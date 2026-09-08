@@ -30,6 +30,7 @@ Appliquer les fichiers de `supabase/migrations/` **dans l'ordre des noms** :
 | --- | --- |
 | `20260907000000_init.sql` | 4 tables, énumérations, index, trigger `updated_at` et **RLS par `user_id`** (chaque ligne n'est lisible et modifiable que par son propriétaire) |
 | `20260907120000_prospects_email.sql` | Colonne `prospects.email` (nullable) |
+| `20260908000000_orion_grants.sql` | `GRANT` DML aux rôles `authenticated` et `service_role` sur les 4 tables — **indispensable** : sans lui PostgREST refuse tout en `42501`, policies RLS ou pas |
 
 Une migration oubliée se voit tout de suite : les requêtes échouent sur une
 colonne inconnue.
