@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Tokens de thème — triplets RVB consommés par tailwind.config.ts.
+ * `:root` porte le thème SOMBRE (défaut de l'app, y compris avant hydratation).
+ * `.light` réapplique la palette claire. Le ThemeProvider pose l'une des deux
+ * classes sur <html> ; `.dark` reste présente pour les variantes `dark:`.
+ */
+:root {
+  --bg: 11 12 14;
+  --surface: 19 21 25;
+  --surface-2: 26 29 34;
+  --border: 38 42 50;
+  --fg: 232 234 239;
+  --muted: 139 146 160;
+
+  --accent: 232 85 46; /* #E8552E */
+  --accent-hover: 209 71 36;
+  --accent-fg: 255 255 255;
+  --accent-soft: 232 85 46;
+
+  --success: 52 199 123;
+  --warning: 234 179 8;
+  --danger: 244 88 88;
+  --info: 96 165 250;
+  --violet: 167 139 250;
+  --teal: 45 212 191;
+
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+}
+
+.light {
+  --bg: 247 248 250;
+  --surface: 255 255 255;
+  --surface-2: 243 244 247;
+  --border: 226 229 235;
+  --fg: 20 22 26;
+  --muted: 91 98 112;
+
+  /* Orange légèrement assombri en thème clair pour rester lisible sur blanc. */
+  --accent: 205 67 30;
+  --accent-hover: 178 56 24;
+  --accent-fg: 255 255 255;
+  --accent-soft: 232 85 46;
+
+  --success: 22 145 90;
+  --warning: 176 124 8;
+  --danger: 208 48 48;
+  --info: 37 99 235;
+  --violet: 124 92 232;
+  --teal: 13 148 136;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    color-scheme: dark;
+  }
+  html.light {
+    color-scheme: light;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Anneau de focus homogène sur toute l'app. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-bg;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--border)) transparent;
+  }
+}
