@@ -1,4 +1,4 @@
-import { BarChart3, ListChecks, Search, Send, type LucideIcon } from "lucide-react";
+import { BarChart3, Gauge, ListChecks, Search, Send, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -10,13 +10,14 @@ export interface NavItem {
 
 /**
  * Navigation principale, dans l'ordre d'affichage.
+ * La barre de navigation lit simplement ce tableau : ajouter une destination
+ * revient a inserer une entree ici, rien d'autre.
  *
- * L'onglet « Cockpit » viendra se placer EN TETE de cette liste quand la page
- * `/cockpit` existera : rien d'autre a modifier, la barre de navigation lit
- * simplement ce tableau. On ne le declare pas tant que la route n'existe pas,
- * pour ne pas exposer un lien mort.
+ * Le Cockpit est l'accueil de l'app : il ouvre la liste et sert de cible aux
+ * redirections par defaut (racine, post-connexion).
  */
 export const NAV_ITEMS: NavItem[] = [
+  { href: "/cockpit", label: "Cockpit", icon: Gauge, hint: "Vue d'ensemble et priorités du jour" },
   { href: "/recherche", label: "Recherche", icon: Search, hint: "Trouver de nouveaux prospects" },
   {
     href: "/prospection",

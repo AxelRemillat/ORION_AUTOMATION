@@ -22,7 +22,7 @@ export async function middleware(request: NextRequest) {
   // Déjà connecté sur /login -> on renvoie vers l'app.
   if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
-    url.pathname = "/recherche";
+    url.pathname = "/cockpit";
     url.search = "";
     return NextResponse.redirect(url);
   }

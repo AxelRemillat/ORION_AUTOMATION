@@ -213,22 +213,6 @@
   color-scheme: light;
 }
 
-/* ---------------------------------------------------------------------------
-   Alias de compatibilite — anciens noms, en triplets RVB.
-   Lus par lib/charts/palette.ts (Recharts exige des couleurs concretes).
-   Les graphes devraient a terme lire les --rgb-* ci-dessus.
-   --------------------------------------------------------------------------- */
-:root {
-  --accent: var(--rgb-primary);
-  --success: var(--rgb-good);
-  --warning: var(--rgb-warn);
-  --danger: var(--rgb-lost);
-  --info: var(--rgb-cyan);
-  --violet: var(--rgb-violet);
-  --border: var(--rgb-line);
-  --fg: var(--rgb-text);
-}
-
 @layer base {
   * {
     @apply border-border;

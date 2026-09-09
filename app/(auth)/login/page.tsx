@@ -12,7 +12,7 @@ export default function LoginPage({
   const next =
     searchParams.next?.startsWith("/") && !searchParams.next.startsWith("//")
       ? searchParams.next
-      : "/recherche";
+      : "/cockpit";
 
   return (
     <main className="relative z-10 flex min-h-screen items-center justify-center px-4 py-12">

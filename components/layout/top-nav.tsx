@@ -22,7 +22,7 @@ export function TopNav({ email }: { email: string }) {
       <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-3 px-4 md:px-6">
         {/* Marque */}
         <Link
-          href="/recherche"
+          href="/cockpit"
           className="flex shrink-0 items-center gap-2.5"
           aria-label="PROSPECT, accueil"
         >

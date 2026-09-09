@@ -10,7 +10,7 @@ export default function NotFound() {
         Cette page n&apos;existe pas
       </h1>
       <Link
-        href="/recherche"
+        href="/cockpit"
         className="mt-2 text-sm font-medium text-primary-ink underline-offset-4 hover:underline"
       >
         Retour à l&apos;app
