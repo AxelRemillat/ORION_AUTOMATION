@@ -2,80 +2,343 @@
 @tailwind components;
 @tailwind utilities;
 
-/**
- * Tokens de thème — triplets RVB consommés par tailwind.config.ts.
- * `:root` porte le thème SOMBRE (défaut de l'app, y compris avant hydratation).
- * `.light` réapplique la palette claire. Le ThemeProvider pose l'une des deux
- * classes sur <html> ; `.dark` reste présente pour les variantes `dark:`.
- */
+/* ===========================================================================
+   CIEL & LAGON — systeme de couleurs
+   ---------------------------------------------------------------------------
+   Deux familles de tokens, volontairement :
+
+   1. Tokens nommes (--bg, --surface, --text, --primary, --accent-grad...) —
+      l'API publique, en hex / rgba / degrades. A consommer en CSS :
+      `background: var(--accent-grad)`, `color: var(--muted)`.
+
+   2. Canaux RVB (--rgb-*) — les memes couleurs en triplets « R G B », requis
+      par Tailwind pour que les modificateurs d'opacite fonctionnent
+      (`bg-surface-2/60`). Ne pas les utiliser a la main : passer par les
+      classes Tailwind, mappees dessus dans tailwind.config.ts.
+
+   LIGHT est le theme par defaut. DARK s'applique soit par preference systeme,
+   soit par choix explicite via l'attribut data-theme sur <html>.
+   =========================================================================== */
+
 :root {
-  --bg: 11 12 14;
-  --surface: 19 21 25;
-  --surface-2: 26 29 34;
-  --border: 38 42 50;
-  --fg: 232 234 239;
-  --muted: 139 146 160;
+  color-scheme: light;
 
-  --accent: 232 85 46; /* #E8552E */
-  --accent-hover: 209 71 36;
-  --accent-fg: 255 255 255;
-  --accent-soft: 232 85 46;
+  --bg: #e9f3fa;
+  --bg-grad: linear-gradient(165deg, #f3fafe 0%, #e4f1fa 48%, #e8f6f2 100%);
+  --surface: #ffffff;
+  --surface-2: #eef6fc;
+  --elev: #ffffff;
+  --line: #d4e5f1;
+  --line-soft: #e5eff7;
+  --text: #143240;
+  --muted: #557488;
+  --faint: #8aa6b6;
+  --primary: #2b9fd6;
+  --primary-strong: #1b7fb8;
+  --primary-soft: rgba(43, 159, 214, 0.12);
+  --cyan: #34c6de;
+  --teal: #3fbfb0;
+  --deep: #0f4c6b;
+  --accent-grad: linear-gradient(135deg, #6fd3e7 0%, #35a9de 50%, #3fc0b4 100%);
+  --halo: radial-gradient(120% 80% at 50% -10%, rgba(83, 199, 229, 0.28), transparent 60%);
+  --good: #1fa98d;
+  --good-soft: rgba(31, 169, 141, 0.12);
+  --warn: #dfa23a;
+  --warn-soft: rgba(223, 162, 58, 0.14);
+  --lost: #ce7b84;
+  --lost-soft: rgba(206, 123, 132, 0.12);
+  --shadow: 0 1px 2px rgba(20, 60, 80, 0.04), 0 18px 40px -26px rgba(30, 90, 120, 0.3);
 
-  --success: 52 199 123;
-  --warning: 234 179 8;
-  --danger: 244 88 88;
-  --info: 96 165 250;
-  --violet: 167 139 250;
-  --teal: 45 212 191;
+  /* Canaux RVB — cf. en-tete. */
+  --rgb-bg: 233 243 250;
+  --rgb-surface: 255 255 255;
+  --rgb-surface-2: 238 246 252;
+  --rgb-elev: 255 255 255;
+  --rgb-line: 212 229 241;
+  --rgb-line-soft: 229 239 247;
+  --rgb-text: 20 50 64;
+  --rgb-muted: 85 116 136;
+  --rgb-faint: 138 166 182;
+  --rgb-primary: 43 159 214;
+  --rgb-primary-strong: 27 127 184;
+  --rgb-cyan: 52 198 222;
+  --rgb-teal: 63 191 176;
+  --rgb-deep: 15 76 107;
+  --rgb-violet: 124 146 232;
+  --rgb-good: 31 169 141;
+  --rgb-warn: 223 162 58;
+  --rgb-lost: 206 123 132;
+  /* Le degrade de marque est clair : son texte est sombre (AA >= 4.5). */
+  --rgb-on-primary: 11 58 78;
 
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  /* Variantes « ink » : meme teinte assombrie, pour du TEXTE pose sur un
+     aplat teinte (badges, puces). Les couleurs de remplissage du spec
+     plafonnent a ~3:1 sur fond clair ; celles-ci passent AA. */
+  --rgb-primary-ink: 23 110 158;
+  --rgb-cyan-ink: 14 124 144;
+  --rgb-teal-ink: 15 114 102;
+  --rgb-violet-ink: 74 91 196;
+  --rgb-good-ink: 14 122 100;
+  --rgb-warn-ink: 138 96 17;
+  --rgb-lost-ink: 166 62 74;
 }
 
-.light {
-  --bg: 247 248 250;
-  --surface: 255 255 255;
-  --surface-2: 243 244 247;
-  --border: 226 229 235;
-  --fg: 20 22 26;
-  --muted: 91 98 112;
+/* --- Crepuscule ocean : preference systeme, sauf choix explicite « light » -- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
 
-  /* Orange légèrement assombri en thème clair pour rester lisible sur blanc. */
-  --accent: 205 67 30;
-  --accent-hover: 178 56 24;
-  --accent-fg: 255 255 255;
-  --accent-soft: 232 85 46;
+    --bg: #0a1b26;
+    --bg-grad: linear-gradient(165deg, #0c1f2c 0%, #0a1922 55%, #0a2328 100%);
+    --surface: #10242f;
+    --surface-2: #16323f;
+    --elev: #1b3a47;
+    --line: #23434f;
+    --line-soft: #1a3542;
+    --text: #e7f3f7;
+    --muted: #93b1be;
+    --faint: #61818d;
+    --primary: #46b7e4;
+    --primary-strong: #74ccec;
+    --primary-soft: rgba(70, 183, 228, 0.16);
+    --cyan: #4cd4e6;
+    --teal: #55cebe;
+    --deep: #a6def2;
+    --accent-grad: linear-gradient(135deg, #5ec8e6 0%, #3fa9d8 50%, #4ccbbe 100%);
+    --halo: radial-gradient(120% 80% at 50% -10%, rgba(70, 183, 228, 0.22), transparent 60%);
+    --good: #37cfaf;
+    --good-soft: rgba(55, 207, 175, 0.16);
+    --warn: #efbc5a;
+    --warn-soft: rgba(239, 188, 90, 0.16);
+    --lost: #e29aa1;
+    --lost-soft: rgba(226, 154, 161, 0.14);
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 20px 44px -26px rgba(0, 0, 0, 0.66);
 
-  --success: 22 145 90;
-  --warning: 176 124 8;
-  --danger: 208 48 48;
-  --info: 37 99 235;
-  --violet: 124 92 232;
-  --teal: 13 148 136;
+    --rgb-bg: 10 27 38;
+    --rgb-surface: 16 36 47;
+    --rgb-surface-2: 22 50 63;
+    --rgb-elev: 27 58 71;
+    --rgb-line: 35 67 79;
+    --rgb-line-soft: 26 53 66;
+    --rgb-text: 231 243 247;
+    --rgb-muted: 147 177 190;
+    --rgb-faint: 97 129 141;
+    --rgb-primary: 70 183 228;
+    --rgb-primary-strong: 116 204 236;
+    --rgb-cyan: 76 212 230;
+    --rgb-teal: 85 206 190;
+    --rgb-deep: 166 222 242;
+    --rgb-violet: 150 168 240;
+    --rgb-good: 55 207 175;
+    --rgb-warn: 239 188 90;
+    --rgb-lost: 226 154 161;
+    --rgb-on-primary: 8 24 33;
+
+    /* En sombre les couleurs du spec sont deja claires : l'encre leur est
+       identique, le contraste sur surface foncee est largement AA. */
+    --rgb-primary-ink: 116 204 236;
+    --rgb-cyan-ink: 76 212 230;
+    --rgb-teal-ink: 85 206 190;
+    --rgb-violet-ink: 150 168 240;
+    --rgb-good-ink: 55 207 175;
+    --rgb-warn-ink: 239 188 90;
+    --rgb-lost-ink: 226 154 161;
+  }
+}
+
+/* --- Crepuscule ocean : choix explicite de l'utilisateur ------------------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0a1b26;
+  --bg-grad: linear-gradient(165deg, #0c1f2c 0%, #0a1922 55%, #0a2328 100%);
+  --surface: #10242f;
+  --surface-2: #16323f;
+  --elev: #1b3a47;
+  --line: #23434f;
+  --line-soft: #1a3542;
+  --text: #e7f3f7;
+  --muted: #93b1be;
+  --faint: #61818d;
+  --primary: #46b7e4;
+  --primary-strong: #74ccec;
+  --primary-soft: rgba(70, 183, 228, 0.16);
+  --cyan: #4cd4e6;
+  --teal: #55cebe;
+  --deep: #a6def2;
+  --accent-grad: linear-gradient(135deg, #5ec8e6 0%, #3fa9d8 50%, #4ccbbe 100%);
+  --halo: radial-gradient(120% 80% at 50% -10%, rgba(70, 183, 228, 0.22), transparent 60%);
+  --good: #37cfaf;
+  --good-soft: rgba(55, 207, 175, 0.16);
+  --warn: #efbc5a;
+  --warn-soft: rgba(239, 188, 90, 0.16);
+  --lost: #e29aa1;
+  --lost-soft: rgba(226, 154, 161, 0.14);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 20px 44px -26px rgba(0, 0, 0, 0.66);
+
+  --rgb-bg: 10 27 38;
+  --rgb-surface: 16 36 47;
+  --rgb-surface-2: 22 50 63;
+  --rgb-elev: 27 58 71;
+  --rgb-line: 35 67 79;
+  --rgb-line-soft: 26 53 66;
+  --rgb-text: 231 243 247;
+  --rgb-muted: 147 177 190;
+  --rgb-faint: 97 129 141;
+  --rgb-primary: 70 183 228;
+  --rgb-primary-strong: 116 204 236;
+  --rgb-cyan: 76 212 230;
+  --rgb-teal: 85 206 190;
+  --rgb-deep: 166 222 242;
+  --rgb-violet: 150 168 240;
+  --rgb-good: 55 207 175;
+  --rgb-warn: 239 188 90;
+  --rgb-lost: 226 154 161;
+  --rgb-on-primary: 8 24 33;
+
+  /* En sombre les couleurs du spec sont deja claires : l'encre leur est
+     identique, le contraste sur surface foncee est largement AA. */
+  --rgb-primary-ink: 116 204 236;
+  --rgb-cyan-ink: 76 212 230;
+  --rgb-teal-ink: 85 206 190;
+  --rgb-violet-ink: 150 168 240;
+  --rgb-good-ink: 55 207 175;
+  --rgb-warn-ink: 239 188 90;
+  --rgb-lost-ink: 226 154 161;
+}
+
+/* Choix explicite « clair » : les valeurs de :root suffisent, on ne reprend
+   que color-scheme pour que les widgets natifs suivent. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* ---------------------------------------------------------------------------
+   Alias de compatibilite — anciens noms, en triplets RVB.
+   Lus par lib/charts/palette.ts (Recharts exige des couleurs concretes).
+   Les graphes devraient a terme lire les --rgb-* ci-dessus.
+   --------------------------------------------------------------------------- */
+:root {
+  --accent: var(--rgb-primary);
+  --success: var(--rgb-good);
+  --warning: var(--rgb-warn);
+  --danger: var(--rgb-lost);
+  --info: var(--rgb-cyan);
+  --violet: var(--rgb-violet);
+  --border: var(--rgb-line);
+  --fg: var(--rgb-text);
 }
 
 @layer base {
   * {
     @apply border-border;
   }
-  html {
-    color-scheme: dark;
-  }
-  html.light {
-    color-scheme: light;
-  }
+
   body {
-    @apply bg-bg text-fg font-sans antialiased;
+    @apply bg-bg text-fg antialiased;
+    background-image: var(--bg-grad);
+    background-attachment: fixed;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
     text-rendering: optimizeLegibility;
   }
-  /* Anneau de focus homogène sur toute l'app. */
+
+  /* Halo lumineux en haut de page — la signature « peinture de ciel ».
+     Purement decoratif, jamais interactif. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: 420px;
+    background: var(--halo);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display), var(--font-sans), ui-sans-serif, sans-serif;
+    letter-spacing: -0.015em;
+  }
+
   :focus-visible {
-    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-bg;
+    outline: 2px solid rgb(var(--rgb-primary));
+    outline-offset: 2px;
+    border-radius: 6px;
   }
 }
 
 @layer utilities {
+  /* Chiffres et libelles techniques : chasse fixe, chiffres tabulaires. */
+  .font-data {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Aplat degrade de marque — bouton primaire, jauges, soulignage d'onglet. */
+  .bg-brand-grad {
+    background-image: var(--accent-grad);
+  }
+
+  /* Texte peint par le degrade. */
+  .text-brand-grad {
+    background-image: var(--accent-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .shadow-mist {
+    box-shadow: var(--shadow);
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--border)) transparent;
+    scrollbar-color: rgb(var(--rgb-line)) transparent;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Bascule d'icones du selecteur de theme : pilotee par CSS, donc aucun etat
+     React et aucun decalage d'hydratation. */
+  .theme-icon-dark {
+    display: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .theme-icon-light {
+      display: none;
+    }
+    :root:not([data-theme="light"]) .theme-icon-dark {
+      display: block;
+    }
+  }
+  :root[data-theme="dark"] .theme-icon-light {
+    display: none;
+  }
+  :root[data-theme="dark"] .theme-icon-dark {
+    display: block;
+  }
+  :root[data-theme="light"] .theme-icon-light {
+    display: block;
+  }
+  :root[data-theme="light"] .theme-icon-dark {
+    display: none;
+  }
+}
+
+/* Preference systeme : on coupe animations et defilement anime. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

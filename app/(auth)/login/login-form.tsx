@@ -65,7 +65,7 @@ export function LoginForm({ next }: { next: string }) {
       </div>
 
       {error && (
-        <p role="alert" className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-danger">
+        <p role="alert" className="rounded-lg border border-lost/30 bg-lost/10 px-3 py-2 text-[13px] text-lost-ink">
           {error}
         </p>
       )}

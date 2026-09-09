@@ -21,7 +21,7 @@ interface Toast {
 }
 
 interface ToastApi {
-  /** Affiche une notification (4 s par défaut). */
+  /** Affiche une notification (4 s par defaut). */
   toast: (message: string, tone?: ToastTone) => void;
   success: (message: string) => void;
   error: (message: string) => void;
@@ -29,17 +29,17 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-/** Accès aux notifications. Requiert <ToastProvider> plus haut dans l'arbre. */
+/** Acces aux notifications. Requiert <ToastProvider> plus haut dans l'arbre. */
 export function useToast(): ToastApi {
   const context = useContext(ToastContext);
-  if (!context) throw new Error("useToast doit être utilisé dans un <ToastProvider>.");
+  if (!context) throw new Error("useToast doit etre utilise dans un <ToastProvider>.");
   return context;
 }
 
 const TONES: Record<ToastTone, { icon: typeof Info; className: string }> = {
-  success: { icon: CheckCircle2, className: "text-success" },
-  error: { icon: AlertTriangle, className: "text-danger" },
-  info: { icon: Info, className: "text-info" },
+  success: { icon: CheckCircle2, className: "text-good" },
+  error: { icon: AlertTriangle, className: "text-lost" },
+  info: { icon: Info, className: "text-primary" },
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -76,15 +76,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           return (
             <div
               key={id}
-              className="pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border bg-surface p-3 shadow-overlay animate-slide-up"
+              className="pointer-events-auto flex items-start gap-2.5 rounded-xl border border-line bg-elev p-3 shadow-overlay animate-slide-up"
             >
               <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", className)} aria-hidden />
-              <p className="flex-1 text-[13px] leading-snug text-fg">{message}</p>
+              <p className="flex-1 text-[13px] leading-snug text-text">{message}</p>
               <button
                 type="button"
                 onClick={() => dismiss(id)}
                 aria-label="Fermer la notification"
-                className="rounded p-0.5 text-muted transition-colors hover:text-fg"
+                className="rounded p-0.5 text-faint transition-colors hover:text-text"
               >
                 <X className="h-3.5 w-3.5" />
               </button>

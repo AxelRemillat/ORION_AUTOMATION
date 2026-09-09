@@ -15,23 +15,26 @@ export default function LoginPage({
       : "/recherche";
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-12">
+    <main className="relative z-10 flex min-h-screen items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
-        <div className="mb-8 flex items-center gap-2.5">
-          <span className="h-3 w-3 rounded-sm bg-accent" aria-hidden />
-          <span className="text-base font-semibold tracking-tight text-fg">PROSPECT</span>
+        <div className="mb-8 flex items-center justify-center gap-2.5">
+          <span className="h-7 w-7 rounded-lg bg-brand-grad shadow-mist" aria-hidden />
+          <span className="font-display text-lg font-semibold tracking-tight text-text">
+            PROSPECT
+          </span>
         </div>
 
-        <div className="rounded-lg border border-border bg-surface p-6 shadow-card">
-          <h1 className="text-lg font-semibold tracking-tight text-fg">Connexion</h1>
-          <p className="mb-6 mt-1 text-[13px] text-muted">
+        <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-7 shadow-mist">
+          <span className="absolute inset-x-0 top-0 h-px bg-brand-grad" aria-hidden />
+          <h1 className="font-display text-xl font-semibold tracking-tight text-text">Connexion</h1>
+          <p className="mb-6 mt-1.5 text-[13px] leading-relaxed text-muted">
             Accès réservé. Un seul compte est autorisé sur cette instance.
           </p>
           <LoginForm next={next} />
         </div>
 
-        <p className="mt-6 text-center text-xs text-muted">
-          Compte oublié ? Réinitialise le mot de passe depuis le tableau de bord Supabase.
+        <p className="mt-6 text-center text-xs text-faint">
+          Mot de passe oublié ? Réinitialise-le depuis le tableau de bord Supabase.
         </p>
       </div>
     </main>

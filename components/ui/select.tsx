@@ -9,13 +9,13 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
       <div className="relative w-full">
         <select
           ref={ref}
-          className={cn(fieldClassName, "h-9 appearance-none pr-9", className)}
+          className={cn(fieldClassName, "h-10 appearance-none pr-9", className)}
           {...props}
         >
           {children}
         </select>
         <ChevronDown
-          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint"
           aria-hidden
         />
       </div>

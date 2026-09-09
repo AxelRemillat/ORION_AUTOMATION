@@ -3,40 +3,34 @@
 import { useCallback } from "react";
 import { Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { THEME_STORAGE_KEY } from "@/lib/theme";
+import { applyTheme, currentTheme } from "@/lib/theme";
 
 /**
- * Bascule sombre / clair. Les deux icônes sont rendues et affichées par CSS
- * (variante `dark:`) : aucun état React, donc aucun décalage d'hydratation.
+ * Bascule clair / sombre.
+ *
+ * Les deux icones sont rendues et l'affichage est pilote par CSS (classes
+ * `theme-icon-*` dans globals.css, qui suivent data-theme et la preference
+ * systeme) : aucun etat React, donc aucun decalage d'hydratation.
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const toggle = useCallback(() => {
-    const root = document.documentElement;
-    const next = root.classList.contains("light") ? "dark" : "light";
-    root.classList.remove("light", "dark");
-    root.classList.add(next);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      // Stockage indisponible (navigation privée) : le thème reste valable
-      // pour la session en cours, on n'échoue pas pour autant.
-    }
+    applyTheme(currentTheme() === "dark" ? "light" : "dark");
   }, []);
 
   return (
     <button
       type="button"
       onClick={toggle}
-      aria-label="Changer de thème"
-      title="Changer de thème"
+      aria-label="Changer de theme"
+      title="Changer de theme"
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded text-muted",
-        "transition-colors hover:bg-surface-2 hover:text-fg",
+        "inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted",
+        "transition-colors hover:bg-surface-2 hover:text-text",
         className,
       )}
     >
-      <Sun className="hidden h-4 w-4 dark:block" aria-hidden />
-      <Moon className="block h-4 w-4 dark:hidden" aria-hidden />
+      <Sun className="theme-icon-dark h-4 w-4" aria-hidden />
+      <Moon className="theme-icon-light h-4 w-4" aria-hidden />
     </button>
   );
 }

@@ -1,31 +1,41 @@
 import type { DealStatus, MessageType, ProspectStatus } from "@/types";
 
 /**
- * Libellés et couleurs des énumérations métier.
- * Utilisés par <Badge variant="status" /> et par les filtres des écrans.
+ * Libelles et couleurs des enumerations metier.
+ * Utilises par <ProspectStatusBadge> / <DealStatusBadge> et par les filtres.
+ *
+ * Regle de la palette Ciel & Lagon : la couleur SEMANTIQUE (vert = gagne,
+ * ambre = chaud, rose = perdu) est distincte de la couleur de MARQUE
+ * (bleu-cyan), pour qu'un statut ne se lise jamais comme une action.
+ * Le texte utilise les encres `*-ink` afin de rester lisible (AA) sur l'aplat
+ * teinte, en clair comme en sombre.
  */
 
 type StatusMeta = { label: string; className: string };
 
 export const PROSPECT_STATUS_META: Record<ProspectStatus, StatusMeta> = {
-  nouveau: { label: "Nouveau", className: "bg-muted/15 text-muted border-muted/25" },
-  a_contacter: { label: "À contacter", className: "bg-accent/15 text-accent border-accent/30" },
-  contacte: { label: "Contacté", className: "bg-info/15 text-info border-info/30" },
-  relance_1: { label: "Relance 1", className: "bg-warning/15 text-warning border-warning/30" },
-  relance_2: { label: "Relance 2", className: "bg-violet/15 text-violet border-violet/30" },
-  repondu: { label: "Répondu", className: "bg-teal/15 text-teal border-teal/30" },
+  nouveau: { label: "Nouveau", className: "bg-surface-2 text-muted border-line" },
+  a_contacter: {
+    label: "À contacter",
+    className: "bg-primary/10 text-primary-ink border-primary/25",
+  },
+  contacte: { label: "Contacté", className: "bg-cyan/10 text-cyan-ink border-cyan/25" },
+  relance_1: { label: "Relance 1", className: "bg-warn/10 text-warn-ink border-warn/25" },
+  relance_2: { label: "Relance 2", className: "bg-violet/10 text-violet-ink border-violet/25" },
+  repondu: { label: "Répondu", className: "bg-teal/10 text-teal-ink border-teal/25" },
+  // Le dossier le plus « chaud » du pipeline : ambre soutenu.
   en_discussion: {
     label: "En discussion",
-    className: "bg-accent text-accent-fg border-transparent",
+    className: "bg-warn/20 text-warn-ink border-warn/45",
   },
-  gagne: { label: "Gagné", className: "bg-success text-white border-transparent" },
-  perdu: { label: "Perdu", className: "bg-danger/15 text-danger border-danger/30" },
+  gagne: { label: "Gagné", className: "bg-good/20 text-good-ink border-good/45 font-semibold" },
+  perdu: { label: "Perdu", className: "bg-lost/10 text-lost-ink border-lost/25" },
 };
 
 export const DEAL_STATUS_META: Record<DealStatus, StatusMeta> = {
-  ouvert: { label: "Ouvert", className: "bg-info/15 text-info border-info/30" },
-  gagne: { label: "Gagné", className: "bg-success text-white border-transparent" },
-  perdu: { label: "Perdu", className: "bg-danger/15 text-danger border-danger/30" },
+  ouvert: { label: "Ouvert", className: "bg-primary/10 text-primary-ink border-primary/25" },
+  gagne: { label: "Gagné", className: "bg-good/20 text-good-ink border-good/45 font-semibold" },
+  perdu: { label: "Perdu", className: "bg-lost/10 text-lost-ink border-lost/25" },
 };
 
 export const MESSAGE_TYPE_LABELS: Record<MessageType, string> = {

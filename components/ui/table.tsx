@@ -2,12 +2,12 @@ import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Tableau de données. Le conteneur scrolle horizontalement pour que les
- * colonnes larges ne débordent jamais de la page.
+ * Tableau de donnees. Le conteneur defile horizontalement pour que les
+ * colonnes larges ne debordent jamais de la page.
  */
 export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="scrollbar-thin w-full overflow-x-auto rounded-lg border border-border bg-surface">
+    <div className="scrollbar-thin w-full overflow-x-auto rounded-xl border border-line bg-surface shadow-mist">
       <table className={cn("w-full border-collapse text-sm", className)} {...props} />
     </div>
   );
@@ -18,7 +18,7 @@ export function THead({ className, ...props }: HTMLAttributes<HTMLTableSectionEl
 }
 
 export function TBody({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
-  return <tbody className={cn("divide-y divide-border", className)} {...props} />;
+  return <tbody className={cn("divide-y divide-line-soft", className)} {...props} />;
 }
 
 export function TR({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
@@ -29,7 +29,7 @@ export function TH({ className, ...props }: ThHTMLAttributes<HTMLTableCellElemen
   return (
     <th
       className={cn(
-        "border-b border-border px-4 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wide text-muted",
+        "border-b border-line px-4 py-2.5 text-left font-data text-[11px] font-semibold uppercase tracking-wide text-muted",
         className,
       )}
       {...props}
@@ -38,10 +38,10 @@ export function TH({ className, ...props }: ThHTMLAttributes<HTMLTableCellElemen
 }
 
 export function TD({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-4 py-3 align-middle text-fg", className)} {...props} />;
+  return <td className={cn("px-4 py-3 align-middle text-text", className)} {...props} />;
 }
 
-/** Ligne "aucun résultat", à placer dans <TBody>. */
+/** Ligne « aucun resultat », a placer dans <TBody>. */
 export function TableEmpty({ colSpan, children }: { colSpan: number; children: React.ReactNode }) {
   return (
     <tr>

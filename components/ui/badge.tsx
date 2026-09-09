@@ -5,17 +5,22 @@ import type { DealStatus, ProspectStatus } from "@/types";
 
 export type BadgeTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info";
 
+/**
+ * Les tons semantiques (success / warning / danger) restent distincts de la
+ * couleur de marque (accent / info), pour qu'un statut ne se confonde jamais
+ * avec une action.
+ */
 const TONES: Record<BadgeTone, string> = {
-  neutral: "bg-muted/15 text-muted border-muted/25",
-  accent: "bg-accent/15 text-accent border-accent/30",
-  success: "bg-success/15 text-success border-success/30",
-  warning: "bg-warning/15 text-warning border-warning/30",
-  danger: "bg-danger/15 text-danger border-danger/30",
-  info: "bg-info/15 text-info border-info/30",
+  neutral: "bg-surface-2 text-muted border-line",
+  accent: "bg-primary/10 text-primary-ink border-primary/25",
+  success: "bg-good/10 text-good-ink border-good/25",
+  warning: "bg-warn/15 text-warn-ink border-warn/30",
+  danger: "bg-lost/10 text-lost-ink border-lost/25",
+  info: "bg-cyan/10 text-cyan-ink border-cyan/25",
 };
 
 const BASE =
-  "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4";
+  "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-4";
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: BadgeTone;
@@ -25,7 +30,7 @@ export function Badge({ className, tone = "neutral", ...props }: BadgeProps) {
   return <span className={cn(BASE, TONES[tone], className)} {...props} />;
 }
 
-/** Badge du statut d'un prospect — couleur et libellé pilotés par lib/constants. */
+/** Badge du statut d'un prospect — couleur et libelle pilotes par lib/constants. */
 export function ProspectStatusBadge({
   status,
   className,
