@@ -52,7 +52,7 @@ export function EmailEditor({
         <div>
           <div className="flex items-baseline justify-between">
             <Label htmlFor="corps">Corps de l&apos;email</Label>
-            <span className={`text-xs tabular-nums ${tooLong ? "text-warning" : "text-muted"}`}>
+            <span className={`font-data text-xs ${tooLong ? "text-warn-ink" : "text-faint"}`}>
               {words} mot{words > 1 ? "s" : ""} / {MAX_WORDS}
             </span>
           </div>
@@ -67,7 +67,7 @@ export function EmailEditor({
             }}
           />
           {tooLong && (
-            <p className="mt-1.5 text-xs text-warning">
+            <p className="mt-1.5 text-xs text-warn-ink">
               Au-delà de {MAX_WORDS} mots, un email à froid est rarement lu jusqu&apos;au bout.
             </p>
           )}
@@ -82,7 +82,7 @@ export function EmailEditor({
             <RefreshCw className="h-4 w-4" aria-hidden />
             Régénérer
           </Button>
-          <span className="text-xs text-muted">
+          <span className="text-xs text-faint">
             {touched ? "Brouillon modifié." : "Relisez avant de valider."} L&apos;envoi reste manuel.
           </span>
         </div>

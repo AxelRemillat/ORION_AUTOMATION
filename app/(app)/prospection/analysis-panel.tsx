@@ -22,12 +22,12 @@ export function AnalysisPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <Card className="border-accent/30 bg-accent/5">
+      <Card className="border-primary/30" style={{ background: "var(--primary-soft)" }}>
         <CardContent className="flex items-start gap-3 p-5">
-          <Target className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <Target className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
           <div>
             <p className="text-[13px] font-medium text-muted">Pain point automatisable</p>
-            <p className="mt-1 text-sm leading-relaxed text-fg">{painPoint}</p>
+            <p className="mt-1 text-sm leading-relaxed text-text">{painPoint}</p>
           </div>
         </CardContent>
       </Card>
@@ -44,9 +44,9 @@ export function AnalysisPanel({
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div className="flex items-start gap-2.5">
-              <AtSign className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden />
+              <AtSign className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
               <div className="text-[13px]">
-                <p className="font-medium text-fg">{contact.email}</p>
+                <p className="font-data font-medium text-text">{contact.email}</p>
                 <p className="text-muted">
                   {[contact.full_name, contact.position].filter(Boolean).join(" · ") ||
                     "Contact identifié via Hunter"}

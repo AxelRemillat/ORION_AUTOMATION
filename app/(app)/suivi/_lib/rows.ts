@@ -1,4 +1,7 @@
-import type { Message, Prospect, ProspectStatus, Reminder } from "@/types";
+import type { Deal, Message, Prospect, ProspectStatus, Reminder } from "@/types";
+import { estimateValue, type EstimatedValue } from "./estimates";
+import { nextAction, type NextAction } from "./next-action";
+import { stageOf } from "./stages";
 
 /** Formes aplaties passées du serveur aux composants clients (props sérialisables). */
 
@@ -8,12 +11,16 @@ export interface ProspectRow {
   sector: string | null;
   city: string | null;
   status: ProspectStatus;
+  /** Colonne du Kanban qui accueille ce prospect. */
+  stageKey: string;
   messagesCount: number;
   draftsCount: number;
   /** Dernier envoi (ou création si rien n'est parti). */
   lastActivity: string | null;
   /** Prochaine relance ouverte, si programmée. */
   nextDueAt: string | null;
+  value: EstimatedValue;
+  action: NextAction;
 }
 
 export interface DueReminderRow {
@@ -24,17 +31,25 @@ export interface DueReminderRow {
   dueAt: string;
 }
 
-/** Assemble les lignes du pipeline à partir des trois tables. */
+/** Assemble les lignes du pipeline à partir des quatre tables. */
 export function buildRows(
   prospects: Prospect[],
   messages: Message[],
   reminders: Reminder[],
+  deals: Deal[],
 ): ProspectRow[] {
-  const byProspect = new Map<string, Message[]>();
+  const messagesByProspect = new Map<string, Message[]>();
   for (const message of messages) {
-    const bucket = byProspect.get(message.prospect_id);
+    const bucket = messagesByProspect.get(message.prospect_id);
     if (bucket) bucket.push(message);
-    else byProspect.set(message.prospect_id, [message]);
+    else messagesByProspect.set(message.prospect_id, [message]);
+  }
+
+  const dealsByProspect = new Map<string, Deal[]>();
+  for (const deal of deals) {
+    const bucket = dealsByProspect.get(deal.prospect_id);
+    if (bucket) bucket.push(deal);
+    else dealsByProspect.set(deal.prospect_id, [deal]);
   }
 
   const nextDue = new Map<string, string>();
@@ -45,11 +60,13 @@ export function buildRows(
   }
 
   return prospects.map((prospect) => {
-    const own = byProspect.get(prospect.id) ?? [];
+    const own = messagesByProspect.get(prospect.id) ?? [];
     const sentDates = own
       .filter((message) => message.status === "sent" && message.sent_at)
       .map((message) => message.sent_at as string)
       .sort();
+    const draftsCount = own.filter((message) => message.status === "draft").length;
+    const nextDueAt = nextDue.get(prospect.id) ?? null;
 
     return {
       id: prospect.id,
@@ -57,10 +74,13 @@ export function buildRows(
       sector: prospect.sector,
       city: prospect.city,
       status: prospect.status,
+      stageKey: stageOf(prospect.status).key,
       messagesCount: own.length,
-      draftsCount: own.filter((message) => message.status === "draft").length,
+      draftsCount,
       lastActivity: sentDates.at(-1) ?? prospect.created_at,
-      nextDueAt: nextDue.get(prospect.id) ?? null,
+      nextDueAt,
+      value: estimateValue(prospect, dealsByProspect.get(prospect.id) ?? []),
+      action: nextAction({ status: prospect.status, draftsCount, nextDueAt }),
     };
   });
 }

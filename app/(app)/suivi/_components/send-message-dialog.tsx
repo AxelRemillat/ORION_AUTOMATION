@@ -58,7 +58,7 @@ export function SendMessageDialog({
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         <Send className="h-3.5 w-3.5" aria-hidden />
         Envoyer
       </Button>

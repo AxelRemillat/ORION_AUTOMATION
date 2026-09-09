@@ -9,8 +9,11 @@ import { createClient } from "@/lib/supabase/client";
 import type { Prospect } from "@/types";
 import { AnalysisPanel } from "./analysis-panel";
 import { EmailEditor } from "./email-editor";
-// Bandeau d'erreur partagé avec la section Recherche (même périmètre).
-import { ErrorBanner } from "../recherche/banners";
+import { DraftPreview } from "./_components/draft-preview";
+import { ErrorBanner } from "./_components/error-banner";
+import { SequenceShell } from "./_components/sequence-shell";
+import { DEFAULT_TONE, type ToneKey } from "./_lib/tones";
+import type { SequenceStep } from "./_lib/sequence";
 import { ProspectHeader } from "./prospect-header";
 import { ProspectPicker } from "./prospect-picker";
 import type { GenerateResponse } from "./types";
@@ -19,14 +22,21 @@ type Draft = { subject: string; body: string };
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
- * brouillon d'email relu puis validé. La validation écrit un `message`
- * (type 'intro', status 'draft') et fait passer le prospect à 'a_contacter'.
+ * brouillon relu puis validé. La validation écrit un `message` (type 'intro',
+ * status 'draft') et fait passer le prospect à 'a_contacter'.
  */
-export function ProspectionClient({ initialProspects }: { initialProspects: Prospect[] }) {
+export function ProspectionClient({
+  initialProspects,
+  sequences,
+}: {
+  initialProspects: Prospect[];
+  sequences: Record<string, SequenceStep[]>;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [prospects, setProspects] = useState(initialProspects);
   const [selected, setSelected] = useState<Prospect | null>(null);
+  const [tone, setTone] = useState<ToneKey>(DEFAULT_TONE);
   const [analysis, setAnalysis] = useState<GenerateResponse | null>(null);
   const [draft, setDraft] = useState<Draft>({ subject: "", body: "" });
   const [generating, setGenerating] = useState(false);
@@ -44,8 +54,10 @@ export function ProspectionClient({ initialProspects }: { initialProspects: Pros
     setGenerating(true);
     setError(null);
     try {
+      // `tone` est déjà transmis : la route l'ignore aujourd'hui (cf. _lib/tones.ts).
       const data = await postJson<GenerateResponse>("/api/emails/generate", {
         prospectId: prospect.id,
+        tone,
       });
       setAnalysis(data);
       setDraft(data.email);
@@ -79,7 +91,11 @@ export function ProspectionClient({ initialProspects }: { initialProspects: Pros
         .eq("id", selected.id);
       if (prospectError) throw new Error(prospectError.message);
 
-      const updated: Prospect = { ...selected, status: "a_contacter", pain_point: analysis.pain_point };
+      const updated: Prospect = {
+        ...selected,
+        status: "a_contacter",
+        pain_point: analysis.pain_point,
+      };
       setSelected(updated);
       setProspects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       toast.success("Brouillon enregistré. Le prospect passe à « À contacter ».");
@@ -107,8 +123,12 @@ export function ProspectionClient({ initialProspects }: { initialProspects: Pros
             prospect={selected}
             loading={generating}
             hasAnalysis={Boolean(analysis)}
+            tone={tone}
+            onToneChange={setTone}
             onGenerate={() => generate(selected)}
           />
+
+          <SequenceShell steps={sequences[selected.id] ?? []} />
 
           {error && <ErrorBanner message={error} />}
 
@@ -126,15 +146,23 @@ export function ProspectionClient({ initialProspects }: { initialProspects: Pros
                 levers={analysis.levers}
                 contact={analysis.contact}
               />
-              <EmailEditor
-                subject={draft.subject}
-                body={draft.body}
-                saving={saving}
-                regenerating={generating}
-                onChange={setDraft}
-                onValidate={validate}
-                onRegenerate={() => generate(selected)}
-              />
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                <EmailEditor
+                  subject={draft.subject}
+                  body={draft.body}
+                  saving={saving}
+                  regenerating={generating}
+                  onChange={setDraft}
+                  onValidate={validate}
+                  onRegenerate={() => generate(selected)}
+                />
+                <DraftPreview
+                  subject={draft.subject}
+                  body={draft.body}
+                  to={analysis.contact?.email ?? selected.email}
+                />
+              </div>
             </>
           )}
         </div>

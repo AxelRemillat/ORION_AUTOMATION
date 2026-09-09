@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge, Card, CardContent, CardHeader, CardTitle, DealStatusBadge } from "@/components/ui";
 import { formatDate, formatEur } from "@/lib/utils";
@@ -6,11 +7,11 @@ import type { Deal, Prospect, Reminder } from "@/types";
 const numberFormat = new Intl.NumberFormat("fr-FR");
 
 /** Ligne libellé / valeur des chiffres clés. */
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1.5">
       <span className="text-[13px] text-muted">{label}</span>
-      <span className="text-right text-[13px] font-medium text-fg">{value}</span>
+      <span className="font-data text-right text-[13px] text-text">{value}</span>
     </div>
   );
 }
@@ -34,7 +35,7 @@ export function ProspectSummary({
         <CardHeader>
           <CardTitle>Chiffres clés</CardTitle>
         </CardHeader>
-        <CardContent className="divide-y divide-border">
+        <CardContent className="divide-y" style={{ borderColor: "var(--line-soft)" }}>
           <Row label="Secteur" value={prospect.sector ?? "—"} />
           <Row label="Ville" value={prospect.city ?? "—"} />
           <Row label="Taille" value={prospect.size_range ?? "—"} />
@@ -50,6 +51,7 @@ export function ProspectSummary({
             }
           />
           <Row label="Créée en" value={figures.founded_year ?? "—"} />
+          <Row label="Contact" value={prospect.email ?? "—"} />
           <Row
             label="Site"
             value={
@@ -58,7 +60,7 @@ export function ProspectSummary({
                   href={prospect.website}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-accent hover:underline"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
                 >
                   Ouvrir
                   <ExternalLink className="h-3 w-3" aria-hidden />
@@ -76,11 +78,11 @@ export function ProspectSummary({
           <CardHeader>
             <CardTitle>Signaux</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-2.5">
             {prospect.signals.map((signal, index) => (
               <div key={`${signal.label}-${index}`} className="text-[13px]">
-                <p className="text-fg">{signal.label}</p>
-                <p className="text-[12px] text-muted">
+                <p className="leading-snug text-text">{signal.label}</p>
+                <p className="font-data text-[11px] text-faint">
                   {[signal.source, signal.date ? formatDate(signal.date) : null]
                     .filter(Boolean)
                     .join(" · ") || "—"}
@@ -96,14 +98,12 @@ export function ProspectSummary({
           <CardTitle>Contrats</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {deals.length === 0 && <p className="text-[13px] text-muted">Aucun contrat enregistré.</p>}
+          {deals.length === 0 && <p className="text-[13px] text-faint">Aucun contrat enregistré.</p>}
           {deals.map((deal) => (
             <div key={deal.id} className="flex items-center justify-between gap-2">
               <DealStatusBadge status={deal.status} />
-              <span className="text-[13px] font-medium tabular-nums text-fg">
-                {formatEur(deal.amount_eur)}
-              </span>
-              <span className="text-[12px] text-muted">{formatDate(deal.signed_at)}</span>
+              <span className="font-data text-[13px] text-text">{formatEur(deal.amount_eur)}</span>
+              <span className="font-data text-[12px] text-faint">{formatDate(deal.signed_at)}</span>
             </div>
           ))}
         </CardContent>
@@ -115,7 +115,7 @@ export function ProspectSummary({
         </CardHeader>
         <CardContent className="space-y-2">
           {openReminders.length === 0 && (
-            <p className="text-[13px] text-muted">Aucune relance en attente.</p>
+            <p className="text-[13px] text-faint">Aucune relance en attente.</p>
           )}
           {openReminders.map((reminder) => (
             <div key={reminder.id} className="flex items-center gap-2 text-[13px]">

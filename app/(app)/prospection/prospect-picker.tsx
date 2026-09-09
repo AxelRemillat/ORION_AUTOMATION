@@ -28,7 +28,7 @@ export function ProspectPicker({
 
   return (
     <Card className="flex max-h-[calc(100vh-13rem)] flex-col overflow-hidden">
-      <div className="border-b border-border p-3">
+      <div className="border-b border-line p-3">
         <Input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
@@ -48,17 +48,17 @@ export function ProspectPicker({
                 aria-current={active ? "true" : undefined}
                 className={`w-full border-l-2 px-4 py-3 text-left transition-colors ${
                   active
-                    ? "border-accent bg-surface-2"
+                    ? "border-primary bg-surface-2"
                     : "border-transparent hover:bg-surface-2/60"
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-[13px] font-medium leading-snug text-fg">
+                  <span className="text-[13px] font-medium leading-snug text-text">
                     {prospect.company_name}
                   </span>
                   <ProspectStatusBadge status={prospect.status} />
                 </div>
-                <p className="mt-0.5 truncate text-xs text-muted">
+                <p className="mt-0.5 truncate text-xs text-faint">
                   {[prospect.sector, prospect.city].filter(Boolean).join(" · ") || "—"}
                 </p>
               </button>
@@ -67,7 +67,7 @@ export function ProspectPicker({
         })}
 
         {!visible.length && (
-          <li className="px-4 py-6 text-center text-[13px] text-muted">Aucun prospect ne correspond.</li>
+          <li className="px-4 py-6 text-center text-[13px] text-faint">Aucun prospect ne correspond.</li>
         )}
       </ul>
     </Card>

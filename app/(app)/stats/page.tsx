@@ -1,5 +1,6 @@
 import { BarChart3 } from "lucide-react";
 import {
+  Badge,
   Card,
   CardContent,
   CardDescription,
@@ -7,28 +8,35 @@ import {
   CardTitle,
   EmptyState,
   PageHeader,
-  StatCard,
 } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { formatEur } from "@/lib/utils";
-import { PIPELINE_ORDER } from "@/lib/constants";
-import {
-  PipelineChart,
-  RateChart,
-  RevenueChart,
-  TrendChart,
-  contactedOverTime,
-  countByStatus,
-  funnelStats,
-  revenueByMonth,
-  totalRevenue,
-} from "@/lib/charts";
 import type { Deal, Message, Prospect } from "@/types";
+import { estimateValue, splitPipelineValue } from "../suivi/_lib/estimates";
+import { FunnelBars } from "./_charts/funnel-bars";
+import { MonthBars } from "./_charts/month-bars";
+import { AiInsightsSlot, WhatWorks } from "./_components/insights";
+import { KpiTile } from "./_components/kpi-tile";
+import { ResponseBreakdown } from "./_components/response-breakdown";
+import { buildInsights } from "./_lib/insights";
+import {
+  buildFunnel,
+  contactedSeries,
+  repliedSeries,
+  responseBySector,
+  responseBySequence,
+  responseBySignal,
+  responseDelay,
+  revenueByMonth,
+  signedRevenue,
+} from "./_lib/metrics";
 
-export const metadata = { title: "Stats — Prospect" };
+export const metadata = { title: "Stats · ORION" };
 
-/** Dashboard : tuiles KPI + 4 graphes, calculés à la volée depuis Supabase. */
+/** Prospects encore en jeu : ils composent la valeur de pipeline. */
+const OPEN_STATUSES = ["contacte", "relance_1", "relance_2", "repondu", "en_discussion"] as const;
+
 export default async function StatsPage() {
   await requireUser();
   const supabase = createClient();
@@ -43,102 +51,124 @@ export default async function StatsPage() {
   const messages = (messagesResult.data ?? []) as Message[];
   const deals = (dealsResult.data ?? []) as Deal[];
 
-  const stats = funnelStats(prospects, messages);
-  const revenue = totalRevenue(deals);
-  const wonDeals = deals.filter((deal) => deal.status === "gagne").length;
-
-  const trend = contactedOverTime(messages, 30);
-  const revenueSeries = revenueByMonth(deals, 6);
-  const pipeline = countByStatus(prospects, PIPELINE_ORDER);
-
   if (prospects.length === 0) {
     return (
       <>
-        <PageHeader title="Stats" description="Performance de la prospection." />
+        <PageHeader title="Stats" description="Ce que la prospection produit vraiment." />
         <EmptyState
           icon={<BarChart3 />}
           title="Rien à mesurer pour l'instant"
-          description="Ajoutez des prospects depuis la Recherche : les indicateurs apparaîtront ici dès le premier message envoyé."
+          description="Ajoutez des prospects depuis la Recherche : les indicateurs se remplissent dès le premier message envoyé."
         />
       </>
     );
   }
 
+  const funnel = buildFunnel(prospects, messages);
+  const contacted = contactedSeries(messages, 30);
+  const replied = repliedSeries(prospects, 30);
+  const delay = responseDelay(prospects, messages);
+  const revenue = signedRevenue(deals);
+  const months = revenueByMonth(deals, 6);
+
+  const bySector = responseBySector(prospects);
+  const bySequence = responseBySequence(prospects, messages);
+  const bySignal = responseBySignal(prospects);
+  const insights = buildInsights({ funnel, bySector, bySequence, bySignal, delay });
+
+  const contactedTotal = contacted.reduce((sum, point) => sum + point.value, 0);
+  const [, contactedStage, repliedStage] = funnel;
+  const replyRate = contactedStage.count > 0 ? repliedStage.count / contactedStage.count : 0;
+
+  // Valeur de pipeline : montants réels des deals + fourchettes d'exemple.
+  const dealsByProspect = new Map<string, Deal[]>();
+  for (const deal of deals) {
+    dealsByProspect.set(deal.prospect_id, [...(dealsByProspect.get(deal.prospect_id) ?? []), deal]);
+  }
+  const pipeline = splitPipelineValue(
+    prospects
+      .filter((prospect) => OPEN_STATUSES.includes(prospect.status as (typeof OPEN_STATUSES)[number]))
+      .map((prospect) => estimateValue(prospect, dealsByProspect.get(prospect.id) ?? [])),
+  );
+
   return (
     <>
       <PageHeader
         title="Stats"
-        description={`${prospects.length} prospect${prospects.length > 1 ? "s" : ""} dans la base.`}
+        description={`${prospects.length} prospect${prospects.length > 1 ? "s" : ""} suivis · ${contactedStage.count} contactés · ${revenue.count} contrat${revenue.count > 1 ? "s" : ""} signé${revenue.count > 1 ? "s" : ""}.`}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Contactés"
-          value={stats.contacted}
-          hint={`${Math.round(stats.replyRate * 100)} % de réponses`}
+        <KpiTile
+          featured
+          label="Contactés (30 jours)"
+          value={String(contactedTotal)}
+          hint={`${contactedStage.count} au total depuis le début`}
+          series={contacted.map((point) => point.value)}
+          seriesId="contacted"
+          seriesLabel="Premiers contacts par jour sur 30 jours"
         />
-        <StatCard
-          label="En discussion"
-          value={stats.inDiscussion}
-          hint={`${stats.replied} réponse${stats.replied > 1 ? "s" : ""} au total`}
+        <KpiTile
+          label="Taux de réponse"
+          value={`${Math.round(replyRate * 100)} %`}
+          hint={`${repliedStage.count} réponse(s) sur ${contactedStage.count} contactés`}
+          series={replied.map((point) => point.value)}
+          seriesId="replied"
+          seriesLabel="Réponses par jour sur 30 jours"
+          tone="good"
         />
-        <StatCard
-          label="Gagnés"
-          value={stats.won}
-          hint={`${Math.round(stats.successRate * 100)} % des répondus`}
+        <KpiTile
+          label="Délai de réponse"
+          value={delay.medianDays === null ? "—" : `${delay.medianDays} j`}
+          hint={
+            delay.sample === 0
+              ? "Aucune réponse mesurable pour l'instant"
+              : `Médiane estimée sur ${delay.sample} réponse(s)`
+          }
+          tone="warn"
         />
-        <StatCard
-          label="CA signé"
-          value={formatEur(revenue)}
-          hint={`${wonDeals} contrat${wonDeals > 1 ? "s" : ""}`}
+        <KpiTile
+          label="Valeur du pipeline"
+          value={formatEur(pipeline.real + pipeline.example)}
+          hint={
+            pipeline.example > 0
+              ? `dont ${formatEur(pipeline.example)} de fourchettes indicatives`
+              : "montants de contrats enregistrés"
+          }
+          badge={pipeline.example > 0 ? <Badge tone="warning">exemple</Badge> : undefined}
         />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Card className="lg:col-span-2">
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <Card>
           <CardHeader>
-            <CardTitle>Prospects contactés</CardTitle>
-            <CardDescription>
-              Premiers contacts par jour sur 30 jours, et cumul sur la période.
-            </CardDescription>
+            <CardTitle>Entonnoir</CardTitle>
+            <CardDescription>De la base de prospects au contrat signé.</CardDescription>
           </CardHeader>
           <CardContent>
-            <TrendChart data={trend} />
+            <FunnelBars stages={funnel} />
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Taux de conversion</CardTitle>
-            <CardDescription>
-              Relance et réponse sur les contactés ({stats.contacted}), succès sur les répondus (
-              {stats.replied}).
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <RateChart stats={stats} />
-          </CardContent>
-        </Card>
+        <ResponseBreakdown bySector={bySector} bySequence={bySequence} bySignal={bySignal} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Répartition du pipeline</CardTitle>
-            <CardDescription>Où en sont les prospects, étape par étape.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <PipelineChart data={pipeline} />
-          </CardContent>
-        </Card>
+        <WhatWorks insights={insights} />
 
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Chiffre d&apos;affaires signé</CardTitle>
-            <CardDescription>Montant et nombre de contrats gagnés, par mois.</CardDescription>
+            <CardDescription>
+              {revenue.count === 0
+                ? "Aucun contrat enregistré : le graphe se remplit au premier passage en « Gagné »."
+                : `${formatEur(revenue.amount)} sur ${revenue.count} contrat(s), mois par mois.`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <RevenueChart data={revenueSeries} />
+            <MonthBars points={months} />
           </CardContent>
         </Card>
+
+        <AiInsightsSlot />
       </div>
     </>
   );
