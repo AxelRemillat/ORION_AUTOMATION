@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 
-/** La racine n'a pas d'écran propre : le middleware oriente vers /login si besoin. */
+/**
+ * La racine n'a pas d'ecran propre : elle ouvre le Cockpit, l'accueil d'ORION.
+ * Le middleware oriente vers /login si la session manque.
+ */
 export default function HomePage() {
-  redirect("/recherche");
+  redirect("/cockpit");
 }

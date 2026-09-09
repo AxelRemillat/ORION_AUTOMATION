@@ -19,11 +19,17 @@ const EMPTY: SearchCriteriaInput = { q: "", section: "", size: "petite", zone: "
 export function SearchForm({
   onSubmit,
   loading,
+  initial,
 }: {
   onSubmit: (criteria: SearchCriteriaInput) => void;
   loading: boolean;
+  /**
+   * Critères de départ. Le formulaire reste non contrôlé : pour appliquer une
+   * recherche sauvegardée, l'écran parent le remonte via une `key`.
+   */
+  initial?: SearchCriteriaInput;
 }) {
-  const [criteria, setCriteria] = useState<SearchCriteriaInput>(EMPTY);
+  const [criteria, setCriteria] = useState<SearchCriteriaInput>(initial ?? EMPTY);
 
   const update = <K extends keyof SearchCriteriaInput>(key: K, value: SearchCriteriaInput[K]) =>
     setCriteria((current) => ({ ...current, [key]: value }));

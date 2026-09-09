@@ -1,10 +1,13 @@
 "use client";
 
-import { Check, ExternalLink, MapPin, Plus, Users } from "lucide-react";
-import { Badge, Button, Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui";
+import { ArrowRight, Check, ExternalLink, MapPin, Plus, Users } from "lucide-react";
+import { Button, Card, CardContent, CardFooter, CardHeader } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
+import { heatScore, whyNow } from "@/lib/scoring";
 import type { EnrichedCompany } from "@/lib/enrichment/types";
-import { SignalList } from "./signal-list";
+import { HeatGauge } from "./heat-gauge";
+import { ExampleTag, MetaChip, SignalChip } from "./signal-chip";
+import { WhyNowCard } from "./why-now";
 
 /** État d'ajout d'une carte, piloté par l'écran parent. */
 export type AddState = "idle" | "loading" | "added" | "duplicate";
@@ -13,6 +16,8 @@ interface ResultCardProps {
   company: EnrichedCompany;
   state: AddState;
   onAdd: (company: EnrichedCompany) => void;
+  /** Ajoute si nécessaire puis ouvre la Prospection. */
+  onProspect: (company: EnrichedCompany) => void;
 }
 
 /** Ligne de chiffres clés, masquée quand la donnée n'a pas été récupérée. */
@@ -31,75 +36,120 @@ function KeyFigures({ company }: { company: EnrichedCompany }) {
   if (!items.length) return null;
 
   return (
-    <dl className="flex flex-wrap gap-x-5 gap-y-1 border-t border-border pt-3 text-[13px]">
+    <dl
+      className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-3 text-[13px]"
+      style={{ borderColor: "var(--line-soft)" }}
+    >
       {items.map((item) => (
         <div key={item.label} className="flex items-baseline gap-1.5">
-          <dt className="text-muted">{item.label}</dt>
-          <dd className="font-medium tabular-nums text-fg">{item.value}</dd>
+          <dt style={{ color: "var(--muted)" }}>{item.label}</dt>
+          <dd className="font-data font-medium" style={{ color: "var(--text)" }}>
+            {item.value}
+          </dd>
         </div>
       ))}
     </dl>
   );
 }
 
-export function ResultCard({ company, state, onAdd }: ResultCardProps) {
+export function ResultCard({ company, state, onAdd, onProspect }: ResultCardProps) {
   const done = state === "added" || state === "duplicate";
+  const score = heatScore(company.signals, { seed: company.siren ?? company.company_name });
+  const why = whyNow(company.signals);
+
+  // Types de signaux distincts, pour ne pas répéter la même puce.
+  const chipTypes = [...new Set((company.signals ?? []).map((signal) => signal.type ?? "presse"))];
 
   return (
     <Card className="flex flex-col">
       <CardHeader>
-        <CardTitle>{company.company_name}</CardTitle>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {company.sector && <Badge tone="accent">{company.sector}</Badge>}
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-[15px] font-semibold tracking-tight" style={{ color: "var(--text)" }}>
+            {company.company_name}
+          </h3>
+          {!score.real && <ExampleTag label="score exemple" />}
+        </div>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {company.sector && <MetaChip>{company.sector}</MetaChip>}
           {company.size_range && (
-            <Badge>
+            <MetaChip>
               <Users className="h-3 w-3" aria-hidden />
               {company.size_range}
-            </Badge>
+            </MetaChip>
           )}
           {company.city && (
-            <Badge>
+            <MetaChip>
               <MapPin className="h-3 w-3" aria-hidden />
               {company.city}
-            </Badge>
+            </MetaChip>
           )}
           {/* Le filtre géographique porte sur les établissements : on le signale. */}
-          {company.matched_branch && <Badge tone="info">Établissement local</Badge>}
+          {company.matched_branch && <MetaChip>Établissement local</MetaChip>}
+        </div>
+
+        <div className="mt-3">
+          <HeatGauge score={score} />
         </div>
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-3">
-        <SignalList signals={company.signals} />
+        {chipTypes.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {chipTypes.map((type) => (
+              <SignalChip
+                key={type}
+                type={type}
+                title={company.signals.find((s) => (s.type ?? "presse") === type)?.label}
+              />
+            ))}
+          </div>
+        )}
+
+        <WhyNowCard why={why} />
         <KeyFigures company={company} />
       </CardContent>
 
-      <CardFooter className="justify-between">
+      <CardFooter className="flex-wrap justify-between gap-2">
         {company.website ? (
           <a
             href={company.website}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center gap-1 text-[13px] text-muted transition-colors hover:text-accent"
+            className="inline-flex items-center gap-1 text-[13px] underline-offset-2 hover:underline"
+            style={{ color: "var(--muted)" }}
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             Site web
           </a>
         ) : (
-          <span className="text-[13px] text-muted">
+          <span className="text-[13px]" style={{ color: "var(--muted)" }}>
             {company.siren ? `SIREN ${company.siren}` : "Site inconnu"}
           </span>
         )}
 
-        <Button
-          size="sm"
-          variant={done ? "secondary" : "primary"}
-          loading={state === "loading"}
-          disabled={done}
-          onClick={() => onAdd(company)}
-        >
-          {done ? <Check className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
-          {state === "duplicate" ? "Déjà suivi" : done ? "Ajouté" : "Ajouter à mes prospects"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={state === "loading"}
+            disabled={done}
+            onClick={() => onAdd(company)}
+          >
+            {done ? <Check className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
+            {state === "duplicate" ? "Déjà suivi" : done ? "Ajouté" : "Ajouter"}
+          </Button>
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onProspect(company)}
+            loading={state === "loading"}
+          >
+            Prospecter
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
       </CardFooter>
     </Card>
   );
