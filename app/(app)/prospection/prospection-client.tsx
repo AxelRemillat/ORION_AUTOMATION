@@ -143,7 +143,7 @@ export function ProspectionClient({
             <>
               <AnalysisPanel
                 painPoint={analysis.pain_point}
-                levers={analysis.levers}
+                evidence={analysis.evidence}
                 contact={analysis.contact}
               />
 

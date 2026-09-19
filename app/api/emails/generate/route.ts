@@ -6,7 +6,13 @@ import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/t
 import type { Prospect } from "@/types";
 // Garde d'authentification partagée avec les routes /api/prospects.
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
-import { buildContext, parseAnalysis, SYSTEM_PROMPT, type Analysis } from "./prompt";
+import {
+  buildContext,
+  extractEuroAmounts,
+  parseAnalysis,
+  SYSTEM_PROMPT,
+  type Analysis,
+} from "./prompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +21,31 @@ export const maxDuration = 60;
 
 interface GenerateBody {
   prospectId?: string;
+}
+
+/**
+ * Garde-fou anti-chiffres inventes : tout montant en euros du brouillon doit
+ * correspondre a une donnee reellement collectee sur le prospect. On ne
+ * reecrit pas le texte du modele — on previent l'utilisateur, qui relit de
+ * toute facon avant d'envoyer.
+ */
+function checkEuroClaims(prospect: Prospect, body: string): EnrichmentWarning | null {
+  const figures = prospect.key_figures ?? {};
+  const known = new Set(
+    [figures.revenue_eur, figures.net_income_eur, figures.capital_eur]
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      .map((value) => Math.round(value)),
+  );
+
+  const unknown = extractEuroAmounts(body).filter((amount) => !known.has(amount));
+  if (!unknown.length) return null;
+
+  return {
+    source: "openai",
+    message:
+      `Montant non verifie dans le brouillon (${unknown.join(", ")} EUR) : ` +
+      "aucune donnee collectee ne le corrobore. Retirez-le ou corrigez-le avant envoi.",
+  };
 }
 
 /** Appel OpenAI en mode JSON : le prompt impose déjà la forme de la réponse. */
@@ -103,9 +134,15 @@ export async function POST(request: Request) {
       .eq("id", prospect.id);
   }
 
+  const analysis = analysisOutcome.value;
+  const warnings: EnrichmentWarning[] = [];
+  if (contactResult.warning) warnings.push(contactResult.warning);
+  const euroWarning = checkEuroClaims(prospect, analysis.email.body);
+  if (euroWarning) warnings.push(euroWarning);
+
   return NextResponse.json({
-    ...analysisOutcome.value,
+    ...analysis,
     contact: contactResult.contact,
-    warnings: contactResult.warning ? [contactResult.warning] : [],
+    warnings,
   });
 }

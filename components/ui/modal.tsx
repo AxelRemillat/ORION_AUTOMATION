@@ -32,23 +32,33 @@ export function Modal({
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // `onClose` est presque toujours une fonction fleche recreee a chaque rendu
+  // du parent. On la garde dans une ref pour que l'effet ci-dessous ne depende
+  // QUE de `open` : sinon il rejouait a chaque frappe clavier et le
+  // `panelRef.focus()` volait le focus du champ en cours de saisie.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKeyDown);
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // Focus initial : une seule fois, a l'ouverture.
     panelRef.current?.focus();
 
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

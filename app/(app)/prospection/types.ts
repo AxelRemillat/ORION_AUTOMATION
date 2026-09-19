@@ -1,16 +1,21 @@
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
 
-/** Un chiffre clé estimé par l'IA, avec l'hypothèse qui le sous-tend. */
-export interface Lever {
+/**
+ * Un fait REEL retenu par l'analyse, recopie des donnees collectees, avec sa
+ * provenance. Ce ne sont jamais des estimations : le modele a l'interdiction
+ * d'inventer un chiffre, et une entree sans source est ecartee cote serveur.
+ */
+export interface Evidence {
   label: string;
   value: string;
-  basis: string;
+  source: string;
 }
 
 /** Réponse de POST /api/emails/generate. */
 export interface GenerateResponse {
+  /** Hypothèse de travail, à lire comme telle — pas un constat verifie. */
   pain_point: string;
-  levers: Lever[];
+  evidence: Evidence[];
   email: { subject: string; body: string };
   contact: DecisionMakerContact | null;
   warnings: EnrichmentWarning[];
