@@ -1,5 +1,5 @@
 import type { Deal, Message, Prospect, ProspectStatus, Reminder } from "@/types";
-import { estimateValue, type EstimatedValue } from "./estimates";
+import { dealValue, type DealValue } from "./estimates";
 import { nextAction, type NextAction } from "./next-action";
 import { stageOf } from "./stages";
 
@@ -19,7 +19,7 @@ export interface ProspectRow {
   lastActivity: string | null;
   /** Prochaine relance ouverte, si programmée. */
   nextDueAt: string | null;
-  value: EstimatedValue;
+  value: DealValue;
   action: NextAction;
 }
 
@@ -79,7 +79,7 @@ export function buildRows(
       draftsCount,
       lastActivity: sentDates.at(-1) ?? prospect.created_at,
       nextDueAt,
-      value: estimateValue(prospect, dealsByProspect.get(prospect.id) ?? []),
+      value: dealValue(dealsByProspect.get(prospect.id) ?? []),
       action: nextAction({ status: prospect.status, draftsCount, nextDueAt }),
     };
   });

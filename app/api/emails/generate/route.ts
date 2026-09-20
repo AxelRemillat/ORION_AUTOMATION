@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOpenAI, OPENAI_MODEL } from "@/lib/openai";
+import { recordOpenAiUsage } from "@/lib/usage/record";
 import { findDecisionMaker, hasHunterKey } from "@/lib/enrichment/hunter";
 import { toDomain } from "@/lib/enrichment/http";
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
@@ -59,6 +60,18 @@ async function runAnalysis(prospect: Prospect): Promise<Analysis | null> {
       { role: "user", content: buildContext(prospect) },
     ],
   });
+  // `usage` est renvoye par OpenAI : le cout est donc calcule sur les tokens
+  // reellement factures, jamais sur une estimation de longueur.
+  if (completion.usage) {
+    await recordOpenAiUsage({
+      model: OPENAI_MODEL,
+      promptTokens: completion.usage.prompt_tokens ?? 0,
+      completionTokens: completion.usage.completion_tokens ?? 0,
+      operation: "analyse+redaction",
+      prospectId: prospect.id,
+    });
+  }
+
   return parseAnalysis(completion.choices[0]?.message?.content ?? "");
 }
 
@@ -75,7 +88,7 @@ async function findContact(
   }
 
   const leader = typeof prospect.key_figures?.leader === "string" ? prospect.key_figures.leader : null;
-  const result = await findDecisionMaker(domain, leader);
+  const result = await findDecisionMaker(domain, leader, prospect.id);
   if (!result.ok) return { contact: null, warning: { source: "hunter", message: result.error } };
   return { contact: result.data };
 }

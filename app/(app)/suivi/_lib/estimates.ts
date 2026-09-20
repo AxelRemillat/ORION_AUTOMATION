@@ -1,76 +1,72 @@
-import type { Deal, Prospect } from "@/types";
+import type { Deal } from "@/types";
 
 /**
- * VALEUR ESTIMÉE — DONNÉE D'EXEMPLE.
+ * VALEUR D'UN PROSPECT — montants réels uniquement.
  *
- * Le schéma ne stocke un montant que sur `deals` (donc seulement une fois
- * l'affaire signée). Tant qu'aucune colonne « valeur estimée » n'existe côté
- * Supabase, on affiche une fourchette indicative calculée depuis la taille de
- * l'entreprise. Elle est TOUJOURS rendue avec la mention « exemple » et n'entre
- * jamais dans les totaux présentés comme réels.
+ * Ce module produisait auparavant une « fourchette indicative » déduite de
+ * l'effectif (3 500 € pour une TPE, 8 000 € pour une PME…). Ces montants
+ * n'avaient aucun fondement et se retrouvaient additionnés dans la valeur du
+ * pipeline. Ils sont supprimés : la seule valeur affichée est celle que
+ * l'utilisateur a saisie sur un deal. Rien de saisi, rien d'affiché.
  */
 
-export interface EstimatedValue {
-  amount: number;
-  /** `reel` = montant d'un deal enregistré ; `exemple` = fourchette indicative. */
-  source: "reel" | "exemple";
-  /** Phrase courte expliquant d'où vient le chiffre. */
+export interface DealValue {
+  /** Montant saisi par l'utilisateur, ou `null` si aucun. */
+  amount: number | null;
+  /** `reel` = montant saisi ; `absent` = aucune estimation renseignée. */
+  source: "reel" | "absent";
+  /** Phrase courte expliquant d'où vient le chiffre (ou son absence). */
   basis: string;
+  /** Deal ouvert portant le montant, cible de l'édition en ligne. */
+  openDealId: string | null;
 }
 
-/** Paliers indicatifs d'une mission « mise en prod IA », par taille d'entreprise. */
-const BANDS: { max: number; amount: number; label: string }[] = [
-  { max: 9, amount: 3_500, label: "TPE (< 10 salariés)" },
-  { max: 49, amount: 8_000, label: "PME (10–49)" },
-  { max: 249, amount: 18_000, label: "ETI (50–249)" },
-  { max: Number.POSITIVE_INFINITY, amount: 35_000, label: "Grand compte (250+)" },
-];
-
-/** Effectif connu, depuis les chiffres clés ou la tranche INSEE textuelle. */
-function headcountOf(prospect: Prospect): number | null {
-  const raw = prospect.key_figures?.headcount;
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-
-  // `size_range` ressemble à "10 à 19 salariés" : on prend la borne basse.
-  const match = prospect.size_range?.match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
+const NO_VALUE: DealValue = {
+  amount: null,
+  source: "absent",
+  basis: "Aucun montant estimé saisi",
+  openDealId: null,
+};
 
 /**
- * Valeur à afficher pour un prospect : le montant réel du deal s'il existe,
- * sinon une fourchette d'exemple.
+ * Valeur à afficher pour un prospect.
+ * Un deal gagné fait foi ; sinon on prend le deal ouvert et son estimation.
  */
-export function estimateValue(prospect: Prospect, deals: Deal[]): EstimatedValue {
-  const withAmount = deals.find((deal) => deal.amount_eur != null);
-  if (withAmount) {
+export function dealValue(deals: Deal[]): DealValue {
+  const won = deals.find((deal) => deal.status === "gagne" && deal.amount_eur != null);
+  if (won) {
     return {
-      amount: Number(withAmount.amount_eur),
+      amount: Number(won.amount_eur),
       source: "reel",
-      basis: "Montant du contrat enregistré",
+      basis: "Montant du contrat signé",
+      openDealId: null,
     };
   }
 
-  const headcount = headcountOf(prospect);
-  const band = BANDS.find((item) => (headcount ?? 20) <= item.max) ?? BANDS[1];
+  const open = deals.find((deal) => deal.status === "ouvert");
+  if (!open) return NO_VALUE;
+
+  if (open.amount_eur == null) {
+    return { ...NO_VALUE, openDealId: open.id };
+  }
+
   return {
-    amount: band.amount,
-    source: "exemple",
-    basis:
-      headcount === null
-        ? "Fourchette par défaut (effectif inconnu) — donnée d'exemple"
-        : `Fourchette ${band.label} — donnée d'exemple`,
+    amount: Number(open.amount_eur),
+    source: "reel",
+    basis: "Montant estimé, saisi à la main",
+    openDealId: open.id,
   };
 }
 
-/** Somme des valeurs réelles et des valeurs d'exemple, séparées. */
-export function splitPipelineValue(
-  entries: EstimatedValue[],
-): { real: number; example: number } {
-  return entries.reduce(
-    (totals, entry) => ({
-      real: totals.real + (entry.source === "reel" ? entry.amount : 0),
-      example: totals.example + (entry.source === "exemple" ? entry.amount : 0),
-    }),
-    { real: 0, example: 0 },
-  );
+/**
+ * Somme des montants réellement saisis.
+ * Aucun montant renseigné ⇒ 0, jamais une valeur reconstituée.
+ */
+export function sumPipeline(values: DealValue[]): number {
+  return values.reduce((total, entry) => total + (entry.amount ?? 0), 0);
+}
+
+/** Nombre d'entrées effectivement chiffrées, pour nuancer un total. */
+export function countValued(values: DealValue[]): number {
+  return values.filter((entry) => entry.amount != null).length;
 }

@@ -50,7 +50,6 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                 </span>
               </TD>
               <TD className="font-data text-[13px] text-muted" title={row.value.basis}>
-                {row.value.source === "exemple" ? "≈ " : ""}
                 {formatEur(row.value.amount)}
               </TD>
               <TD className="text-[13px] text-muted">

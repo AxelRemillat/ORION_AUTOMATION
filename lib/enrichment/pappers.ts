@@ -4,6 +4,7 @@
  * Sans PAPPERS_API_KEY, l'enrichissement est simplement sauté.
  */
 import { fetchJson } from "./http";
+import { recordUnitUsage } from "@/lib/usage/record";
 import type { Result } from "./http";
 
 const BASE_URL = "https://api.pappers.fr/v2/entreprise";
@@ -72,6 +73,11 @@ export async function fetchPappers(siren: string): Promise<Result<PappersData>> 
 
   const params = new URLSearchParams({ api_token: token, siren });
   const response = await fetchJson<PappersResponse>(`${BASE_URL}?${params}`);
+  // Pappers debite 1 credit par fiche entreprise, meme si on n'en exploite
+  // qu'une partie. On journalise l'appel reel, pas ce qu'on en a tire.
+  if (response.ok) {
+    await recordUnitUsage({ service: "pappers", operation: "entreprise", units: 1 });
+  }
   if (!response.ok) return response;
 
   const raw = response.data;

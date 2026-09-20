@@ -1,4 +1,4 @@
-import { BarChart3, Gauge, ListChecks, Search, Send, type LucideIcon } from "lucide-react";
+import { BarChart3, Gauge, ListChecks, Search, Send, Wallet, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -27,4 +27,10 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { href: "/suivi", label: "Suivi", icon: ListChecks, hint: "Pipeline, relances et deals" },
   { href: "/stats", label: "Stats", icon: BarChart3, hint: "Performance de la prospection" },
+  {
+    href: "/couts",
+    label: "Coûts",
+    icon: Wallet,
+    hint: "Consommation des APIs et coût par prospect",
+  },
 ];

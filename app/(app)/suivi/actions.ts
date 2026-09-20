@@ -37,6 +37,55 @@ export async function setProspectStatus(
   return { ok: true };
 }
 
+/**
+ * Montant estimé d'une affaire en cours, saisi par l'utilisateur.
+ *
+ * C'est la SEULE source de la « valeur du pipeline » : l'app ne devine plus
+ * aucun montant. Le montant vit sur un deal `ouvert` du prospect, cree a la
+ * volee s'il n'existe pas encore. `null` efface l'estimation sans supprimer
+ * le deal (l'historique de l'affaire reste).
+ */
+export async function setDealEstimate(
+  prospectId: string,
+  amountEur: number | null,
+): Promise<ActionResult> {
+  if (amountEur !== null && (!Number.isFinite(amountEur) || amountEur < 0)) {
+    return { ok: false, error: "Le montant doit être un nombre positif." };
+  }
+
+  const supabase = createClient();
+
+  // La RLS restreint deja au proprietaire : une ligne trouvee est la sienne.
+  const { data: existing, error: readError } = await supabase
+    .from("deals")
+    .select("id")
+    .eq("prospect_id", prospectId)
+    .eq("status", "ouvert")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (readError) return { ok: false, error: readError.message };
+
+  if (existing) {
+    const { error } = await supabase
+      .from("deals")
+      .update({ amount_eur: amountEur })
+      .eq("id", existing.id);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    // Rien a creer si l'utilisateur efface un montant qui n'existait pas.
+    if (amountEur === null) return { ok: true };
+    const { error } = await supabase
+      .from("deals")
+      .insert({ prospect_id: prospectId, amount_eur: amountEur, status: "ouvert" });
+    if (error) return { ok: false, error: error.message };
+  }
+
+  refresh(prospectId);
+  revalidatePath("/cockpit");
+  return { ok: true, message: amountEur === null ? "Estimation effacée." : "Estimation enregistrée." };
+}
+
 /** Enregistre un contrat signé et bascule le prospect en « gagné ». */
 export async function createDeal(
   prospectId: string,

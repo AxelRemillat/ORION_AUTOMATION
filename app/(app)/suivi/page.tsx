@@ -5,7 +5,7 @@ import { formatEur } from "@/lib/utils";
 import type { Deal, Message, Prospect, Reminder } from "@/types";
 import { DueReminders } from "./_components/due-reminders";
 import { PipelineBoard } from "./_components/pipeline-board";
-import { splitPipelineValue } from "./_lib/estimates";
+import { countValued, sumPipeline } from "./_lib/estimates";
 import { buildRows, type DueReminderRow } from "./_lib/rows";
 
 export const metadata = { title: "Suivi · ORION" };
@@ -52,12 +52,16 @@ export default async function SuiviPage() {
     });
 
   const open = rows.filter((row) => row.stageKey !== "gagne" && row.stageKey !== "perdu");
-  const value = splitPipelineValue(open.map((row) => row.value));
+  const openValues = open.map((row) => row.value);
+  const pipeline = sumPipeline(openValues);
+  const valued = countValued(openValues);
   const drafts = rows.reduce((total, row) => total + row.draftsCount, 0);
 
   const summary = [
     `${prospects.length} prospect${prospects.length > 1 ? "s" : ""}`,
-    `${formatEur(value.real + value.example)} en jeu${value.example > 0 ? " (fourchettes indicatives incluses)" : ""}`,
+    valued > 0
+      ? `${formatEur(pipeline)} en jeu sur ${valued} prospect${valued > 1 ? "s" : ""} chiffré${valued > 1 ? "s" : ""}`
+      : "aucun montant estimé saisi",
     drafts > 0 ? `${drafts} brouillon${drafts > 1 ? "s" : ""} à envoyer` : null,
   ]
     .filter(Boolean)

@@ -31,6 +31,8 @@ Appliquer les fichiers de `supabase/migrations/` **dans l'ordre des noms** :
 | `20260907000000_init.sql` | 4 tables, énumérations, index, trigger `updated_at` et **RLS par `user_id`** (chaque ligne n'est lisible et modifiable que par son propriétaire) |
 | `20260907120000_prospects_email.sql` | Colonne `prospects.email` (nullable) |
 | `20260908000000_orion_grants.sql` | `GRANT` DML aux rôles `authenticated` et `service_role` sur les 4 tables — **indispensable** : sans lui PostgREST refuse tout en `42501`, policies RLS ou pas |
+| `20260920100000_purge_unproven_signals.sql` | Supprime les signaux web sans preuve (ancien format sans `quote` ni `url`) |
+| `20260920110000_api_usage.sql` | Table `api_usage` : consommation et coût réels des APIs tierces, RLS + GRANT |
 
 Une migration oubliée se voit tout de suite : les requêtes échouent sur une
 colonne inconnue.
@@ -54,6 +56,11 @@ puis se connecter sur `/login`.
 | `LINKUP_API_KEY` | serveur | Recherche web / signaux |
 | `HUNTER_API_KEY` | serveur | Emails professionnels |
 | `N8N_WEBHOOK_SEND_URL` | serveur | Webhook d'envoi des messages |
+| `USD_EUR_RATE` | serveur | Optionnelle — conversion des services facturés en $ (défaut 0.92) |
+| `LINKUP_SEARCH_USD` | serveur | Optionnelle — prix d'une recherche Linkup (défaut 0.005) |
+| `PAPPERS_CREDIT_EUR` · `PAPPERS_PLAN_CREDITS` | serveur | Optionnelles — valeur d'un crédit, taille du forfait |
+| `HUNTER_SEARCH_EUR` | serveur | Optionnelle — valeur d'une recherche Hunter |
+| `OPENAI_MONTHLY_BUDGET_EUR` | serveur | Optionnelle — seul moyen d'estimer le restant OpenAI |
 
 Sur Vercel : renseigner les mêmes variables dans *Settings → Environment Variables*.
 Aucune configuration supplémentaire n'est nécessaire, le projet se déploie tel quel.

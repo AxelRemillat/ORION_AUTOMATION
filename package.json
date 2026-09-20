@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test:signals": "tsc -p tsconfig.test.json && node .test-build/scripts/signals.test.js"
+    "test:signals": "tsc -p tsconfig.test.json && node .test-build/scripts/signals.test.js",
+    "test:usage": "tsc -p tsconfig.test.json && node .test-build/scripts/usage.test.js",
+    "test": "npm run test:signals && npm run test:usage"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

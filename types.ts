@@ -36,6 +36,10 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 export const DEAL_STATUSES = ["ouvert", "gagne", "perdu"] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
 
+/** Fournisseurs d'API dont la consommation est mesuree. */
+export const API_SERVICES = ["openai", "pappers", "linkup", "hunter"] as const;
+export type ApiService = (typeof API_SERVICES)[number];
+
 // ---------------------------------------------------------------------------
 // Colonnes JSONB — volontairement souples : le contenu vient d'APIs externes
 // (Pappers, Linkup…) et n'est pas contraint par la base.
@@ -135,6 +139,26 @@ export type Reminder = {
   created_at: string;
 }
 
+/**
+ * Un appel facture a une API tierce.
+ *
+ * `units` est toujours dans l'unite NATIVE du fournisseur (tokens, credits,
+ * recherches) et est exacte. `cost` est en euros ; pour les services factures
+ * en dollars il resulte d'une conversion approximative, que l'ecran signale.
+ */
+export type ApiUsage = {
+  id: string;
+  user_id: string;
+  service: ApiService;
+  /** Ce qui a ete fait : "chat.completions", "entreprise", "search"... */
+  operation: string;
+  units: number;
+  unit_cost: number;
+  cost: number;
+  prospect_id: string | null;
+  created_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers d'écriture
 //
@@ -178,6 +202,9 @@ export type DealUpdate = Update<Deal>;
 
 export type ReminderInsert = Insert<Reminder, "done">;
 export type ReminderUpdate = Update<Reminder>;
+
+export type ApiUsageInsert = Insert<ApiUsage, "units" | "unit_cost" | "cost" | "prospect_id">;
+export type ApiUsageUpdate = Update<ApiUsage>;
 
 // ---------------------------------------------------------------------------
 // Vues composées fréquemment utilisées par les écrans
@@ -227,6 +254,12 @@ export type Database = {
         Update: ReminderUpdate;
         Relationships: [];
       };
+      api_usage: {
+        Row: ApiUsage;
+        Insert: ApiUsageInsert;
+        Update: ApiUsageUpdate;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -236,6 +269,7 @@ export type Database = {
       message_type: MessageType;
       message_status: MessageStatus;
       deal_status: DealStatus;
+      api_service: ApiService;
     };
     CompositeTypes: Record<string, never>;
   };

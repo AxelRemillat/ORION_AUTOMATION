@@ -1,6 +1,5 @@
 import { BarChart3 } from "lucide-react";
 import {
-  Badge,
   Card,
   CardContent,
   CardDescription,
@@ -13,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { formatEur } from "@/lib/utils";
 import type { Deal, Message, Prospect } from "@/types";
-import { estimateValue, splitPipelineValue } from "../suivi/_lib/estimates";
+import { countValued, dealValue, sumPipeline } from "../suivi/_lib/estimates";
 import { FunnelBars } from "./_charts/funnel-bars";
 import { MonthBars } from "./_charts/month-bars";
 import { AiInsightsSlot, WhatWorks } from "./_components/insights";
@@ -85,11 +84,11 @@ export default async function StatsPage() {
   for (const deal of deals) {
     dealsByProspect.set(deal.prospect_id, [...(dealsByProspect.get(deal.prospect_id) ?? []), deal]);
   }
-  const pipeline = splitPipelineValue(
-    prospects
-      .filter((prospect) => OPEN_STATUSES.includes(prospect.status as (typeof OPEN_STATUSES)[number]))
-      .map((prospect) => estimateValue(prospect, dealsByProspect.get(prospect.id) ?? [])),
-  );
+  const openValues = prospects
+    .filter((prospect) => OPEN_STATUSES.includes(prospect.status as (typeof OPEN_STATUSES)[number]))
+    .map((prospect) => dealValue(dealsByProspect.get(prospect.id) ?? []));
+  const pipeline = sumPipeline(openValues);
+  const valued = countValued(openValues);
 
   return (
     <>
@@ -129,13 +128,12 @@ export default async function StatsPage() {
         />
         <KpiTile
           label="Valeur du pipeline"
-          value={formatEur(pipeline.real + pipeline.example)}
+          value={valued > 0 ? formatEur(pipeline) : "—"}
           hint={
-            pipeline.example > 0
-              ? `dont ${formatEur(pipeline.example)} de fourchettes indicatives`
-              : "montants de contrats enregistrés"
+            valued > 0
+              ? `Montants estimés saisis sur ${valued} prospect${valued > 1 ? "s" : ""} ouvert${valued > 1 ? "s" : ""}`
+              : "Aucun montant estimé saisi — renseignez-le depuis la fiche prospect"
           }
-          badge={pipeline.example > 0 ? <Badge tone="warning">exemple</Badge> : undefined}
         />
       </div>
 

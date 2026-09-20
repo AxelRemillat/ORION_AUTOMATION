@@ -9,9 +9,10 @@ import type { Deal, Message, Prospect, Reminder } from "@/types";
 import { DealTimeline } from "../_components/deal-timeline";
 import { FollowUpButton } from "../_components/follow-up-button";
 import { ProspectSummary } from "../_components/prospect-summary";
+import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
 import { guessEmail } from "../_lib/contact";
-import { estimateValue } from "../_lib/estimates";
+import { dealValue } from "../_lib/estimates";
 import { nextAction } from "../_lib/next-action";
 import { STAGE_TONE_VARS, stageOf } from "../_lib/stages";
 import { buildTimeline } from "../_lib/timeline";
@@ -53,7 +54,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
 
   const stage = stageOf(typed.status);
   const tone = STAGE_TONE_VARS[stage.tone];
-  const value = estimateValue(typed, deals);
+  const value = dealValue(deals);
   const openReminder = reminders.find((reminder) => !reminder.done);
   const action = nextAction({
     status: typed.status,
@@ -115,17 +116,13 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
             </CardHeader>
 
             <CardContent className="relative flex flex-wrap items-center gap-x-6 gap-y-2 pt-2">
-              <span className="text-[13px] text-muted">
-                Valeur{" "}
-                <span className="font-data text-text">
-                  {value.source === "exemple" ? "≈ " : ""}
-                  {formatEur(value.amount)}
-                </span>
-                {value.source === "exemple" && (
-                  <Badge tone="warning" className="ml-2" title={value.basis}>
-                    exemple
-                  </Badge>
-                )}
+              <span className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
+                <span title={value.basis}>Montant estimé</span>
+                <EstimateInput
+                  prospectId={typed.id}
+                  amount={value.amount}
+                  editable={value.basis !== "Montant du contrat signé"}
+                />
               </span>
               <span className="text-[13px] text-muted">
                 {messages.filter((message) => message.status === "sent").length} message(s) envoyé(s)

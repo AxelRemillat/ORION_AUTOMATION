@@ -55,9 +55,8 @@ export function KanbanCard({
         <span
           className="font-data shrink-0 text-[11px] text-muted"
           title={row.value.basis}
-          aria-label={`${row.value.source === "exemple" ? "Valeur d'exemple" : "Valeur du contrat"} : ${formatEur(row.value.amount)}`}
+          aria-label={`${row.value.basis} : ${formatEur(row.value.amount)}`}
         >
-          {row.value.source === "exemple" ? "≈ " : ""}
           {formatEur(row.value.amount)}
         </span>
       </div>

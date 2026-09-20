@@ -4,6 +4,7 @@
  * simplement pas de contact.
  */
 import { fetchJson } from "./http";
+import { recordUnitUsage } from "@/lib/usage/record";
 import type { Result } from "./http";
 import type { DecisionMakerContact } from "./types";
 
@@ -43,12 +44,22 @@ function score(email: HunterEmail, leaderLastName: string | null): number {
 export async function findDecisionMaker(
   domain: string,
   leaderName?: string | null,
+  prospectId?: string | null,
 ): Promise<Result<DecisionMakerContact | null>> {
   const key = process.env.HUNTER_API_KEY;
   if (!key) return { ok: false, error: "HUNTER_API_KEY absente" };
 
   const params = new URLSearchParams({ domain, api_key: key, limit: "10" });
   const response = await fetchJson<HunterResponse>(`${DOMAIN_SEARCH_URL}?${params}`);
+  // Hunter decompte une recherche de domaine, qu'elle trouve un email ou non.
+  if (response.ok) {
+    await recordUnitUsage({
+      service: "hunter",
+      operation: "domain-search",
+      units: 1,
+      prospectId,
+    });
+  }
   if (!response.ok) return response;
 
   const emails = (response.data.data?.emails ?? []).filter((email) => email.value);

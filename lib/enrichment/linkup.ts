@@ -9,6 +9,7 @@
  * qui decide, preuve en main, s'il y a un evenement.
  */
 import { fetchJson } from "./http";
+import { recordUnitUsage } from "@/lib/usage/record";
 import type { Result } from "./http";
 
 const SEARCH_URL = "https://api.linkup.so/v1/search";
@@ -78,6 +79,10 @@ export async function fetchWebResults(company: {
     },
     15_000,
   );
+  // Linkup ne facture pas les requetes en echec : on ne journalise que le succes.
+  if (response.ok) {
+    await recordUnitUsage({ service: "linkup", operation: "search", units: 1 });
+  }
   if (!response.ok) return response;
 
   const results = (response.data.results ?? [])

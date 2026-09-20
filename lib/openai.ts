@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { requireEnv } from "@/lib/env";
+import { recordOpenAiUsage } from "@/lib/usage/record";
 
 /** Modèle par défaut, surchargeable via OPENAI_MODEL. */
 export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
@@ -25,14 +26,28 @@ export async function completeText(params: {
   user: string;
   model?: string;
   temperature?: number;
+  /** Operation journalisee dans api_usage. */
+  operation?: string;
+  prospectId?: string | null;
 }): Promise<string> {
+  const model = params.model ?? OPENAI_MODEL;
   const response = await getOpenAI().chat.completions.create({
-    model: params.model ?? OPENAI_MODEL,
+    model,
     temperature: params.temperature ?? 0.7,
     messages: [
       { role: "system", content: params.system },
       { role: "user", content: params.user },
     ],
   });
+  if (response.usage) {
+    await recordOpenAiUsage({
+      model,
+      promptTokens: response.usage.prompt_tokens ?? 0,
+      completionTokens: response.usage.completion_tokens ?? 0,
+      operation: params.operation ?? "completion",
+      prospectId: params.prospectId,
+    });
+  }
+
   return response.choices[0]?.message?.content?.trim() ?? "";
 }
