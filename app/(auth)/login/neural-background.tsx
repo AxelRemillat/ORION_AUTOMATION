@@ -28,9 +28,11 @@ function readTriplet(styles: CSSStyleDeclaration, name: string, fallback: Triple
 
 /**
  * Construit la palette depuis les tokens de theme.
- * Les opacites sont volontairement basses : le fond doit rester une texture,
- * jamais un element qu'on lit. Ce sont les seules valeurs a retoucher pour
- * rendre le reseau plus ou moins present.
+ *
+ * Ce sont les SEULES valeurs a retoucher pour rendre le reseau plus ou moins
+ * present. La carte de connexion etant opaque, elle n'est jamais traversee :
+ * la limite haute est fixee par le confort de lecture du texte qui l'entoure,
+ * pas par le formulaire lui-meme.
  */
 function readPalette(): Palette {
   const styles = getComputedStyle(document.documentElement);
@@ -44,8 +46,8 @@ function readPalette(): Palette {
     node: primary,
     hub: cyan,
     alpha: isDark
-      ? { link: 0.26, node: 0.5, hub: 0.6 }
-      : { link: 0.32, node: 0.48, hub: 0.55 },
+      ? { link: 0.55, node: 0.92, hub: 1, pulse: 1 }
+      : { link: 0.6, node: 0.88, hub: 0.95, pulse: 0.95 },
   };
 }
 

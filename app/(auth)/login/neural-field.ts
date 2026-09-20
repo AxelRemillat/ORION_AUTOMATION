@@ -17,7 +17,7 @@ export interface Palette {
   node: [number, number, number];
   hub: [number, number, number];
   /** Opacites de base, ajustees selon le theme clair/sombre. */
-  alpha: { link: number; node: number; hub: number };
+  alpha: { link: number; node: number; hub: number; pulse: number };
 }
 
 interface Node {
@@ -52,16 +52,20 @@ interface Wave {
 
 // --- Reglages ---------------------------------------------------------------
 /** Plafond dur : au-dela, le cout O(n²) des liens devient inutilement visible. */
-const MAX_NODES = 50;
-/** Un noeud pour ~24 000 px² : un petit ecran n'est jamais surcharge. */
-const AREA_PER_NODE = 24_000;
-const LINK_DISTANCE = 132;
+const MAX_NODES = 64;
+/** Un noeud pour ~17 000 px² : maillage dense, sans surcharger un petit ecran. */
+const AREA_PER_NODE = 17_000;
+const LINK_DISTANCE = 138;
+/** Epaisseur des liens : au-dessus de 1 px, le maillage se lit vraiment. */
+const LINK_WIDTH = 1.4;
 const POINTER_RADIUS = 190;
 const MAX_OFFSET = 34;
 const SPRING = 6;
 const SPRING_DAMPING = 3.2;
-const MAX_PULSES = 6;
-const PULSE_INTERVAL = 0.75;
+const MAX_PULSES = 9;
+const PULSE_INTERVAL = 0.5;
+/** Longueur du sillage lumineux, en fraction du lien. */
+const PULSE_TAIL = 0.14;
 const MAX_WAVES = 3;
 const WAVE_SPEED = 420;
 const WAVE_MAX_RADIUS = 340;
@@ -124,7 +128,7 @@ export class NeuralField {
         oy: 0,
         ovx: 0,
         ovy: 0,
-        radius: hub ? 2.6 + this.random() * 0.9 : 1.1 + this.random() * 0.8,
+        radius: hub ? 3.4 + this.random() * 1.2 : 1.7 + this.random() * 1.0,
         hub,
       };
     });
@@ -296,7 +300,7 @@ export class NeuralField {
     ctx.clearRect(0, 0, this.width, this.height);
 
     // 1. Liens — plus lumineux a proximite du curseur.
-    ctx.lineWidth = 1;
+    ctx.lineWidth = LINK_WIDTH;
     for (let i = 0; i < this.nodes.length; i += 1) {
       const a = this.nodes[i];
       const ax = a.x + a.ox;
@@ -314,7 +318,7 @@ export class NeuralField {
           if (toPointer < POINTER_RADIUS) strength += (1 - toPointer / POINTER_RADIUS) * 1.6;
         }
 
-        ctx.strokeStyle = rgba(link, Math.min(0.75, strength * alpha.link));
+        ctx.strokeStyle = rgba(link, Math.min(0.92, strength * alpha.link));
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
@@ -322,20 +326,45 @@ export class NeuralField {
       }
     }
 
-    // 2. Impulsions le long des liens.
+    // 2. Impulsions le long des liens : sillage, halo, puis coeur lumineux.
+    ctx.lineCap = "round";
     for (const pulse of this.pulses) {
       const from = this.nodes[pulse.from];
       const to = this.nodes[pulse.to];
       if (!from || !to) continue;
-      const x = from.x + from.ox + (to.x + to.ox - (from.x + from.ox)) * pulse.t;
-      const y = from.y + from.oy + (to.y + to.oy - (from.y + from.oy)) * pulse.t;
+
+      const ax = from.x + from.ox;
+      const ay = from.y + from.oy;
+      const dx = to.x + to.ox - ax;
+      const dy = to.y + to.oy - ay;
+      const x = ax + dx * pulse.t;
+      const y = ay + dy * pulse.t;
       // Apparition et disparition en fondu, pour ne pas « clignoter ».
       const fade = Math.sin(pulse.t * Math.PI);
-      ctx.fillStyle = rgba(hubColor, fade * 0.85);
+
+      const tail = Math.max(0, pulse.t - PULSE_TAIL);
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = rgba(hubColor, fade * alpha.pulse * 0.55);
       ctx.beginPath();
-      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
+      ctx.moveTo(ax + dx * tail, ay + dy * tail);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      const halo = ctx.createRadialGradient(x, y, 0, x, y, 9);
+      halo.addColorStop(0, rgba(hubColor, fade * alpha.pulse * 0.6));
+      halo.addColorStop(1, rgba(hubColor, 0));
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(x, y, 9, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = rgba(hubColor, Math.min(1, fade * alpha.pulse));
+      ctx.beginPath();
+      ctx.arc(x, y, 2.6, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.lineCap = "butt";
+    ctx.lineWidth = LINK_WIDTH;
 
     // 3. Noeuds — les hubs portent un halo.
     for (const node of this.nodes) {

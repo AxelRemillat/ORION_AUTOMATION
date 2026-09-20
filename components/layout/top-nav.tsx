@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/ui";
+import { Logo, ThemeToggle } from "@/components/ui";
 import { HOME_ITEM, NAV_ITEMS, type NavItem } from "./nav-items";
 
 /**
@@ -26,7 +26,7 @@ export function TopNav({ email }: { email: string }) {
           className="flex shrink-0 items-center gap-2.5"
           aria-label="PROSPECT, accueil"
         >
-          <span className="h-6 w-6 rounded-lg bg-brand-grad shadow-mist" aria-hidden />
+          <Logo size="sm" priority />
           <span className="font-display text-[15px] font-semibold tracking-tight text-text">
             PROSPECT
           </span>

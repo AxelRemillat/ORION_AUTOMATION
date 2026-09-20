@@ -24,3 +24,4 @@ export { ThemeToggle } from "./theme-toggle";
 export { Skeleton } from "./skeleton";
 export { EmptyState } from "./empty-state";
 export { PageHeader } from "./page-header";
+export { Logo, type LogoSize } from "./logo";
