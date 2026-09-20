@@ -13,6 +13,7 @@ import { fetchPappers, hasPappersKey } from "./pappers";
 import { fetchWebResults, hasLinkupKey } from "./linkup";
 import { qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
+import { clampAnalysisLimit, DEFAULT_ANALYSIS_LIMIT } from "./limits";
 import type { CompanyBase, EnrichedCompany, EnrichmentWarning, SearchCriteria } from "./types";
 
 /** Nombre d'enrichissements menés en parallèle (ménage les quotas tiers). */
@@ -92,18 +93,37 @@ export async function enrichCompany(
   return { ...company, key_figures: keyFigures, signals, warnings };
 }
 
-/** Mode A — recherche par critères, puis enrichissement des résultats. */
+/**
+ * Mode A — recherche par criteres, puis enrichissement des resultats.
+ *
+ * On ne demande a l'annuaire QUE le nombre de fiches qu'on va analyser, et on
+ * n'en enrichit pas une de plus. `total` reste le nombre d'entreprises que la
+ * recherche a trouvees, pour que l'ecran puisse dire « 3 analysees sur 148 ».
+ */
 export async function searchAndEnrich(
   criteria: SearchCriteria,
-): Promise<{ results: EnrichedCompany[]; total: number; warnings: EnrichmentWarning[] } | { error: string }> {
-  const search = await searchCompanies(criteria);
+): Promise<
+  | { results: EnrichedCompany[]; total: number; analysed: number; warnings: EnrichmentWarning[] }
+  | { error: string }
+> {
+  const limit = clampAnalysisLimit(criteria.limit ?? DEFAULT_ANALYSIS_LIMIT);
+
+  const search = await searchCompanies(criteria, limit);
   if (!search.ok) return { error: search.error };
 
-  const enriched = await mapWithConcurrency(search.data.companies, CONCURRENCY, (company) =>
+  // Ceinture et bretelles : meme si l'annuaire renvoyait plus que demande,
+  // aucun appel facture ne part au-dela du plafond.
+  const toEnrich = search.data.companies.slice(0, limit);
+  const enriched = await mapWithConcurrency(toEnrich, CONCURRENCY, (company) =>
     enrichCompany(company, { withSignals: criteria.withSignals }),
   );
 
-  return { results: enriched, total: search.data.total, warnings: dedupeWarnings(enriched) };
+  return {
+    results: enriched,
+    total: search.data.total,
+    analysed: enriched.length,
+    warnings: dedupeWarnings(enriched),
+  };
 }
 
 /** Mode B — saisie libre (nom, SIREN ou URL) → une entreprise enrichie. */
@@ -149,4 +169,5 @@ function dedupeWarnings(companies: EnrichedCompany[]): EnrichmentWarning[] {
 }
 
 export { toDomain };
+export { clampAnalysisLimit, DEFAULT_ANALYSIS_LIMIT, MAX_ANALYSIS_LIMIT } from "./limits";
 export type { CompanyBase, EnrichedCompany, EnrichmentWarning, SearchCriteria };

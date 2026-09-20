@@ -11,6 +11,11 @@
 import { aggregate, perProspect, remainingProspects } from "../app/(app)/couts/_lib/aggregate";
 import type { ApiService, ApiUsage } from "../types";
 import type { ServiceBalance } from "../lib/usage/balances";
+import {
+  clampAnalysisLimit,
+  DEFAULT_ANALYSIS_LIMIT,
+  MAX_ANALYSIS_LIMIT,
+} from "../lib/enrichment/limits";
 
 let failures = 0;
 
@@ -112,6 +117,18 @@ console.log("\n4. Aucun solde connu -> aucune estimation inventee");
     { service: "pappers", remaining: null, unit: "crédit", quality: "estime", basis: "inconnu" },
   ];
   check("pas d'estimation", remainingProspects(blind, avg, LABELS) === null);
+}
+
+console.log("\n5. Plafond d'analyse : aucune saisie ne doit faire exploser la facture");
+{
+  check("defaut a 3", DEFAULT_ANALYSIS_LIMIT === 3);
+  check("valeur normale conservee", clampAnalysisLimit(7) === 7);
+  check("borne haute respectee", clampAnalysisLimit(500) === MAX_ANALYSIS_LIMIT);
+  check("borne basse respectee", clampAnalysisLimit(0) === 1);
+  check("negatif ramene a 1", clampAnalysisLimit(-12) === 1);
+  check("decimal tronque", clampAnalysisLimit(4.9) === 4);
+  check("absent -> defaut", clampAnalysisLimit(undefined) === DEFAULT_ANALYSIS_LIMIT);
+  check("texte -> defaut", clampAnalysisLimit("beaucoup") === DEFAULT_ANALYSIS_LIMIT);
 }
 
 console.log(

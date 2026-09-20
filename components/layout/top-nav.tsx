@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui";
-import { NAV_ITEMS } from "./nav-items";
+import { HOME_ITEM, NAV_ITEMS, type NavItem } from "./nav-items";
 
 /**
  * Barre de navigation horizontale, collee en haut.
@@ -32,37 +32,21 @@ export function TopNav({ email }: { email: string }) {
           </span>
         </Link>
 
-        {/* Onglets */}
+        {/* Navigation : le Cockpit d'abord, isole du reste par un separateur. */}
         <nav
           aria-label="Navigation principale"
           className="scrollbar-none -mx-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 sm:justify-center"
         >
-          {NAV_ITEMS.map(({ href, label, icon: Icon, hint }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
-            return (
-              <Link
-                key={href}
-                href={href}
-                title={hint}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "relative flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
-                  "transition-colors",
-                  active ? "text-text" : "text-muted hover:bg-surface-2 hover:text-text",
-                )}
-              >
-                <Icon className="h-4 w-4" aria-hidden />
-                {label}
-                {/* Soulignage degrade de l'onglet actif — la signature de marque. */}
-                {active && (
-                  <span
-                    className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand-grad"
-                    aria-hidden
-                  />
-                )}
-              </Link>
-            );
-          })}
+          <Tab item={HOME_ITEM} pathname={pathname} home />
+
+          <span
+            aria-hidden
+            className="mx-1.5 h-5 w-px shrink-0 rounded-full bg-line"
+          />
+
+          {NAV_ITEMS.map((item) => (
+            <Tab key={item.href} item={item} pathname={pathname} />
+          ))}
         </nav>
 
         {/* Compte */}
@@ -82,5 +66,47 @@ export function TopNav({ email }: { email: string }) {
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Un onglet. `home` distingue le Cockpit : fond legerement appuye et icone
+ * teintee, pour qu'il se lise comme un tableau de bord et non comme une etape.
+ */
+function Tab({
+  item,
+  pathname,
+  home = false,
+}: {
+  item: NavItem;
+  pathname: string;
+  home?: boolean;
+}) {
+  const { href, label, icon: Icon, hint } = item;
+  const active = pathname === href || pathname.startsWith(`${href}/`);
+
+  return (
+    <Link
+      href={href}
+      title={hint}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
+        "transition-colors",
+        home && "border border-line bg-surface-2",
+        active ? "text-text" : "text-muted hover:bg-surface-2 hover:text-text",
+        home && active && "border-primary/30 bg-primary/10",
+      )}
+    >
+      <Icon className={cn("h-4 w-4", home && "text-primary")} aria-hidden />
+      {label}
+      {/* Soulignage degrade de l'onglet actif — la signature de marque. */}
+      {active && !home && (
+        <span
+          className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand-grad"
+          aria-hidden
+        />
+      )}
+    </Link>
   );
 }

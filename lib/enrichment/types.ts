@@ -86,4 +86,12 @@ export interface SearchCriteria {
   zone?: string;
   /** Interroge Linkup (coûteux) — désactivable depuis le formulaire. */
   withSignals?: boolean;
+  /**
+   * Nombre maximal d'entreprises REELLEMENT enrichies.
+   *
+   * L'annuaire public est gratuit, mais chaque enrichissement declenche un
+   * appel Pappers et un appel Linkup — facturés. Ce plafond est donc le
+   * principal levier de cout de l'app : on n'analyse que ce qu'on va lire.
+   */
+  limit?: number;
 }

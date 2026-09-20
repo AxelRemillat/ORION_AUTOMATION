@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { searchAndEnrich } from "@/lib/enrichment";
+import { clampAnalysisLimit, searchAndEnrich } from "@/lib/enrichment";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { readJson, requireSession } from "../_guard";
 
@@ -15,6 +15,8 @@ interface SearchBody {
   /** Ville, code postal ou département. */
   zone?: string;
   withSignals?: boolean;
+  /** Plafond d'entreprises reellement enrichies (1-10). */
+  limit?: number;
 }
 
 /** Mode A — recherche par critères sur l'annuaire public, puis enrichissement. */
@@ -31,6 +33,8 @@ export async function POST(request: Request) {
     tranches: tranchesForBucket(body.size),
     zone: body.zone,
     withSignals: body.withSignals !== false,
+    // Borne cote serveur : le client ne peut pas faire exploser la facture.
+    limit: clampAnalysisLimit(body.limit),
   });
 
   if ("error" in outcome) return NextResponse.json({ error: outcome.error }, { status: 422 });

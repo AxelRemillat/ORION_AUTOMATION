@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Check, ExternalLink, MapPin, Plus, Users } from "lucide-react";
+import { ArrowRight, Check, ExternalLink, MapPin, Plus, Star, Users } from "lucide-react";
 import { Button, Card, CardContent, CardFooter, CardHeader } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
 import { heatScore, whyNow } from "@/lib/scoring";
@@ -12,12 +12,18 @@ import { WhyNowCard } from "./why-now";
 /** État d'ajout d'une carte, piloté par l'écran parent. */
 export type AddState = "idle" | "loading" | "added" | "duplicate";
 
+/** État de mise en favori d'une carte. */
+export type FavoriteState = "idle" | "loading" | "saved";
+
 interface ResultCardProps {
   company: EnrichedCompany;
   state: AddState;
   onAdd: (company: EnrichedCompany) => void;
   /** Ajoute si nécessaire puis ouvre la Prospection. */
   onProspect: (company: EnrichedCompany) => void;
+  /** Met l'entreprise DÉJÀ enrichie en réserve, sans nouvel appel API. */
+  onFavorite: (company: EnrichedCompany) => void;
+  favoriteState: FavoriteState;
 }
 
 /** Ligne de chiffres clés, masquée quand la donnée n'a pas été récupérée. */
@@ -52,7 +58,7 @@ function KeyFigures({ company }: { company: EnrichedCompany }) {
   );
 }
 
-export function ResultCard({ company, state, onAdd, onProspect }: ResultCardProps) {
+export function ResultCard({ company, state, onAdd, onProspect, onFavorite, favoriteState }: ResultCardProps) {
   const done = state === "added" || state === "duplicate";
   const score = heatScore(company.signals, { seed: company.siren ?? company.company_name });
   const why = whyNow(company.signals);
@@ -129,6 +135,28 @@ export function ResultCard({ company, state, onAdd, onProspect }: ResultCardProp
         )}
 
         <div className="flex items-center gap-2">
+          {/* L'enrichissement de cette carte est deja paye : le mettre en
+              reserve evite de le refaire dans quelques semaines. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={favoriteState === "loading"}
+            disabled={favoriteState === "saved"}
+            onClick={() => onFavorite(company)}
+            title={
+              favoriteState === "saved"
+                ? "Déjà en favori"
+                : "Garder en réserve sans redépenser de crédit"
+            }
+            aria-label={`Mettre ${company.company_name} en favori`}
+          >
+            <Star
+              className={`h-4 w-4 ${favoriteState === "saved" ? "fill-current" : ""}`}
+              aria-hidden
+            />
+            {favoriteState === "saved" ? "En favori" : "Favori"}
+          </Button>
+
           <Button
             size="sm"
             variant="ghost"

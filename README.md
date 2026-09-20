@@ -33,6 +33,7 @@ Appliquer les fichiers de `supabase/migrations/` **dans l'ordre des noms** :
 | `20260908000000_orion_grants.sql` | `GRANT` DML aux rôles `authenticated` et `service_role` sur les 4 tables — **indispensable** : sans lui PostgREST refuse tout en `42501`, policies RLS ou pas |
 | `20260920100000_purge_unproven_signals.sql` | Supprime les signaux web sans preuve (ancien format sans `quote` ni `url`) |
 | `20260920110000_api_usage.sql` | Table `api_usage` : consommation et coût réels des APIs tierces, RLS + GRANT |
+| `20260920120000_favorites.sql` | Table `favorites` : entreprises déjà enrichies mises en réserve, RLS + GRANT |
 
 Une migration oubliée se voit tout de suite : les requêtes échouent sur une
 colonne inconnue.

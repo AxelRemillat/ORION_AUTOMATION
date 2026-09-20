@@ -9,16 +9,26 @@ import { compareHeat, heatScore } from "@/lib/scoring";
 import type { EnrichedCompany, EnrichmentWarning } from "@/lib/enrichment/types";
 import { ErrorBanner, WarningBanner } from "./banners";
 import { ManualForm } from "./manual-form";
-import { ResultCard, type AddState } from "./result-card";
+import { FavoritesPanel } from "./favorites-panel";
+import { ResultCard, type AddState, type FavoriteState } from "./result-card";
 import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
-import { SortToggle, type SortMode } from "./sort-toggle";
+import { SignalFilters } from "./signal-filters";
 
-type Mode = "auto" | "manuel";
+type Mode = "auto" | "manuel" | "favoris";
+
+const TAB_LABELS: Record<Mode, string> = {
+  auto: "Recherche par critères",
+  manuel: "Ajout manuel",
+  favoris: "Favoris",
+};
 
 interface SearchResponse {
   results: EnrichedCompany[];
+  /** Entreprises trouvees par l'annuaire, bien au-dela de ce qu'on analyse. */
   total: number;
+  /** Entreprises reellement enrichies — donc facturees. */
+  analysed: number;
   warnings: EnrichmentWarning[];
 }
 
@@ -35,23 +45,60 @@ export function RechercheClient() {
   const [warnings, setWarnings] = useState<EnrichmentWarning[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [addStates, setAddStates] = useState<Record<string, AddState>>({});
-  const [sort, setSort] = useState<SortMode>("chaleur");
+  const [signalFilter, setSignalFilter] = useState<string[]>([]);
+  const [favoriteStates, setFavoriteStates] = useState<Record<string, FavoriteState>>({});
+  // Incremente a chaque mise en favori : reveille le panneau des favoris.
+  const [favoritesKey, setFavoritesKey] = useState(0);
+  const [found, setFound] = useState<{ total: number; analysed: number } | null>(null);
   const [lastCriteria, setLastCriteria] = useState<SearchCriteriaInput | null>(null);
   // Remonter le formulaire est le moyen le plus simple d'y injecter des critères.
   const [formSeed, setFormSeed] = useState(0);
   const [seedCriteria, setSeedCriteria] = useState<SearchCriteriaInput | undefined>();
 
-  /** L'ordre de l'annuaire est la pertinence ; le score le réordonne à la demande. */
-  const sorted = useMemo(() => {
-    if (sort === "pertinence") return results;
-    return [...results].sort((a, b) =>
-      compareHeat(heatScore(a.signals, { seed: keyOf(a) }), heatScore(b.signals, { seed: keyOf(b) })),
+  /**
+   * Ordre unique : du plus chaud au plus froid. Le tri par « pertinence »
+   * (l'ordre brut de l'annuaire) a ete retire : il n'apportait rien qu'un
+   * classement par intention ne donne deja.
+   */
+  const sorted = useMemo(
+    () =>
+      [...results].sort((a, b) =>
+        compareHeat(
+          heatScore(a.signals, { seed: keyOf(a) }),
+          heatScore(b.signals, { seed: keyOf(b) }),
+        ),
+      ),
+    [results],
+  );
+
+  /** Types de signaux presents dans les resultats, avec leur effectif. */
+  const signalCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const company of results) {
+      for (const type of new Set(company.signals.map((signal) => signal.type ?? "presse"))) {
+        counts.set(type, (counts.get(type) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [results]);
+
+  /** Un resultat passe le filtre s'il porte AU MOINS un des types coches. */
+  const visible = useMemo(() => {
+    if (!signalFilter.length) return sorted;
+    return sorted.filter((company) =>
+      company.signals.some((signal) => signalFilter.includes(signal.type ?? "presse")),
     );
-  }, [results, sort]);
+  }, [sorted, signalFilter]);
 
   /** Enveloppe commune aux deux modes : reset, appel, gestion d'erreur. */
   async function run(
-    request: () => Promise<{ results: EnrichedCompany[]; warnings: EnrichmentWarning[] }>,
+    request: () => Promise<{
+      results: EnrichedCompany[];
+      warnings: EnrichmentWarning[];
+      found?: { total: number; analysed: number };
+    }>,
   ) {
     setLoading(true);
     setError(null);
@@ -60,9 +107,13 @@ export function RechercheClient() {
       setResults(data.results);
       setWarnings(data.warnings);
       setAddStates({});
+      setFavoriteStates({});
+      setSignalFilter([]);
+      setFound(data.found ?? null);
     } catch (cause) {
       setResults([]);
       setWarnings([]);
+      setFound(null);
       setError(cause instanceof Error ? cause.message : "Recherche impossible.");
     } finally {
       setLoading(false);
@@ -74,7 +125,11 @@ export function RechercheClient() {
     setLastCriteria(criteria);
     return run(async () => {
       const data = await postJson<SearchResponse>("/api/prospects/search", criteria);
-      return { results: data.results, warnings: data.warnings };
+      return {
+        results: data.results,
+        warnings: data.warnings,
+        found: { total: data.total, analysed: data.analysed ?? data.results.length },
+      };
     });
   };
 
@@ -114,6 +169,29 @@ export function RechercheClient() {
     }
   }
 
+  /**
+   * Met en reserve l'entreprise DEJA enrichie. Aucun appel Pappers, Linkup ou
+   * Hunter : on stocke l'instantane que la recherche vient de payer.
+   */
+  async function favorite(company: EnrichedCompany) {
+    const key = keyOf(company);
+    if (favoriteStates[key] === "saved" || favoriteStates[key] === "loading") return;
+
+    setFavoriteStates((current) => ({ ...current, [key]: "loading" }));
+    try {
+      await postJson("/api/favorites", { company });
+      setFavoriteStates((current) => ({ ...current, [key]: "saved" }));
+      setFavoritesKey((current) => current + 1);
+      toast.success(`${company.company_name} gardé en réserve, sans nouvel appel API.`);
+    } catch (cause) {
+      // Un doublon n'est pas un echec : l'entreprise est deja en reserve.
+      const duplicate = cause instanceof ApiError && cause.status === 409;
+      setFavoriteStates((current) => ({ ...current, [key]: duplicate ? "saved" : "idle" }));
+      if (duplicate) toast.success("Déjà dans vos favoris.");
+      else toast.error(cause instanceof Error ? cause.message : "Mise en favori impossible.");
+    }
+  }
+
   /** 1-clic : on s'assure que le prospect existe, puis on ouvre la Prospection. */
   async function prospect(company: EnrichedCompany) {
     const state = await addProspect(company);
@@ -128,7 +206,7 @@ export function RechercheClient() {
           style={{ borderColor: "var(--line-soft)" }}
           role="tablist"
         >
-          {(["auto", "manuel"] as const).map((value) => (
+          {(["auto", "manuel", "favoris"] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -138,7 +216,7 @@ export function RechercheClient() {
               className="relative rounded-t px-3 py-2 text-[13px] font-medium motion-safe:transition-colors"
               style={{ color: mode === value ? "var(--text)" : "var(--muted)" }}
             >
-              {value === "auto" ? "Recherche par critères" : "Ajout manuel"}
+              {TAB_LABELS[value]}
               {mode === value && (
                 <span
                   aria-hidden
@@ -150,17 +228,19 @@ export function RechercheClient() {
         </div>
 
         <CardContent className="flex flex-col gap-4 pt-5">
-          {mode === "auto" ? (
+          {mode === "auto" && (
             <SearchForm
               key={formSeed}
               initial={seedCriteria}
               onSubmit={searchAuto}
               loading={loading}
             />
-          ) : (
-            <ManualForm onSubmit={searchManual} loading={loading} />
           )}
-          <SavedSearches current={lastCriteria} canSave={mode === "auto"} onApply={applySaved} />
+          {mode === "manuel" && <ManualForm onSubmit={searchManual} loading={loading} />}
+          {mode === "favoris" && <FavoritesPanel refreshKey={favoritesKey} />}
+          {mode !== "favoris" && (
+            <SavedSearches current={lastCriteria} canSave={mode === "auto"} onApply={applySaved} />
+          )}
         </CardContent>
       </Card>
 
@@ -175,30 +255,65 @@ export function RechercheClient() {
         </div>
       )}
 
-      {!loading && results.length > 0 && (
+      {!loading && mode !== "favoris" && results.length > 0 && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col gap-3">
             <p className="text-[13px]" style={{ color: "var(--muted)" }}>
-              {results.length} résultat{results.length > 1 ? "s" : ""}
+              {visible.length} résultat{visible.length > 1 ? "s" : ""}
+              {signalFilter.length > 0 && ` sur ${results.length} analysé${results.length > 1 ? "s" : ""}`}
+              {found && found.total > found.analysed && (
+                <>
+                  {" · "}
+                  <span style={{ color: "var(--faint)" }}>
+                    {found.analysed} entreprise{found.analysed > 1 ? "s" : ""} analysée
+                    {found.analysed > 1 ? "s" : ""} sur {found.total} trouvée
+                    {found.total > 1 ? "s" : ""} — augmentez la limite pour en analyser plus
+                  </span>
+                </>
+              )}
+              {" · "}
+              <span style={{ color: "var(--faint)" }}>du plus chaud au plus froid</span>
             </p>
-            <SortToggle value={sort} onChange={setSort} />
+
+            <SignalFilters
+              counts={signalCounts}
+              selected={signalFilter}
+              onToggle={(type) =>
+                setSignalFilter((current) =>
+                  current.includes(type)
+                    ? current.filter((item) => item !== type)
+                    : [...current, type],
+                )
+              }
+              onClear={() => setSignalFilter([])}
+            />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {sorted.map((company) => (
-              <ResultCard
-                key={keyOf(company)}
-                company={company}
-                state={addStates[keyOf(company)] ?? "idle"}
-                onAdd={addProspect}
-                onProspect={prospect}
-              />
-            ))}
-          </div>
+          {visible.length === 0 ? (
+            <EmptyState
+              icon={<SearchX />}
+              title="Aucun résultat pour ces signaux"
+              description="Décochez un filtre pour élargir."
+            />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {visible.map((company) => (
+                <ResultCard
+                  key={keyOf(company)}
+                  company={company}
+                  state={addStates[keyOf(company)] ?? "idle"}
+                  onAdd={addProspect}
+                  onProspect={prospect}
+                  onFavorite={favorite}
+                  favoriteState={favoriteStates[keyOf(company)] ?? "idle"}
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
 
-      {!loading && searched && !results.length && !error && (
+      {!loading && mode !== "favoris" && searched && !results.length && !error && (
         <EmptyState
           icon={<SearchX />}
           title="Aucune entreprise trouvée"
@@ -206,7 +321,7 @@ export function RechercheClient() {
         />
       )}
 
-      {!loading && !searched && (
+      {!loading && mode !== "favoris" && !searched && (
         <EmptyState
           icon={<Building2 />}
           title="Lancez une recherche"

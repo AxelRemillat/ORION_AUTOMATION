@@ -140,6 +140,25 @@ export type Reminder = {
 }
 
 /**
+ * Entreprise deja enrichie, mise de cote pour plus tard.
+ *
+ * `company` est l'instantane complet de l'enrichissement (au format
+ * `EnrichedCompany` de lib/enrichment) : le rejouer cree un prospect sans
+ * aucun appel externe, donc sans consommer de credit.
+ */
+export type Favorite = {
+  id: string;
+  user_id: string;
+  company_name: string;
+  siren: string | null;
+  website: string | null;
+  sector: string | null;
+  city: string | null;
+  company: Record<string, unknown>;
+  created_at: string;
+}
+
+/**
  * Un appel facture a une API tierce.
  *
  * `units` est toujours dans l'unite NATIVE du fournisseur (tokens, credits,
@@ -203,6 +222,9 @@ export type DealUpdate = Update<Deal>;
 export type ReminderInsert = Insert<Reminder, "done">;
 export type ReminderUpdate = Update<Reminder>;
 
+export type FavoriteInsert = Insert<Favorite, "siren" | "website" | "sector" | "city">;
+export type FavoriteUpdate = Update<Favorite>;
+
 export type ApiUsageInsert = Insert<ApiUsage, "units" | "unit_cost" | "cost" | "prospect_id">;
 export type ApiUsageUpdate = Update<ApiUsage>;
 
@@ -252,6 +274,12 @@ export type Database = {
         Row: Reminder;
         Insert: ReminderInsert;
         Update: ReminderUpdate;
+        Relationships: [];
+      };
+      favorites: {
+        Row: Favorite;
+        Insert: FavoriteInsert;
+        Update: FavoriteUpdate;
         Relationships: [];
       };
       api_usage: {

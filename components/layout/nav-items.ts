@@ -9,15 +9,24 @@ export interface NavItem {
 }
 
 /**
- * Navigation principale, dans l'ordre d'affichage.
- * La barre de navigation lit simplement ce tableau : ajouter une destination
- * revient a inserer une entree ici, rien d'autre.
+ * Le Cockpit est traite a part.
  *
- * Le Cockpit est l'accueil de l'app : il ouvre la liste et sert de cible aux
- * redirections par defaut (racine, post-connexion).
+ * Ce n'est pas une etape du workflow mais le tableau de bord quotidien : la
+ * barre de navigation l'affiche isole, a gauche d'un separateur, pour que la
+ * distinction se voie sans avoir a lire les libelles.
+ */
+export const HOME_ITEM: NavItem = {
+  href: "/cockpit",
+  label: "Cockpit",
+  icon: Gauge,
+  hint: "Vue d'ensemble et priorités du jour",
+};
+
+/**
+ * Les etapes du workflow, dans l'ordre ou on les traverse.
+ * Ajouter une destination revient a inserer une entree ici, rien d'autre.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/cockpit", label: "Cockpit", icon: Gauge, hint: "Vue d'ensemble et priorités du jour" },
   { href: "/recherche", label: "Recherche", icon: Search, hint: "Trouver de nouveaux prospects" },
   {
     href: "/prospection",
@@ -34,3 +43,6 @@ export const NAV_ITEMS: NavItem[] = [
     hint: "Consommation des APIs et coût par prospect",
   },
 ];
+
+/** Toutes les destinations, Cockpit compris. */
+export const ALL_NAV_ITEMS: NavItem[] = [HOME_ITEM, ...NAV_ITEMS];
