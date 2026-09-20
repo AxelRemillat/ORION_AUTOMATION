@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
-import { clampAnalysisLimit, searchAndEnrich } from "@/lib/enrichment";
+import { clampAnalysisLimit, clampScanWidth, searchAndEnrich } from "@/lib/enrichment";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { readJson, requireSession } from "../_guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/**
+ * Le scan interroge Linkup pour chaque candidat, par vagues de six. Avec une
+ * largeur de 18 et une source lente, on depasse largement le plafond par
+ * defaut d'une route serverless : on l'allonge explicitement.
+ */
+export const maxDuration = 60;
 
 interface SearchBody {
   q?: string;
@@ -14,12 +20,18 @@ interface SearchBody {
   size?: string;
   /** Ville, code postal ou département. */
   zone?: string;
-  withSignals?: boolean;
-  /** Plafond d'entreprises reellement enrichies (1-10). */
+  /** Plafond d'enrichissements profonds — Pappers (1-10). */
   limit?: number;
+  /** Largeur du scan Linkup (5-25). */
+  scanWidth?: number;
 }
 
-/** Mode A — recherche par critères sur l'annuaire public, puis enrichissement. */
+/**
+ * Mode A — recherche par criteres, en deux phases.
+ *
+ * Phase 1 : scan Linkup sur une liste elargie de l'annuaire public.
+ * Phase 2 : Pappers uniquement sur les entreprises porteuses d'un signal.
+ */
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session.ok) return session.response;
@@ -32,9 +44,9 @@ export async function POST(request: Request) {
     section: body.section || undefined,
     tranches: tranchesForBucket(body.size),
     zone: body.zone,
-    withSignals: body.withSignals !== false,
-    // Borne cote serveur : le client ne peut pas faire exploser la facture.
+    // Bornes cote serveur : le client ne peut pas faire exploser la facture.
     limit: clampAnalysisLimit(body.limit),
+    scanWidth: clampScanWidth(body.scanWidth),
   });
 
   if ("error" in outcome) return NextResponse.json({ error: outcome.error }, { status: 422 });

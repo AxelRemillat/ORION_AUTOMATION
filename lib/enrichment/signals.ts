@@ -279,3 +279,54 @@ export function structuralSignals(
 
   return signals.slice(0, 3);
 }
+
+// ---------------------------------------------------------------------------
+// Predicats et deductions utilises par le moteur de recherche en deux phases
+// ---------------------------------------------------------------------------
+
+/**
+ * Un signal REEL est atteste par une source nommant l'entreprise.
+ * Les signaux `structure` sont des deductions INSEE : ils decrivent un contexte
+ * favorable, jamais un evenement. Seuls les premiers justifient de depenser un
+ * enrichissement profond.
+ */
+export function isProvenSignal(signal: ProspectSignal): boolean {
+  return signal.type !== "structure";
+}
+
+export function hasProvenSignal(signals: readonly ProspectSignal[]): boolean {
+  return signals.some(isProvenSignal);
+}
+
+/** Annuaires et agregateurs : leur domaine ne prouve rien sur l'entreprise. */
+const DIRECTORY_HOSTS = [
+  "societe.com", "pappers.fr", "infogreffe.fr", "verif.com", "linkedin.com",
+  "facebook.com", "youtube.com", "indeed.com", "welcometothejungle.com",
+  "bodacc.fr", "manageo.fr", "kompass.com", "google.com", "wikipedia.org",
+];
+
+/**
+ * Devine le site officiel a partir des resultats du scan.
+ *
+ * L'annuaire public ne donne pas de site web, et en deux phases le scan tourne
+ * AVANT Pappers : sans cette deduction on perdrait l'ancre « la page est sur
+ * son propre domaine », qui vaut la moitie de la confiance d'un signal. On ne
+ * retient qu'un domaine dont le label porte reellement le nom de l'entreprise.
+ */
+export function guessOwnWebsite(name: string, results: WebResult[]): string | null {
+  const aliases = companyAliases(name)
+    .map((alias) => alias.replace(/[^a-z0-9]/g, ""))
+    .filter((alias) => alias.length >= 5);
+  if (!aliases.length) return null;
+
+  for (const result of results) {
+    const host = toDomain(result.url);
+    if (!host || DIRECTORY_HOSTS.some((blocked) => host.endsWith(blocked))) continue;
+    const label = host.split(".")[0].replace(/[^a-z0-9]/g, "");
+    if (label.length < 4) continue;
+    if (aliases.some((alias) => alias === label || alias.startsWith(label) || label.startsWith(alias))) {
+      return `https://${host}`;
+    }
+  }
+  return null;
+}

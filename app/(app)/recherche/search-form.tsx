@@ -4,16 +4,25 @@ import { useState, type FormEvent } from "react";
 import { Search } from "lucide-react";
 import { Button, Input, Label, Select } from "@/components/ui";
 import { NAF_SECTIONS, SIZE_BUCKETS } from "@/lib/enrichment/naf";
-import { DEFAULT_ANALYSIS_LIMIT, MAX_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
+import {
+  DEFAULT_ANALYSIS_LIMIT,
+  DEFAULT_SCAN_WIDTH,
+  MAX_ANALYSIS_LIMIT,
+  MAX_SCAN_WIDTH,
+  MIN_SCAN_WIDTH,
+} from "@/lib/enrichment/limits";
 
 export interface SearchCriteriaInput {
   q: string;
   section: string;
   size: string;
   zone: string;
+  /** Conserve pour les recherches sauvegardees avant la refonte en deux phases. */
   withSignals: boolean;
-  /** Nombre d'entreprises réellement analysées — donc facturées. */
+  /** Phase 2 : entreprises enrichies en profondeur (Pappers). */
   limit: number;
+  /** Phase 1 : candidats passes au scan Linkup. */
+  scanWidth: number;
 }
 
 const EMPTY: SearchCriteriaInput = {
@@ -23,6 +32,7 @@ const EMPTY: SearchCriteriaInput = {
   zone: "",
   withSignals: true,
   limit: DEFAULT_ANALYSIS_LIMIT,
+  scanWidth: DEFAULT_SCAN_WIDTH,
 };
 
 /** Mode A — critères envoyés à l'annuaire public des entreprises. */
@@ -104,9 +114,30 @@ export function SearchForm({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="w-44">
-          <Label htmlFor="limite">Entreprises à analyser</Label>
+      <div className="grid gap-4 sm:grid-cols-[11rem_11rem_1fr] sm:items-end">
+        <div>
+          <Label htmlFor="scan">Entreprises à scanner</Label>
+          <Input
+            id="scan"
+            type="number"
+            min={MIN_SCAN_WIDTH}
+            max={MAX_SCAN_WIDTH}
+            step={1}
+            value={criteria.scanWidth}
+            onChange={(event) =>
+              update(
+                "scanWidth",
+                Math.max(
+                  MIN_SCAN_WIDTH,
+                  Math.min(MAX_SCAN_WIDTH, Number(event.target.value) || MIN_SCAN_WIDTH),
+                ),
+              )
+            }
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="limite">Fiches à ouvrir</Label>
           <Input
             id="limite"
             type="number"
@@ -122,22 +153,20 @@ export function SearchForm({
             }
           />
         </div>
-        <p className="mb-2.5 max-w-sm text-[12px] leading-snug text-faint">
-          Chaque analyse consomme un crédit Pappers et une recherche Linkup. Au-delà de ce
-          nombre, rien n&apos;est enrichi — et rien n&apos;est facturé.
+
+        <p className="mb-2.5 text-[12px] leading-snug text-muted">
+          <strong className="font-medium text-text">Scan</strong> : une recherche Linkup par
+          entreprise pour repérer qui bouge — large et bon marché.{" "}
+          <strong className="font-medium text-text">Fiches</strong> : Pappers (puis Hunter à la
+          rédaction), réservé aux entreprises qui ressortent du scan. Une entreprise sans signal
+          n&apos;est jamais ouverte.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted">
-          <input
-            type="checkbox"
-            checked={criteria.withSignals}
-            onChange={(event) => update("withSignals", event.target.checked)}
-            className="h-4 w-4 rounded border-border bg-surface-2 accent-accent"
-          />
-          Chercher les signaux web (plus lent, consomme du quota Linkup)
-        </label>
+        <p className="text-[13px] text-muted">
+          Les résultats sont classés du plus chaud au plus froid.
+        </p>
 
         <Button type="submit" loading={loading}>
           <Search className="h-4 w-4" aria-hidden />

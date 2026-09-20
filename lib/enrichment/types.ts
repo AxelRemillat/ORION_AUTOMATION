@@ -87,11 +87,18 @@ export interface SearchCriteria {
   /** Interroge Linkup (coûteux) — désactivable depuis le formulaire. */
   withSignals?: boolean;
   /**
-   * Nombre maximal d'entreprises REELLEMENT enrichies.
+   * PHASE 2 — nombre maximal d'entreprises enrichies en profondeur (Pappers).
    *
-   * L'annuaire public est gratuit, mais chaque enrichissement declenche un
-   * appel Pappers et un appel Linkup — facturés. Ce plafond est donc le
-   * principal levier de cout de l'app : on n'analyse que ce qu'on va lire.
+   * Ne s'applique QU'AUX entreprises porteuses d'un signal atteste : une
+   * entreprise froide n'est jamais enrichie, quel que soit ce plafond.
    */
   limit?: number;
+  /**
+   * PHASE 1 — nombre de candidats passes au scan Linkup.
+   *
+   * C'est le filet : plus il est large, plus on a de chances de tomber sur une
+   * entreprise reellement active. Le scan coute une recherche Linkup par
+   * candidat, bien moins qu'une fiche Pappers.
+   */
+  scanWidth?: number;
 }

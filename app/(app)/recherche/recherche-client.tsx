@@ -13,6 +13,8 @@ import { FavoritesPanel } from "./favorites-panel";
 import { ResultCard, type AddState, type FavoriteState } from "./result-card";
 import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
+import { DEFAULT_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
+import { ScanSummary, type ScanStats } from "./scan-summary";
 import { SignalFilters } from "./signal-filters";
 
 type Mode = "auto" | "manuel" | "favoris";
@@ -25,9 +27,13 @@ const TAB_LABELS: Record<Mode, string> = {
 
 interface SearchResponse {
   results: EnrichedCompany[];
-  /** Entreprises trouvees par l'annuaire, bien au-dela de ce qu'on analyse. */
+  /** Entreprises trouvees par l'annuaire, bien au-dela de ce qu'on scanne. */
   total: number;
-  /** Entreprises reellement enrichies — donc facturees. */
+  /** Candidats passes au scan Linkup (phase 1). */
+  scanned: number;
+  /** Parmi eux, ceux portant un signal atteste. */
+  withSignal: number;
+  /** Fiches Pappers reellement ouvertes (phase 2). */
   analysed: number;
   warnings: EnrichmentWarning[];
 }
@@ -49,7 +55,7 @@ export function RechercheClient() {
   const [favoriteStates, setFavoriteStates] = useState<Record<string, FavoriteState>>({});
   // Incremente a chaque mise en favori : reveille le panneau des favoris.
   const [favoritesKey, setFavoritesKey] = useState(0);
-  const [found, setFound] = useState<{ total: number; analysed: number } | null>(null);
+  const [scan, setScan] = useState<ScanStats | null>(null);
   const [lastCriteria, setLastCriteria] = useState<SearchCriteriaInput | null>(null);
   // Remonter le formulaire est le moyen le plus simple d'y injecter des critères.
   const [formSeed, setFormSeed] = useState(0);
@@ -97,7 +103,7 @@ export function RechercheClient() {
     request: () => Promise<{
       results: EnrichedCompany[];
       warnings: EnrichmentWarning[];
-      found?: { total: number; analysed: number };
+      scan?: ScanStats;
     }>,
   ) {
     setLoading(true);
@@ -109,11 +115,11 @@ export function RechercheClient() {
       setAddStates({});
       setFavoriteStates({});
       setSignalFilter([]);
-      setFound(data.found ?? null);
+      setScan(data.scan ?? null);
     } catch (cause) {
       setResults([]);
       setWarnings([]);
-      setFound(null);
+      setScan(null);
       setError(cause instanceof Error ? cause.message : "Recherche impossible.");
     } finally {
       setLoading(false);
@@ -128,7 +134,14 @@ export function RechercheClient() {
       return {
         results: data.results,
         warnings: data.warnings,
-        found: { total: data.total, analysed: data.analysed ?? data.results.length },
+        scan: {
+          total: data.total,
+          scanned: data.scanned ?? 0,
+          withSignal: data.withSignal ?? data.results.length,
+          analysed: data.analysed ?? data.results.length,
+          // Une recherche sauvegardee avant la refonte n'a pas de plafond.
+          requested: criteria.limit ?? DEFAULT_ANALYSIS_LIMIT,
+        },
       };
     });
   };
@@ -255,22 +268,14 @@ export function RechercheClient() {
         </div>
       )}
 
+      {!loading && mode !== "favoris" && scan && <ScanSummary scan={scan} />}
+
       {!loading && mode !== "favoris" && results.length > 0 && (
         <>
           <div className="flex flex-col gap-3">
             <p className="text-[13px]" style={{ color: "var(--muted)" }}>
               {visible.length} résultat{visible.length > 1 ? "s" : ""}
               {signalFilter.length > 0 && ` sur ${results.length} analysé${results.length > 1 ? "s" : ""}`}
-              {found && found.total > found.analysed && (
-                <>
-                  {" · "}
-                  <span style={{ color: "var(--faint)" }}>
-                    {found.analysed} entreprise{found.analysed > 1 ? "s" : ""} analysée
-                    {found.analysed > 1 ? "s" : ""} sur {found.total} trouvée
-                    {found.total > 1 ? "s" : ""} — augmentez la limite pour en analyser plus
-                  </span>
-                </>
-              )}
               {" · "}
               <span style={{ color: "var(--faint)" }}>du plus chaud au plus froid</span>
             </p>
@@ -313,7 +318,12 @@ export function RechercheClient() {
         </>
       )}
 
-      {!loading && mode !== "favoris" && searched && !results.length && !error && (
+      {/*
+        Aucun resultat : on n'affiche un etat vide que si le scan n'a rien eu a
+        se mettre sous la dent. Quand le scan a tourne, c'est <ScanSummary> qui
+        explique pourquoi — et surtout qu'aucune fiche n'a ete facturee.
+      */}
+      {!loading && mode !== "favoris" && searched && !results.length && !error && !scan?.scanned && (
         <EmptyState
           icon={<SearchX />}
           title="Aucune entreprise trouvée"
