@@ -41,7 +41,14 @@ export type DealStatus = (typeof DEAL_STATUSES)[number];
 // (Pappers, Linkup…) et n'est pas contraint par la base.
 // ---------------------------------------------------------------------------
 
-/** Signaux d'actualité détectés sur l'entreprise (levée, recrutement, presse…). */
+/**
+ * Signal d'actualité détecté sur l'entreprise (levée, recrutement, presse…).
+ *
+ * Un signal issu du web n'est émis que si une source le PROUVE : `quote` porte
+ * la phrase exacte qui l'atteste et `url` permet de la vérifier. Les signaux
+ * déduits des données structurelles (INSEE, NAF) n'ont ni `quote` ni `url` et
+ * ne doivent jamais être présentés comme une actualité.
+ */
 export interface ProspectSignal {
   type?: string;
   label: string;
@@ -49,6 +56,10 @@ export interface ProspectSignal {
   /** Date ISO du signal, telle que fournie par la source. */
   date?: string;
   source?: string;
+  /** Phrase exacte de la source qui atteste le signal. */
+  quote?: string;
+  /** Confiance dans la preuve, de 0 à 1. Absente = non prouvé. */
+  confidence?: number;
   [key: string]: unknown;
 }
 

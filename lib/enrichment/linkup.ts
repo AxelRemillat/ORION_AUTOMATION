@@ -1,7 +1,12 @@
 /**
- * Client Linkup — recherche web utilisée pour détecter des SIGNAUX d'actualité
- * (recrutements, levée de fonds, refonte, croissance…).
- * Les résultats bruts sont ensuite qualifiés par `signals.ts`.
+ * Client Linkup — recherche web servant a detecter des SIGNAUX d'actualite.
+ *
+ * La requete est volontairement NEUTRE. Une version precedente enumerait les
+ * evenements recherches ("levee de fonds, recrutements, croissance...") : le
+ * moteur renvoyait alors des pages ou ces termes apparaissaient sans concerner
+ * l'entreprise, et la qualification les prenait pour des confirmations. On
+ * demande donc simplement l'actualite de l'entreprise, et c'est `signals.ts`
+ * qui decide, preuve en main, s'il y a un evenement.
  */
 import { fetchJson } from "./http";
 import type { Result } from "./http";
@@ -13,17 +18,22 @@ interface LinkupApiResult {
   name?: string;
   url?: string;
   content?: string;
+  /** Certaines sources datent leurs resultats ; on le conserve tel quel. */
+  date?: string;
+  publishedDate?: string;
 }
 
 interface LinkupApiResponse {
   results?: LinkupApiResult[];
 }
 
-/** Résultat web normalisé, prêt à être qualifié en signal. */
+/** Resultat web normalise, pret a etre qualifie en signal. */
 export interface WebResult {
   title: string;
   url: string;
   snippet: string;
+  /** Date de publication si la source la fournit. */
+  date?: string;
 }
 
 export function hasLinkupKey(): boolean {
@@ -31,17 +41,19 @@ export function hasLinkupKey(): boolean {
 }
 
 /**
- * Une seule requête par entreprise : Linkup est facturé à l'appel, et une
- * question large ramène déjà les pages presse, emploi et site officiel.
+ * Requete neutre : le nom de l'entreprise, sa ville, et rien qui suggere un
+ * evenement. Le nom est entre guillemets pour que le moteur privilegie les
+ * pages qui le contiennent reellement.
  */
-function buildQuery(company: { name: string; city?: string | null; website?: string | null }) {
-  const location = company.city ? ` à ${company.city}` : "";
-  const site = company.website ? ` (${company.website})` : "";
-  return (
-    `Actualités récentes de l'entreprise ${company.name}${location}${site} : ` +
-    `recrutements et offres d'emploi, levée de fonds, croissance et ouvertures, ` +
-    `service client, boutique en ligne, refonte de site ou nouveaux outils internes.`
-  );
+export function buildQuery(company: {
+  name: string;
+  city?: string | null;
+  website?: string | null;
+}): string {
+  const parts = [`"${company.name}"`];
+  if (company.city) parts.push(company.city);
+  parts.push("actualité entreprise");
+  return parts.join(" ");
 }
 
 export async function fetchWebResults(company: {
@@ -75,6 +87,7 @@ export async function fetchWebResults(company: {
       title: (item.name ?? "").trim(),
       url: item.url as string,
       snippet: (item.content ?? "").replace(/\s+/g, " ").trim().slice(0, 600),
+      date: item.publishedDate ?? item.date,
     }));
 
   return { ok: true, data: results };

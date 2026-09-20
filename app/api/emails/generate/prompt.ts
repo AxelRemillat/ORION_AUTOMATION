@@ -126,15 +126,25 @@ export function buildContext(prospect: Prospect): string {
   add("Dirigeant", leader ? `${leader}${leaderRole ? ` (${leaderRole})` : ""}` : null);
   add("Contact connu", str(prospect.email));
 
-  // Signaux : on conserve la date et la source, qui rendent le fait citable.
-  const signals = (prospect.signals ?? []).slice(0, 6).map((signal, index) => {
-    const parts = [str(signal.label) ?? "signal"];
-    const excerpt = str(signal.excerpt);
-    if (excerpt) parts.push(excerpt.slice(0, 200));
-    const meta = [str(signal.date), str(signal.source)].filter(Boolean).join(", ");
-    if (meta) parts.push(`[${meta}]`);
-    return `${index + 1}. ${parts.join(" — ")}`;
+  // Signaux : on ne transmet que ce qui est ATTESTE, et on transmet la
+  // CITATION de la source plutot que le libelle interne — c'est elle que le
+  // modele doit reprendre. Les deductions structurelles sont marquees comme
+  // telles pour qu'il ne les presente jamais comme une actualite.
+  const attested = (prospect.signals ?? []).filter(
+    (signal) => str(signal.quote) && str(signal.url),
+  );
+
+  const signals = attested.slice(0, 6).map((signal, index) => {
+    const quote = str(signal.quote) ?? str(signal.label) ?? "";
+    const meta = [str(signal.source), str(signal.date)].filter(Boolean).join(", ");
+    const cite = meta ? ` [${meta}]` : "";
+    return `${index + 1}. "${quote.slice(0, 220)}"${cite} — ${str(signal.url)}`;
   });
+
+  const deductions = (prospect.signals ?? [])
+    .filter((signal) => signal.type === "structure")
+    .slice(0, 3)
+    .map((signal) => `- ${str(signal.label)}`);
 
   const painPoint = str(prospect.pain_point);
 
@@ -146,8 +156,14 @@ export function buildContext(prospect: Prospect): string {
     painPoint ? `\nPain point deja note par l'utilisateur : ${painPoint}` : "",
     "",
     signals.length
-      ? `SIGNAUX WEB REELS (${signals.length}) :\n${signals.join("\n")}`
-      : "SIGNAUX WEB : aucun signal n'a ete trouve. N'en invente pas, et n'evoque aucune actualite les concernant.",
+      ? `SIGNAUX WEB ATTESTES — citations exactes de leurs sources (${signals.length}) :\n${signals.join("\n")}`
+      : "SIGNAUX WEB : aucun signal atteste. N'en invente pas, n'evoque " +
+        "aucune actualite, aucune levee de fonds et aucun recrutement les concernant.",
+    deductions.length
+      ? "DEDUCTIONS STRUCTURELLES (ce ne sont PAS des actualites, ne les " +
+        "presente jamais comme des evenements) :\n" +
+        deductions.join("\n")
+      : "",
     "",
     missing.length
       ? `DONNEES INDISPONIBLES — ne les invente pas, n'y fais aucune allusion chiffree : ${missing.join(", ")}.`

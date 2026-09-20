@@ -73,8 +73,17 @@ export async function enrichCompany(
         city: company.city,
         website: company.website,
       });
-      if (web.ok) signals = [...qualifyWebResults(web.data), ...signals].slice(0, 8);
-      else warnings.push({ source: "linkup", message: web.error });
+      if (web.ok) {
+        // La qualification a besoin de l'identite de l'entreprise pour verifier
+        // que chaque resultat la concerne reellement.
+        const proven = qualifyWebResults(web.data, {
+          name: company.company_name,
+          website: company.website,
+        });
+        signals = [...proven, ...signals].slice(0, 8);
+      } else {
+        warnings.push({ source: "linkup", message: web.error });
+      }
     } else {
       warnings.push({ source: "linkup", message: "clé absente : signaux web non récupérés" });
     }

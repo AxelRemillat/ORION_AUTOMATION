@@ -85,9 +85,9 @@ export const HEAT_LEVEL_LABELS: Record<HeatLevel, string> = {
 const RAW_MAX = 55;
 
 /**
- * Poids de récence. Les sources actuelles (Linkup) ne datent pas leurs
- * résultats : sans date, on applique un facteur prudent plutôt que de
- * supposer une actualité fraîche.
+ * Poids de récence. Une source qui ne se date pas ne permet pas d'affirmer
+ * qu'un évènement est récent : on applique alors un facteur prudent plutôt
+ * que de supposer une actualité fraîche.
  */
 function recencyFactor(signal: ProspectSignal, now: number): number {
   const raw = typeof signal.date === "string" ? Date.parse(signal.date) : NaN;
@@ -103,6 +103,31 @@ function recencyFactor(signal: ProspectSignal, now: number): number {
 
 const levelOf = (value: number): HeatLevel =>
   value >= 75 ? "brulant" : value >= 50 ? "chaud" : value >= 25 ? "tiede" : "froid";
+
+/** Au-dela de ce seuil, la preuve est jugee solide (source datee et nommante). */
+export const PROVEN_CONFIDENCE = 0.75;
+
+/**
+ * Plafond applique tant qu'aucun signal n'est solidement prouve.
+ * « Brulant » commence a 75 : sans preuve forte, on n'y arrive jamais.
+ */
+const UNPROVEN_CEILING = 60;
+
+/** Un signal issu du web, date et attestant nommement l'entreprise. */
+const isProven = (signal: ProspectSignal): boolean =>
+  typeof signal.url === "string" &&
+  typeof signal.quote === "string" &&
+  (signal.confidence ?? 0) >= PROVEN_CONFIDENCE;
+
+/**
+ * Facteur de confiance. Un signal sans preuve explicite pese moitie moins :
+ * il peut orienter un tri, jamais declencher une alerte.
+ */
+const confidenceFactor = (signal: ProspectSignal): number => {
+  const raw = signal.confidence;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0.5;
+  return Math.max(0, Math.min(1, raw));
+};
 
 /**
  * Score démo, stable pour une même entrée (hash du nom) : sert uniquement à
@@ -133,7 +158,10 @@ export function heatScore(
   const contributions = list
     .map((signal) => ({
       type: signal.type ?? "presse",
-      points: (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) * recencyFactor(signal, now),
+      points:
+        (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
+        recencyFactor(signal, now) *
+        confidenceFactor(signal),
     }))
     .sort((a, b) => b.points - a.points);
 
@@ -142,7 +170,10 @@ export function heatScore(
     0,
   );
 
-  const value = Math.max(0, Math.min(100, Math.round((raw / RAW_MAX) * 100)));
+  // Sans preuve solide, le score est plafonne : aucun prospect ne peut etre
+  // annonce « brulant » sur la foi de signaux non attestes.
+  const ceiling = list.some(isProven) ? 100 : UNPROVEN_CEILING;
+  const value = Math.max(0, Math.min(ceiling, Math.round((raw / RAW_MAX) * 100)));
   return {
     value,
     level: levelOf(value),
@@ -167,38 +198,57 @@ export function compareHeat(a: HeatScore, b: HeatScore): number {
 // « Pourquoi maintenant »
 // ---------------------------------------------------------------------------
 
+/**
+ * L'argument d'urgence, DERIVE DE LA SOURCE REELLE.
+ *
+ * Une version precedente piochait dans un dictionnaire de phrases toutes
+ * faites indexe par type de signal : deux entreprises differentes recevaient
+ * mot pour mot le meme « pourquoi maintenant ». C'etait faux et cela se voyait.
+ * On ne restitue desormais que ce que la source dit, avec son URL.
+ */
 export interface WhyNow {
-  /** Une phrase : l'urgence, du point de vue du prospect. */
+  /** Citation de la source. Deux sources differentes ne peuvent pas coincider. */
   headline: string;
-  /** Le signal d'origine, pour que l'utilisateur puisse vérifier. */
+  /** Provenance verifiable : hote, et date quand la source la fournit. */
   evidence: string;
-  url?: string;
+  /** Toujours presente : sans lien verifiable, il n'y a pas de « pourquoi maintenant ». */
+  url: string;
   signalType: string;
-  /** `false` quand la phrase est illustrative faute de signal réel. */
-  real: boolean;
+  /** Confiance de la preuve, de 0 a 1. */
+  confidence: number;
 }
 
-/** Règle simple et lisible ; une génération IA pourra la remplacer plus tard. */
-const WHY_NOW_TEMPLATES: Record<string, string> = {
-  levee: "Ils viennent de lever : le budget outillage est arbitré maintenant, pas dans six mois.",
-  recrutement:
-    "Ils recrutent sur des postes ops : le volume dépasse déjà l'équipe en place.",
-  support:
-    "Leur service client est très exposé : c'est le premier poste où l'automatisation se voit.",
-  digital:
-    "Un chantier digital est en cours : se greffer dessus coûte bien moins cher qu'après.",
-  croissance:
-    "La croissance est annoncée : leurs process actuels vont saturer dans les mois qui viennent.",
-  ecommerce:
-    "Leur boutique tourne : commandes, relances et SAV se traitent encore largement à la main.",
-  presse: "Ils sont dans l'actualité : l'accroche est disponible tout de suite.",
-  structure:
-    "Leur taille et leur secteur impliquent un back-office manuel important.",
-};
+/** Confiance minimale pour qu'un signal puisse porter l'argument d'urgence. */
+const MIN_WHY_NOW_CONFIDENCE = 0.6;
+
+const MONTHS = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+];
+
+function frenchDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  const index = Number(month) - 1;
+  if (!year || Number.isNaN(index) || !MONTHS[index]) return iso;
+  return `${Number(day)} ${MONTHS[index]} ${year}`;
+}
+
+/** Signal citable : il porte une preuve textuelle et un lien verifiable. */
+type CitableSignal = ProspectSignal & { url: string; quote: string };
+
+function isCitable(signal: ProspectSignal): signal is CitableSignal {
+  return (
+    typeof signal.url === "string" &&
+    signal.url.length > 0 &&
+    typeof signal.quote === "string" &&
+    signal.quote.trim().length > 0 &&
+    (signal.confidence ?? 0) >= MIN_WHY_NOW_CONFIDENCE
+  );
+}
 
 /**
- * Signal portant le plus d'intention (type × récence).
- * L'ordre du tableau vient des sources : il ne reflète aucune priorité métier.
+ * Signal portant le plus d'intention (type x recence x confiance).
+ * L'ordre du tableau vient des sources : il ne reflete aucune priorite metier.
  */
 export function strongestSignal(
   signals: readonly ProspectSignal[] | null | undefined,
@@ -209,25 +259,41 @@ export function strongestSignal(
 
   const now = (options.now ?? new Date()).getTime();
   const weight = (signal: ProspectSignal) =>
-    (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) * recencyFactor(signal, now);
+    (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
+    recencyFactor(signal, now) *
+    confidenceFactor(signal);
 
   return [...list].sort((a, b) => weight(b) - weight(a))[0];
 }
 
-/** Retient le signal le plus fort et en dérive l'argument d'urgence. */
+/**
+ * Retient le signal prouve le plus fort et en restitue la citation.
+ *
+ * Renvoie `null` des qu'aucun signal n'est attestable : l'ecran doit alors
+ * dire franchement qu'aucun signal recent n'a ete detecte, plutot que de
+ * servir une phrase d'urgence inventee.
+ */
 export function whyNow(
   signals: readonly ProspectSignal[] | null | undefined,
   options: { now?: Date } = {},
 ): WhyNow | null {
-  const best = strongestSignal(signals, options);
-  if (!best) return null;
+  const citable = (signals ?? []).filter(isCitable);
+  if (!citable.length) return null;
 
-  const type = best.type ?? "presse";
+  const now = (options.now ?? new Date()).getTime();
+  const weight = (signal: CitableSignal) =>
+    (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
+    recencyFactor(signal, now) *
+    confidenceFactor(signal);
+
+  const best = [...citable].sort((a, b) => weight(b) - weight(a))[0];
+  const date = typeof best.date === "string" ? frenchDate(best.date) : null;
+
   return {
-    headline: WHY_NOW_TEMPLATES[type] ?? WHY_NOW_TEMPLATES.presse,
-    evidence: best.label,
-    url: typeof best.url === "string" ? best.url : undefined,
-    signalType: type,
-    real: type !== "structure",
+    headline: best.quote.trim().slice(0, 260),
+    evidence: [best.source, date].filter(Boolean).join(" · ") || "source web",
+    url: best.url,
+    signalType: best.type ?? "presse",
+    confidence: best.confidence ?? MIN_WHY_NOW_CONFIDENCE,
   };
 }
