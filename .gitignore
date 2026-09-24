@@ -33,3 +33,6 @@ yarn-error.log*
 
 # rapport d’évaluation, regénéré à la demande
 eval-report.md
+
+# état local de la CLI Supabase
+supabase/.temp

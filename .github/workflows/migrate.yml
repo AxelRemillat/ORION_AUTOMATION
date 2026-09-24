@@ -1,0 +1,100 @@
+# Application automatique des migrations Supabase au merge sur main.
+#
+# Secret unique : SUPABASE_DB_URL, la chaîne de connexion du « Session
+# pooler » (IPv4 ; la connexion directe est en IPv6, injoignable depuis les
+# runners GitHub). Sans ce secret, le job de migration apparaît « skipped ».
+#
+# Avant le premier passage sur une base où les migrations ont été appliquées
+# à la main : voir docs/migrations-bootstrap.md.
+name: Migrations Supabase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Afficher les migrations à appliquer, sans rien appliquer"
+        type: boolean
+        default: false
+
+# Deux merges rapprochés ne doivent jamais pousser en même temps.
+concurrency:
+  group: supabase-migrations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  secret:
+    name: Secret SUPABASE_DB_URL
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            msg="Secret SUPABASE_DB_URL absent : migrations NON appliquées. Créez-le dans Settings > Secrets and variables > Actions (chaîne du Session pooler)."
+            echo "::notice::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  migrate:
+    name: Appliquer les migrations
+    needs: secret
+    if: needs.secret.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Installer les dépendances
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Garde-fou des migrations
+        run: npm run check:migrations
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.117.0
+
+      - name: supabase db push
+        env:
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          set +e
+          # shellcheck disable=SC2086
+          supabase db push --db-url "$SUPABASE_DB_URL" --yes $DRY_RUN 2>&1 | tee push.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            # Chaque migration part dans sa propre transaction et le push
+            # s'arrête à la première erreur : la dernière annoncée est la fautive.
+            failed=$(grep -oE 'Applying migration [^ ]+\.sql' push.log | tail -1 | sed 's/Applying migration //')
+            echo "::error::Échec de la migration ${failed:-inconnue} — les suivantes n'ont pas été appliquées."
+            echo "Échec de la migration **${failed:-inconnue}** (voir le log du job)." >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
+          {
+            echo "### Migrations"
+            echo '```'
+            grep -E 'Applying migration|up to date|Finished' push.log || echo "Aucune sortie."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
