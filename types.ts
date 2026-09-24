@@ -27,7 +27,7 @@ export type ProspectStatus = (typeof PROSPECT_STATUSES)[number];
 export const PROSPECT_SOURCES = ["auto", "import"] as const;
 export type ProspectSource = (typeof PROSPECT_SOURCES)[number];
 
-export const MESSAGE_TYPES = ["intro", "relance_1", "relance_2", "note"] as const;
+export const MESSAGE_TYPES = ["intro", "relance_1", "relance_2", "note", "reponse"] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number];
 
 export const MESSAGE_STATUSES = ["draft", "sent"] as const;
@@ -35,6 +35,10 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
 export const DEAL_STATUSES = ["ouvert", "gagne", "perdu"] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
+
+/** Catégories attribuées par le classifieur n8n à un email entrant. */
+export const INBOUND_CATEGORIES = ["reponse", "question", "relance", "refus", "autre"] as const;
+export type InboundCategory = (typeof INBOUND_CATEGORIES)[number];
 
 /** Fournisseurs d'API dont la consommation est mesuree. */
 export const API_SERVICES = ["openai", "pappers", "linkup", "hunter"] as const;
@@ -117,6 +121,29 @@ export type Message = {
   body: string;
   status: MessageStatus;
   sent_at: string | null;
+  /** Fil Gmail : permet de répondre dans la conversation d'origine. */
+  thread_id: string | null;
+  created_at: string;
+}
+
+/**
+ * Email entrant, déjà trié par n8n comme lié à la prospection.
+ *
+ * Table séparée de `messages` : `prospect_id` est nullable ici, un expéditeur
+ * inconnu devant rester visible plutôt que d'être jeté.
+ */
+export type InboundMessage = {
+  id: string;
+  user_id: string;
+  prospect_id: string | null;
+  from_email: string;
+  subject: string | null;
+  body: string;
+  category: InboundCategory;
+  thread_id: string | null;
+  received_at: string;
+  /** Vrai dès qu'une réponse est partie depuis le Cockpit. */
+  handled: boolean;
   created_at: string;
 }
 
@@ -156,6 +183,25 @@ export type Favorite = {
   city: string | null;
   company: Record<string, unknown>;
   created_at: string;
+}
+
+/**
+ * Decision prise sur une action de la file du Cockpit.
+ *
+ * La file elle-meme n'est jamais stockee : elle se recalcule depuis les tables
+ * metier. Seules deux intentions n'y sont portees par rien — « traite
+ * autrement » et « pas aujourd'hui » — et c'est tout l'objet de cette table.
+ */
+export type ActionState = {
+  id: string;
+  user_id: string;
+  /** Identifiant stable de l'action, calcule par _lib/queue.ts. */
+  action_id: string;
+  state: "done" | "snoozed";
+  /** Renseigne uniquement pour `snoozed` : l'action revient apres cette date. */
+  snooze_until: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -213,7 +259,7 @@ export type ProspectInsert = Insert<
 >;
 export type ProspectUpdate = Update<Prospect>;
 
-export type MessageInsert = Insert<Message, "subject" | "status" | "sent_at">;
+export type MessageInsert = Insert<Message, "subject" | "status" | "sent_at" | "thread_id">;
 export type MessageUpdate = Update<Message>;
 
 export type DealInsert = Insert<Deal, "amount_eur" | "status" | "signed_at">;
@@ -222,8 +268,17 @@ export type DealUpdate = Update<Deal>;
 export type ReminderInsert = Insert<Reminder, "done">;
 export type ReminderUpdate = Update<Reminder>;
 
+export type ActionStateInsert = Insert<ActionState, "snooze_until">;
+export type ActionStateUpdate = Update<ActionState>;
+
 export type FavoriteInsert = Insert<Favorite, "siren" | "website" | "sector" | "city">;
 export type FavoriteUpdate = Update<Favorite>;
+
+export type InboundMessageInsert = Insert<
+  InboundMessage,
+  "prospect_id" | "subject" | "category" | "thread_id" | "received_at" | "handled"
+> & { user_id: string };
+export type InboundMessageUpdate = Update<InboundMessage>;
 
 export type ApiUsageInsert = Insert<ApiUsage, "units" | "unit_cost" | "cost" | "prospect_id">;
 export type ApiUsageUpdate = Update<ApiUsage>;
@@ -276,10 +331,22 @@ export type Database = {
         Update: ReminderUpdate;
         Relationships: [];
       };
+      action_states: {
+        Row: ActionState;
+        Insert: ActionStateInsert;
+        Update: ActionStateUpdate;
+        Relationships: [];
+      };
       favorites: {
         Row: Favorite;
         Insert: FavoriteInsert;
         Update: FavoriteUpdate;
+        Relationships: [];
+      };
+      inbound_messages: {
+        Row: InboundMessage;
+        Insert: InboundMessageInsert;
+        Update: InboundMessageUpdate;
         Relationships: [];
       };
       api_usage: {
@@ -295,6 +362,7 @@ export type Database = {
       prospect_status: ProspectStatus;
       prospect_source: ProspectSource;
       message_type: MessageType;
+      inbound_category: InboundCategory;
       message_status: MessageStatus;
       deal_status: DealStatus;
       api_service: ApiService;

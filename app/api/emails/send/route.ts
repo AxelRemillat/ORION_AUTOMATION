@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireEnv } from "@/lib/env";
+import { advanceStatus } from "@/lib/constants";
 import type { MessageType, ProspectStatus } from "@/types";
 
 /**
@@ -17,15 +18,18 @@ const NEXT_REMINDER_DAYS: Partial<Record<MessageType, number>> = {
   relance_1: 7,
 };
 
-/** Statut visé après envoi. On ne redescend jamais un prospect déjà plus avancé. */
+/**
+ * Statut visé après envoi. Le garde-fou est désormais le RANG dans le pipeline
+ * (`advanceStatus`) : un statut n'est appliqué que s'il fait avancer le
+ * prospect. Répondre à un prospect qui vient d'écrire l'amène en discussion,
+ * sans qu'un simple `intro` puisse jamais dégrader un prospect déjà gagné.
+ */
 const STATUS_AFTER_SEND: Partial<Record<MessageType, ProspectStatus>> = {
   intro: "contacte",
   relance_1: "relance_1",
   relance_2: "relance_2",
+  reponse: "en_discussion",
 };
-
-/** Statuts « au-delà » de la séquence d'envoi : ils ne doivent pas être écrasés. */
-const TERMINAL_STATUSES: ProspectStatus[] = ["repondu", "en_discussion", "gagne", "perdu"];
 
 const isEmail = (value: unknown): value is string =>
   typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -52,7 +56,7 @@ export async function POST(request: Request) {
   // La RLS restreint déjà à l'utilisateur courant : une ligne trouvée = une ligne à lui.
   const { data: message } = await supabase
     .from("messages")
-    .select("id, type, subject, body, status, prospect_id")
+    .select("id, type, subject, body, status, prospect_id, thread_id")
     .eq("id", messageId)
     .eq("prospect_id", prospectId)
     .maybeSingle();
@@ -83,6 +87,9 @@ export async function POST(request: Request) {
         body: message.body,
         prospect_id: prospectId,
         message_id: message.id,
+        // Présent quand on répond à un entrant : n8n peut alors poster dans le
+        // fil Gmail d'origine plutôt que d'ouvrir une nouvelle conversation.
+        thread_id: message.thread_id ?? null,
       }),
       cache: "no-store",
     });
@@ -118,8 +125,10 @@ export async function POST(request: Request) {
     .eq("id", prospectId)
     .maybeSingle();
 
-  if (nextStatus && prospect && !TERMINAL_STATUSES.includes(prospect.status)) {
-    await supabase.from("prospects").update({ status: nextStatus }).eq("id", prospectId);
+  const applied =
+    nextStatus && prospect ? advanceStatus(prospect.status as ProspectStatus, nextStatus) : null;
+  if (applied) {
+    await supabase.from("prospects").update({ status: applied }).eq("id", prospectId);
   }
 
   // Une relance en attente à la fois : les anciennes sont soldées par l'envoi.
@@ -142,7 +151,7 @@ export async function POST(request: Request) {
     ok: true,
     message_id: message.id,
     sent_at: sentAt,
-    prospect_status: nextStatus ?? prospect?.status ?? null,
+    prospect_status: applied ?? prospect?.status ?? null,
     reminder_due_at: reminderDueAt,
   });
 }

@@ -4,10 +4,11 @@
  * afficher. Aucune donnée inventée ici : ce qui n'est pas calculable à partir
  * des tables reste absent, et la page bascule alors sur `_lib/example.ts`.
  */
-import type { Deal, Message, Prospect, Reminder } from "@/types";
+import type { Deal, InboundMessage, Message, Prospect, Reminder } from "@/types";
 import { compareHeat, heatScore, strongestSignal } from "@/lib/scoring";
 import type {
   DueReminder,
+  PendingInbound,
   FocusAction,
   PendingReply,
   SignalHighlight,
@@ -31,6 +32,40 @@ const REPLIED_STATUSES = new Set(["repondu", "en_discussion", "gagne"]);
 /** Jours restants avant l'échéance (négatif = en retard). */
 const daysUntil = (iso: string, now: number) =>
   Math.floor((Date.parse(iso) - now) / DAY_MS);
+
+/** Extrait lisible du corps d'un email : une seule ligne, sans blancs parasites. */
+function excerptOf(body: string, max = 160): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/**
+ * Emails entrants non traités, du plus récent au plus ancien.
+ *
+ * Un expéditeur non rattaché à un prospect reste affiché — sous son adresse —
+ * plutôt que d'être masqué : c'est peut-être justement le contact à créer.
+ */
+export function pendingInbound(
+  inbound: InboundMessage[],
+  prospects: Prospect[],
+): PendingInbound[] {
+  const names = new Map(prospects.map((prospect) => [prospect.id, prospect.company_name]));
+
+  return inbound
+    .filter((message) => !message.handled)
+    .sort((a, b) => Date.parse(b.received_at) - Date.parse(a.received_at))
+    .map((message) => ({
+      id: message.id,
+      prospectId: message.prospect_id,
+      label:
+        (message.prospect_id ? names.get(message.prospect_id) : null) ?? message.from_email,
+      fromEmail: message.from_email,
+      subject: message.subject,
+      excerpt: excerptOf(message.body),
+      category: message.category,
+      receivedAt: message.received_at,
+    }));
+}
 
 /** Relances non faites dont l'échéance est atteinte, les plus en retard d'abord. */
 export function dueReminders(

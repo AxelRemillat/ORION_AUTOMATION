@@ -1,5 +1,19 @@
-import type { Prospect, ProspectSignal } from "@/types";
+import type { InboundCategory, Prospect, ProspectSignal } from "@/types";
 import type { HeatScore } from "@/lib/scoring";
+
+/** Un email entrant en attente de traitement, prêt à être affiché. */
+export interface PendingInbound {
+  id: string;
+  prospectId: string | null;
+  /** Nom du prospect s'il est connu, sinon l'adresse de l'expéditeur. */
+  label: string;
+  fromEmail: string;
+  subject: string | null;
+  /** Début du corps, pour donner à lire sans ouvrir. */
+  excerpt: string;
+  category: InboundCategory;
+  receivedAt: string;
+}
 
 /** Une action proposée en tête de Cockpit. */
 export interface FocusAction {

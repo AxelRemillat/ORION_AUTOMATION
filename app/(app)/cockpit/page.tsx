@@ -1,13 +1,21 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import type { Deal, Message, Prospect, Reminder } from "@/types";
+import type { Deal, InboundMessage, Message, Prospect, Reminder } from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
 import { FocusCard } from "./_components/focus-card";
+import { InboxCard } from "./_components/inbox-card";
 import { KpiRow } from "./_components/kpi-row";
 import { DueRemindersCard, RepliesCard } from "./_components/queues";
 import { SignalsCard } from "./_components/signals-card";
 import { EXAMPLE_FOCUS, EXAMPLE_SIGNALS } from "./_lib/example";
-import { dueReminders, focusActions, pendingReplies, topSignals, weeklyKpis } from "./_lib/compute";
+import {
+  dueReminders,
+  focusActions,
+  pendingInbound,
+  pendingReplies,
+  topSignals,
+  weeklyKpis,
+} from "./_lib/compute";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -29,23 +37,29 @@ export default async function CockpitPage() {
   await requireUser();
   const supabase = createClient();
 
-  const [prospectsResult, messagesResult, dealsResult, remindersResult] = await Promise.all([
-    supabase.from("prospects").select("*"),
-    supabase.from("messages").select("*"),
-    supabase.from("deals").select("*"),
-    supabase.from("reminders").select("*"),
-  ]);
+  const [prospectsResult, messagesResult, dealsResult, remindersResult, inboundResult] =
+    await Promise.all([
+      supabase.from("prospects").select("*"),
+      supabase.from("messages").select("*"),
+      supabase.from("deals").select("*"),
+      supabase.from("reminders").select("*"),
+      supabase.from("inbound_messages").select("*"),
+    ]);
 
   const prospects = (prospectsResult.data ?? []) as Prospect[];
   const messages = (messagesResult.data ?? []) as Message[];
   const deals = (dealsResult.data ?? []) as Deal[];
   const reminders = (remindersResult.data ?? []) as Reminder[];
+  const inbound = (inboundResult.data ?? []) as InboundMessage[];
 
   const focus = focusActions(prospects, messages, reminders);
   const signals = topSignals(prospects);
+  const inboxItems = pendingInbound(inbound, prospects);
 
   const date = DATE_FORMAT.format(new Date());
-  const subtitle = prospects.length
+  const subtitle = inboxItems.length
+    ? `${inboxItems.length} réponse${inboxItems.length > 1 ? "s" : ""} à traiter. Commencez par là.`
+    : prospects.length
     ? `${prospects.length} prospect${prospects.length > 1 ? "s" : ""} en portefeuille. Voici par quoi commencer.`
     : "Votre portefeuille est vide : l'écran se remplira dès vos premiers prospects.";
 
@@ -56,6 +70,9 @@ export default async function CockpitPage() {
         subtitle={subtitle}
         date={date.charAt(0).toUpperCase() + date.slice(1)}
       />
+
+      {/* En premier, avant même les actions du jour : quelqu'un attend. */}
+      <InboxCard items={inboxItems} />
 
       <FocusCard
         actions={focus.length ? focus : EXAMPLE_FOCUS}

@@ -43,6 +43,7 @@ export const MESSAGE_TYPE_LABELS: Record<MessageType, string> = {
   relance_1: "Relance 1",
   relance_2: "Relance 2",
   note: "Note",
+  reponse: "Réponse",
 };
 
 /** Ordre du pipeline, du premier contact au closing. Sert aux vues kanban/stats. */
@@ -57,3 +58,24 @@ export const PIPELINE_ORDER: ProspectStatus[] = [
   "gagne",
   "perdu",
 ];
+
+/**
+ * Rang d'un statut dans le pipeline.
+ *
+ * Sert de garde-fou partagé : un prospect n'est JAMAIS ramené en arrière.
+ * Un mail entrant le passe à « Répondu », l'envoi d'une réponse à « En
+ * discussion » — mais ni l'un ni l'autre ne doit dégrader un prospect déjà
+ * gagné, ni ressusciter un prospect perdu (« perdu » ferme la séquence et
+ * porte donc le rang le plus élevé).
+ */
+export function statusRank(status: ProspectStatus): number {
+  return PIPELINE_ORDER.indexOf(status);
+}
+
+/** Le statut visé, ou `null` s'il ferait reculer le prospect. */
+export function advanceStatus(
+  current: ProspectStatus,
+  target: ProspectStatus,
+): ProspectStatus | null {
+  return statusRank(target) > statusRank(current) ? target : null;
+}
