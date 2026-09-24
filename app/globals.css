@@ -400,6 +400,13 @@
 }
 
 /* Report : la ligne glisse et se brouille, sans eclair. */
+/* Entree d'une ligne. `fill-mode: both` est essentiel : sans lui l'element
+   reviendrait a son opacite d'origine une fois l'animation finie. */
+@keyframes vs-row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes vs-snooze-out {
   from { opacity: 1; transform: translateX(0); filter: blur(0); }
   to { opacity: 0; transform: translateX(32px); filter: blur(4px); }
@@ -412,6 +419,25 @@
   .vs-flash { animation: vs-flash 200ms ease-out forwards; }
   .vs-collapse { animation: vs-collapse 260ms 180ms ease-in forwards; }
   .vs-snooze-out { animation: vs-snooze-out 320ms ease-in forwards; }
+  .vs-row-in { animation: vs-row-in 260ms ease-out both; }
+
+  /* Boutons de la scene. Ces etats passent par une classe plutot que par une
+     valeur arbitraire Tailwind : `rgb(var(--x) / 0.35)` contient des espaces,
+     que Tailwind n'accepte pas dans un arbitrary value — la classe ne serait
+     tout simplement pas generee. */
+  .vs-ghost {
+    background: rgb(var(--rgb-vs-ink) / 0.06);
+    border-color: rgb(var(--rgb-vs-ink) / 0.35);
+    color: rgb(var(--rgb-vs-ink) / 0.9);
+  }
+  .vs-ghost:hover:not(:disabled) {
+    background: rgb(var(--rgb-vs-ink) / 0.14);
+    border-color: rgb(var(--rgb-vs-ink) / 0.6);
+    color: rgb(var(--rgb-vs-ink));
+  }
+  .vs-cta:hover {
+    box-shadow: 0 0 18px rgb(var(--rgb-vs-ink) / 0.55);
+  }
   /* Le sweep de survol ne part qu'au survol du parent. */
   .group:hover .vs-sweep { animation: vs-sweep 600ms ease-out; }
 }

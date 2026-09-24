@@ -41,15 +41,20 @@ export function ActionRow({
   const score = scored ? Number(scored[1]) : Math.round(action.heat * 100);
   const accent = heatColor(score);
 
-  const exit =
+  // L'entree se termine a opacity 1 (`fill-mode: both`). La sortie n'attenue
+  // que la ligne resolue : les autres restent pleinement lisibles.
+  const animation =
     state === "done"
       ? "motion-safe:vs-collapse"
       : state === "snoozed"
         ? "motion-safe:vs-snooze-out"
-        : "";
+        : "motion-safe:vs-row-in";
 
   return (
-    <li className={`group relative origin-top ${exit}`} style={{ listStyle: "none" }}>
+    <li
+      className={`group relative origin-top ${animation}`}
+      style={{ listStyle: "none", opacity: state === "snoozed" ? 0.55 : 1 }}
+    >
       {/* Éclair de validation : balaie la ligne avant qu'elle se replie. */}
       {state === "done" && (
         <span
@@ -63,16 +68,25 @@ export function ActionRow({
         />
       )}
 
+      {/*
+        L'alpha est DANS les couleurs du degrade, pas en `opacity` sur le
+        conteneur : `opacity` cree un contexte d'empilement et s'applique a tout
+        le sous-arbre — c'est ce qui delavait le nom, la jauge et les boutons.
+      */}
       <div
-        className="rounded-xl p-px motion-safe:transition-opacity"
+        className="rounded-xl p-px"
         style={{
-          background: "linear-gradient(120deg, var(--vs-blue), var(--vs-red))",
-          opacity: 0.28,
+          background:
+            "linear-gradient(120deg, rgb(var(--rgb-vs-blue) / 0.35), rgb(var(--rgb-vs-red) / 0.35))",
         }}
       >
         <div
           className="relative overflow-hidden rounded-[11px] px-3.5 py-3"
-          style={{ background: "rgb(var(--rgb-vs-ink) / 0.04)" }}
+          style={{
+            // L'effet verre vient du fond seul : opaque a 55 %, flou derriere.
+            background: "rgb(var(--rgb-vs-stage) / 0.55)",
+            backdropFilter: "blur(8px)",
+          }}
         >
           {/* Light streak de survol. */}
           <span
@@ -91,7 +105,10 @@ export function ActionRow({
                 style={{ background: accent, boxShadow: `0 0 10px ${accent}` }}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold" style={{ color: "var(--vs-ink)" }}>
+                <p
+                  className="truncate text-sm font-semibold"
+                  style={{ color: "rgb(var(--rgb-vs-ink) / 0.95)" }}
+                >
                   {action.title}
                 </p>
                 {!scored && (
@@ -107,7 +124,7 @@ export function ActionRow({
               <Link
                 href={action.href}
                 style={{ ...SKEW, background: "var(--vs-ink)", color: "var(--vs-stage)" }}
-                className="inline-flex items-center px-3.5 py-2 text-[13px] font-semibold motion-safe:transition-shadow hover:shadow-[0_0_18px_rgb(var(--rgb-vs-ink) / 0.55)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                className="vs-cta inline-flex items-center px-3.5 py-2 text-[13px] font-semibold motion-safe:transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 <span style={UNSKEW} className="inline-flex items-center gap-1.5">
                   {action.cta}

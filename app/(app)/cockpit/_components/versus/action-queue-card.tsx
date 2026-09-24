@@ -98,7 +98,9 @@ export function ActionQueueCard({ visible, total }: { visible: QueueAction[]; to
       <Sparks ref={sparks} intensity={calm ? 0.15 : intensity} />
       {overlay && <RoundCompleteOverlay total={roundTotal} />}
 
-      <div className="relative p-5 md:p-6">
+      {/* Decor en z-0, contenu en z-10 : aucune couche decorative ne peut
+          repasser au-dessus des lignes et les delaver. */}
+      <div className="relative z-10 p-5 md:p-6">
         {/* Mobile : le score passe au-dessus du titre. */}
         <div className="flex flex-col items-center gap-3 md:flex-row md:items-center md:justify-between">
           <div className="order-2 min-w-0 flex-1 md:order-1">

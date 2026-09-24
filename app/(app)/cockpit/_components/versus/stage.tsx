@@ -14,7 +14,7 @@ export function Stage({ calm }: { calm: boolean }) {
     <>
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 motion-safe:transition-opacity motion-safe:duration-700"
+        className="pointer-events-none absolute inset-0 z-0 motion-safe:transition-opacity motion-safe:duration-700"
         style={{
           // File vide : les camps se retirent, la carte se calme.
           opacity: calm ? 0.35 : 1,
@@ -26,7 +26,7 @@ export function Stage({ calm }: { calm: boolean }) {
       />
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.03]"
+        className="pointer-events-none absolute inset-0 z-0 opacity-[0.03]"
         style={{ backgroundImage: NOISE }}
       />
     </>
