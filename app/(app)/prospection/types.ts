@@ -33,5 +33,11 @@ export interface GenerateResponse {
   needsReview: boolean;
   reviewReasons: string[];
   /** L'implication deduite qui sert d'indice de besoin. */
-  needLead: { text: string; factIds: string[]; confidence: number } | null;
+  needLead: {
+    text: string;
+    factIds: string[];
+    confidence: number;
+    /** D'ou vient la confiance, ligne par ligne : affiche au survol. */
+    confidenceDetail?: string;
+  } | null;
 }

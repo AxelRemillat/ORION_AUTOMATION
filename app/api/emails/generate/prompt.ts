@@ -1,4 +1,4 @@
-import { personaBlock, pickProof, BOOKING_URL } from "@/lib/persona";
+import { personaBlock, pickIntro, pickProof, BOOKING_URL } from "@/lib/persona";
 import { toneInstruction, type ToneKey } from "@/lib/tones";
 import { greetingName, greetingSurname } from "@/lib/emails/validate";
 import { buildFacts, factsBlock, type DerivedFact } from "@/lib/emails/derived-facts";
@@ -42,7 +42,7 @@ Bonjour,
 
 Combien de mails de suivi de commande votre équipe traite-t-elle un jour de forte activité ?
 
-Si je lis bien votre catalogue, vous vendez en direct et vous assumez donc le SAV de bout en bout. Je suis Axel Remillat, j'automatise ce type de flux : réponse aux questions de suivi, détection des commandes bloquées, escalade seulement quand c'est nécessaire.
+Si je lis bien votre catalogue, vous vendez en direct et vous assumez donc le SAV de bout en bout. Je suis à mon compte et j'automatise ce type de flux : réponse aux questions de suivi, détection des commandes bloquées, escalade seulement quand c'est nécessaire.
 
 C'est un sujet chez vous en ce moment, ou c'est déjà outillé ?
 
@@ -55,7 +55,7 @@ Bonjour Monsieur Ferrand,
 
 Vous avez annoncé l'ouverture d'une seconde agence en mars. Sur des travaux, une croissance comme celle-là fait généralement doubler les pointages de chantier à consolider chaque mois, avant même que l'administratif suive.
 
-Je suis Axel Remillat, ingénieur freelance en IA. J'ai déjà relié des saisies terrain à la facturation, pour que les situations sortent sans ressaisie.
+Je travaille en indépendant sur l'automatisation de tâches répétitives. Ici, ça voudrait dire brancher les saisies terrain sur votre outil de facturation, pour que les situations sortent sans ressaisie.
 
 Ça se passe comment chez vous aujourd'hui ?
 
@@ -112,8 +112,42 @@ export function choosePlan(prospectId: string, tone: ToneKey, hasSignal: boolean
   return options[hash % options.length];
 }
 
-/** Salutation imposée : un contact identifié à haute confiance doit être nommé. */
-export function buildGreeting(tone: ToneKey, contact?: DecisionMakerContact | null): string {
+const strip = (value: string): string =>
+  value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z]/g, "");
+
+/**
+ * L'adresse trouvee appartient-elle au dirigeant connu du registre ?
+ *
+ * On ne se contente pas de « un dirigeant existe » : le mail part a une
+ * adresse precise, et nommer Monsieur Dupont dans un message adresse a
+ * contact@ est une faute qui se voit tout de suite. On exige donc que le nom
+ * de famille apparaisse dans la partie locale de l'adresse.
+ */
+export function emailBelongsTo(email: string | null | undefined, person: string | null): boolean {
+  if (!email || !person) return false;
+  const local = strip(email.split("@")[0] ?? "");
+  const surname = strip(person.trim().split(/\s+/).slice(-1)[0] ?? "");
+  return surname.length > 2 && local.includes(surname);
+}
+
+/**
+ * Salutation imposée : un contact identifié à haute confiance doit être nommé.
+ *
+ * Deux sources, dans cet ordre. Le dirigeant du registre passe en premier
+ * quand l'adresse est bien la sienne : c'est la donnée la plus sûre qu'on ait,
+ * et elle justifie le « Monsieur » formel quel que soit le registre.
+ */
+export function buildGreeting(
+  tone: ToneKey,
+  contact?: DecisionMakerContact | null,
+  leaderPerson?: string | null,
+): string {
+  if (leaderPerson && emailBelongsTo(contact?.email, leaderPerson)) {
+    const parts = leaderPerson.trim().split(/\s+/);
+    const surname = parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
+    return `Bonjour Monsieur ${surname},`;
+  }
+
   const first = greetingName(contact);
   if (!first) return "Bonjour,";
   if (tone === "factuel") {
@@ -144,6 +178,8 @@ export interface WritingInput {
   companyName: string;
   /** Ouvertures et fins des derniers mails : interdiction de les reprendre. */
   avoid: string[];
+  /** Dirigeant personne physique issu du registre, quand il est connu. */
+  leaderPerson?: string | null;
   /** Retour du juge, lors de l'unique réécriture. */
   critique?: string;
 }
@@ -155,16 +191,42 @@ const factLine = (facts: DerivedFact[], ids: string[]): string =>
     .map((fact) => `${fact.id} = ${fact.label} : ${fact.value}`)
     .join(" ; ");
 
+/** Le plan retenu, expose pour que la route puisse verifier qu'il a ete suivi. */
+export function planFor(input: WritingInput): PlanKey {
+  const candidates = input.analysis.hookCandidates;
+  const hasSignal =
+    input.facts.some((fact) => fact.source === "Signal web") &&
+    candidates.some((hook) => hook.type === "signal");
+  const hasQuestion = candidates.some((hook) => hook.type === "question");
+  const plan = choosePlan(input.prospectId, input.tone, hasSignal);
+  // Sans accroche de type question, le plan B n'a rien a mettre en ouverture.
+  return plan === "B" && !hasQuestion ? "A" : plan;
+}
+
+/**
+ * L'accroche qui va avec le plan.
+ *
+ * Le plan etait tire au sort, l'accroche choisie par l'analyse, et les deux ne
+ * se parlaient pas : le plan B reclamait une question d'ouverture alors que
+ * l'accroche retenue etait un constat. Le redacteur tranchait comme il pouvait,
+ * et le validateur le rejetait. Ici le plan commande : B prend l'accroche de
+ * type question si elle existe, C celle de type signal.
+ */
+function hookFor(analysis: DeepAnalysis, plan: PlanKey): HookCandidate {
+  const fallback = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
+  if (plan === "B") return analysis.hookCandidates.find((item) => item.type === "question") ?? fallback;
+  if (plan === "C") return analysis.hookCandidates.find((item) => item.type === "signal") ?? fallback;
+  return fallback;
+}
+
 export function buildWritingPrompt(input: WritingInput): string {
   const { analysis, facts, tone, avoid } = input;
-  const hook: HookCandidate =
-    analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
+  const plan = planFor(input);
+  const hook: HookCandidate = hookFor(analysis, plan);
   const pain: PainCandidate =
     analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
-
-  const hasSignal = facts.some((fact) => fact.source === "Signal web");
-  const plan = choosePlan(input.prospectId, tone, hasSignal && hook.type === "signal");
-  const greeting = buildGreeting(tone, input.contact);
+  const greeting = buildGreeting(tone, input.contact, input.leaderPerson);
+  const intro = pickIntro(`${input.prospectId}:${tone}`);
 
   // Une preuve pertinente, ou aucune : pas de preuve de remplissage.
   const proof = pickProof(`${pain.task} ${pain.whyHere} ${pain.automationIdea}`);
@@ -220,6 +282,18 @@ REGLES DURES — chacune est verifiee par du code apres generation
    interruption », pas de « d'apres mes estimations ».
 6. 3 a 4 paragraphes COURTS, separes par une LIGNE VIDE. ${lengths}.
 7. Signature : « Axel » seul sur la derniere ligne.
+8. PRESENTATION DE TOI, si tu te presentes : pars de cette formulation, telle
+   quelle ou presque — « ${intro} ». Le mot « ingenieur » est INTERDIT.
+9. L'offre est un FLUX branche sur leurs outils existants. Interdits :
+   « logiciel », « progiciel », « solution », « systeme de gestion integre »,
+   « plateforme ». Decris ce qui circule : ce qui declenche, ce qui est lu, ce
+   qui est ecrit, et dans quel outil.
+10. Le nom de l'entreprise s'ecrit en CASSE NATURELLE, jamais comme au
+    registre. « ${input.companyName} » se recopie sans ses capitales
+    (« Blue EnerFreeze », pas « BLUE ENERFREEZE »).
+11. UNE SEULE formule d'hypothese dans tout le mail (« j'imagine »,
+    « sans doute », « si je lis bien »...). Deux, et le lecteur comprend qu'on
+    ne sait rien de lui.
 
 ${PLANS[plan]}
 

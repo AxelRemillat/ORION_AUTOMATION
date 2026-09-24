@@ -2,12 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getOpenAI, OPENAI_MODEL } from "@/lib/openai";
 import { recordOpenAiUsage } from "@/lib/usage/record";
-import { findDecisionMaker, hasHunterKey } from "@/lib/enrichment/hunter";
+import {
+  fetchQuota,
+  findDecisionMaker,
+  findEmailByName,
+  hasHunterKey,
+} from "@/lib/enrichment/hunter";
 import { fetchSiteContent, hasLinkupKey, type PageContent } from "@/lib/enrichment/linkup";
 import { toDomain } from "@/lib/enrichment/http";
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
 import { buildFacts, type DerivedFact } from "@/lib/emails/derived-facts";
+import { PERSONA } from "@/lib/persona";
 import { validateEmail } from "@/lib/emails/validate";
+import { describesNeed, needConfidence } from "@/lib/emails/need-lead";
 import { edges, maxSimilarity } from "@/lib/similarity";
 import { coerceTone, type ToneKey } from "@/lib/tones";
 import type { Prospect } from "@/types";
@@ -23,6 +30,7 @@ import {
 import {
   buildWritingPrompt,
   parseEmail,
+  planFor,
   type Evidence,
   type GeneratedEmail,
 } from "./prompt";
@@ -39,6 +47,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 /** Analyse + rédaction + juge, et jusqu'à une réécriture : 90 s suffisent. */
 export const maxDuration = 120;
+
+/** Preuves autorisees dans un mail : toute autre experience est inventee. */
+const PUBLIC_PROOFS = PERSONA.proofs.filter((proof) => proof.publicOk).map((proof) => proof.text);
 
 const SIMILARITY_LIMIT = 0.4;
 const HISTORY = 10;
@@ -85,19 +96,56 @@ async function readSite(
   }
 }
 
-/** Recherche du décideur — best effort, jamais bloquante. */
+/**
+ * Recherche du contact nominatif — au moment du brouillon, jamais avant.
+ *
+ * Trois tentatives successives, et l'absence de contact est un resultat
+ * acceptable : le mail commencera par « Bonjour, » et l'ecran affichera un
+ * badge « sans contact nominatif ». Aucune etape ne peut faire echouer la
+ * generation.
+ */
 async function findContact(
   prospect: Prospect,
 ): Promise<{ contact: DecisionMakerContact | null; warning?: EnrichmentWarning }> {
   const domain = toDomain(prospect.website);
   if (!domain) return { contact: null, warning: { source: "hunter", message: "aucun site connu" } };
   if (!hasHunterKey()) {
-    return { contact: null, warning: { source: "hunter", message: "clé absente : décideur non recherché" } };
+    return { contact: null, warning: { source: "hunter", message: "cle absente : decideur non recherche" } };
   }
-  const leader = typeof prospect.key_figures?.leader === "string" ? prospect.key_figures.leader : null;
-  const result = await findDecisionMaker(domain, leader, prospect.id);
-  if (!result.ok) return { contact: null, warning: { source: "hunter", message: result.error } };
-  return { contact: result.data };
+
+  const figures = prospect.key_figures ?? {};
+  const leaderPerson =
+    typeof figures.leader_person === "string" ? figures.leader_person : null;
+  const leader = typeof figures.leader === "string" ? figures.leader : null;
+
+  // 1. Un decideur sur le domaine.
+  const search = await findDecisionMaker(domain, leaderPerson ?? leader, prospect.id);
+  if (search.ok && search.data) return { contact: search.data };
+
+  if (!search.ok && search.quotaExceeded) {
+    const quota = await fetchQuota();
+    const detail = quota
+      ? `quota atteint (${quota.used}/${quota.available} recherches du plan ${quota.planName ?? "en cours"})`
+      : "quota de recherches atteint pour ce mois";
+    return { contact: null, warning: { source: "hunter", message: detail } };
+  }
+  if (!search.ok) return { contact: null, warning: { source: "hunter", message: search.error } };
+
+  // 2. L'adresse du dirigeant personne physique, reconstruite par Hunter.
+  const parts = (leaderPerson ?? "").trim().split(/\s+/);
+  if (parts.length >= 2) {
+    const finder = await findEmailByName(domain, parts[0], parts.slice(1).join(" "), prospect.id);
+    if (finder.ok && finder.data) return { contact: finder.data };
+    if (!finder.ok && finder.quotaExceeded) {
+      return { contact: null, warning: { source: "hunter", message: "quota de recherches atteint pour ce mois" } };
+    }
+  }
+
+  // 3. Rien : on le dit, et on ecrit « Bonjour, ».
+  return {
+    contact: null,
+    warning: { source: "hunter", message: "aucun contact nominatif trouve sur ce domaine" },
+  };
 }
 
 /** Appel OpenAI générique, avec journalisation du coût réel. */
@@ -163,6 +211,14 @@ export async function POST(request: Request) {
   if (error || !prospect) {
     return NextResponse.json({ error: "Prospect introuvable." }, { status: 404 });
   }
+  // Un prospect perdu est clos : generer un mail pour lui, c'est relancer
+  // quelqu'un qui a deja dit non, et payer des credits pour le faire.
+  if (prospect.status === "perdu") {
+    return NextResponse.json(
+      { error: "Prospect clôturé : ce prospect est marqué « Perdu », la génération est désactivée." },
+      { status: 409 },
+    );
+  }
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       { error: "OPENAI_API_KEY absente : la génération est indisponible." },
@@ -193,7 +249,8 @@ export async function POST(request: Request) {
 
   // Les faits sont TOUJOURS recalcules cote serveur : le client n'est pas une
   // source de verite, meme pour des donnees qu'il a recues de nous.
-  const { facts } = buildFacts(prospect, contact);
+  const siteText = pages.map((page) => page.markdown).join("\n");
+  const { facts, leaderPerson } = buildFacts(prospect, contact, new Date(), siteText);
 
   let analysis: DeepAnalysis;
   if (body.cachedAnalysis) {
@@ -242,7 +299,9 @@ export async function POST(request: Request) {
     prospectId: prospect.id,
     companyName: prospect.company_name,
     avoid,
+    leaderPerson,
   };
+  const plan = planFor(writingInput);
 
   let email: GeneratedEmail | null = parseEmail(
     await ask(
@@ -258,12 +317,18 @@ export async function POST(request: Request) {
   }
 
   // --- Garde-fous déterministes, puis juge --------------------------------
-  const siteText = pages.map((page) => page.markdown).join("\n");
-  const context = { facts, contact, tone, companyName: prospect.company_name, siteText };
+  const context = {
+    facts,
+    contact,
+    tone,
+    companyName: prospect.company_name,
+    proofs: PUBLIC_PROOFS,
+    plan,
+  };
   let validation = validateEmail(email, context);
   let critique: Critique | null = parseCritique(
     await ask(
-      buildCriticPrompt(facts),
+      buildCriticPrompt(facts, PUBLIC_PROOFS),
       buildCriticContext(analysis, email),
       0,
       "critique",
@@ -289,7 +354,7 @@ export async function POST(request: Request) {
       const secondValidation = validateEmail(rewritten, context);
       const secondCritique = parseCritique(
         await ask(
-          buildCriticPrompt(facts),
+          buildCriticPrompt(facts, PUBLIC_PROOFS),
           buildCriticContext(analysis, rewritten),
           0,
           "critique:rewrite",
@@ -326,8 +391,17 @@ export async function POST(request: Request) {
   const hook = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
   const pain = analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
 
-  // « Indice de besoin » : une implication déduite, pas un chiffre isolé.
-  const lead = analysis.implications[0];
+  // « Indice de besoin » : une friction operationnelle, pas un bulletin de
+  // sante. On ecarte les implications qui decrivent une entreprise qui va
+  // bien, et la confiance se calcule sur ce qu'on a reellement collecte.
+  const lead = analysis.implications.find((item) => describesNeed(item.text)) ?? null;
+  const confidence = needConfidence({
+    facts,
+    hasSiteContent: siteText.trim().length > 0,
+    vocabularyConfirmed: Boolean(
+      lead && siteText && describesNeed(siteText) && lead.factIds.length >= 2,
+    ),
+  });
   const evidence: Evidence[] = [
     { label: "Modèle économique", value: analysis.businessModel.text, source: "Analyse du site et du NAF" },
     ...facts.map((fact) => ({
@@ -350,7 +424,15 @@ export async function POST(request: Request) {
     /** Les points qui n'ont pas pu être corrigés : l'UI affiche « à revoir ». */
     needsReview: !validation.ok || failing.length > 0,
     reviewReasons: [...validation.failures, ...failing],
-    needLead: lead ? { text: lead.text, factIds: lead.factIds, confidence: lead.confidence } : null,
+    needLead: lead
+      ? {
+          text: lead.text,
+          factIds: lead.factIds,
+          confidence: confidence.value,
+          /** Detail affiche au survol : d'ou vient cette confiance. */
+          confidenceDetail: confidence.explanation,
+        }
+      : null,
     chosenHook: hook,
     chosenPain: pain,
   });

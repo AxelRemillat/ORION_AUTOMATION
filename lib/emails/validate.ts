@@ -32,6 +32,12 @@ const BLACKLIST = [
   // Vus en sortie d'evaluation : la promesse creuse revient par la bande.
   "gagner en efficacite",
   "optimiser vos ressources",
+  // L'offre est un flux branche sur leurs outils, pas un produit a installer.
+  "logiciel",
+  "progiciel",
+  "solution",
+  "systeme de gestion integre",
+  "pourrait potentiellement",
   "pas mal de temps",
   "cote startup et cote entreprise",
   "revolutionner",
@@ -48,15 +54,13 @@ export interface EmailDraft {
 
 export interface ValidationContext {
   facts: DerivedFact[];
-  /**
-   * Contenu du site du prospect. Les nombres qu'il contient (« 268 points de
-   * livraison », « 320 dossiers ») sont VERIFIABLES : les rejeter comme
-   * inventes etait un faux positif du validateur.
-   */
-  siteText?: string;
   contact?: DecisionMakerContact | null;
   tone: ToneKey;
   companyName: string;
+  /** Preuves publiques du persona : seule base autorisee pour une experience. */
+  proofs?: readonly string[];
+  /** Plan impose au redacteur : on verifie qu'il a bien ete suivi. */
+  plan?: "A" | "B" | "C";
 }
 
 export interface ValidationResult {
@@ -127,6 +131,131 @@ function numbersIn(text: string): number[] {
   return found;
 }
 
+/**
+ * Tournures qui affirment une EXPERIENCE PASSEE.
+ *
+ * Le modele a ecrit « Pour des entreprises similaires, j'ai mis en place des
+ * logiciels de planification automatisee » : Axel n'a jamais dit ca. Une telle
+ * phrase se verifie en rendez-vous, et elle grille la credibilite si elle est
+ * fausse. Elle n'est donc autorisee que si elle correspond a une preuve
+ * declaree `publicOk` dans le persona.
+ */
+const EXPERIENCE_MARKERS = [
+  "j'ai deja ",
+  "j'ai mis en place",
+  "j'ai construit",
+  "j'ai relie",
+  "j'ai relié",
+  "j'ai automatise",
+  "j'ai automatisé",
+  "j'ai mene",
+  "j'ai mené",
+  "j'ai accompagne",
+  "j'ai accompagné",
+  "j'ai developpe",
+  "j'ai développé",
+  "j'accompagne",
+  "j'aide des entreprises",
+  "j'aide des clients",
+  "pour des entreprises similaires",
+  "pour des clients similaires",
+  "pour des structures similaires",
+  "pour des entreprises comme",
+  "pour des clients comme",
+  "chez d'autres clients",
+  "mes clients",
+];
+
+/** `true` si la phrase revendique une experience passee. */
+function claimsExperience(sentence: string): boolean {
+  const haystack = normalize(sentence);
+  return EXPERIENCE_MARKERS.some((marker) => haystack.includes(normalize(marker)));
+}
+
+const SIGNIFICANT = /[a-zà-ÿ]{5,}/gi;
+
+function words(text: string): Set<string> {
+  return new Set(
+    (normalize(text).match(SIGNIFICANT) ?? []).map((word) => word.toLowerCase()),
+  );
+}
+
+/**
+ * Phrases du mail qui revendiquent une experience sans preuve correspondante.
+ *
+ * On compare le vocabulaire significatif de la phrase a celui de chaque preuve
+ * publique : deux mots de fond partages suffisent a considerer que la phrase
+ * decrit bien la preuve. En dessous, c'est une invention.
+ */
+export function unprovenExperience(body: string, proofs: readonly string[]): string[] {
+  const sentences = body.split(/(?<=[.!?])\s+|\n+/).map((part) => part.trim()).filter(Boolean);
+  const proofWords = proofs.map(words);
+
+  return sentences.filter((sentence) => {
+    if (!claimsExperience(sentence)) return false;
+    const own = words(sentence);
+    return !proofWords.some((proof) => {
+      let shared = 0;
+      for (const word of own) if (proof.has(word)) shared += 1;
+      return shared >= 2;
+    });
+  });
+}
+
+/**
+ * Tournures de presentation de soi qui retombent sur « ingenieur ».
+ *
+ * Le mot n'est pas faux, mais il revient dans tous les mails et il place Axel
+ * du cote du CV plutot que du cote du probleme. On l'interdit uniquement dans
+ * une phrase de presentation : un prospect peut tres bien, lui, recruter un
+ * ingenieur sans que le mail soit fautif.
+ */
+const SELF_INTRO_ENGINEER = /(je suis|moi c'est|ici)[^.!?]{0,40}ing[ée]nieur/i;
+
+/**
+ * Nuances (« j'imagine », « sans doute »...). Une seule par mail.
+ *
+ * Deux hypotheses dans le meme texte et le lecteur comprend qu'on ne sait rien
+ * de lui : la prudence devient un aveu.
+ */
+const HEDGES = [
+  "j'imagine",
+  "je suppose",
+  "je devine",
+  "il me semble",
+  "sans doute",
+  "probablement",
+  "peut-etre",
+  "si je lis bien",
+  "si je comprends bien",
+  "si c'est comme",
+  "generalement",
+  "le plus souvent",
+  "a priori",
+];
+
+/** Nuances employees dans le corps, doublons compris. */
+export function hedgesUsed(body: string): string[] {
+  const haystack = normalize(body);
+  return HEDGES.filter((hedge) => haystack.includes(normalize(hedge)));
+}
+
+/**
+ * Le plan impose a-t-il ete suivi ?
+ *
+ * Verification volontairement grossiere — on ne juge que l'OUVERTURE, la seule
+ * chose qui distingue structurellement les trois plans. Sans ce controle, le
+ * modele recevait trois plans et ecrivait toujours le meme.
+ */
+export function planApplied(plan: "A" | "B" | "C" | undefined, body: string): boolean {
+  if (!plan) return true;
+  const first = bodyParagraphs(body)[0] ?? "";
+  if (!first) return false;
+  const isQuestion = first.trim().endsWith("?");
+  // B ouvre sur une question metier ; A et C ouvrent sur un constat.
+  return plan === "B" ? isQuestion : !isQuestion;
+}
+
 export function validateEmail(draft: EmailDraft, context: ValidationContext): ValidationResult {
   const failures: string[] = [];
   const body = draft.body.trim();
@@ -139,19 +268,54 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   }
 
   // --- Nombres inventés ----------------------------------------------------
+  // Le texte du site N'AUTORISE PAS un nombre. C'etait la faille par laquelle
+  // « 268 points de livraison » est arrive dans un mail : le modele piochait
+  // n'importe quel chiffre d'un dump de 2 500 caracteres. Seuls les FAITS
+  // comptent — ils incluent les citations de signaux.
   const known = knownNumbers(context.facts);
-  if (context.siteText) {
-    for (const value of numbersIn(context.siteText)) {
-      known.add(value);
-      known.add(Math.round(value));
-    }
-  }
   const invented = numbersIn(body).filter(
     (value) => !known.has(value) && !known.has(Math.round(value)) && !CTA_NUMBERS.has(value),
   );
   if (invented.length) {
     failures.push(
       `Nombre absent des faits : ${[...new Set(invented)].join(", ")}. Tout chiffre doit venir des données collectées.`,
+    );
+  }
+
+  // --- Experience inventee -------------------------------------------------
+  const unproven = unprovenExperience(body, context.proofs ?? []);
+  if (unproven.length) {
+    failures.push(
+      `Expérience non prouvée : « ${unproven[0].slice(0, 120)} ». Reformulez au présent sur ce que vous savez faire.`,
+    );
+  }
+
+  // --- Nom de l'entreprise en capitales ------------------------------------
+  if (context.companyName && context.companyName === context.companyName.toUpperCase()) {
+    const escaped = context.companyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const shouted = new RegExp("\\b" + escaped + "\\b");
+    if (shouted.test(body)) {
+      failures.push(`Nom de l'entreprise en capitales dans le corps : écrivez-le en casse naturelle.`);
+    }
+  }
+
+  // --- Presentation de soi -------------------------------------------------
+  if (SELF_INTRO_ENGINEER.test(body)) {
+    failures.push("Presentation en « ingenieur » : dites ce que vous construisez, pas votre titre.");
+  }
+
+  // --- Une seule nuance ----------------------------------------------------
+  const hedges = hedgesUsed(body);
+  if (hedges.length > 1) {
+    failures.push(`${hedges.length} formules d'hypothèse (${hedges.join(", ")}) : une seule par mail.`);
+  }
+
+  // --- Plan impose ---------------------------------------------------------
+  if (!planApplied(context.plan, body)) {
+    failures.push(
+      context.plan === "B"
+        ? "Plan B : le mail doit s'ouvrir sur une question métier, pas sur un constat."
+        : `Plan ${context.plan} : le mail doit s'ouvrir sur un constat, pas sur une question.`,
     );
   }
 

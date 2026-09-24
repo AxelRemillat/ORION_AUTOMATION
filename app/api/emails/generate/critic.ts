@@ -27,6 +27,7 @@ export const CRITIQUE_SCHEMA = z.object({
   verifiabilite: CRITERION,
   voix: CRITERION,
   naturel: CRITERION,
+  experienceVerifiee: CRITERION,
 });
 
 export type Critique = z.infer<typeof CRITIQUE_SCHEMA>;
@@ -38,6 +39,7 @@ export const CRITERIA_LABELS: Record<keyof Critique, string> = {
   verifiabilite: "Vérifiabilité",
   voix: "Voix du persona",
   naturel: "Naturel",
+  experienceVerifiee: "Expérience réellement vécue",
 };
 
 /** Seuil en dessous duquel une réécriture est déclenchée. */
@@ -50,11 +52,13 @@ export function failingCriteria(critique: Critique): string[] {
     .map((key) => `${CRITERIA_LABELS[key]} (${critique[key].score}/5) : ${critique[key].note}`);
 }
 
-export function buildCriticPrompt(facts: DerivedFact[]): string {
+export function buildCriticPrompt(facts: DerivedFact[], proofs: readonly string[] = []): string {
   return `Tu es relecteur exigeant d'emails de prospection a froid. Tu NOTES, tu ne
 reecris pas. Sois severe : un 5 doit se meriter.
 
 ${factsBlock(facts)}
+
+${proofs.length ? "PREUVES AUTORISEES — seules experiences qu'Axel peut revendiquer :\n" + proofs.map((proof) => "- " + proof).join("\n") : "PREUVES AUTORISEES : aucune. Toute affirmation d'experience passee vaut 0."}
 
 Note chaque critere de 0 a 5, avec UNE phrase d'explication.
 
@@ -72,6 +76,11 @@ Note chaque critere de 0 a 5, avec UNE phrase d'explication.
   promesse intenable.
 - naturel : est-ce que ca sonne comme un humain qui ecrit a un humain, ou
   comme un texte genere ?
+- experienceVerifiee : le mail affirme-t-il une experience passee ("j'ai mis en
+  place", "pour des clients similaires", "j'accompagne") ? Si oui, elle doit
+  correspondre a une des PREUVES AUTORISEES ci-dessous. Toute autre
+  affirmation d'experience vaut 0 : c'est une invention, et elle se verifie en
+  rendez-vous. Un mail qui decrit au present ce qu'Axel sait faire vaut 5.
 
 Reponds UNIQUEMENT avec un objet JSON :
 {
@@ -80,7 +89,8 @@ Reponds UNIQUEMENT avec un objet JSON :
   "pertinenceMetier": { "score": 0, "note": "..." },
   "verifiabilite": { "score": 0, "note": "..." },
   "voix": { "score": 0, "note": "..." },
-  "naturel": { "score": 0, "note": "..." }
+  "naturel": { "score": 0, "note": "..." },
+  "experienceVerifiee": { "score": 0, "note": "..." }
 }`;
 }
 

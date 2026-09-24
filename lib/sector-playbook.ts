@@ -1,3 +1,5 @@
+import { isOpaqueNaf } from "./naf";
+
 /**
  * Playbook sectoriel — ce qui s'automatise VRAIMENT, métier par métier.
  *
@@ -188,9 +190,25 @@ const normalize = (value: string): string =>
 export function resolvePlaybook(
   nafCode: string | null | undefined,
   sector: string | null | undefined,
+  /**
+   * Texte libre — raison sociale, contenu du site, signaux. Seul recours quand
+   * le code NAF est celui d'un siege ou d'une holding : « RAS INTERIM
+   * JERECRUTE » est en 70.10Z, son NAF ne dit rien de son metier.
+   */
+  freeText?: string | null,
 ): SectorPlaybook {
   const division = typeof nafCode === "string" ? nafCode.replace(/\D/g, "").slice(0, 2) : "";
-  if (division) {
+  const opaque = isOpaqueNaf(nafCode);
+
+  if (opaque && freeText) {
+    const haystack = normalize(freeText);
+    const byText = PLAYBOOKS.find((playbook) =>
+      playbook.keywords.some((keyword) => haystack.includes(normalize(keyword))),
+    );
+    if (byText) return byText;
+  }
+
+  if (division && !opaque) {
     const byDivision = PLAYBOOKS.find((playbook) => playbook.divisions.includes(division));
     if (byDivision) return byDivision;
   }

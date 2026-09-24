@@ -17,13 +17,24 @@ export const PERSONA = {
   fullName: "Axel Remillat",
 
   /**
-   * Comment il se présente en une ligne.
+   * Comment il se présente, en plusieurs formulations.
    *
-   * « Étudiant » et « alternant » sont proscrits dans un mail : vrais, mais
-   * hors sujet pour un dirigeant qui évalue une prestation. Ce qui compte
-   * c'est ce qu'il sait faire.
+   * Une seule phrase de bio produisait le même paragraphe dans tous les mails,
+   * et « ingénieur » plaçait la conversation sur le CV plutôt que sur le
+   * problème du lecteur. D'où une liste : le choix est déterministe (voir
+   * `pickIntro`), donc un prospect garde toujours la même, mais deux prospects
+   * ne reçoivent pas la même phrase.
+   *
+   * « Étudiant » et « alternant » restent proscrits : vrais, mais hors sujet
+   * pour un dirigeant qui évalue une prestation.
    */
-  headline: "ingénieur freelance en IA, spécialisé en automatisation de tâches",
+  intros: [
+    "je suis freelance, je construis des automatisations pour des PME",
+    "je travaille en indépendant sur l'automatisation de tâches répétitives",
+    "je monte des flux automatisés pour des entreprises de votre taille",
+    "je suis à mon compte, spécialisé dans l'automatisation des tâches qui se répètent",
+    "mon métier, c'est de brancher des automatisations sur les outils déjà en place",
+  ],
 
   /** Le détail technique, quand il y a la place de préciser. */
   expertise: [
@@ -40,14 +51,16 @@ export const PERSONA = {
     "production de façon fiable et rentable",
 
   /**
-   * Preuve sociale. UNIQUEMENT ce qui est vrai.
+   * Ce qu'il vend, dit comme un FLUX et jamais comme un produit.
    *
-   * Pas de nom de client, pas de logo, pas de « +50 entreprises accompagnées ».
-   * Cette phrase est le plafond de ce qui peut être affirmé.
+   * L'ancienne « preuve sociale » (« des projets en startup et en entreprise »)
+   * a été supprimée : c'était une affirmation d'expérience sans preuve
+   * associée, exactement ce que `proofs` sert à encadrer. Les seules
+   * expériences citables sont celles de `proofs` marquées `publicOk`.
    */
-  socialProof:
-    "j'ai déjà mis en place ce type d'automatisation dans des projets en " +
-    "startup et en entreprise",
+  offerShape:
+    "un flux branché sur les outils qu'ils utilisent déjà — pas un logiciel à " +
+    "installer, pas une plateforme à adopter",
 
   signature: "Axel",
 
@@ -127,6 +140,19 @@ export function pickProof(painText: string): PersonaProof | null {
  * Rédigé à la première personne : le modèle écrit EN TANT QU'Axel, il ne
  * rédige pas une fiche sur lui.
  */
+/**
+ * Présentation de soi retenue pour ce prospect.
+ *
+ * Déterministe : le même prospect garde sa formulation d'une génération à
+ * l'autre, deux prospects n'ont pas la même. Le registre entre dans la graine
+ * pour qu'un changement de ton change aussi la phrase.
+ */
+export function pickIntro(seed: string): string {
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) % 100_000;
+  return PERSONA.intros[hash % PERSONA.intros.length];
+}
+
 export function personaBlock(): string {
   const cta = BOOKING_URL
     ? `Lien de prise de rendez-vous à placer dans le CTA, tel quel : ${BOOKING_URL}`
@@ -134,11 +160,13 @@ export function personaBlock(): string {
       "N'invente pas d'URL, ne mets pas de lien vide ni de crochets à compléter.";
 
   return `QUI TU ES (tu écris en son nom, à la première personne)
-- ${PERSONA.fullName}, ${PERSONA.headline}.
+- ${PERSONA.fullName}.
 - Domaines : ${PERSONA.expertise.join(", ")}.
 - Ce que tu fais : ${PERSONA.offer}.
-- Preuve que tu peux avancer, et RIEN de plus : « ${PERSONA.socialProof} ».
-  Aucun nom de client, aucun chiffre de portefeuille, aucune référence inventée.
+- FORME DE L'OFFRE, toujours : ${PERSONA.offerShape}. Les mots « logiciel »,
+  « progiciel », « solution » et « systeme de gestion integre » sont interdits.
+- Aucun nom de client, aucun chiffre de portefeuille, aucune référence inventée.
+- Ne dis JAMAIS « ingénieur » pour te présenter.
 - Ne mentionne JAMAIS un statut d'étudiant ou d'alternant.
 - Signature : « ${PERSONA.signature} ».
 - ${cta}`;

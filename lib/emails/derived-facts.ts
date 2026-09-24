@@ -1,17 +1,22 @@
 import type { Prospect } from "@/types";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
+import { isOpaqueNaf, nafLabel } from "@/lib/naf";
+import { companyAge, frenchDate, isFresh } from "@/lib/enrichment/dates";
 import { resolvePlaybook } from "@/lib/sector-playbook";
 
 /**
  * Faits du prospect, calculés côté serveur.
  *
- * Le LLM ne recevait que des valeurs brutes — « CA 40 878 286 € », « créée en
- * 1969 » — et n'en tirait rien d'autre qu'une paraphrase (« longue expérience
- * depuis 1969 »). Les déductions arithmétiques appartiennent au code : il les
- * fait juste, à coût nul, et le modèle n'a plus qu'à les interpréter.
+ * Deux responsabilités, au-delà du calcul :
  *
- * Chaque fait porte un `id` stable (f1, f2…) que l'analyse doit citer. C'est ce
- * qui rend une affirmation vérifiable : pas de factId, pas d'affirmation.
+ * 1. PRIORISER. Tous les faits ne valent pas une accroche. Une offre d'emploi
+ *    d'automaticien parue il y a trois semaines ouvre un mail ; un chiffre
+ *    d'affaires, non — c'est vrai, public, et ça n'apprend rien au lecteur.
+ *    Chaque fait porte donc un `hookTier` de 1 (meilleur) à 5.
+ *
+ * 2. DIRE CE QUI EST UTILISABLE DANS LE CORPS. Un ratio sert à raisonner, pas
+ *    à écrire : « 1 167 951 € par personne » dans un mail est grotesque. Ces
+ *    faits portent `bodyUsable: false` et seule leur forme arrondie passe.
  */
 
 export type FactSource =
@@ -22,197 +27,474 @@ export type FactSource =
   | "Signal web"
   | "calculé";
 
+/** 1 = ouvre un mail, 5 = ne l'ouvre jamais seul. */
+export type HookTier = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * CLE CANONIQUE d'un fait.
+ *
+ * Deux sources disaient la meme chose de deux facons — « 57 ans » d'un cote,
+ * « 58 ans » de l'autre ; le CA du registre et le CA repete par un article.
+ * Chaque fait porte donc une cle : a cle egale, une seule valeur survit, celle
+ * de la source la mieux classee (`SOURCE_RANK`). Le registre gagne toujours
+ * sur le web, par construction.
+ */
+export type FactKey =
+  | "signal"
+  | "parent_group"
+  | "naf"
+  | "family"
+  | "city"
+  | "website"
+  | "site_offer"
+  | "size_range"
+  | "headcount"
+  | "revenue"
+  | "net_income"
+  | "revenue_per_head"
+  | "age"
+  | "leader"
+  | "contact";
+
+/**
+ * Autorite des sources. Le registre (Annuaire, Pappers) fait foi sur tout fait
+ * de registre : un article de presse qui contredit le SIREN a tort.
+ */
+const SOURCE_RANK: Record<FactSource, number> = {
+  "Annuaire Entreprises": 4,
+  Pappers: 4,
+  "Site officiel": 3,
+  Hunter: 3,
+  "calculé": 2,
+  "Signal web": 1,
+};
+
+/** Cles pouvant porter plusieurs faits : chaque signal est un evenement distinct. */
+const MULTI_VALUE: Set<FactKey> = new Set(["signal"]);
+
 export interface DerivedFact {
   id: string;
+  /** Cle canonique : deux faits de meme cle ne coexistent pas. */
+  key: FactKey;
   label: string;
   value: string;
-  /**
-   * D'où vient VRAIMENT la donnée. Une date de création ou un chiffre
-   * d'affaires ne viennent jamais du site officiel : ils viennent du
-   * répertoire légal.
-   */
   source: FactSource;
   url?: string;
+  hookTier: HookTier;
+  /**
+   * `false` quand la valeur ne doit jamais apparaître telle quelle dans le
+   * corps : ratios, montants au centime.
+   */
+  bodyUsable: boolean;
 }
 
 const ANNUAIRE = "https://annuaire-entreprises.data.gouv.fr/entreprise/";
 
+/** Postes dont l'ouverture signale un besoin d'automatisation. */
+const AUTOMATION_ROLES =
+  /automaticien|automatisation|data\b|données|informatique|it\b|erp\b|adv\b|administration des ventes|planificateur|ordonnancement|supply|logistique|back[- ]office|assistant[e]? administratif|gestionnaire/i;
+
+const RECRUITMENT = /recrute|recrutement|offre d'emploi|poste|cdi\b|nous recherchons|rejoign/i;
+
 /**
- * Milieu d'une tranche d'effectif INSEE.
- *
- * Les libellés sont du texte libre (« 20 à 49 salariés », « 100 à 199 »,
- * « 10 000 salariés et plus »). On prend le milieu des deux bornes, ou la
- * borne seule quand la tranche est ouverte.
+ * Categories de poste directement automatisables, telles que l'extraction
+ * structuree les nomme. Meme liste que le scoring, meme sens.
  */
+const AUTOMATION_CATEGORIES = new Set(["automation", "data", "it", "ops"]);
+
 export function headcountMidpoint(sizeRange: string | null | undefined): number | null {
   if (!sizeRange) return null;
   const numbers = sizeRange.replace(/ /g, "").match(/\d[\d\s]*/g);
   if (!numbers?.length) return null;
-
   const bounds = numbers.map((value) => Number(value.replace(/\s/g, ""))).filter(Number.isFinite);
   if (!bounds.length) return null;
-  if (bounds.length === 1) {
-    // « 10 000 salariés et plus » : on ne peut que retenir la borne basse.
-    return bounds[0];
-  }
+  if (bounds.length === 1) return bounds[0];
   return Math.round((bounds[0] + bounds[1]) / 2);
 }
 
 /**
- * Lecture qualitative du CA par salarié.
+ * Lecture du CA par salarié, PAR FAMILLE MÉTIER.
  *
- * Les seuils sont grossiers et assumés : le but n'est pas de classer une
- * entreprise, c'est de dire au modèle ce que ce ratio SIGNIFIE, pour qu'il
- * en tire une implication au lieu de recracher le nombre.
+ * L'interprétation figée précédente sortait « revente d'énergie » pour une
+ * agence d'intérim, dont le CA est simplement gonflé par la masse salariale
+ * qu'elle refacture. Hors des familles connues, on ne conclut rien.
  */
-export function revenuePerHeadReading(perHead: number): string {
-  if (perHead >= 800_000) {
-    return "CA/salarié très élevé : forte volumétrie de flux, activité de négoce, de portage ou de revente d'énergie plutôt que de la production interne";
+export function revenuePerHeadReading(perHead: number, familyKey: string): string {
+  if (perHead < 200_000) return "CA/salarié modéré : activité à forte intensité de main-d'œuvre interne";
+
+  switch (familyKey) {
+    case "interim_rh":
+      return "CA gonflé par la masse salariale des intérimaires refacturée : beaucoup de contrats de mission et de relevés d'heures pour peu de permanents";
+    case "commerce":
+      return "CA élevé par salarié, typique du négoce : le volume de commandes traité dépasse largement la taille de l'équipe";
+    case "cvc_maintenance":
+      return "CA élevé par salarié : revente d'énergie ou de fluides, où la marge se joue sur le suivi des installations plus que sur la main-d'œuvre";
+    case "transport_logistique":
+      return "CA élevé par salarié : volume de flux transportés sans rapport avec l'effectif administratif";
+    default:
+      // Sans famille identifiee, on constate sans interpreter.
+      return "CA élevé rapporté à l'effectif : beaucoup de volume traité par peu de personnes";
   }
-  if (perHead >= 300_000) {
-    return "CA/salarié élevé : beaucoup de volume traité par peu de personnes, donc des flux administratifs denses";
-  }
-  if (perHead >= 120_000) {
-    return "CA/salarié dans la moyenne haute des services : activité à forte intensité de main-d'œuvre encadrée";
-  }
-  return "CA/salarié modéré : activité à forte intensité de main-d'œuvre";
 }
 
 const euros = (value: number): string =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(value);
+
+/** Montant arrondi, tel qu'on peut l'écrire dans un mail. */
+export function roundedEuros(value: number): string {
+  if (value >= 1_000_000) return `~${Math.round(value / 1_000_000)} M€`;
+  if (value >= 1_000) return `~${Math.round(value / 1_000)} k€`;
+  return `~${Math.round(value)} €`;
+}
+
+/** Effectif arrondi, tel qu'on peut l'écrire dans un mail. */
+export function roundedHeadcount(value: number): string {
+  if (value < 15) return "une petite équipe";
+  const decade = Math.round(value / 10) * 10;
+  return `une ${decade === 50 ? "cinquantaine" : `${decade}aine`} de personnes`.replace("100aine", "centaine");
+}
 
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 const num = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-export interface FactsResult {
-  facts: DerivedFact[];
-  /** Effectif retenu pour les ratios, et d'où il vient. */
-  headcount: number | null;
+/**
+ * Nettoie un extrait de signal : markdown, emojis, puces, et coupe à la phrase.
+ *
+ * Les extraits arrivaient bruts de Linkup — « - [Voir l'offre](https://…) 🔥 » —
+ * et le modèle recopiait la syntaxe dans le mail.
+ */
+export function cleanExcerpt(raw: string, maxLength = 220): string {
+  const text = raw
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[#*_`>|]/g, " ")
+    .replace(/^\s*[-•·]\s*/gm, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (text.length <= maxLength) return text;
+  const cut = text.slice(0, maxLength);
+  const lastStop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf(" ! "), cut.lastIndexOf(" ? "));
+  return (lastStop > 60 ? cut.slice(0, lastStop + 1) : cut).trim();
 }
 
-/**
- * Construit la liste des faits, numérotés dans l'ordre.
- *
- * L'ordre n'est pas neutre : identité, métier, taille, argent, puis les
- * déductions. Le modèle lit de haut en bas.
- */
+/** `true` si le signal ne fait que répéter une donnée du registre. */
+export function duplicatesRegistry(text: string): boolean {
+  const haystack = text.toLowerCase();
+  return (
+    /cr[ée]{2}e? le \d|immatricul|siren|rcs |capital social|forme juridique|code naf|ape\b/.test(haystack) &&
+    !/recrute|offre d'emploi|ouvre|inaugur|lev[ée]e de fonds|rachat|acquisition/.test(haystack)
+  );
+}
+
+export interface FactsResult {
+  facts: DerivedFact[];
+  headcount: number | null;
+  /** Famille métier retenue, éventuellement déduite hors NAF. */
+  familyKey: string;
+  familyLabel: string;
+  /** Société mère détectée, s'il y en a une. */
+  parent: string | null;
+  /** Dirigeant personne physique, pour la salutation. */
+  leaderPerson: string | null;
+  /** Holding par laquelle on est passe pour l'identifier. */
+  leaderVia: string | null;
+  /** Filiale d'un grand groupe : l'ecran et le score doivent le savoir. */
+  isLargeGroupSubsidiary: boolean;
+  /** Indices d'appartenance a un groupe, sources melangees. */
+  groupEvidence: string[];
+  /**
+   * Confiance dans le modele economique, 0 a 1. Plafonnee a 0,4 quand le site
+   * officiel n'a pas ete lu : sans site, on ne connait pas leur metier reel.
+   */
+  businessModelConfidence: number;
+}
+
 export function buildFacts(
   prospect: Prospect,
   contact?: DecisionMakerContact | null,
   now = new Date(),
+  siteText?: string | null,
 ): FactsResult {
   const figures = prospect.key_figures ?? {};
   const facts: DerivedFact[] = [];
   let counter = 0;
-  const add = (label: string, value: string | null, source: FactSource, url?: string) => {
+
+  const add = (
+    key: FactKey,
+    label: string,
+    value: string | null,
+    source: FactSource,
+    hookTier: HookTier,
+    options: { url?: string; bodyUsable?: boolean } = {},
+  ) => {
     if (!value) return;
+
+    // Deduplication par cle canonique : la source la mieux classee l'emporte,
+    // et a egalite la premiere arrivee reste.
+    if (!MULTI_VALUE.has(key)) {
+      const existing = facts.findIndex((fact) => fact.key === key);
+      if (existing >= 0) {
+        if (SOURCE_RANK[source] <= SOURCE_RANK[facts[existing].source]) return;
+        facts.splice(existing, 1);
+      }
+    }
+
     counter += 1;
-    facts.push({ id: `f${counter}`, label, value, source, ...(url ? { url } : {}) });
+    facts.push({
+      id: `f${counter}`,
+      key,
+      label,
+      value,
+      source,
+      hookTier,
+      bodyUsable: options.bodyUsable !== false,
+      ...(options.url ? { url: options.url } : {}),
+    });
   };
 
   const siren = str(prospect.siren);
   const annuaireUrl = siren ? `${ANNUAIRE}${siren}` : undefined;
-
-  // --- Identité et métier --------------------------------------------------
   const nafCode = str(figures.naf_code);
-  const playbook = resolvePlaybook(nafCode, prospect.sector);
-  add(
-    "Activité (NAF)",
-    nafCode && prospect.sector ? `${nafCode} — ${prospect.sector}` : (prospect.sector ?? nafCode),
-    "Annuaire Entreprises",
-    annuaireUrl,
-  );
-  if (playbook.processes.length) {
-    add("Famille métier", playbook.family, "calculé");
-  }
-  add("Ville", str(prospect.city), "Annuaire Entreprises", annuaireUrl);
-  add("Site officiel", str(prospect.website), "Site officiel", str(prospect.website) ?? undefined);
 
-  // --- Taille --------------------------------------------------------------
+  // Le metier se deduit du NAF, sauf pour un siege ou une holding : dans ce cas
+  // c'est le nom, le site et les signaux qui parlent.
+  const signalText = (prospect.signals ?? [])
+    .map((signal) => `${str(signal.label) ?? ""} ${str(signal.quote) ?? ""}`)
+    .join(" ");
+  const freeText = `${prospect.company_name} ${siteText ?? ""} ${signalText}`;
+  const playbook = resolvePlaybook(nafCode, prospect.sector, freeText);
+
+  // --- Tier 1 : recrutement lie a l'automatisation, recent ------------------
+  const parent = str(figures.parent_company);
+  for (const signal of prospect.signals ?? []) {
+    const quote = str(signal.quote);
+    const url = str(signal.url);
+    if (!quote || !url) continue;
+
+    const text = `${str(signal.label) ?? ""} ${quote}`;
+    if (duplicatesRegistry(text)) continue;
+
+    const date = str(signal.date);
+    const fresh = isFresh(date, now);
+    // La categorie vient de l'extraction structuree quand elle a tourne ;
+    // sinon on retombe sur la lecture du texte.
+    const category = typeof signal.category === "string" ? signal.category : null;
+    const isAutomationHire =
+      (category !== null && AUTOMATION_CATEGORIES.has(category)) ||
+      (RECRUITMENT.test(text) && AUTOMATION_ROLES.test(text));
+
+    // Un signal non date ou perime ne peut pas ouvrir un mail : rang 3 au mieux.
+    const tier: HookTier = isAutomationHire && fresh ? 1 : fresh ? 3 : 4;
+    add(
+      "signal",
+      isAutomationHire ? "Recrutement lié aux process" : "Signal web",
+      `${cleanExcerpt(quote)} (${frenchDate(date)})`,
+      "Signal web",
+      tier,
+      { url },
+    );
+  }
+
+  // --- Tier 2 : appartenance a un groupe -----------------------------------
+  // Deux indices INDEPENDANTS, affiches tels quels : le registre (representant
+  // personne morale) et le web (extraction structuree). Ils se confirment
+  // souvent ; quand ils divergent, le lecteur doit le voir.
+  const parentGroup = str(figures.parent_group);
+  const groupEvidence = Array.isArray(figures.group_evidence)
+    ? (figures.group_evidence as unknown[]).filter((item): item is string => typeof item === "string")
+    : [];
+  const isSubsidiary = figures.is_large_group_subsidiary === true;
+
+  add(
+    "parent_group",
+    "Société mère",
+    parentGroup ?? parent
+      ? [
+          parentGroup ? `Groupe ${parentGroup} (source web)` : null,
+          parent ? `Représentée par ${parent} (registre)` : null,
+          isSubsidiary ? "— décision probablement au niveau groupe" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null,
+    parentGroup ? "Signal web" : "Annuaire Entreprises",
+    2,
+    { url: str(figures.parent_group_url) ?? annuaireUrl },
+  );
+
+  // --- Tier 4 : metier et identite -----------------------------------------
+  const naf = nafLabel(nafCode, prospect.sector);
+  add(
+    "naf",
+    "Activité (NAF)",
+    naf ? `${nafCode} — ${naf.label}${naf.precision !== "sous-classe" ? ` (libellé de ${naf.precision})` : ""}` : prospect.sector,
+    "Annuaire Entreprises",
+    4,
+    { url: annuaireUrl },
+  );
+  if (isOpaqueNaf(nafCode)) {
+    add(
+      "family",
+      "Métier réel",
+      `${playbook.family} — déduit du nom et du site, le code NAF étant celui d'un siège ou d'une holding`,
+      "calculé",
+      4,
+    );
+  } else if (playbook.processes.length) {
+    add("family", "Famille métier", playbook.family, "calculé", 4);
+  }
+  add("city", "Ville", str(prospect.city), "Annuaire Entreprises", 5, { url: annuaireUrl });
+  // Un site absent est une INFORMATION : on l'ecrit, on ne paraphrase jamais
+  // le NAF pour combler le trou.
+  const siteStatus = str(figures.site_status);
+  add(
+    "website",
+    "Site officiel",
+    str(prospect.website) ?? (siteStatus === "non trouvé" ? "non trouvé" : null),
+    "Site officiel",
+    5,
+    { url: str(prospect.website) ?? undefined },
+  );
+  add("site_offer", "Ce que dit leur site", str(figures.site_offer), "Site officiel", 3);
+
+  // --- Tier 5 : taille et finances -----------------------------------------
   const sizeRange = str(prospect.size_range) ?? str(figures.size_range);
-  add("Tranche d'effectif", sizeRange, "Annuaire Entreprises", annuaireUrl);
+  add("size_range", "Tranche d'effectif", sizeRange, "Annuaire Entreprises", 5, { url: annuaireUrl });
 
   const exact = num(figures.headcount);
-  if (exact !== null) add("Effectif", `${exact} salariés`, "Pappers");
+  if (exact !== null) {
+    add("headcount", "Effectif", `${exact} salariés (à écrire « ${roundedHeadcount(exact)} »)`, "Pappers", 5);
+  }
   const headcount = exact ?? headcountMidpoint(sizeRange);
 
-  // --- Argent --------------------------------------------------------------
   const revenue = num(figures.revenue_eur);
   const revenueYear = num(figures.revenue_year);
   add(
+    "revenue",
     "Chiffre d'affaires",
-    revenue !== null ? `${euros(revenue)}${revenueYear ? ` (exercice ${revenueYear})` : ""}` : null,
+    revenue !== null
+      ? `${euros(revenue)}${revenueYear ? ` (exercice ${revenueYear})` : ""} — à écrire « ${roundedEuros(revenue)} »`
+      : null,
     "Pappers",
+    5,
+    { bodyUsable: false },
   );
-  add("Résultat net", num(figures.net_income_eur) !== null ? euros(figures.net_income_eur as number) : null, "Pappers");
-  add("Capital social", num(figures.capital_eur) !== null ? euros(figures.capital_eur as number) : null, "Pappers");
+  add(
+    "net_income",
+    "Résultat net",
+    num(figures.net_income_eur) !== null ? euros(figures.net_income_eur as number) : null,
+    "Pappers",
+    5,
+    { bodyUsable: false },
+  );
 
-  // --- Déductions arithmétiques -------------------------------------------
   if (revenue !== null && headcount) {
     const perHead = Math.round(revenue / headcount);
     add(
+      "revenue_per_head",
       "CA par salarié",
-      `${euros(perHead)} par personne (${euros(revenue)} ÷ ${headcount}) — ${revenuePerHeadReading(perHead)}`,
+      `${euros(perHead)} par personne — ${revenuePerHeadReading(perHead, playbook.key)}`,
       "calculé",
+      5,
+      // Un ratio sert a RAISONNER. Il n'a rien a faire dans le corps du mail.
+      { bodyUsable: false },
     );
   }
 
-  const founded = num(figures.founded_year);
-  if (founded !== null) {
-    const age = now.getFullYear() - founded;
-    add("Ancienneté", `${age} ans (créée en ${founded})`, "Annuaire Entreprises", annuaireUrl);
+  // Age : un seul calcul, centralise dans lib/enrichment/dates.
+  const age = companyAge(
+    { foundedOn: str(figures.founded_on), foundedYear: num(figures.founded_year) },
+    now,
+  );
+  if (age) {
+    add(
+      "age",
+      "Ancienneté",
+      `${age.years} ans (créée en ${str(figures.founded_on)?.slice(0, 4) ?? num(figures.founded_year)})`,
+      "Annuaire Entreprises",
+      5,
+      { url: annuaireUrl },
+    );
   }
 
-  add("Forme juridique", str(figures.legal_form), "Annuaire Entreprises", annuaireUrl);
+  const leaderPerson = str(figures.leader_person);
+  const leaderVia = str(figures.leader_via);
   add(
+    "leader",
     "Dirigeant",
-    str(figures.leader)
-      ? `${str(figures.leader)}${str(figures.leader_role) ? ` (${str(figures.leader_role)})` : ""}`
-      : null,
-    "Pappers",
+    leaderPerson ? `${leaderPerson}${leaderVia ? ` (via ${leaderVia})` : ""}` : null,
+    leaderVia ? "Pappers" : "Annuaire Entreprises",
+    5,
+    { url: annuaireUrl },
   );
 
-  // --- Contact nominatif ---------------------------------------------------
   if (contact?.email) {
     const parts = [contact.full_name, contact.position].filter(Boolean).join(", ");
     add(
+      "contact",
       "Contact identifié",
       `${parts || contact.email}${contact.confidence != null ? ` — confiance ${contact.confidence} %` : ""}`,
       "Hunter",
+      5,
     );
   }
 
-  // --- Signaux attestés ----------------------------------------------------
-  for (const signal of prospect.signals ?? []) {
-    const quote = str(signal.quote);
-    if (!quote || !str(signal.url)) continue;
-    add(
-      "Signal web",
-      `${quote}${str(signal.date) ? ` (${str(signal.date)})` : ""}`,
-      "Signal web",
-      str(signal.url) ?? undefined,
-    );
-  }
+  // L'ordre de lecture EST la priorite : le modele lit de haut en bas.
+  facts.sort((a, b) => a.hookTier - b.hookTier);
+  facts.forEach((fact, index) => {
+    fact.id = `f${index + 1}`;
+  });
 
-  return { facts, headcount };
+  return {
+    facts,
+    headcount,
+    familyKey: playbook.key,
+    familyLabel: playbook.family,
+    parent,
+    leaderPerson,
+    leaderVia,
+    isLargeGroupSubsidiary: isSubsidiary,
+    groupEvidence,
+    businessModelConfidence:
+      siteStatus === "lu" ? (str(figures.site_offer) ? 0.8 : 0.6) : siteStatus === "trouvé" ? 0.5 : 0.4,
+  };
 }
 
-/** Bloc numéroté injecté dans le prompt d'analyse. */
+/** Bloc numéroté injecté dans le prompt d'analyse, trié par potentiel d'accroche. */
 export function factsBlock(facts: DerivedFact[]): string {
   if (!facts.length) return "FAITS : aucun. Dis-le plutot que d'inventer.";
-  return `FAITS NUMEROTES — tu ne peux affirmer que ce qui s'appuie sur ces ids.
+
+  const tierName: Record<HookTier, string> = {
+    1: "ACCROCHE PRIORITAIRE",
+    2: "groupe",
+    3: "signal recent",
+    4: "metier",
+    5: "contexte — n'ouvre jamais un mail seul",
+  };
+
+  return `FAITS NUMEROTES, tries par potentiel d'accroche. Tu ne peux affirmer que
+ce qui s'appuie sur ces ids. Les faits de rang 5 ne peuvent porter l'accroche
+que si AUCUN fait de rang 1 a 4 n'existe.
 ${facts
-  .map((fact) => `[${fact.id}] ${fact.label} : ${fact.value}  (source : ${fact.source}${fact.url ? `, ${fact.url}` : ""})`)
+  .map(
+    (fact) =>
+      `[${fact.id}] (rang ${fact.hookTier} — ${tierName[fact.hookTier]}) ${fact.label} : ${fact.value}` +
+      `${fact.bodyUsable ? "" : "  << NE PAS ECRIRE CETTE VALEUR TELLE QUELLE DANS LE MAIL >>"}` +
+      `  (source : ${fact.source}${fact.url ? `, ${fact.url}` : ""})`,
+  )
   .join("\n")}`;
 }
 
 /**
- * Nombres presents dans les faits, sous toutes leurs formes utiles.
+ * Nombres autorisés dans le CORPS.
  *
- * Sert au validateur : un nombre du mail doit exister ici, brut, arrondi au
- * millier ou au million. Sinon il a ete invente.
+ * Seuls les faits `bodyUsable` comptent, plus les formes arrondies des
+ * montants. Un ratio ou un montant au centime n'y figure pas : c'est ce qui
+ * empêche « 1 167 951 € par personne » d'atterrir dans un mail.
  */
 export function knownNumbers(facts: DerivedFact[]): Set<number> {
   const known = new Set<number>();
@@ -221,12 +503,14 @@ export function knownNumbers(facts: DerivedFact[]): Set<number> {
     for (const match of matches) {
       const value = Number(match[0].replace(/\s/g, "").replace(",", "."));
       if (!Number.isFinite(value)) continue;
-      known.add(value);
-      known.add(Math.round(value));
-      // « 40 878 286 € » doit autoriser « 41 M€ » et « 40,9 M€ ».
-      known.add(Math.round(value / 1_000));
+      // Les arrondis restent permis meme pour un fait non utilisable brut :
+      // « ~41 M€ » vient bien du chiffre d'affaires.
       known.add(Math.round(value / 1_000_000));
       known.add(Math.floor(value / 1_000_000));
+      known.add(Math.round(value / 1_000));
+      if (!fact.bodyUsable) continue;
+      known.add(value);
+      known.add(Math.round(value));
     }
   }
   return known;

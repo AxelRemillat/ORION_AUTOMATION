@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Prospect } from "@/types";
 import type { PageContent } from "@/lib/enrichment/linkup";
 import { playbookBlock, resolvePlaybook } from "@/lib/sector-playbook";
-import { factsBlock, type DerivedFact } from "@/lib/emails/derived-facts";
+import { factsBlock, knownNumbers, type DerivedFact } from "@/lib/emails/derived-facts";
 
 /**
  * ÉTAPE 1 — raisonner avant d'écrire.
@@ -94,10 +94,60 @@ export function isGenericAnalysis(analysis: DeepAnalysis): boolean {
   return !pain || isBannedPain(`${pain.task} ${pain.whyHere}`) || pain.specificity < 2;
 }
 
+/**
+ * Retire d'un texte d'analyse les nombres qui ne viennent pas des faits.
+ *
+ * Une consigne ne suffit pas : « 268 points de livraison » et « 80 000
+ * interimaires » sont revenus dans les accroches parce que le site est fourni
+ * en entree et que le modele y pioche le chiffre le plus spectaculaire. Le
+ * validateur les rattrapait ensuite, ce qui coutait une reecriture entiere a
+ * chaque mail. Autant les couper ici, avant la redaction.
+ *
+ * On enleve le nombre et son unite immediate, pas la phrase : « vos 80 000
+ * interimaires » devient « vos interimaires », ce qui reste vrai et dit la
+ * meme chose sans s'appuyer sur une plaquette commerciale.
+ */
+export function stripUnknownNumbers(text: string, allowed: Set<number>): string {
+  return text
+    .replace(/(\d[\d\s]*(?:[.,]\d+)?)(\s*(?:%|€|EUR|M€|k€|GWh|MWh|kWh|tonnes?|t))?/gi, (match, digits: string) => {
+      const value = Number(String(digits).replace(/\s/g, "").replace(",", "."));
+      if (!Number.isFinite(value)) return match;
+      return allowed.has(value) || allowed.has(Math.round(value)) ? match : "";
+    })
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s([,.;:])/g, "$1")
+    .trim();
+}
+
+/** Applique `stripUnknownNumbers` a tous les textes que lira le redacteur. */
+export function sanitizeAnalysis(analysis: DeepAnalysis, facts: DerivedFact[]): DeepAnalysis {
+  const allowed = knownNumbers(facts);
+  const clean = (text: string) => stripUnknownNumbers(text, allowed);
+
+  return {
+    ...analysis,
+    businessModel: { ...analysis.businessModel, text: clean(analysis.businessModel.text) },
+    implications: analysis.implications.map((item) => ({ ...item, text: clean(item.text) })),
+    painCandidates: analysis.painCandidates.map((pain) => ({
+      ...pain,
+      task: clean(pain.task),
+      whyHere: clean(pain.whyHere),
+      automationIdea: clean(pain.automationIdea),
+    })),
+    hookCandidates: analysis.hookCandidates.map((hook) => ({ ...hook, text: clean(hook.text) })),
+  };
+}
+
 export function buildAnalysisPrompt(prospect: Prospect, facts: DerivedFact[]): string {
+  // Le nom et les signaux servent de repli quand le code NAF est opaque
+  // (siege social, holding) : c'est la seule facon de retrouver le vrai metier.
+  const freeText = [prospect.company_name, prospect.sector, ...(prospect.signals ?? []).map((signal) => `${signal.label ?? ""} ${signal.quote ?? ""}`)]
+    .filter(Boolean)
+    .join(" ");
   const playbook = resolvePlaybook(
     typeof prospect.key_figures?.naf_code === "string" ? prospect.key_figures.naf_code : null,
     prospect.sector,
+    freeText,
   );
 
   return `Tu es analyste. Ta seule tache : comprendre ce que fait REELLEMENT cette
@@ -129,11 +179,18 @@ METHODE
        secteur repond en une seconde ;
    (c) signal : uniquement si un fait "Signal web" existe. Sinon ne produis
        que (a) et (b).
+   REGLE DE RANG, non negociable : chaque accroche doit s'appuyer sur le fait
+   du MEILLEUR rang disponible. Si un fait de rang 1 existe (recrutement sur un
+   metier automatisable, de moins de 60 jours), au moins une accroche doit
+   partir de lui. Une accroche qui ne cite que des faits de rang 5 (chiffre
+   d'affaires, resultat, anciennete) est rejetee tant qu'il reste un fait de
+   rang 1 a 4 non utilise : ces chiffres sont du contexte, pas une nouvelle.
    INTERDIT : tout compliment ("j'ai ete impressionne", "votre engagement"),
    et toute simple reformulation d'un fait ("fondee en 1969", "longue
    experience"). Une accroche doit APPRENDRE quelque chose au lecteur ou lui
    montrer qu'on a compris son modele economique.
-5. chosen : l'accroche et le pain retenus. Critere : specificite maximale ET
+5. chosen : l'accroche et le pain retenus. Critere, dans cet ordre : le rang
+   des faits cites (1 avant 2, 2 avant 3...), puis la specificite, puis la
    verifiabilite. L'accroche doit passer le TEST DE SUBSTITUTION — si on
    remplace le nom par une autre entreprise du meme code NAF, la phrase ne doit
    plus tenir. Explique ton choix dans "rationale".
@@ -180,7 +237,13 @@ sur les faits numerotes ci-dessus.`;
 
   return `${header}
 
-CONTENU DU SITE OFFICIEL (source la plus fiable sur leur metier reel) :
+CONTENU DU SITE OFFICIEL (source la plus fiable sur leur metier reel).
+ATTENTION : les CHIFFRES qui s'y trouvent sont du contexte pour toi, pas des
+faits citables. Ils sont souvent datés, arrondis ou commerciaux. N'en recopie
+AUCUN dans "text" — ni dans une implication, ni dans une accroche. Un chiffre
+ne peut venir que des FAITS NUMEROTES. Dis « beaucoup de points de livraison »
+plutot que « 268 points de livraison ».
+
 ${pages.map((page) => `--- ${page.url} ---\n${page.markdown}`).join("\n\n")}`;
 }
 
@@ -242,7 +305,7 @@ export async function runAnalysisWithRetry(
   const context = buildAnalysisContext(prospect, pages);
 
   const first = parseDeepAnalysis(await ask(system, context, 0.2, "analyse-metier"));
-  if (first.analysis) return first;
+  if (first.analysis) return { analysis: sanitizeAnalysis(first.analysis, facts) };
 
   const retry = parseDeepAnalysis(
     await ask(
@@ -255,5 +318,7 @@ Recommence en respectant a la lettre le nombre d'elements et les factIds obligat
       "analyse-metier:retry",
     ),
   );
-  return retry.analysis ? retry : { analysis: null, error: retry.error ?? first.error };
+  return retry.analysis
+    ? { analysis: sanitizeAnalysis(retry.analysis, facts) }
+    : { analysis: null, error: retry.error ?? first.error };
 }

@@ -24,6 +24,9 @@ export function ProspectHeader({
   onGenerate: () => void;
 }) {
   const revenue = prospect.key_figures?.revenue_eur;
+  // Un prospect perdu a deja dit non : relancer la generation, c'est payer des
+  // credits pour ecrire a quelqu'un qu'on ne recontactera pas.
+  const closed = prospect.status === "perdu";
 
   return (
     <Card className="relative overflow-hidden">
@@ -66,14 +69,22 @@ export function ProspectHeader({
           </div>
         </div>
 
-        <Button
-          onClick={onGenerate}
-          loading={loading}
-          variant={hasAnalysis ? "secondary" : "primary"}
-        >
-          <Sparkles className="h-4 w-4" aria-hidden />
-          {hasAnalysis ? "Relancer l'analyse" : "Analyser et générer l'email"}
-        </Button>
+        <div className="flex flex-col items-end gap-1.5">
+          <Button
+            onClick={onGenerate}
+            loading={loading}
+            disabled={closed}
+            variant={hasAnalysis ? "secondary" : "primary"}
+          >
+            <Sparkles className="h-4 w-4" aria-hidden />
+            {hasAnalysis ? "Relancer l'analyse" : "Analyser et générer l'email"}
+          </Button>
+          {closed && (
+            <p className="text-[12px] text-muted">
+              Prospect clôturé : passez-le hors de « Perdu » pour générer un email.
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

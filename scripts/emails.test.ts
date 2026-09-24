@@ -60,12 +60,13 @@ console.log("\n2. CA par salarié");
   const digits = (perHead?.value ?? "").replace(/[\s  ]/g, "");
   check("valeur attendue (~1,17 M)", digits.includes("1167951"), perHead?.value);
   check("source « calculé »", perHead?.source === "calculé");
-  check("lecture qualitative jointe", Boolean(perHead?.value.includes("très élevé")), perHead?.value);
+  check("lecture qualitative jointe", Boolean(perHead?.value.includes("intérimaires")), perHead?.value);
   check(
     "seuils de lecture",
-    revenuePerHeadReading(900_000).includes("très élevé") &&
-      revenuePerHeadReading(150_000).includes("moyenne haute") &&
-      revenuePerHeadReading(50_000).includes("modéré"),
+    revenuePerHeadReading(900_000, "interim_rh").includes("intérimaires") &&
+      revenuePerHeadReading(900_000, "commerce").includes("négoce") &&
+      !revenuePerHeadReading(900_000, "interim_rh").includes("énergie") &&
+      revenuePerHeadReading(50_000, "industrie").includes("modéré"),
   );
 }
 
@@ -170,14 +171,7 @@ console.log("\n8. Validateur — objet");
   check("point d'exclamation rejeté", validateSubject("contrats de mission !", "RAS").some((f) => f.includes("exclamation")));
 }
 
-console.log("\n9. Nombres connus : arrondis autorisés");
-{
-  const facts = buildFacts(prospect({ key_figures: { revenue_eur: 40_878_286 } })).facts;
-  const known = knownNumbers(facts);
-  check("valeur exacte", known.has(40878286));
-  check("arrondi au million", known.has(41));
-  check("un nombre absent reste absent", !known.has(777));
-}
+// Les nombres, l'experience et le NAF sont couverts par emails-extra.test.ts.
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -28,7 +28,7 @@ export function AnalysisPanel({
    * chiffre d'affaires seul ne dit rien d'un besoin — c'est le croisement qui
    * en dit quelque chose.
    */
-  needLead?: { text: string; confidence: number } | null;
+  needLead?: { text: string; confidence: number; confidenceDetail?: string } | null;
 }) {
   const toast = useToast();
 
@@ -48,7 +48,10 @@ export function AnalysisPanel({
               <div className="mt-3 border-t border-primary/20 pt-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-[13px] font-medium text-muted">Indice de besoin</p>
-                  <Badge tone="neutral">déduction · {Math.round(needLead.confidence * 100)} %</Badge>
+                  {/* Le detail au survol : sans lui, « 60 % » est un chiffre magique. */}
+                  <span title={needLead.confidenceDetail ?? undefined}>
+                    <Badge tone="neutral">déduction · {Math.round(needLead.confidence * 100)} %</Badge>
+                  </span>
                 </div>
                 <p className="mt-1 text-[13px] leading-relaxed text-text">{needLead.text}</p>
               </div>
@@ -103,6 +106,19 @@ export function AnalysisPanel({
                 Copier
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!contact && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-2.5 p-4">
+            <AtSign className="h-4 w-4 shrink-0 text-faint" aria-hidden />
+            <Badge tone="warning">sans contact nominatif</Badge>
+            <p className="text-[13px] text-muted">
+              Aucun décideur trouvé sur ce domaine : le mail s’ouvrira sur
+              « Bonjour, ».
+            </p>
           </CardContent>
         </Card>
       )}
