@@ -104,6 +104,32 @@
   --rgb-vs-blue: 76 212 230;
   --rgb-vs-red: 255 42 42;
   --rgb-vs-ink: 244 248 255;
+
+  /* Scene decorative de l'en-tete du Cockpit.
+     Invariantes par theme, comme la scene VERSUS : les deux scenes coexistent
+     dans le DOM pendant le fondu croise, et celle qui s'efface ne doit pas
+     changer de couleurs en chemin. */
+  --scene-day-sky-top: #bfe6f7;
+  --scene-day-sky-low: #e7f7fb;
+  --scene-sun: #ffd98a;
+  --scene-sun-core: #fff3d2;
+  --scene-cloud: #ffffff;
+  --scene-sea-far: #6fd3e7;
+  --scene-sea-mid: #35a9de;
+  --scene-sea-near: #1b7fb8;
+  --scene-sand: #f2dfb8;
+  --scene-foam: #ffffff;
+  --scene-palm: #2f7d63;
+  --scene-bird: #0f4c6b;
+
+  --scene-night-sky-top: #0a1730;
+  --scene-night-sky-low: #1b2a55;
+  --scene-moon: #f3e2b0;
+  --scene-moon-core: #fff8e2;
+  --scene-star: #fdf6e0;
+  --scene-figure: #060c1c;
+  --scene-night-sea-far: #1e3a6b;
+  --scene-night-sea-near: #122447;
 }
 
 /* --- Crepuscule ocean : preference systeme, sauf choix explicite « light » -- */

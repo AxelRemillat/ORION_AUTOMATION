@@ -1,0 +1,109 @@
+/**
+ * Scene decorative de l'en-tete du Cockpit.
+ *
+ * Tout est en CSS : le basculement jour / nuit reprend EXACTEMENT les
+ * selecteurs de theme de globals.css, si bien qu'aucun JavaScript ne lit le
+ * theme. Les deux scenes sont dans le DOM en permanence et se croisent en
+ * opacite — c'est ce qui garantit l'absence d'ecart d'hydratation.
+ *
+ * Les animations ne touchent que `transform` et `opacity`.
+ */
+
+/* Le masque depend de l'orientation du bandeau : a droite sur large ecran,
+   en haut sur mobile ou la scene devient une baniere. */
+.hero-scene {
+  -webkit-mask-image: linear-gradient(to bottom, black 68%, transparent);
+  mask-image: linear-gradient(to bottom, black 68%, transparent);
+}
+
+@media (min-width: 640px) {
+  .hero-scene {
+    -webkit-mask-image: linear-gradient(to right, transparent, black 35%);
+    mask-image: linear-gradient(to right, transparent, black 35%);
+  }
+}
+
+.hero-scene__layer {
+  position: absolute;
+  inset: 0;
+  transition: opacity 600ms ease-in-out;
+}
+
+/* Jour par defaut ; la nuit prend le relais aux memes conditions que les
+   tokens sombres : preference systeme non contredite, ou choix explicite. */
+.hero-scene__day {
+  opacity: 1;
+}
+.hero-scene__night {
+  opacity: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hero-scene__day {
+    opacity: 0;
+  }
+  :root:not([data-theme="light"]) .hero-scene__night {
+    opacity: 1;
+  }
+}
+
+:root[data-theme="dark"] .hero-scene__day {
+  opacity: 0;
+}
+:root[data-theme="dark"] .hero-scene__night {
+  opacity: 1;
+}
+
+/* Bonus : pendant le fondu, le soleil se couche et la lune se leve. */
+.scene-sun-group,
+.scene-moon-group {
+  transition: transform 600ms ease-in-out;
+}
+.scene-sun-group {
+  transform: translateY(0);
+}
+.scene-moon-group {
+  transform: translateY(64px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .scene-sun-group {
+    transform: translateY(76px);
+  }
+  :root:not([data-theme="light"]) .scene-moon-group {
+    transform: translateY(0);
+  }
+}
+:root[data-theme="dark"] .scene-sun-group {
+  transform: translateY(76px);
+}
+:root[data-theme="dark"] .scene-moon-group {
+  transform: translateY(0);
+}
+
+/* Pivots de rotation.
+   `transform-box: fill-box` cale l'origine sur la boite propre de l'element :
+   sans lui, l'origine se rapporte au systeme du viewBox et une palme greffee
+   sur un groupe deja translate tournerait autour d'un point arbitraire. */
+.scene-pivot-top {
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+}
+.scene-pivot-corner {
+  transform-box: fill-box;
+  transform-origin: 0% 100%;
+}
+
+/* --------------------------------------------------------------------------
+   Mise en pause — hors ecran ou onglet cache.
+   `animation-play-state` fige sans reinitialiser : la scene reprend ou elle
+   s'etait arretee.
+   -------------------------------------------------------------------------- */
+.hero-scene[data-paused="true"] * {
+  animation-play-state: paused !important;
+}
+
+/* --------------------------------------------------------------------------
+   Animations. Les etats de BASE sont deja composes : en mouvement reduit,
+   toutes les animations sont coupees et la scene reste jolie, figee.
+   -------------------------------------------------------------------------- */

@@ -1,3 +1,5 @@
+import { HeroScene } from "./hero-scene/hero-scene";
+
 /**
  * En-tête du Cockpit — la signature visuelle d'ORION.
  * --accent-grad pose un filet lumineux en haut, --halo diffuse la brume derrière
@@ -15,20 +17,23 @@ export function CockpitHeader({
 }) {
   return (
     <header
-      className="shadow-mist relative overflow-hidden rounded-xl border p-6 sm:p-8"
+      className="shadow-mist relative overflow-hidden rounded-xl border"
       style={{ borderColor: "var(--line)", background: "var(--surface)" }}
     >
       <div
         aria-hidden
         className="bg-brand-grad pointer-events-none absolute inset-x-0 top-0 h-1"
       />
+      {/* Scene decorative : bandeau en haut sur mobile, moitie droite ensuite. */}
+      <HeroScene />
+
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{ background: "var(--halo)" }}
       />
 
-      <div className="relative">
+      <div className="relative p-6 sm:p-8">
         <p className="font-data text-[11px] font-semibold uppercase tracking-[0.12em] text-primary-ink">
           {date}
         </p>
