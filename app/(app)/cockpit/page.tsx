@@ -1,16 +1,23 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import type { Deal, InboundMessage, Message, Prospect, Reminder } from "@/types";
+import type {
+  ActionState,
+  Deal,
+  InboundMessage,
+  Message,
+  Prospect,
+  Reminder,
+} from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
-import { FocusCard } from "./_components/focus-card";
+import { ActionQueue } from "./_components/action-queue";
 import { InboxCard } from "./_components/inbox-card";
 import { KpiRow } from "./_components/kpi-row";
 import { DueRemindersCard, RepliesCard } from "./_components/queues";
 import { SignalsCard } from "./_components/signals-card";
-import { EXAMPLE_FOCUS, EXAMPLE_SIGNALS } from "./_lib/example";
+import { EXAMPLE_SIGNALS } from "./_lib/example";
+import { buildQueue } from "./_lib/queue";
 import {
   dueReminders,
-  focusActions,
   pendingInbound,
   pendingReplies,
   topSignals,
@@ -37,24 +44,40 @@ export default async function CockpitPage() {
   await requireUser();
   const supabase = createClient();
 
-  const [prospectsResult, messagesResult, dealsResult, remindersResult, inboundResult] =
-    await Promise.all([
-      supabase.from("prospects").select("*"),
-      supabase.from("messages").select("*"),
-      supabase.from("deals").select("*"),
-      supabase.from("reminders").select("*"),
-      supabase.from("inbound_messages").select("*"),
-    ]);
+  const [
+    prospectsResult,
+    messagesResult,
+    dealsResult,
+    remindersResult,
+    inboundResult,
+    statesResult,
+  ] = await Promise.all([
+    supabase.from("prospects").select("*"),
+    supabase.from("messages").select("*"),
+    supabase.from("deals").select("*"),
+    supabase.from("reminders").select("*"),
+    supabase.from("inbound_messages").select("*"),
+    supabase.from("action_states").select("*"),
+  ]);
 
   const prospects = (prospectsResult.data ?? []) as Prospect[];
   const messages = (messagesResult.data ?? []) as Message[];
   const deals = (dealsResult.data ?? []) as Deal[];
   const reminders = (remindersResult.data ?? []) as Reminder[];
   const inbound = (inboundResult.data ?? []) as InboundMessage[];
+  const states = (statesResult.data ?? []) as ActionState[];
 
-  const focus = focusActions(prospects, messages, reminders);
   const signals = topSignals(prospects);
   const inboxItems = pendingInbound(inbound, prospects);
+
+  // Une seule file, triee par urgence : on n'en montre que la tete.
+  const queue = buildQueue({
+    prospects,
+    messages,
+    reminders,
+    inbound: inboxItems.map((item) => ({ id: item.id, prospect_id: item.prospectId })),
+    states,
+  });
 
   const date = DATE_FORMAT.format(new Date());
   const subtitle = inboxItems.length
@@ -74,10 +97,7 @@ export default async function CockpitPage() {
       {/* En premier, avant même les actions du jour : quelqu'un attend. */}
       <InboxCard items={inboxItems} />
 
-      <FocusCard
-        actions={focus.length ? focus : EXAMPLE_FOCUS}
-        isExample={focus.length === 0}
-      />
+      <ActionQueue visible={queue.visible} total={queue.total} />
 
       <KpiRow kpis={weeklyKpis(prospects, messages, deals)} />
 

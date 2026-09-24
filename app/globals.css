@@ -81,6 +81,15 @@
   --rgb-good-ink: 14 122 100;
   --rgb-warn-ink: 138 96 17;
   --rgb-lost-ink: 166 62 74;
+
+  /* Bloc « Actions du jour » — surface d'alerte, volontairement HORS de la
+     palette Ciel & Lagon. Identique en clair et en sombre : c'est une alarme,
+     elle ne se fond pas dans le decor. Chaque arret du degrade tient >= 5:1
+     avec --flame-ink, pour que le texte reste lisible AA par-dessus. */
+  --flame-grad: linear-gradient(135deg, #c2381a 0%, #a8112b 52%, #7e1259 100%);
+  --flame-ink: #fff5ef;
+  --flame-ink-soft: rgba(255, 245, 239, 0.78);
+  --flame-line: rgba(255, 245, 239, 0.22);
 }
 
 /* --- Crepuscule ocean : preference systeme, sauf choix explicite « light » -- */
