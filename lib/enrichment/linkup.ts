@@ -10,6 +10,7 @@
  */
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
+import { linkupFetchCost } from "@/lib/usage/pricing";
 import type { Result } from "./http";
 
 const SEARCH_URL = "https://api.linkup.so/v1/search";
@@ -96,4 +97,84 @@ export async function fetchWebResults(company: {
     }));
 
   return { ok: true, data: results };
+}
+
+/** Contenu texte d'une page du site du prospect. */
+export interface PageContent {
+  url: string;
+  /** Markdown nettoye, tronque. */
+  markdown: string;
+}
+
+/** Chemins ou l'on trouve, en francais, ce que fait vraiment l'entreprise. */
+const ABOUT_PATHS = ["/services", "/nos-services", "/activites", "/a-propos", "/qui-sommes-nous"];
+
+/** Longueur retenue par page : assez pour comprendre le metier, pas plus. */
+const PAGE_CHARS = 2_500;
+
+/**
+ * Lit une page du site du prospect via Linkup /v1/fetch.
+ *
+ * Mode standard sans rendu JS : c'est dix fois moins cher qu'une recherche
+ * (0,001 $ contre 0,005 $) et suffisant pour du contenu editorial. Le cout est
+ * journalise separement du tarif « recherche », qui ne s'applique pas ici.
+ */
+export async function fetchPage(url: string, prospectId?: string | null): Promise<Result<PageContent>> {
+  const key = process.env.LINKUP_API_KEY;
+  if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };
+
+  const response = await fetchJson<{ markdown?: string }>(
+    "https://api.linkup.so/v1/fetch",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, mode: "standard", renderJs: false }),
+    },
+    15_000,
+  );
+
+  if (response.ok) {
+    await recordUnitUsage({
+      service: "linkup",
+      operation: "fetch",
+      units: 1,
+      unitCost: linkupFetchCost(),
+      prospectId,
+    });
+  }
+  if (!response.ok) return response;
+
+  const markdown = (response.data.markdown ?? "").replace(/\n{3,}/g, "\n\n").trim();
+  if (!markdown) return { ok: false, error: "page vide" };
+
+  return { ok: true, data: { url, markdown: markdown.slice(0, PAGE_CHARS) } };
+}
+
+/**
+ * Accueil + une page « services / a propos ».
+ *
+ * Deux pages au maximum, en parallele : c'est le meilleur rapport
+ * comprehension / cout. Une page qui echoue n'empeche pas l'autre.
+ */
+export async function fetchSiteContent(
+  website: string,
+  prospectId?: string | null,
+): Promise<PageContent[]> {
+  let origin: string;
+  try {
+    origin = new URL(website.startsWith("http") ? website : `https://${website}`).origin;
+  } catch {
+    return [];
+  }
+
+  const home = await fetchPage(origin, prospectId);
+  const pages: PageContent[] = home.ok ? [home.data] : [];
+
+  // On ne tente qu'UNE page secondaire : deviner cinq chemins couterait cinq
+  // appels pour, au mieux, une page utile.
+  const guessed = ABOUT_PATHS.find((path) => home.ok && home.data.markdown.includes(path));
+  const secondary = await fetchPage(`${origin}${guessed ?? ABOUT_PATHS[0]}`, prospectId);
+  if (secondary.ok) pages.push(secondary.data);
+
+  return pages;
 }

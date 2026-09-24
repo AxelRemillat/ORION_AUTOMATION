@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Prospect } from "@/types";
 import { AnalysisPanel } from "./analysis-panel";
 import { EmailEditor } from "./email-editor";
+import { AnalysisTracks } from "./_components/analysis-tracks";
 import { DraftPreview } from "./_components/draft-preview";
 import { ErrorBanner } from "./_components/error-banner";
 import { SequenceShell } from "./_components/sequence-shell";
@@ -50,14 +51,19 @@ export function ProspectionClient({
     setError(null);
   }
 
-  async function generate(prospect: Prospect) {
+  /**
+   * `trackIndex` rejoue la generation sur une piste ecartee par l'analyse.
+   * L'etape 1 est refaite : c'est le prix a payer pour que la preuve et le
+   * detail unique restent coherents avec le nouveau process vise.
+   */
+  async function generate(prospect: Prospect, trackIndex?: number) {
     setGenerating(true);
     setError(null);
     try {
-      // `tone` est déjà transmis : la route l'ignore aujourd'hui (cf. _lib/tones.ts).
       const data = await postJson<GenerateResponse>("/api/emails/generate", {
         prospectId: prospect.id,
         tone,
+        trackIndex,
       });
       setAnalysis(data);
       setDraft(data.email);
@@ -163,6 +169,13 @@ export function ProspectionClient({
                   to={analysis.contact?.email ?? selected.email}
                 />
               </div>
+
+              {/* Sous le brouillon : le raisonnement, et de quoi en changer. */}
+              <AnalysisTracks
+                analysis={analysis.analysis}
+                regenerating={generating}
+                onPickTrack={(index) => generate(selected, index)}
+              />
             </>
           )}
         </div>

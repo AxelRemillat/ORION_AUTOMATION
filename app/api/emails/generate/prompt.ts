@@ -1,6 +1,7 @@
 import type { Prospect } from "@/types";
 import { personaBlock } from "@/lib/persona";
 import { toneInstruction, type ToneKey } from "@/lib/tones";
+import type { DeepAnalysis } from "./analysis";
 
 /**
  * Prompt d'analyse commerciale.
@@ -19,90 +20,157 @@ import { toneInstruction, type ToneKey } from "@/lib/tones";
  */
 
 /**
- * Exemple de la voix cible, fourni par Axel.
+ * Quatre exemples de la VOIX, volontairement dissemblables.
  *
- * Il sert de reference de RYTHME et de registre — phrases simples, nuances
- * assumees, benefice flou mais concret, sortie courte. Le modele s'en inspire,
- * il ne le recopie pas : deux prospects ne doivent jamais recevoir le meme
- * texte. La salutation fait exception, voir la regle d'ouverture.
+ * Un exemple unique se faisait recopier : les mails sortaient identiques a
+ * 99 %. Quatre ouvertures differentes — observation, question, signal,
+ * reference metier — montrent un registre plutot qu'un moule. La consigne le
+ * dit explicitement : aucune phrase ne doit etre reprise.
  */
-const VOICE_EXAMPLE = `Salut, je m'appelle Axel Remillat, je suis ingenieur freelance en IA, plus precisement en automatisation de taches. Sans vouloir paraitre trop intrusif, il me semble que votre boite pourrait largement optimiser son systeme de commandes et de livraisons. D'apres mes estimations, cela pourrait vous faire economiser plusieurs milliers d'euros par an et pas mal de temps. Si ca vous interesse, j'ai deja automatise ce genre de processus dans des structures similaires. N'hesitez pas a me recontacter ou a utiliser le lien ci-dessous pour reserver un echange de 30 min. Cordialement, Axel`;
+const VOICE_EXAMPLES = [
+  // Ouverture par une observation sur l'entreprise.
+  `Bonjour, je suis Axel Remillat, ingenieur freelance en IA specialise en automatisation. En regardant votre site, j'ai vu que vous gerez vos demandes d'intervention par telephone et par mail. Il me semble que la prise de rendez-vous et la planification des tournees pourraient tourner toutes seules, ce qui vous rendrait pas mal de temps chaque semaine. J'ai deja construit ce genre de systeme dans des structures qui fonctionnaient pareil. Si le sujet vous parle, je vous propose 30 minutes pour en discuter.`,
+
+  // Ouverture par une question.
+  `Bonjour, combien d'heures par semaine passez-vous a ressaisir les releves d'heures de vos interimaires ? Je suis Axel Remillat, ingenieur freelance, je construis des automatisations pour des PME. D'apres mes estimations, sur un volume comme le votre, la collecte et le rapprochement avec la facturation pourraient etre traites automatiquement. Ce n'est pas un gros chantier. Je vous laisse mon lien si vous voulez qu'on en parle.`,
+
+  // Ouverture par le signal repere.
+  `Bonjour, j'ai vu que vous ouvrez un second atelier a Caen. Axel Remillat, ingenieur freelance en IA : j'aide des PME a automatiser leurs process avant qu'ils ne saturent. Une ouverture, c'est souvent le moment ou le suivi des commandes et les relances fournisseurs commencent a couter cher en temps. Sans vouloir paraitre intrusif, c'est exactement ce que je sais outiller. On en parle 30 minutes ?`,
+
+  // Ouverture par la reference metier.
+  `Bonjour, dans le froid industriel, la tracabilite des fluides et les rapports d'intervention finissent presque toujours par se faire a la main, le soir. Axel Remillat, ingenieur freelance en IA, je fabrique des automatisations pour ce type de metier. Chez vous, vu la taille de l'equipe technique, ca pourrait representer plusieurs milliers d'euros par an. J'ai deja mene ce genre de chantier en entreprise. Je vous mets mon lien si vous voulez creuser.`,
+];
 
 /**
- * Prompt systeme, module par le registre choisi.
- *
- * Le modele n'ecrit pas SUR Axel : il ecrit A SA PLACE. D'ou le bloc persona
- * a la premiere personne, et des regles de voix plutot que des regles de
- * contenu marketing.
+ * Banque de nuances. Le modele en pioche UNE OU DEUX, jamais les memes d'un
+ * mail a l'autre. Les imposer toutes produisait un tic reconnaissable.
  */
-export function buildSystemPrompt(tone: ToneKey): string {
-  return `Tu ecris un email de prospection a froid A LA PLACE d'Axel. Tu n'es pas
-un assistant qui redige pour lui : tu es lui. Premiere personne, sa voix.
+const HEDGES = [
+  "il me semble que",
+  "sans vouloir paraitre intrusif",
+  "d'apres mes estimations",
+  "pourrait",
+  "si je ne me trompe pas",
+  "de ce que j'en vois",
+  "souvent",
+  "a priori",
+];
+
+/** Plusieurs facons VRAIES de dire la meme chose. Optionnelle. */
+const SOCIAL_PROOFS = [
+  "j'ai deja mis en place ce type d'automatisation dans des projets en startup et en entreprise",
+  "j'ai deja construit ce genre de systeme, en startup comme en entreprise",
+  "c'est le type de chantier que j'ai deja mene, cote startup et cote entreprise",
+];
+
+/** Fins possibles. Varier evite la signature mecanique. */
+const CLOSINGS = [
+  "un echange de 30 minutes",
+  "30 minutes pour en parler",
+  "un rapide appel si le sujet vous parle",
+  "quelques minutes pour voir si ca a du sens chez vous",
+];
+
+export interface WritingInput {
+  tone: ToneKey;
+  /**
+   * Graine de variation — le nom de l'entreprise. Elle decide QUELLE preuve
+   * sociale, QUELLE fin et QUELLES nuances sont proposees. Laisser le modele
+   * choisir dans une liste ne suffisait pas : il prenait toujours la premiere,
+   * et deux mails d'affilee se terminaient pareil.
+   */
+  seed: string;
+  /** Sortie de l'etape 1 : c'est elle qui porte la specificite. */
+  analysis: DeepAnalysis;
+  /**
+   * Ouvertures et fins des derniers mails generes. Le modele a interdiction de
+   * les reutiliser : c'est le principal levier anti-repetition.
+   */
+  avoid: string[];
+}
+
+/**
+ * ETAPE 2 — la redaction, a partir du JSON d'analyse.
+ *
+ * Le modele n'analyse plus rien ici : il met en mots un diagnostic deja pose.
+ * Cela libere la temperature pour le style sans relacher la rigueur du fond.
+ */
+export function buildWritingPrompt(input: WritingInput): string {
+  const { analysis, avoid } = input;
+
+  // Rotation deterministe : meme entreprise -> meme choix, entreprises
+  // differentes -> formulations differentes.
+  let hash = 0;
+  for (const char of input.seed) hash = (hash * 31 + char.charCodeAt(0)) % 100_000;
+  const pick = <T,>(list: readonly T[], offset: number): T => list[(hash + offset) % list.length];
+
+  const socialProof = pick(SOCIAL_PROOFS, 0);
+  const closing = pick(CLOSINGS, 1);
+  // Trois nuances proposees sur huit : le modele en retient une ou deux.
+  const hedges = [pick(HEDGES, 2), pick(HEDGES, 5), pick(HEDGES, 7)];
+
+  const avoidBlock = avoid.length
+    ? `INTERDIT DE REUTILISER — ouvertures et fins de tes derniers mails. Aucune
+de ces phrases, ni une variante proche :
+${avoid.map((line) => `- ${line}`).join("\n")}`
+    : "";
+
+  return `Tu ecris un email de prospection a froid A LA PLACE d'Axel. Tu n'es pas un
+assistant qui redige pour lui : tu es lui. Premiere personne, sa voix.
 
 ${personaBlock()}
 
-LA VOIX — c'est le plus important
-- Ton humain, chaleureux mais professionnel. Quelqu'un qui ecrit a quelqu'un,
-  pas un service commercial qui adresse une cible.
-- Des nuances, systematiquement. Utilise au moins deux de ces tournures :
-  « il me semble que », « sans vouloir paraitre intrusif », « d'apres mes
-  estimations », « pourrait ». Elles ne sont pas de la politesse : elles
-  disent la verite, tu ne connais pas leur entreprise de l'interieur.
-- Zero jargon corporate, zero formule creuse. Bannis notamment : « acteur
-  incontournable », « je me permets de vous solliciter », « solution
-  innovante », « j'espere que vous allez bien », « dans un monde ou »,
-  « levier de croissance », « synergies ».
-- Varie le rythme : des phrases courtes, une plus longue. Pas quatre phrases
-  de meme longueur a la suite.
-- Pas de superlatif, pas d'emoji, pas de markdown, aucun crochet a completer.
+CE QUE L'ANALYSE A ETABLI — c'est ta matiere, utilise-la
+- Leur metier : ${analysis.business_model}
+- Le process a adresser : ${analysis.pain_point}
+- Pourquoi eux, precisement : ${analysis.pourquoi_lui}
+- Angle d'accroche : ${analysis.angle}
+- Detail unique a cette entreprise : ${analysis.detail_unique}
 
-STRUCTURE
-1. « Bonjour » — c'est la salutation, meme si l'exemple ci-dessous dit
-   « Salut ». Puis qui tu es et ce que tu fais, en UNE ligne.
-2. L'accroche : un FAIT REEL les concernant, pris dans les DONNEES. Un signal
-   web, une info de leur site, leur metier. Jamais « creee en 1969 » ni
-   « X salaries » : une fiche d'identite n'est pas une accroche.
-3. L'hypothese : ce que tu penses pouvoir automatiser chez eux, formule comme
-   une hypothese, jamais comme un diagnostic.
-4. Le benefice, estime et FLOU : « plusieurs milliers d'euros par an »,
-   « pas mal de temps », toujours precede d'une nuance. Jamais un chiffre
-   precis invente.
-5. La preuve sociale, telle qu'elle est ecrite dans QUI TU ES. Rien de plus.
-6. Un CTA doux, avec le lien de rendez-vous s'il y en a un. Signature « Axel ».
+REGLES NON NEGOCIABLES
+1. L'accroche DOIT contenir le detail unique ci-dessus, ou s'y referer
+   clairement. Un mail qui pourrait partir a une autre entreprise est rate.
+2. Le process nomme est celui de l'analyse, dans le vocabulaire du metier.
+   Jamais "processus administratifs", "back-office", "gagner en efficacite",
+   "optimiser vos processus".
+3. Aucun chiffre precis invente. Les ordres de grandeur flous et nuances sont
+   permis ("plusieurs milliers d'euros par an", "pas mal de temps") ; un nombre
+   precis ne l'est jamais.
+4. Objet du mail : specifique a CETTE entreprise, lisible seul. Jamais
+   "optimisation de vos processus" ni une formule interchangeable.
 
-Longueur : 80 a 130 mots pour le corps.
+LA VOIX
+- Ton humain, chaleureux mais professionnel. Quelqu'un qui ecrit a quelqu'un.
+- Nuances : choisis UNE OU DEUX tournures dans cette banque, pas plus, et
+  change d'un mail a l'autre. Pour celui-ci : ${hedges.join(" / ")}
+- Preuve sociale : OPTIONNELLE, et si tu la mets, c'est CELLE-CI, mot pour mot
+  ou presque : « ${socialProof} ». Rien au-dela : aucun nom de client, aucun
+  chiffre de portefeuille. Si elle alourdit le mail, supprime-la.
+- Fin : propose « ${closing} ». Ne reprends pas une autre formule de cloture.
+- Zero jargon corporate, zero formule creuse ("acteur incontournable", "je me
+  permets de vous solliciter", "solution innovante", "j'espere que vous allez
+  bien"). Pas d'emoji, pas de markdown, aucun crochet a completer.
+- Varie le rythme : des phrases courtes, une plus longue. Pas quatre phrases de
+  meme longueur a la suite.
 
-CE QUE TU NE PEUX PAS ECRIRE
-- Aucun chiffre precis qui ne figure pas LITTERALEMENT dans les DONNEES.
-  « 300 heures perdues », « 12 000 EUR d'economies », « -40 % de traitement » :
-  interdits, meme suivis de « environ ». Un ordre de grandeur flou et nuance
-  est permis ; un nombre precis invente ne l'est jamais.
-- Aucun fait sur eux qui ne vienne pas des DONNEES. Si tu n'as ni signal ni
-  info exploitable, appuie-toi sur leur secteur et leur taille, et reste
-  modeste : un mail court et honnete vaut mieux qu'un mail precis et faux.
-- Aucune reference client, aucun nom d'entreprise accompagnee, aucun
-  pourcentage de reussite.
+STRUCTURE — variable, c'est voulu
+L'ordre des blocs peut changer : ouvre sur le detail unique, sur une question,
+sur le signal, ou sur une observation metier. Tu dois seulement dire qui tu es
+quelque part dans les deux premieres phrases, poser l'hypothese, proposer un
+echange et signer "Axel". Longueur : 60 a 130 mots.
+
+${avoidBlock}
+
+QUATRE EXEMPLES DE LA VOIX — quatre ouvertures differentes, pour montrer le
+registre. N'en reutilise AUCUNE phrase : ce sont des exemples de ton, pas des
+modeles a remplir.
+${VOICE_EXAMPLES.map((example, index) => `Exemple ${index + 1} :\n${example}`).join("\n\n")}
 
 REGISTRE DEMANDE
-${toneInstruction(tone)}
+${toneInstruction(input.tone)}
 
-EXEMPLE DE LA VOIX A IMITER (le style, le rythme, les nuances — pas le contenu,
-qui doit etre entierement adapte a ce prospect) :
-"${VOICE_EXAMPLE}"
-
-Reponds UNIQUEMENT avec un objet JSON de cette forme :
-{
-  "pain_point": "une phrase, formulee comme une hypothese",
-  "evidence": [
-    { "label": "nature du fait", "value": "le fait, repris tel quel des DONNEES", "source": "d'ou il vient" }
-  ],
-  "email": { "subject": "objet court, sans majuscules inutiles", "body": "corps de l'email" }
-}
-"evidence" contient 1 a 4 faits REELS, recopies depuis les DONNEES, qui
-justifient l'hypothese. Chaque entree cite sa provenance dans "source"
-(ex : "Pappers", "Signal web", "Annuaire public", "Site de l'entreprise").
-N'y mets jamais une estimation : si tu n'as qu'un secteur et un effectif,
-"evidence" ne contient que ces deux faits.`;
+Reponds UNIQUEMENT avec un objet JSON :
+{ "email": { "subject": "objet court, specifique a cette entreprise", "body": "corps de l'email" } }`;
 }
 
 /** Formate un montant en euros, sans inventer de precision. */
@@ -215,16 +283,16 @@ export function buildContext(prospect: Prospect): string {
 }
 
 /** Un fait reel retenu pour justifier le pain point, avec sa provenance. */
+/** Un fait REEL retenu par l'analyse, avec sa provenance. */
 export interface Evidence {
   label: string;
   value: string;
   source: string;
 }
 
-export interface Analysis {
-  pain_point: string;
-  evidence: Evidence[];
-  email: { subject: string; body: string };
+export interface GeneratedEmail {
+  subject: string;
+  body: string;
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -247,8 +315,8 @@ export function extractEuroAmounts(text: string): number[] {
   return amounts;
 }
 
-/** Valide la reponse du modele ; renvoie null si elle est inexploitable. */
-export function parseAnalysis(raw: string): Analysis | null {
+/** Valide la sortie de l'etape 2 ; renvoie null si elle est inexploitable. */
+export function parseEmail(raw: string): GeneratedEmail | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -257,30 +325,12 @@ export function parseAnalysis(raw: string): Analysis | null {
   }
   if (!parsed || typeof parsed !== "object") return null;
 
-  const source = parsed as Record<string, unknown>;
-  const email = (source.email ?? {}) as Record<string, unknown>;
+  const email = ((parsed as Record<string, unknown>).email ?? {}) as Record<string, unknown>;
   const body = asString(email.body);
   if (!body) return null;
 
-  // Un fait sans provenance n'est pas un fait : on l'ecarte plutot que de le
-  // presenter a l'utilisateur comme verifie.
-  const evidence = Array.isArray(source.evidence)
-    ? source.evidence
-        .map((item) => item as Record<string, unknown>)
-        .filter(
-          (item) => asString(item.label) && asString(item.value) && asString(item.source),
-        )
-        .slice(0, 4)
-        .map((item) => ({
-          label: asString(item.label),
-          value: asString(item.value),
-          source: asString(item.source),
-        }))
-    : [];
-
   return {
-    pain_point: asString(source.pain_point, "Hypothese non formulee."),
-    evidence,
-    email: { subject: asString(email.subject, "Une piste d'automatisation"), body },
+    subject: asString(email.subject, "Une piste d'automatisation"),
+    body,
   };
 }

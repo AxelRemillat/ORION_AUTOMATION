@@ -72,9 +72,14 @@ export async function recordUnitUsage(params: {
   operation: string;
   units?: number;
   prospectId?: string | null;
+  /**
+   * Prix unitaire en euros, quand l'operation n'est pas au tarif standard du
+   * service — une lecture de page Linkup ne coute pas le prix d'une recherche.
+   */
+  unitCost?: number;
 }): Promise<void> {
   const units = params.units ?? 1;
-  const { unitCost } = serviceUnit(params.service);
+  const unitCost = params.unitCost ?? serviceUnit(params.service).unitCost;
   await insert({
     service: params.service,
     operation: params.operation,

@@ -128,6 +128,15 @@ export function serviceUnit(service: Exclude<ApiService, "openai">): ServiceUnit
   }
 }
 
+/**
+ * Tarif d'une lecture de page via Linkup (/v1/fetch).
+ * Mode standard, markdown, sans rendu JS : 0,001 $ l'appel.
+ */
+export function linkupFetchCost(): number {
+  const usd = envNumber("LINKUP_FETCH_USD", 0.001);
+  return Number((usd * USD_EUR_RATE).toFixed(6));
+}
+
 /** Budget mensuel OpenAI, optionnel, pour estimer ce qu'il reste. */
 export function openAiMonthlyBudget(): number | null {
   const raw = process.env.OPENAI_MONTHLY_BUDGET_EUR;

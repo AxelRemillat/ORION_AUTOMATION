@@ -1,4 +1,5 @@
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
+import type { DeepAnalysis } from "@/app/api/emails/generate/analysis";
 
 /**
  * Un fait REEL retenu par l'analyse, recopie des donnees collectees, avec sa
@@ -19,4 +20,10 @@ export interface GenerateResponse {
   email: { subject: string; body: string };
   contact: DecisionMakerContact | null;
   warnings: EnrichmentWarning[];
+  /**
+   * Resultat de l'etape d'analyse metier. Affiche sous le brouillon pour que
+   * l'utilisateur voie sur quoi le mail s'appuie — et puisse basculer sur une
+   * autre piste sans relancer une recherche.
+   */
+  analysis: DeepAnalysis;
 }
