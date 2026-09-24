@@ -15,6 +15,27 @@ export interface PendingInbound {
   receivedAt: string;
 }
 
+/**
+ * Un email de la boîte de réception, corps compris.
+ *
+ * Le corps part vers le client pour alimenter le panneau de lecture : il est
+ * donc tronqué, et la liste est plafonnée. On n'envoie pas toute l'archive.
+ */
+export interface InboxEntry {
+  id: string;
+  prospectId: string | null;
+  /** Nom du prospect s'il est connu, sinon l'adresse de l'expéditeur. */
+  label: string;
+  fromEmail: string;
+  subject: string | null;
+  excerpt: string;
+  body: string;
+  category: InboundCategory;
+  receivedAt: string;
+  /** Non lu = pas encore traité depuis le Cockpit. */
+  unread: boolean;
+}
+
 /** Une action proposée en tête de Cockpit. */
 export interface FocusAction {
   id: string;

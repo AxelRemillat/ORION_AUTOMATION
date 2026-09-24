@@ -149,6 +149,66 @@ function frenchDate(iso: string): string {
   return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
 }
 
+/**
+ * Registres et agregateurs : ils REPRODUISENT la fiche legale, ils n'attestent
+ * aucun evenement. Un mot-cle qui y apparait vient de la raison sociale ou du
+ * libelle NAF, jamais d'une actualite.
+ *
+ * A ne pas confondre avec DIRECTORY_HOSTS plus bas : les sites d'emploi
+ * (Indeed, Welcome to the Jungle, LinkedIn) n'y figurent PAS — une offre
+ * publiee chez eux est au contraire une preuve valable de recrutement.
+ */
+const REGISTRY_HOSTS = [
+  "annuaire-entreprises.data.gouv.fr",
+  "entreprise.data.gouv.fr",
+  "data.gouv.fr",
+  "pappers.fr",
+  "societe.com",
+  "societe.ninja",
+  "infogreffe.fr",
+  "bodacc.fr",
+  "verif.com",
+  "manageo.fr",
+  "kompass.com",
+  "infonet.fr",
+  "score3.fr",
+  "b-reputation.com",
+  "dirigeant.com",
+  "entreprises.lefigaro.fr",
+  "usinenouvelle.com/annuaire",
+];
+
+/** Vrai si l'hote se contente de republier des donnees d'immatriculation. */
+export function isRegistryHost(host: string): boolean {
+  const clean = host.toLowerCase().replace(/^www\./, "");
+  return REGISTRY_HOSTS.some((blocked) => clean === blocked || clean.endsWith(`.${blocked}`));
+}
+
+/**
+ * Retire d'un texte toute occurrence de la raison sociale.
+ *
+ * Sans cela, « RAS INTERIM JERECRUTE » declenchait un signal Recrutement : le
+ * mot-cle « recrute » etait dans son propre NOM. On masque donc les alias
+ * complets ET chaque mot significatif du nom avant de tester les regles. Une
+ * entreprise qui s'appelle « Recrutement Plus » ne peut plus emettre de signal
+ * de recrutement sur son seul nom — c'est voulu : ce n'est pas une actualite.
+ */
+export function maskCompanyName(text: string, aliases: string[]): string {
+  let masked = normalize(text);
+  const tokens = new Set<string>();
+  for (const alias of aliases) {
+    if (alias.length >= 4) tokens.add(alias);
+    for (const word of alias.split(/[^a-z0-9]+/)) {
+      if (word.length >= 5) tokens.add(word);
+    }
+  }
+  // Du plus long au plus court : masquer l'alias entier avant ses morceaux.
+  for (const token of [...tokens].sort((a, b) => b.length - a.length)) {
+    masked = masked.split(token).join(" ");
+  }
+  return masked.replace(/\s+/g, " ").trim();
+}
+
 export interface QualifyTarget {
   name: string;
   website?: string | null;
@@ -177,6 +237,8 @@ export function qualifyWebResults(
     if (signals.length >= MAX_SIGNALS) break;
 
     const host = hostOf(result.url);
+    // Un registre ne prouve rien : il republie la fiche d'immatriculation.
+    if (isRegistryHost(host)) continue;
     const onOwnSite = Boolean(ownDomain && host.endsWith(ownDomain));
     const namedInTitle = aliases.some((alias) => normalize(result.title).includes(alias));
 
@@ -185,7 +247,12 @@ export function qualifyWebResults(
 
     let matched: { rule: Rule; sentence: string; named: boolean } | null = null;
     for (const rule of RULES) {
-      const sentence = candidates.find((candidate) => rule.pattern.test(candidate));
+      // La regle doit matcher HORS raison sociale : le nom de l'entreprise
+      // n'est pas une preuve de ce qu'elle fait.
+      const sentence = candidates.find(
+        (candidate) =>
+          rule.pattern.test(candidate) && rule.pattern.test(maskCompanyName(candidate, aliases)),
+      );
       if (!sentence) continue;
       const named = aliases.some((alias) => normalize(sentence).includes(alias));
       // Ancrage obligatoire : la preuve doit concerner CETTE entreprise.
@@ -205,7 +272,7 @@ export function qualifyWebResults(
     if (onOwnSite) confidence += 0.5;
     if (namedInTitle) confidence += 0.15;
     if (foundDate) confidence += 0.2;
-    if (rule.pattern.test(result.title)) confidence += 0.1;
+    if (rule.pattern.test(maskCompanyName(result.title, aliases))) confidence += 0.1;
     confidence = Math.min(1, Number(confidence.toFixed(2)));
 
     if (confidence < rule.minConfidence) continue;

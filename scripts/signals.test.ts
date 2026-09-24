@@ -8,7 +8,7 @@
  *
  * Execution : `npm run test:signals` (aucune dependance de test).
  */
-import { qualifyWebResults } from "../lib/enrichment/signals";
+import { isRegistryHost, maskCompanyName, qualifyWebResults } from "../lib/enrichment/signals";
 import type { WebResult } from "../lib/enrichment/linkup";
 import { heatScore, whyNow } from "../lib/scoring";
 import type { ProspectSignal } from "../types";
@@ -155,6 +155,78 @@ console.log("\n6. Une page de recrutement sur le domaine de l'entreprise est acc
   );
   check("signal emis", signals.length === 1, JSON.stringify(signals));
   check("type = recrutement", signals[0]?.type === "recrutement");
+}
+
+console.log("\n7. Un mot-cle present dans la RAISON SOCIALE n'est pas un signal");
+{
+  // Cas reel : « RAS INTERIM JERECRUTE » recevait un signal Recrutement parce
+  // que son propre nom contient « recrute », et la source etait l'annuaire
+  // public — qui ne fait que republier sa fiche d'immatriculation.
+  const name = "RAS INTERIM JERECRUTE";
+
+  const fromRegistry = qualifyWebResults(
+    [
+      web({
+        title: "RAS INTERIM JERECRUTE - Annuaire des Entreprises",
+        url: "https://annuaire-entreprises.data.gouv.fr/entreprise/ras-interim-jerecrute",
+        snippet:
+          "RAS INTERIM JERECRUTE, SAS au capital de 40 000 euros, immatriculée au RCS de Lyon. Activité principale : activités des agences de travail temporaire.",
+      }),
+    ],
+    { name },
+  );
+  check("aucun signal depuis un annuaire", fromRegistry.length === 0, JSON.stringify(fromRegistry));
+
+  const fromPress = qualifyWebResults(
+    [
+      web({
+        title: "RAS INTERIM JERECRUTE ouvre une agence à Nantes",
+        url: "https://www.ouest-france.fr/eco/ras-interim",
+        snippet:
+          "RAS INTERIM JERECRUTE, agence de travail temporaire, est désormais présente à Nantes. Publié le 03/09/2026.",
+      }),
+    ],
+    { name },
+  );
+  check(
+    "meme hors annuaire, le nom seul ne prouve pas un recrutement",
+    !fromPress.some((signal) => signal.type === "recrutement"),
+    JSON.stringify(fromPress.map((signal) => signal.type)),
+  );
+
+  check(
+    "le nom complet est masque avant le test des regles",
+    maskCompanyName("RAS INTERIM JERECRUTE recrute", ["ras interim jerecrute"]) === "recrute",
+    maskCompanyName("RAS INTERIM JERECRUTE recrute", ["ras interim jerecrute"]),
+  );
+  check(
+    "un mot isole du nom est masque aussi",
+    !maskCompanyName("Jerecrute publie une offre", ["ras interim jerecrute"]).includes("jerecrute"),
+  );
+
+  check("annuaire-entreprises reconnu comme registre", isRegistryHost("annuaire-entreprises.data.gouv.fr"));
+  check("pappers reconnu comme registre", isRegistryHost("pappers.fr"));
+  check("sous-domaine de registre reconnu", isRegistryHost("www.societe.com"));
+  check("la presse n'est pas un registre", !isRegistryHost("lesechos.fr"));
+  // Les sites d'emploi publient de vraies offres : les bloquer tuerait le signal.
+  check("un site d'emploi n'est pas un registre", !isRegistryHost("welcometothejungle.com"));
+
+  const realJob = qualifyWebResults(
+    [
+      web({
+        title: "Zeta Technologies recrute un gestionnaire ADV",
+        url: "https://www.welcometothejungle.com/fr/companies/zeta/jobs",
+        snippet:
+          "Zeta Technologies recrute un gestionnaire ADV en CDI pour accompagner sa croissance. Publié le 12/08/2026.",
+      }),
+    ],
+    { name: "ZETA TECHNOLOGIES" },
+  );
+  check(
+    "une offre d'emploi reelle reste un signal",
+    realJob.some((signal) => signal.type === "recrutement"),
+    JSON.stringify(realJob.map((signal) => signal.type)),
+  );
 }
 
 console.log(

@@ -10,19 +10,13 @@ import type {
 } from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
 import { ActionQueue } from "./_components/action-queue";
-import { InboxCard } from "./_components/inbox-card";
-import { KpiRow } from "./_components/kpi-row";
-import { DueRemindersCard, RepliesCard } from "./_components/queues";
+import { InboxPanel } from "./_components/inbox-panel";
+import { KpiChart } from "./_components/kpi-chart";
 import { SignalsCard } from "./_components/signals-card";
 import { EXAMPLE_SIGNALS } from "./_lib/example";
 import { buildQueue } from "./_lib/queue";
-import {
-  dueReminders,
-  pendingInbound,
-  pendingReplies,
-  topSignals,
-  weeklyKpis,
-} from "./_lib/compute";
+import { buildAllPeriods } from "./_lib/series";
+import { inboxEntries, topSignals } from "./_lib/compute";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -35,10 +29,13 @@ const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", {
 /**
  * COCKPIT — centre de commandement quotidien, écran d'accueil d'ORION.
  *
- * Tout ce qui est calculable l'est à partir des tables réelles (prospects,
- * messages, deals, reminders). Les deux zones sans back dédié — actions du jour
- * et signaux — sont DÉDUITES du pipeline existant, et ne basculent sur des
- * exemples étiquetés que si la base est encore vide.
+ * Quatre blocs, dans l'ordre où on les traite : ce qu'il faut FAIRE, ce qui est
+ * ARRIVÉ, ce qui a été CAPTÉ, puis la tendance. Chacun a son registre visuel —
+ * rouge, ambre, violet/cyan, neutre — pour qu'un coup d'œil suffise à savoir
+ * de quoi on lui parle.
+ *
+ * Les chiffres détaillés vivent sur /stats : le Cockpit n'en garde qu'une
+ * courbe. Tout vient des tables réelles ; rien n'est inventé.
  */
 export default async function CockpitPage() {
   await requireUser();
@@ -68,20 +65,24 @@ export default async function CockpitPage() {
   const states = (statesResult.data ?? []) as ActionState[];
 
   const signals = topSignals(prospects);
-  const inboxItems = pendingInbound(inbound, prospects);
+  const mailbox = inboxEntries(inbound, prospects);
+  const unread = mailbox.filter((entry) => entry.unread).length;
 
-  // Une seule file, triee par urgence : on n'en montre que la tete.
+  // Une seule file, triee par urgence : on n'en montre que la tete. Les
+  // relances dues y remontent deja, d'ou le retrait de leur ancien bloc.
   const queue = buildQueue({
     prospects,
     messages,
     reminders,
-    inbound: inboxItems.map((item) => ({ id: item.id, prospect_id: item.prospectId })),
+    inbound: inbound
+      .filter((message) => !message.handled)
+      .map((message) => ({ id: message.id, prospect_id: message.prospect_id })),
     states,
   });
 
   const date = DATE_FORMAT.format(new Date());
-  const subtitle = inboxItems.length
-    ? `${inboxItems.length} réponse${inboxItems.length > 1 ? "s" : ""} à traiter. Commencez par là.`
+  const subtitle = unread
+    ? `${unread} réponse${unread > 1 ? "s" : ""} à traiter. Commencez par là.`
     : prospects.length
     ? `${prospects.length} prospect${prospects.length > 1 ? "s" : ""} en portefeuille. Voici par quoi commencer.`
     : "Votre portefeuille est vide : l'écran se remplira dès vos premiers prospects.";
@@ -94,22 +95,16 @@ export default async function CockpitPage() {
         date={date.charAt(0).toUpperCase() + date.slice(1)}
       />
 
-      {/* En premier, avant même les actions du jour : quelqu'un attend. */}
-      <InboxCard items={inboxItems} />
-
       <ActionQueue visible={queue.visible} total={queue.total} />
 
-      <KpiRow kpis={weeklyKpis(prospects, messages, deals)} />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <DueRemindersCard reminders={dueReminders(reminders, prospects)} />
-        <RepliesCard replies={pendingReplies(prospects)} />
-      </div>
+      <InboxPanel entries={mailbox} />
 
       <SignalsCard
         signals={signals.length ? signals : EXAMPLE_SIGNALS}
         isExample={signals.length === 0}
       />
+
+      <KpiChart periods={buildAllPeriods({ messages, inbound, prospects, deals })} />
     </div>
   );
 }
