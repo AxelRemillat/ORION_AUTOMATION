@@ -12,6 +12,16 @@ export interface ScanStats {
   analysed: number;
   /** Plafond demandé par l'utilisateur. */
   requested: number;
+  /** `true` quand l'annuaire plafonne son total : « plus de 10 000 ». */
+  totalCapped?: boolean;
+  /** Zone réellement appliquée (« Paris (75) »). */
+  zoneLabel?: string | null;
+  /** Entreprises écartées parce que déjà vues. */
+  skippedKnown?: number;
+  /** Pages d'annuaire lues. */
+  pagesRead?: number;
+  /** Pourquoi la boucle s'est arrêtée, en clair. */
+  stopReason?: string;
 }
 
 function Figure({ value, label }: { value: number; label: string }) {
@@ -59,10 +69,26 @@ export function ScanSummary({ scan }: { scan: ScanStats }) {
 
         {scan.total > scan.scanned && (
           <span className="text-[12px] text-faint">
-            sur {scan.total} entreprise{scan.total > 1 ? "s" : ""} correspondant aux critères
+            {/* L'annuaire plafonne son compteur a 10 000 : on ne fait pas passer
+                ce plafond pour un decompte exact. */}
+            sur {scan.totalCapped ? "plus de 10 000" : scan.total} entreprise
+            {scan.total > 1 ? "s" : ""} correspondant aux critères
+            {scan.zoneLabel ? ` · ${scan.zoneLabel}` : ""}
           </span>
         )}
       </div>
+
+      {(scan.stopReason || scan.skippedKnown || scan.pagesRead) && (
+        <p className="mt-2 font-data text-[11px] text-faint">
+          {[
+            scan.pagesRead ? `${scan.pagesRead} page(s) d'annuaire lues` : null,
+            scan.skippedKnown ? `${scan.skippedKnown} déjà connue(s), non rescannée(s)` : null,
+            scan.stopReason ? `arrêt : ${scan.stopReason}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      )}
 
       {nothing && (
         <p className="mt-2.5 text-[13px] leading-snug text-text">

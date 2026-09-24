@@ -2,11 +2,22 @@ import { Clock } from "lucide-react";
 import type { WhyNow as WhyNowData } from "@/lib/scoring";
 
 /**
- * « Pourquoi maintenant » — la citation de la source qui justifie d'écrire
- * maintenant, jamais une phrase générique.
+ * « Pourquoi maintenant » — la preuve qui justifie d'écrire aujourd'hui.
  *
- * Quand aucun signal n'est attesté, on le dit franchement : mieux vaut une
- * carte honnêtement vide qu'une urgence inventée dans un mail à froid.
+ * Deux corrections par rapport à la version précédente :
+ *
+ * 1. La citation arrivait BRUTE du web. On lisait « - [Voir l'offre](https://…)
+ *    🔥 **Automaticien** H/F » dans une carte censée être lisible. Le nettoyage
+ *    se fait maintenant en amont (`whyNow`), et ce composant n'affiche plus que
+ *    du texte.
+ *
+ * 2. Tout reposait sur le verbatim. On affiche désormais d'abord la lecture
+ *    STRUCTURÉE — le poste, la date ou « en ligne » — et la citation vient
+ *    ensuite, comme pièce justificative. Une offre sans date le dit franchement
+ *    plutôt que de laisser croire à une actualité fraîche.
+ *
+ * Quand aucun signal n'est attesté, on le dit : mieux vaut une carte
+ * honnêtement vide qu'une urgence inventée dans un mail à froid.
  */
 export function WhyNowCard({ why }: { why: WhyNowData | null }) {
   if (!why) {
@@ -16,6 +27,9 @@ export function WhyNowCard({ why }: { why: WhyNowData | null }) {
       </p>
     );
   }
+
+  // « en ligne, non datée » n'est pas une date : on le montre comme un état.
+  const undated = why.when === "en ligne, non datée";
 
   return (
     <div
@@ -29,10 +43,25 @@ export function WhyNowCard({ why }: { why: WhyNowData | null }) {
         </span>
       </div>
 
+      {/* Lecture structurée : ce qu'on a compris, avant la citation. */}
+      {why.role && (
+        <p className="mt-1.5 text-[13px] font-medium leading-snug" style={{ color: "var(--text)" }}>
+          Poste ouvert : {why.role}
+          {why.when && (
+            <span
+              className="ml-1.5 font-data text-[11px] font-normal"
+              style={{ color: undated ? "var(--warn-ink)" : "var(--muted)" }}
+            >
+              {undated ? "en ligne, non datée" : why.when}
+            </span>
+          )}
+        </p>
+      )}
+
       {/* Verbatim de la source : citation, donc entre guillemets. */}
       <blockquote
         className="mt-1.5 border-l-2 pl-2.5 text-[13px] leading-snug"
-        style={{ borderColor: "var(--primary)", color: "var(--text)" }}
+        style={{ borderColor: "var(--primary)", color: why.role ? "var(--muted)" : "var(--text)" }}
       >
         &laquo;&nbsp;{why.headline}&nbsp;&raquo;
       </blockquote>

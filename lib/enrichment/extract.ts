@@ -94,6 +94,11 @@ export interface JobPosting {
   dateBasis: DateBasis | null;
   url: string;
   evidenceQuote: string;
+  /**
+   * Verdict de verification de la page de l'offre (cf. `job-posting.ts`).
+   * Absent tant que la verification n'a pas eu lieu.
+   */
+  freshness?: "datée" | "en ligne" | "périmée" | "introuvable";
 }
 
 export interface CompanyEvent {

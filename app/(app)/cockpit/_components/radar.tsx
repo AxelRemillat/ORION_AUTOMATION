@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { readThemeColor, toCanvasColor } from "@/lib/canvas-color";
 
 /**
  * Fond radar du bloc « Signaux les plus forts ».
@@ -28,11 +29,6 @@ interface Blip {
 
 const SWEEP_PERIOD = 4.2;
 const PING_PERIOD = 2.6;
-
-function readRgb(name: string, fallback: string): string {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return raw || fallback;
-}
 
 export function Radar({ strengths }: { strengths: number[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,8 +63,8 @@ export function Radar({ strengths }: { strengths: number[] }) {
     }
 
     function readTokens() {
-      violet = readRgb("--rgb-violet", violet);
-      cyan = readRgb("--rgb-cyan", cyan);
+      violet = readThemeColor("--rgb-violet", violet);
+      cyan = readThemeColor("--rgb-cyan", cyan);
     }
 
     /** Une image. `t` en secondes ; `t = 0` donne la version figée. */
@@ -86,10 +82,10 @@ export function Radar({ strengths }: { strengths: number[] }) {
 
       const sweep = ctx.createConicGradient?.(angle, cx, cy);
       if (sweep) {
-        sweep.addColorStop(0, `rgba(${cyan}, 0.20)`);
-        sweep.addColorStop(0.06, `rgba(${violet}, 0.06)`);
-        sweep.addColorStop(0.2, `rgba(${violet}, 0)`);
-        sweep.addColorStop(1, `rgba(${violet}, 0)`);
+        sweep.addColorStop(0, toCanvasColor(cyan, 0.2));
+        sweep.addColorStop(0.06, toCanvasColor(violet, 0.06));
+        sweep.addColorStop(0.2, toCanvasColor(violet, 0));
+        sweep.addColorStop(1, toCanvasColor(violet, 0));
         ctx.fillStyle = sweep;
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
@@ -99,7 +95,7 @@ export function Radar({ strengths }: { strengths: number[] }) {
       // Cercles de portée.
       ctx.lineWidth = 1;
       for (let ring = 1; ring <= 4; ring += 1) {
-        ctx.strokeStyle = `rgba(${violet}, 0.12)`;
+        ctx.strokeStyle = toCanvasColor(violet, 0.12);
         ctx.beginPath();
         ctx.arc(cx, cy, (radius / 4.4) * ring, 0, Math.PI * 2);
         ctx.stroke();
@@ -116,7 +112,7 @@ export function Radar({ strengths }: { strengths: number[] }) {
           const progress = (cycle + offset) % 1;
           const alpha = (1 - progress) * 0.5 * blip.strength;
           if (alpha <= 0.01) continue;
-          ctx.strokeStyle = `rgba(${cyan}, ${alpha})`;
+          ctx.strokeStyle = toCanvasColor(cyan, alpha);
           ctx.lineWidth = 1.2;
           ctx.beginPath();
           ctx.arc(bx, by, progress * maxR, 0, Math.PI * 2);
@@ -124,8 +120,8 @@ export function Radar({ strengths }: { strengths: number[] }) {
         }
 
         const glow = ctx.createRadialGradient(bx, by, 0, bx, by, 9 + blip.strength * 7);
-        glow.addColorStop(0, `rgba(${cyan}, ${0.5 * blip.strength})`);
-        glow.addColorStop(1, `rgba(${cyan}, 0)`);
+        glow.addColorStop(0, toCanvasColor(cyan, 0.5 * blip.strength));
+        glow.addColorStop(1, toCanvasColor(cyan, 0));
         ctx.fillStyle = glow;
         ctx.beginPath();
         ctx.arc(bx, by, 9 + blip.strength * 7, 0, Math.PI * 2);

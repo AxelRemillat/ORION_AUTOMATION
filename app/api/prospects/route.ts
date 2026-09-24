@@ -47,8 +47,19 @@ export async function POST(request: Request) {
 
   if (error) {
     if (error.code === UNIQUE_VIOLATION) {
+      // On renvoie l'id de la fiche existante : l'ecran doit pouvoir y
+      // conduire, pas se contenter d'annoncer un echec.
+      const { data: existing } = await session.supabase
+        .from("prospects")
+        .select("id")
+        .eq("siren", company.siren ?? "")
+        .maybeSingle();
+
       return NextResponse.json(
-        { error: `${company.company_name} figure déjà dans vos prospects.` },
+        {
+          error: `${company.company_name} est déjà dans ton portefeuille.`,
+          prospectId: existing?.id ?? null,
+        },
         { status: 409 },
       );
     }

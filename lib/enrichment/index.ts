@@ -27,12 +27,24 @@ import type {
 import { compareHeat, heatScore } from "@/lib/scoring";
 import { mapWithConcurrency, toDomain } from "./http";
 import { resolveCompany, searchCompanies } from "./gouv";
+import { resolveZone, type ResolvedZone } from "./geo";
+import {
+  filterCandidates,
+  pagePlan,
+  plannedPages,
+  scanBudget,
+  searchSeed,
+  shouldContinue,
+  STOP_LABELS,
+  type ScanStop,
+} from "./scan-plan";
 import { fetchPappers, hasPappersKey } from "./pappers";
 import { fetchWebResults, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
 import { extractSignals, type Extraction } from "./extract";
 import { extractionToSignals, mergeSignals } from "./structured-signals";
+import { checkJobPosting } from "./job-posting";
 import { assessGroup } from "./group";
 import { coverSite, looksLikeDomain, type SiteCoverage } from "./site";
 import type { PappersRepresentative } from "./pappers";
@@ -200,18 +212,22 @@ async function deepEnrich(
 
   // --- 3. Extraction structuree -------------------------------------------
   let extraction: Extraction | null = null;
+  // Le site officiel passe EN PREMIER. L'extraction travaille sous budget de
+  // contexte : quand les extraits web etaient en tete, ils le consommaient et
+  // les pages du site — les seules a porter les offres d'emploi — arrivaient
+  // tronquees ou pas du tout.
   const documents = [
-    ...webResults.map((result) => ({
-      url: result.url,
-      title: result.title,
-      content: result.snippet,
-      sourceDate: result.date ?? null,
-    })),
     ...site.pages.map((page) => ({
       url: page.url,
       title: base.company_name,
       content: page.text,
       sourceDate: null,
+    })),
+    ...webResults.map((result) => ({
+      url: result.url,
+      title: result.title,
+      content: result.snippet,
+      sourceDate: result.date ?? null,
     })),
   ];
 
@@ -267,6 +283,23 @@ async function deepEnrich(
   keyFigures.is_large_group_subsidiary = group.isLargeGroupSubsidiary;
   if (group.evidence.length) keyFigures.group_evidence = group.evidence;
 
+  // --- 5. Verification des offres d'emploi --------------------------------
+  // On relit la page de chaque offre : une annonce dont `validThrough` est
+  // passe ne prouve plus rien, et une annonce sans date mais toujours servie
+  // sur le domaine officiel merite mieux que zero.
+  if (extraction?.jobPostings.length) {
+    const checked = await mapWithConcurrency(extraction.jobPostings, 3, async (posting) => {
+      const verdict = await checkJobPosting(posting.url, company.website);
+      return {
+        ...posting,
+        postedAt: posting.postedAt ?? verdict.datePosted,
+        dateBasis: posting.postedAt ? posting.dateBasis : verdict.datePosted ? "source" : posting.dateBasis,
+        freshness: verdict.freshness,
+      };
+    });
+    extraction = { ...extraction, jobPostings: checked };
+  }
+
   // --- Fusion des signaux -------------------------------------------------
   const structured = extraction ? extractionToSignals(extraction) : [];
   const webMerged = mergeSignals(structured, webSignals);
@@ -312,13 +345,33 @@ export interface SearchOutcome {
   results: EnrichedCompany[];
   /** Entreprises correspondant aux criteres dans l'annuaire. */
   total: number;
+  /** `true` quand l'annuaire plafonne son total : « plus de 10 000 ». */
+  totalCapped: boolean;
+  /** Zone reellement appliquee (« Paris (75) »), ou null si aucune. */
+  zoneLabel: string | null;
   /** Candidats reellement passes au scan Linkup. */
   scanned: number;
   /** Parmi eux, ceux portant au moins un signal atteste. */
   withSignal: number;
   /** Enrichissements profonds (Pappers) reellement effectues. */
   analysed: number;
+  /** Entreprises ecartees parce que deja vues (prospects, favoris, scan < 30 j). */
+  skippedKnown: number;
+  /** Pages d'annuaire lues pour y arriver. */
+  pagesRead: number;
+  /** Pourquoi la boucle s'est arretee, en clair. */
+  stopReason: string;
   warnings: EnrichmentWarning[];
+}
+
+/** Ce que la route fournit a l'orchestrateur en plus des criteres. */
+export interface SearchContext {
+  /** SIREN a ne pas rescanner : deja en portefeuille ou vus recemment. */
+  exclude?: ReadonlySet<string>;
+  /** Journalise les entreprises scannees (table `scan_history`). */
+  onScanned?: (rows: { siren: string; company_name: string; had_signal: boolean }[]) => Promise<void>;
+  /** Date du jour, injectee pour rendre la graine testable. */
+  today?: string;
 }
 
 /**
@@ -329,51 +382,147 @@ export interface SearchOutcome {
  */
 export async function searchAndEnrich(
   criteria: SearchCriteria,
+  context: SearchContext = {},
 ): Promise<SearchOutcome | { error: string }> {
   const limit = clampAnalysisLimit(criteria.limit ?? DEFAULT_ANALYSIS_LIMIT);
   const scanWidth = clampScanWidth(criteria.scanWidth ?? DEFAULT_SCAN_WIDTH);
+  const warnings: EnrichmentWarning[] = [];
 
-  const search = await searchCompanies(criteria, scanWidth);
-  if (!search.ok) return { error: search.error };
+  // --- Zone : resolue AVANT tout appel a l'annuaire ------------------------
+  let zone: ResolvedZone | null = null;
+  if (criteria.zone?.trim()) {
+    const resolved = await resolveZone(criteria.zone);
+    // Une zone saisie mais introuvable est une erreur de l'utilisateur, pas un
+    // detail : on refuse plutot que de chercher dans la France entiere.
+    if (!resolved.ok) return { error: resolved.error };
+    zone = resolved.data;
+  }
 
-  const candidates = search.data.companies.slice(0, scanWidth);
+  // --- Premiere page : elle donne le total, donc le nombre de pages --------
+  const first = await searchCompanies(criteria, scanWidth, { zone, page: 1 });
+  if (!first.ok) return { error: first.error };
+
+  const emptyOutcome = (stop: ScanStop): SearchOutcome => ({
+    results: [],
+    total: first.ok ? first.data.total : 0,
+    totalCapped: first.ok ? first.data.capped : false,
+    zoneLabel: zone?.label ?? null,
+    scanned: 0,
+    withSignal: 0,
+    analysed: 0,
+    skippedKnown: 0,
+    pagesRead: 1,
+    stopReason: STOP_LABELS[stop],
+    warnings,
+  });
 
   // Sans Linkup on ne sait pas qui est chaud. Plutot que d'ouvrir des fiches
   // Pappers au hasard — l'erreur que cette refonte corrige — on ne depense rien.
   if (!hasLinkupKey()) {
-    return {
-      results: [],
-      total: search.data.total,
-      scanned: 0,
-      withSignal: 0,
-      analysed: 0,
-      warnings: [
-        {
-          source: "linkup",
-          message:
-            "clé absente : impossible de repérer les entreprises actives, aucune fiche n'a été ouverte",
-        },
-      ],
-    };
+    warnings.push({
+      source: "linkup",
+      message:
+        "clé absente : impossible de repérer les entreprises actives, aucune fiche n'a été ouverte",
+    });
+    return emptyOutcome("annuaire");
   }
 
-  // --- PHASE 1 : scan large, bon marche -----------------------------------
-  const scanned = await mapWithConcurrency(candidates, SCAN_CONCURRENCY, scanSignals);
-  const scanWarnings = scanned
-    .map((item) => item.warning)
-    .filter((warning): warning is EnrichmentWarning => Boolean(warning));
+  // --- Plan de lecture : des pages variees, mais reproductibles dans la journee
+  const today = context.today ?? new Date().toISOString().slice(0, 10);
+  const seed = searchSeed(
+    [criteria.q, criteria.section, (criteria.tranches ?? []).join(","), zone?.value, scanWidth, limit],
+    today,
+  );
+  const budget = scanBudget(scanWidth);
+  const maxPages = plannedPages(budget, scanWidth, first.data.pages);
+  const plan = pagePlan(seed, first.data.pages, maxPages);
 
-  const hot = scanned
-    .filter((item) => hasProvenSignal(item.signals))
-    .sort((a, b) =>
-      compareHeat(
-        // Au scan, on n'a pas encore ouvert de fiche : pas de contexte groupe.
-        heatScore(a.signals, { seed: a.base.company_name }),
-        heatScore(b.signals, { seed: b.base.company_name }),
-      ),
+  const exclude = context.exclude ?? new Set<string>();
+  const seen = new Set<string>();
+  let skippedKnown = 0;
+  let pagesRead = 0;
+  let stop: ScanStop = "annuaire";
+
+  type Scanned = Awaited<ReturnType<typeof scanSignals>>;
+  const hot: Scanned[] = [];
+  let scannedCount = 0;
+
+  for (const page of plan) {
+    const check = shouldContinue(
+      { scanned: scannedCount, withSignal: hot.length, pagesRead },
+      limit,
+      budget,
+      plan.length,
     );
+    if (!check.go) {
+      stop = check.stop;
+      break;
+    }
+
+    const search = page === 1 ? first : await searchCompanies(criteria, scanWidth, { zone, page });
+    pagesRead += 1;
+    if (!search.ok) {
+      warnings.push({ source: "gouv", message: `page ${page} illisible : ${search.error}` });
+      continue;
+    }
+
+    // Deduplication : deja en portefeuille, deja en favori, ou deja scanne.
+    const filtered = filterCandidates(search.data.companies, { exclude, seen });
+    skippedKnown += filtered.skippedKnown;
+    const candidates = filtered.kept;
+    if (!candidates.length) continue;
+
+    // On ne depasse jamais le budget, meme au milieu d'un lot.
+    const room = Math.max(0, budget - scannedCount);
+    const batch = candidates.slice(0, room);
+    if (!batch.length) {
+      stop = "plafond";
+      break;
+    }
+
+    const scanned = await mapWithConcurrency(batch, SCAN_CONCURRENCY, scanSignals);
+    scannedCount += batch.length;
+
+    for (const item of scanned) {
+      if (item.warning) warnings.push(item.warning);
+      if (hasProvenSignal(item.signals)) hot.push(item);
+    }
+
+    // Memoire du scan : ecrite lot par lot, pour qu'un abandon en cours de
+    // route ne fasse pas rescanner ce qu'on vient de payer.
+    if (context.onScanned) {
+      // Mesurer ne doit jamais casser ce qu'on mesure : si la table n'est pas
+      // encore migree, le scan continue, il sera juste moins econome demain.
+      await context.onScanned(
+        batch
+          .filter((company): company is typeof company & { siren: string } => Boolean(company.siren))
+          .map((company, index) => ({
+            siren: company.siren,
+            company_name: company.company_name,
+            had_signal: hasProvenSignal(scanned[index]?.signals ?? []),
+          })),
+      ).catch((cause) => {
+        warnings.push({
+          source: "gouv",
+          message: `historique de scan non enregistré : ${cause instanceof Error ? cause.message : "erreur"}`,
+        });
+      });
+    }
+  }
+
+  // Le plan epuise sans atteindre l'objectif : on le dit tel quel.
+  if (hot.length >= limit) stop = "objectif";
+  else if (scannedCount >= budget) stop = "plafond";
 
   // --- PHASE 2 : enrichissement des seuls gagnants -------------------------
+  hot.sort((a, b) =>
+    compareHeat(
+      // Au scan, on n'a pas encore ouvert de fiche : pas de contexte groupe.
+      heatScore(a.signals, { seed: a.base.company_name }),
+      heatScore(b.signals, { seed: b.base.company_name }),
+    ),
+  );
+
   const results = await mapWithConcurrency(hot.slice(0, limit), CONCURRENCY, (item) =>
     deepEnrich(
       { ...item.base, website: item.base.website ?? item.website },
@@ -384,11 +533,16 @@ export async function searchAndEnrich(
 
   return {
     results,
-    total: search.data.total,
-    scanned: candidates.length,
+    total: first.data.total,
+    totalCapped: first.data.capped,
+    zoneLabel: zone?.label ?? null,
+    scanned: scannedCount,
     withSignal: hot.length,
     analysed: results.length,
-    warnings: dedupeWarnings(results, scanWarnings),
+    skippedKnown,
+    pagesRead,
+    stopReason: STOP_LABELS[stop],
+    warnings: dedupeWarnings(results, warnings),
   };
 }
 
