@@ -5,7 +5,7 @@
  * des tables reste absent, et la page bascule alors sur `_lib/example.ts`.
  */
 import type { InboundMessage, Prospect } from "@/types";
-import { compareHeat, heatScore, strongestSignal } from "@/lib/scoring";
+import { compareHeat, heatContextOf, heatScore, strongestSignal } from "@/lib/scoring";
 import type { InboxEntry, SignalHighlight } from "./types";
 
 /** Extrait lisible du corps d'un email : une seule ligne, sans blancs parasites. */
@@ -57,7 +57,10 @@ export function topSignals(prospects: Prospect[], limit = 4): SignalHighlight[] 
   return prospects
     .filter((prospect) => prospect.signals?.length)
     .map((prospect) => {
-      const score = heatScore(prospect.signals, { seed: prospect.company_name });
+      const score = heatScore(prospect.signals, {
+        seed: prospect.company_name,
+        context: heatContextOf(prospect.key_figures),
+      });
       const strongest = strongestSignal(prospect.signals);
       return {
         prospectId: prospect.id,

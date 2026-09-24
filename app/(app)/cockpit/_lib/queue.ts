@@ -1,5 +1,5 @@
 import type { Message, Prospect, Reminder } from "@/types";
-import { compareHeat, heatScore } from "@/lib/scoring";
+import { compareHeat, heatContextOf, heatScore, type ScoreLine } from "@/lib/scoring";
 
 /**
  * File d'attente du Cockpit.
@@ -37,6 +37,11 @@ export interface QueueAction {
   cta: string;
   /** 0 → 1. Pilote l'intensité de la flamme. */
   heat: number;
+  /**
+   * Bonus et malus qui ont fait ce score. Affichés sous la ligne : un score
+   * qu'on ne peut pas discuter est un score qu'on ne peut pas corriger.
+   */
+  scoreLines?: ScoreLine[];
   prospectId: string | null;
 }
 
@@ -190,7 +195,10 @@ export function buildQueue(input: QueueInput): QueueResult {
     .filter((prospect) => !drafts.has(prospect.id))
     .map((prospect) => ({
       prospect,
-      score: heatScore(prospect.signals, { seed: prospect.company_name }),
+      score: heatScore(prospect.signals, {
+        seed: prospect.company_name,
+        context: heatContextOf(prospect.key_figures),
+      }),
     }))
     .sort((a, b) => compareHeat(a.score, b.score));
 
@@ -199,6 +207,7 @@ export function buildQueue(input: QueueInput): QueueResult {
       action: {
         id: `approche-${prospect.id}`,
         kind: "approche",
+        scoreLines: score.breakdown,
         title: `Préparer l'approche de ${prospect.company_name}`,
         reason: score.real
           ? `Score de chaleur ${score.value}/100`

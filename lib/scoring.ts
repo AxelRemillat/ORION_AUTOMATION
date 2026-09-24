@@ -11,6 +11,7 @@
  *   3. le NOMBRE de signaux, à rendement décroissant.
  */
 import type { ProspectSignal } from "@/types";
+import { FRESH_DAYS, isFresh } from "@/lib/enrichment/dates";
 
 // ---------------------------------------------------------------------------
 // Référentiel des signaux
@@ -69,6 +70,8 @@ export interface HeatScore {
   real: boolean;
   /** Types de signaux ayant le plus contribué, du plus fort au plus faible. */
   drivers: string[];
+  /** Détail lisible : d'où viennent les points, bonus et malus compris. */
+  breakdown: ScoreLine[];
 }
 
 export const HEAT_LEVEL_LABELS: Record<HeatLevel, string> = {
@@ -85,20 +88,73 @@ export const HEAT_LEVEL_LABELS: Record<HeatLevel, string> = {
 const RAW_MAX = 55;
 
 /**
- * Poids de récence. Une source qui ne se date pas ne permet pas d'affirmer
- * qu'un évènement est récent : on applique alors un facteur prudent plutôt
- * que de supposer une actualité fraîche.
+ * Poids de fraîcheur — binaire, et c'est voulu.
+ *
+ * Une version précédente appliquait 0,8 à un signal NON DATÉ : une offre
+ * d'emploi de 2019 pesait donc presque autant qu'une offre de mardi. Un signal
+ * d'actualité non daté ou vieux de plus de 60 jours ne prouve plus rien sur
+ * l'instant présent : il vaut zéro.
+ *
+ * Exception assumée : les signaux `structure` ne sont pas des actualités mais
+ * des déductions INSEE (effectif, secteur, ancienneté). Ils n'ont pas de date
+ * par construction, et les écarter reviendrait à leur appliquer une règle
+ * faite pour autre chose. Ils gardent donc leur petit poids — mais ils ne
+ * lèvent jamais le plafond des 60 points, faute de preuve.
  */
 function recencyFactor(signal: ProspectSignal, now: number): number {
-  const raw = typeof signal.date === "string" ? Date.parse(signal.date) : NaN;
-  if (Number.isNaN(raw)) return 0.8;
+  if (signal.type === "structure") return 1;
+  return isFresh(typeof signal.date === "string" ? signal.date : null, new Date(now)) ? 1 : 0;
+}
 
-  const days = (now - raw) / 86_400_000;
-  if (days < 0) return 0.8; // date future : donnée douteuse
-  if (days <= 30) return 1;
-  if (days <= 90) return 0.85;
-  if (days <= 180) return 0.7;
-  return 0.55;
+/** Postes dont l'ouverture signale un besoin d'automatisation immédiat. */
+const AUTOMATION_CATEGORIES = new Set(["automation", "data", "it", "ops"]);
+
+/** Bonus d'un recrutement frais sur un métier directement automatisable. */
+export const FRESH_AUTOMATION_HIRE_BONUS = 15;
+/** Bonus d'une PME autonome dont on sait à qui parler. */
+export const INDEPENDENT_PME_BONUS = 10;
+/** Malus d'une filiale : la décision se prend ailleurs. */
+export const LARGE_GROUP_MALUS = -15;
+
+/** Une ligne du détail de score, telle qu'affichée dans la fiche prospect. */
+export interface ScoreLine {
+  label: string;
+  /** Points signés, sur l'échelle 0-100 du score final. */
+  points: number;
+  kind: "base" | "bonus" | "malus" | "info";
+}
+
+/**
+ * Contexte de score lu depuis `key_figures`.
+ *
+ * Volontairement ici, a cote des regles : les ecrans n'ont pas a savoir
+ * comment un « dirigeant identifie » se reconnait dans le JSON.
+ */
+export function heatContextOf(figures: Record<string, unknown> | null | undefined): HeatContext {
+  const value = figures ?? {};
+  const leader = value.leader_person;
+
+  // Un representant personne morale suffit a disqualifier l'independance, meme
+  // quand on n'a pas pu mesurer la taille du groupe : on ne recompense pas une
+  // filiale au motif qu'on manque d'information sur sa maison mere.
+  const hasGroupIndicator =
+    value.is_large_group_subsidiary === true ||
+    typeof value.parent_company === "string" ||
+    typeof value.parent_group === "string";
+
+  return {
+    isLargeGroupSubsidiary: value.is_large_group_subsidiary === true,
+    hasIdentifiedLeader:
+      !hasGroupIndicator && typeof leader === "string" && leader.trim().length > 2,
+  };
+}
+
+/** Ce que l'on sait de l'entreprise en dehors de ses signaux. */
+export interface HeatContext {
+  /** Filiale d'un grand groupe : décision probablement au niveau groupe. */
+  isLargeGroupSubsidiary?: boolean;
+  /** Dirigeant personne physique identifié (y compris derrière une holding). */
+  hasIdentifiedLeader?: boolean;
 }
 
 const levelOf = (value: number): HeatLevel =>
@@ -139,22 +195,71 @@ export function demoHeatScore(seed: string): HeatScore {
     hash = (hash * 31 + seed.charCodeAt(index)) % 100_000;
   }
   const value = 22 + (hash % 39); // 22-60 : jamais « brûlant » par hasard
-  return { value, level: levelOf(value), real: false, drivers: [] };
+  return {
+    value,
+    level: levelOf(value),
+    real: false,
+    drivers: [],
+    breakdown: [
+      { label: "Aucun signal exploitable : score de démonstration", points: value, kind: "info" },
+    ],
+  };
+}
+
+/** Un recrutement frais sur un métier directement automatisable. */
+export function hasFreshAutomationHire(
+  signals: readonly ProspectSignal[],
+  now: Date,
+): ProspectSignal | null {
+  return (
+    signals.find(
+      (signal) =>
+        signal.type === "recrutement" &&
+        typeof signal.category === "string" &&
+        AUTOMATION_CATEGORIES.has(signal.category) &&
+        isFresh(typeof signal.date === "string" ? signal.date : null, now),
+    ) ?? null
+  );
 }
 
 /**
- * Score réel à partir des signaux. Les contributions sont triées puis
- * atténuées (1, 1/1.4, 1/1.8…) : le 4ᵉ signal ajoute peu, ce qui évite
- * qu'un prospect bruyant écrase un prospect réellement mûr.
+ * Score réel à partir des signaux, puis ajustements métier.
+ *
+ * Deux étages, volontairement séparés :
+ *   1. les SIGNAUX — triés puis atténués (1, 1/1.4, 1/1.8…), pour qu'un
+ *      prospect bruyant n'écrase pas un prospect réellement mûr ;
+ *   2. les AJUSTEMENTS — ce que l'entreprise est, indépendamment de son
+ *      actualité : un recrutement d'automaticien frais, une PME autonome
+ *      avec un interlocuteur identifié, une filiale de grand groupe.
+ *
+ * Le plafond de 60 points sans preuve solide s'applique APRÈS les ajustements :
+ * aucun bonus ne permet d'annoncer « brûlant » sans preuve.
  */
 export function heatScore(
   signals: readonly ProspectSignal[] | null | undefined,
-  options: { seed?: string; now?: Date } = {},
+  options: { seed?: string; now?: Date; context?: HeatContext } = {},
 ): HeatScore {
   const list = signals ?? [];
-  if (!list.length) return demoHeatScore(options.seed ?? "orion");
+  const context = options.context ?? {};
+  const nowDate = options.now ?? new Date();
 
-  const now = (options.now ?? new Date()).getTime();
+  if (!list.length) {
+    const demo = demoHeatScore(options.seed ?? "orion");
+    // Même sans signal, un malus de filiale reste une information utile.
+    if (!context.isLargeGroupSubsidiary) return demo;
+    const value = Math.max(0, demo.value + LARGE_GROUP_MALUS);
+    return {
+      ...demo,
+      value,
+      level: levelOf(value),
+      breakdown: [
+        ...demo.breakdown,
+        { label: "Filiale d'un grand groupe", points: LARGE_GROUP_MALUS, kind: "malus" },
+      ],
+    };
+  }
+
+  const now = nowDate.getTime();
   const contributions = list
     .map((signal) => ({
       type: signal.type ?? "presse",
@@ -170,15 +275,80 @@ export function heatScore(
     0,
   );
 
-  // Sans preuve solide, le score est plafonne : aucun prospect ne peut etre
-  // annonce « brulant » sur la foi de signaux non attestes.
+  const base = Math.round((raw / RAW_MAX) * 100);
+  const breakdown: ScoreLine[] = [];
+
+  const counted = list.filter((signal) => recencyFactor(signal, now) > 0).length;
+  breakdown.push({
+    label:
+      counted > 0
+        ? `${counted} signal(aux) retenu(s) sur ${list.length}`
+        : `Aucun signal retenu sur ${list.length}`,
+    points: base,
+    kind: "base",
+  });
+
+  // Ce qui a été ignoré, et pourquoi : c'est la moitié de l'explication.
+  const ignored = list.filter(
+    (signal) => signal.type !== "structure" && recencyFactor(signal, now) === 0,
+  );
+  const undated = ignored.filter((signal) => typeof signal.date !== "string").length;
+  const stale = ignored.length - undated;
+  if (undated > 0) {
+    breakdown.push({ label: `${undated} signal(aux) non daté(s) : ignoré(s)`, points: 0, kind: "info" });
+  }
+  if (stale > 0) {
+    breakdown.push({
+      label: `${stale} signal(aux) de plus de ${FRESH_DAYS} jours : ignoré(s)`,
+      points: 0,
+      kind: "info",
+    });
+  }
+
+  let value = base;
+
+  const hire = hasFreshAutomationHire(list, nowDate);
+  if (hire) {
+    value += FRESH_AUTOMATION_HIRE_BONUS;
+    breakdown.push({
+      label: `Recrutement ${String(hire.category)} de moins de ${FRESH_DAYS} jours`,
+      points: FRESH_AUTOMATION_HIRE_BONUS,
+      kind: "bonus",
+    });
+  }
+
+  if (context.isLargeGroupSubsidiary) {
+    value += LARGE_GROUP_MALUS;
+    breakdown.push({
+      label: "Filiale d'un grand groupe : décision probablement au niveau groupe",
+      points: LARGE_GROUP_MALUS,
+      kind: "malus",
+    });
+  } else if (context.hasIdentifiedLeader) {
+    value += INDEPENDENT_PME_BONUS;
+    breakdown.push({
+      label: "PME indépendante, dirigeant identifié",
+      points: INDEPENDENT_PME_BONUS,
+      kind: "bonus",
+    });
+  }
+
   const ceiling = list.some(isProven) ? 100 : UNPROVEN_CEILING;
-  const value = Math.max(0, Math.min(ceiling, Math.round((raw / RAW_MAX) * 100)));
+  const capped = Math.max(0, Math.min(ceiling, value));
+  if (capped < value) {
+    breakdown.push({
+      label: `Plafonné à ${UNPROVEN_CEILING} : aucune preuve solide`,
+      points: capped - value,
+      kind: "info",
+    });
+  }
+
   return {
-    value,
-    level: levelOf(value),
+    value: capped,
+    level: levelOf(capped),
     real: true,
-    drivers: [...new Set(contributions.slice(0, 3).map((c) => c.type))],
+    drivers: [...new Set(contributions.filter((c) => c.points > 0).slice(0, 3).map((c) => c.type))],
+    breakdown,
   };
 }
 

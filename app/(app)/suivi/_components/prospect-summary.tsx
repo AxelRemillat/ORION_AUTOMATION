@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge, Card, CardContent, CardHeader, CardTitle, DealStatusBadge } from "@/components/ui";
+import { ScoreBreakdown } from "@/components/score-breakdown";
+import { HEAT_LEVEL_LABELS, heatContextOf, heatScore } from "@/lib/scoring";
 import { formatDate, formatEur } from "@/lib/utils";
 import type { Deal, Prospect, Reminder } from "@/types";
 
@@ -29,8 +31,45 @@ export function ProspectSummary({
   const figures = prospect.key_figures ?? {};
   const openReminders = reminders.filter((reminder) => !reminder.done);
 
+  const score = heatScore(prospect.signals, {
+    seed: prospect.company_name,
+    context: heatContextOf(figures),
+  });
+  const leaderVia = typeof figures.leader_via === "string" ? figures.leader_via : null;
+  const leaderPerson = typeof figures.leader_person === "string" ? figures.leader_person : null;
+  const groupEvidence = Array.isArray(figures.group_evidence)
+    ? (figures.group_evidence as unknown[]).filter((item): item is string => typeof item === "string")
+    : [];
+
   return (
     <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <CardTitle>Score de chaleur</CardTitle>
+            <span className="font-data text-[15px] text-text">
+              {score.value}
+              <span className="text-faint">/100</span>
+            </span>
+          </div>
+          <p className="text-[12px] text-faint">
+            {HEAT_LEVEL_LABELS[score.level]}
+            {score.real ? "" : " — score de démonstration, aucun signal exploitable"}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ScoreBreakdown lines={score.breakdown} className="divide-y divide-[var(--line-soft)]" />
+          {figures.is_large_group_subsidiary === true && (
+            <p className="mt-3 rounded-lg px-3 py-2 text-[12px] leading-snug" style={{ background: "var(--lost-soft)", color: "var(--lost)" }}>
+              Décision probablement au niveau groupe.
+              {groupEvidence.length > 0 && (
+                <span className="mt-1 block text-faint">{groupEvidence.join(" · ")}</span>
+              )}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Chiffres clés</CardTitle>
@@ -51,6 +90,14 @@ export function ProspectSummary({
             }
           />
           <Row label="Créée en" value={figures.founded_year ?? "—"} />
+          <Row
+            label="Dirigeant"
+            value={
+              leaderPerson
+                ? `${leaderPerson}${leaderVia ? ` (via ${leaderVia})` : ""}`
+                : "—"
+            }
+          />
           <Row label="Contact" value={prospect.email ?? "—"} />
           <Row
             label="Site"

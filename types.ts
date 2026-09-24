@@ -68,6 +68,15 @@ export interface ProspectSignal {
   quote?: string;
   /** Confiance dans la preuve, de 0 à 1. Absente = non prouvé. */
   confidence?: number;
+  /**
+   * Nature du poste pour un signal de recrutement : automation, data, it, ops,
+   * sales, other. Renseignée par l'extraction structurée uniquement.
+   */
+  category?: string;
+  /** D'où vient `date` : "source", "texte" ou "url". Absente = non daté. */
+  dateBasis?: string;
+  /** `true` pour un signal issu de l'extraction structurée (citation vérifiée). */
+  structured?: boolean;
   [key: string]: unknown;
 }
 
@@ -78,6 +87,28 @@ export interface ProspectKeyFigures {
   founded_year?: number;
   legal_form?: string;
   naf_code?: string;
+  /**
+   * Groupe détecté, et par quelle voie. Deux indices indépendants coexistent :
+   * `parent_company` vient du registre (dirigeant personne morale),
+   * `parent_group` de l'extraction web. On garde les deux : ils se confirment
+   * ou se contredisent, et l'écran affiche ce qu'il en est.
+   */
+  parent_company?: string;
+  parent_group?: string;
+  parent_group_quote?: string;
+  parent_group_url?: string;
+  /** Vrai quand un indice sérieux rattache l'entreprise à un grand groupe. */
+  is_large_group_subsidiary?: boolean;
+  /** Ce qui a déclenché le drapeau ci-dessus, en clair. */
+  group_evidence?: string[];
+  /** Dirigeant personne physique retrouvé derrière une holding. */
+  leader_via?: string;
+  /** Ce que le site officiel dit du métier (extraction structurée). */
+  site_offer?: string;
+  site_customers?: string;
+  site_vocabulary?: string[];
+  /** État de la couverture du site : trouvé, lu, ou explicitement absent. */
+  site_status?: "lu" | "trouvé" | "non trouvé";
   [key: string]: unknown;
 }
 
@@ -224,6 +255,28 @@ export type ApiUsage = {
   created_at: string;
 }
 
+/**
+ * Cache partagé des appels payants (fiches de registre).
+ *
+ * Pas de `user_id` : la donnée mise en cache est publique, et la mutualiser
+ * évite qu'un utilisateur repaie un crédit déjà dépensé par un autre.
+ */
+export type EnrichmentCache = {
+  key: string;
+  payload: unknown;
+  expires_at: string;
+  created_at: string;
+};
+
+export type EnrichmentCacheInsert = {
+  key: string;
+  payload: unknown;
+  expires_at: string;
+  created_at?: string;
+};
+
+export type EnrichmentCacheUpdate = Partial<EnrichmentCacheInsert>;
+
 // ---------------------------------------------------------------------------
 // Helpers d'écriture
 //
@@ -353,6 +406,12 @@ export type Database = {
         Row: ApiUsage;
         Insert: ApiUsageInsert;
         Update: ApiUsageUpdate;
+        Relationships: [];
+      };
+      enrichment_cache: {
+        Row: EnrichmentCache;
+        Insert: EnrichmentCacheInsert;
+        Update: EnrichmentCacheUpdate;
         Relationships: [];
       };
     };

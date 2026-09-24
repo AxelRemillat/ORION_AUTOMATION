@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import type { ApiService } from "@/types";
 import { openAiCost, serviceUnit } from "./pricing";
 
@@ -12,6 +12,12 @@ import { openAiCost, serviceUnit } from "./pricing";
  *
  * Module serveur : il depend de `next/headers` via le client Supabase, donc
  * toute tentative de l'importer depuis un composant client echoue au build.
+ *
+ * HORS REQUETE (scripts de maintenance, re-enrichissement) il n'y a ni cookie
+ * ni session : `auth.uid()` est nul et l'insertion echouerait en silence, ce
+ * qui rendait le cout des traitements par lot invisible. Quand
+ * ORION_SCRIPT_USER_ID est defini, on passe donc par la cle service_role en
+ * fournissant explicitement le proprietaire de la ligne.
  */
 
 interface UsageEntry {
@@ -24,8 +30,9 @@ interface UsageEntry {
 }
 
 async function insert(entry: UsageEntry): Promise<void> {
+  const scriptUserId = process.env.ORION_SCRIPT_USER_ID;
   try {
-    const supabase = createClient();
+    const supabase = scriptUserId ? createAdminClient() : createClient();
     await supabase.from("api_usage").insert({
       service: entry.service,
       operation: entry.operation,
@@ -33,6 +40,7 @@ async function insert(entry: UsageEntry): Promise<void> {
       unit_cost: Number(entry.unitCost.toFixed(6)),
       cost: Number(entry.cost.toFixed(6)),
       prospect_id: entry.prospectId ?? null,
+      ...(scriptUserId ? { user_id: scriptUserId } : {}),
     });
   } catch {
     // Hors contexte de requete (script, tache de fond) ou base indisponible :

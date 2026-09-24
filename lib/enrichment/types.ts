@@ -34,6 +34,10 @@ export interface CompanyBase {
   legal_form: string | null;
   /** Dirigeant principal, si le référentiel l'expose. */
   leader: string | null;
+  /** Dirigeant personne physique, en casse naturelle : sert à la salutation. */
+  leader_person: string | null;
+  /** Société mère quand un dirigeant est une personne morale : indice de groupe. */
+  parent_company: string | null;
   /**
    * Vrai quand le filtre géographique a matché un établissement secondaire :
    * `city` désigne alors ce site, pas le siège social.
@@ -48,6 +52,8 @@ export interface CompanyBase {
  * exploitables même sans clé Pappers.
  */
 export interface BaseFigures {
+  /** Date de creation complete (AAAA-MM-JJ) : base du calcul d'age. */
+  founded_on: string | null;
   /** Code INSEE brut de tranche d'effectif : sert aux estimations. */
   effectif_code: string | null;
   revenue_eur: number | null;

@@ -31,6 +31,12 @@ import { fetchPappers, hasPappersKey } from "./pappers";
 import { fetchWebResults, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
+import { extractSignals, type Extraction } from "./extract";
+import { extractionToSignals, mergeSignals } from "./structured-signals";
+import { assessGroup } from "./group";
+import { coverSite, looksLikeDomain, type SiteCoverage } from "./site";
+import type { PappersRepresentative } from "./pappers";
+import type { WebResult } from "./linkup";
 import {
   clampAnalysisLimit,
   clampScanWidth,
@@ -54,6 +60,9 @@ function baseKeyFigures(base: CompanyBase): ProspectKeyFigures {
     size_range: base.size_range ?? undefined,
   };
   if (base.leader) figures.leader = base.leader;
+  if (base.leader_person) figures.leader_person = base.leader_person;
+  if (base.parent_company) figures.parent_company = base.parent_company;
+  if (base.figures.founded_on) figures.founded_on = base.figures.founded_on;
   if (base.figures.revenue_eur != null) figures.revenue_eur = base.figures.revenue_eur;
   if (base.figures.revenue_year != null) figures.revenue_year = base.figures.revenue_year;
   if (base.figures.net_income_eur != null) figures.net_income_eur = base.figures.net_income_eur;
@@ -69,6 +78,12 @@ interface ScanResult {
   website: string | null;
   /** Signaux ATTESTES uniquement — aucun signal structurel a ce stade. */
   signals: ProspectSignal[];
+  /**
+   * Resultats web bruts du scan. Conserves pour la phase 2 : l'extraction
+   * structuree travaille sur ces textes, et les re-demander couterait une
+   * seconde recherche Linkup par entreprise.
+   */
+  web: WebResult[];
   warning?: EnrichmentWarning;
 }
 
@@ -85,7 +100,13 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
     website: base.website,
   });
   if (!web.ok) {
-    return { base, website: null, signals: [], warning: { source: "linkup", message: web.error } };
+    return {
+      base,
+      website: null,
+      signals: [],
+      web: [],
+      warning: { source: "linkup", message: web.error },
+    };
   }
 
   // Le site officiel retrouve ici sert deux fois : il ancre la qualification
@@ -94,28 +115,43 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
   const website = base.website ?? guessOwnWebsite(base.company_name, web.data);
   const signals = qualifyWebResults(web.data, { name: base.company_name, website });
 
-  return { base, website, signals };
+  return { base, website, signals, web: web.data };
 }
 
 /**
- * PHASE 2 — enrichissement profond : la fiche Pappers, puis fusion.
+ * PHASE 2 — enrichissement profond. C'est ici que tout se joue.
  *
- * N'est appele que sur une entreprise deja qualifiee par le scan. Les signaux
- * structurels sont ajoutes ici, en complement des signaux attestes.
+ * Quatre depenses, dans cet ordre, et uniquement sur les entreprises retenues
+ * par le scan (donc dans la limite de `clampAnalysisLimit`) :
+ *
+ *   1. PAPPERS (1 credit) — finances, effectif reel, representants legaux.
+ *   2. SITE OFFICIEL (gratuit, repli Linkup a 0,001 $) — decouverte ordonnee,
+ *      validation que la page parle bien de cette entreprise, 3 pages au plus.
+ *   3. EXTRACTION (1 appel LLM leger) — signaux structures, dates calculees,
+ *      citations verifiees, groupe parent.
+ *   4. HOLDING (1 credit Pappers, en cache 30 jours) — seulement si un
+ *      representant est une personne morale : c'est la qu'on retrouve le
+ *      dirigeant personne physique et la taille du groupe.
  */
 async function deepEnrich(
   base: CompanyBase,
   webSignals: ProspectSignal[],
+  webResults: WebResult[] = [],
 ): Promise<EnrichedCompany> {
   const warnings: EnrichmentWarning[] = [];
   const company = { ...base };
   const keyFigures = baseKeyFigures(base);
 
+  // --- 1. Pappers ---------------------------------------------------------
+  let legalRepresentatives: PappersRepresentative[] = [];
+  let pappersWebsite: string | null = null;
+
   if (base.siren && hasPappersKey()) {
     const pappers = await fetchPappers(base.siren);
     if (pappers.ok) {
       const data = pappers.data;
-      company.website = company.website ?? data.website;
+      pappersWebsite = data.website;
+      legalRepresentatives = data.representatives;
       company.email = company.email ?? data.email;
       company.sector = data.sector ?? company.sector;
       company.legal_form = data.legal_form ?? company.legal_form;
@@ -137,7 +173,105 @@ async function deepEnrich(
     });
   }
 
-  const signals = [...webSignals, ...structuralSignals(company, keyFigures.headcount)].slice(0, 8);
+  // --- 2. Site officiel ---------------------------------------------------
+  const site: SiteCoverage = await coverSite({
+    name: base.company_name,
+    siren: base.siren,
+    city: base.city,
+    postalCode: base.postal_code,
+    pappersWebsite,
+    knownWebsite: company.website,
+    contactEmail: company.email,
+  });
+
+  // Un site non valide (adresse IP, libelle sans extension) vaut mieux absent :
+  // il serait affiche tel quel et lu par le modele comme une source.
+  const fallbackSite = [company.website, pappersWebsite].find((candidate) =>
+    looksLikeDomain(toDomain(candidate ?? null)),
+  );
+  company.website = site.url ?? fallbackSite ?? null;
+  keyFigures.site_status = site.status;
+  if (site.status === "non trouvé") {
+    warnings.push({
+      source: "linkup",
+      message: site.note ?? "site officiel introuvable : modèle économique non confirmé",
+    });
+  }
+
+  // --- 3. Extraction structuree -------------------------------------------
+  let extraction: Extraction | null = null;
+  const documents = [
+    ...webResults.map((result) => ({
+      url: result.url,
+      title: result.title,
+      content: result.snippet,
+      sourceDate: result.date ?? null,
+    })),
+    ...site.pages.map((page) => ({
+      url: page.url,
+      title: base.company_name,
+      content: page.text,
+      sourceDate: null,
+    })),
+  ];
+
+  if (documents.length) {
+    try {
+      extraction = await extractSignals(
+        {
+          name: base.company_name,
+          siren: base.siren,
+          city: base.city,
+          postalCode: base.postal_code,
+          website: company.website,
+        },
+        documents,
+      );
+    } catch (error) {
+      warnings.push({
+        source: "openai",
+        message: `extraction indisponible : ${error instanceof Error ? error.message : "erreur"}`,
+      });
+    }
+  }
+
+  if (extraction && extraction.siteSummary) {
+    keyFigures.site_offer = extraction.siteSummary.offer;
+    keyFigures.site_customers = extraction.siteSummary.customers;
+    keyFigures.site_vocabulary = extraction.siteSummary.vocabulary;
+  }
+
+  // --- 4. Groupe et dirigeant derriere la holding -------------------------
+  const group = await assessGroup({
+    representatives: legalRepresentatives,
+    knownLeaderPerson: base.leader_person,
+    parentGroup: extraction ? extraction.parentGroup : null,
+    allowHoldingLookup: hasPappersKey(),
+  });
+
+  if (group.leaderPerson) {
+    company.leader_person = group.leaderPerson;
+    keyFigures.leader_person = group.leaderPerson;
+  }
+  if (group.leaderVia) keyFigures.leader_via = group.leaderVia;
+  if (group.leaderRole) keyFigures.leader_role = group.leaderRole;
+  if (group.parentCompany) {
+    company.parent_company = group.parentCompany;
+    keyFigures.parent_company = group.parentCompany;
+  }
+  if (group.parentGroup) {
+    keyFigures.parent_group = group.parentGroup;
+    if (group.parentGroupQuote) keyFigures.parent_group_quote = group.parentGroupQuote;
+    if (group.parentGroupUrl) keyFigures.parent_group_url = group.parentGroupUrl;
+  }
+  keyFigures.is_large_group_subsidiary = group.isLargeGroupSubsidiary;
+  if (group.evidence.length) keyFigures.group_evidence = group.evidence;
+
+  // --- Fusion des signaux -------------------------------------------------
+  const structured = extraction ? extractionToSignals(extraction) : [];
+  const webMerged = mergeSignals(structured, webSignals);
+  const signals = [...webMerged, ...structuralSignals(company, keyFigures.headcount)].slice(0, 8);
+
   return { ...company, key_figures: keyFigures, signals, warnings };
 }
 
@@ -155,10 +289,12 @@ export async function enrichCompany(
   let webSignals: ProspectSignal[] = [];
   let identity = base;
 
+  let webResults: WebResult[] = [];
   if (options.withSignals !== false) {
     if (hasLinkupKey()) {
       const scan = await scanSignals(base);
       webSignals = scan.signals;
+      webResults = scan.web;
       if (scan.warning) warnings.push(scan.warning);
       if (scan.website) identity = { ...base, website: base.website ?? scan.website };
     } else {
@@ -166,7 +302,7 @@ export async function enrichCompany(
     }
   }
 
-  const enriched = await deepEnrich(identity, webSignals);
+  const enriched = await deepEnrich(identity, webSignals, webResults);
   return { ...enriched, warnings: [...warnings, ...enriched.warnings] };
 }
 
@@ -231,6 +367,7 @@ export async function searchAndEnrich(
     .filter((item) => hasProvenSignal(item.signals))
     .sort((a, b) =>
       compareHeat(
+        // Au scan, on n'a pas encore ouvert de fiche : pas de contexte groupe.
         heatScore(a.signals, { seed: a.base.company_name }),
         heatScore(b.signals, { seed: b.base.company_name }),
       ),
@@ -238,7 +375,11 @@ export async function searchAndEnrich(
 
   // --- PHASE 2 : enrichissement des seuls gagnants -------------------------
   const results = await mapWithConcurrency(hot.slice(0, limit), CONCURRENCY, (item) =>
-    deepEnrich({ ...item.base, website: item.base.website ?? item.website }, item.signals),
+    deepEnrich(
+      { ...item.base, website: item.base.website ?? item.website },
+      item.signals,
+      item.web,
+    ),
   );
 
   return {

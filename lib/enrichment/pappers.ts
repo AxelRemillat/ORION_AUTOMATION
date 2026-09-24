@@ -5,6 +5,7 @@
  */
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
+import { cached } from "./cache";
 import type { Result } from "./http";
 
 const BASE_URL = "https://api.pappers.fr/v2/entreprise";
@@ -19,6 +20,13 @@ interface PappersFinance {
 interface PappersRepresentant {
   nom_complet?: string;
   qualite?: string;
+  /** `true` quand le représentant est une société (holding, SC familiale…). */
+  personne_morale?: boolean;
+  /** SIREN du représentant, renseigné pour une personne morale. */
+  siren?: string | null;
+  nom?: string;
+  prenom?: string;
+  prenoms?: string;
 }
 
 interface PappersResponse {
@@ -39,6 +47,25 @@ interface PappersResponse {
   representants?: PappersRepresentant[];
 }
 
+/**
+ * Représentant légal PUBLIC de l'entreprise.
+ *
+ * Volontairement limité aux représentants légaux : les bénéficiaires
+ * effectifs ne sont pas lus, ni demandés. Leur accès est restreint depuis la
+ * décision CJUE du 22 novembre 2022, et une prospection commerciale n'entre
+ * dans aucun des cas d'accès prévus.
+ */
+export interface PappersRepresentative {
+  name: string;
+  role: string | null;
+  isCompany: boolean;
+  /** SIREN de la société représentante, pour remonter d'un cran. */
+  siren: string | null;
+  /** Prénom et nom séparés, quand c'est une personne physique. */
+  firstName: string | null;
+  lastName: string | null;
+}
+
 /** Ce que la couche d'enrichissement retient de Pappers. */
 export interface PappersData {
   website: string | null;
@@ -53,10 +80,45 @@ export interface PappersData {
   net_income_eur: number | null;
   leader: string | null;
   leader_role: string | null;
+  /** Tous les représentants légaux, personnes physiques ET morales. */
+  representatives: PappersRepresentative[];
 }
 
 export function hasPappersKey(): boolean {
   return Boolean(process.env.PAPPERS_API_KEY);
+}
+
+/** Casse naturelle : l'API renvoie « DUPONT », inutilisable dans un mail. */
+function properCase(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .split(/([\s-])/)
+    .map((part) => (/[\s-]/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join("");
+}
+
+/** Normalise la liste des représentants légaux. */
+function mapRepresentatives(raw: PappersRepresentant[] | undefined): PappersRepresentative[] {
+  return (raw ?? [])
+    .map((item) => {
+      const isCompany = Boolean(item.personne_morale ?? (item.siren && !item.nom));
+      const firstName = (item.prenom ?? item.prenoms ?? "").trim().split(/\s+/)[0] || null;
+      const lastName = item.nom?.trim() || null;
+      const name =
+        item.nom_complet?.trim() ||
+        [firstName, lastName].filter(Boolean).join(" ").trim();
+      if (!name) return null;
+      return {
+        name: isCompany ? name : properCase(name),
+        role: item.qualite?.trim() || null,
+        isCompany,
+        siren: item.siren?.replace(/\s/g, "") || null,
+        firstName: isCompany || !firstName ? null : properCase(firstName),
+        lastName: isCompany || !lastName ? null : properCase(lastName),
+      };
+    })
+    .filter((item): item is PappersRepresentative => item !== null);
 }
 
 /** Retient le bilan le plus récent qui porte un chiffre d'affaires. */
@@ -98,6 +160,41 @@ export async function fetchPappers(siren: string): Promise<Result<PappersData>> 
       net_income_eur: finance?.resultat ?? null,
       leader: leader?.nom_complet ?? null,
       leader_role: leader?.qualite ?? null,
+      representatives: mapRepresentatives(raw.representants),
     },
   };
+}
+
+/**
+ * Profil d'une société REPRÉSENTANTE (holding, SC familiale, société mère).
+ *
+ * Coûte un crédit Pappers de plus, d'où le cache 30 jours : une holding
+ * détient souvent plusieurs cibles, et ses données ne bougent pas d'un mois
+ * sur l'autre. N'est appelé que sur les entreprises retenues en phase 2.
+ */
+export interface HoldingProfile {
+  siren: string;
+  name: string | null;
+  /** Représentants personnes physiques de la holding : le vrai dirigeant. */
+  people: PappersRepresentative[];
+  revenue_eur: number | null;
+  headcount: number | null;
+}
+
+export async function fetchHoldingProfile(siren: string): Promise<HoldingProfile | null> {
+  const clean = siren.replace(/\s/g, "");
+  if (!/^\d{9}$/.test(clean)) return null;
+
+  return cached<HoldingProfile>(`pappers:holding:${clean}`, async () => {
+    const response = await fetchPappers(clean);
+    if (!response.ok) return null;
+    const data = response.data;
+    return {
+      siren: clean,
+      name: null,
+      people: data.representatives.filter((item) => !item.isCompany),
+      revenue_eur: data.revenue_eur,
+      headcount: data.headcount,
+    };
+  });
 }

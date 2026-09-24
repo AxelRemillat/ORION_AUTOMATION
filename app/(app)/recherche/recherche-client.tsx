@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Building2, SearchX } from "lucide-react";
 import { Card, CardContent, EmptyState, Skeleton, useToast } from "@/components/ui";
 import { ApiError, postJson } from "@/lib/enrichment/api-client";
-import { compareHeat, heatScore } from "@/lib/scoring";
+import { compareHeat, heatContextOf, heatScore } from "@/lib/scoring";
 import type { EnrichedCompany, EnrichmentWarning } from "@/lib/enrichment/types";
 import { ErrorBanner, WarningBanner } from "./banners";
 import { ManualForm } from "./manual-form";
@@ -70,8 +70,8 @@ export function RechercheClient() {
     () =>
       [...results].sort((a, b) =>
         compareHeat(
-          heatScore(a.signals, { seed: keyOf(a) }),
-          heatScore(b.signals, { seed: keyOf(b) }),
+          heatScore(a.signals, { seed: keyOf(a), context: heatContextOf(a.key_figures) }),
+          heatScore(b.signals, { seed: keyOf(b), context: heatContextOf(b.key_figures) }),
         ),
       ),
     [results],

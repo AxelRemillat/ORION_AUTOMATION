@@ -11,6 +11,7 @@ import type { CompanyBase, SearchCriteria } from "./types";
 const BASE_URL = "https://recherche-entreprises.api.gouv.fr/search";
 
 interface GouvDirigeant {
+  type_dirigeant?: string;
   nom?: string;
   prenoms?: string;
   denomination?: string;
@@ -106,6 +107,57 @@ function formatLeader(dirigeants: GouvDirigeant[] | undefined): string | null {
 }
 
 /**
+ * Dirigeant PERSONNE PHYSIQUE, en casse naturelle.
+ *
+ * L'API renvoie « DUMONT » / « BENJAMIN ALEXANDRE » en capitales : inutilisable
+ * tel quel dans une salutation. On ne garde que le premier prenom.
+ */
+function physicalLeader(dirigeants: GouvDirigeant[] | undefined): string | null {
+  const person = dirigeants?.find(
+    (item) => (item.type_dirigeant === "personne physique" || item.nom) && isOwnerRole(item.qualite),
+  );
+  if (!person?.nom) return null;
+  const capitalize = (value: string) =>
+    value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+  const firstName = (person.prenoms ?? "").trim().split(/\s+/)[0] ?? "";
+  return [firstName, person.nom]
+    .filter(Boolean)
+    .map((part) => part.split(/[-\s]/).map(capitalize).join("-"))
+    .join(" ")
+    .trim() || null;
+}
+
+/**
+ * Qualites qui n'ont RIEN d'un actionnaire : controle legal et mandats
+ * judiciaires. Un commissaire aux comptes figure parmi les « dirigeants » de
+ * l'annuaire, et le prendre pour une societe mere faisait de JACQUET PARIS une
+ * filiale d'Ernst & Young.
+ */
+const NON_OWNER_ROLE =
+  /commissaire aux comptes|suppl[eé]ant|liquidateur|administrateur judiciaire|mandataire|expert-comptable/i;
+
+/** Un representant qui peut reellement detenir l'entreprise. */
+function isOwnerRole(qualite: string | undefined): boolean {
+  return !qualite || !NON_OWNER_ROLE.test(qualite);
+}
+
+/**
+ * Societe mere, quand un dirigeant est une PERSONNE MORALE.
+ *
+ * C'est l'indice d'appartenance a un groupe le plus fiable qu'on ait : il est
+ * structure, date du registre, et ne depend d'aucune lecture de texte — a
+ * condition d'ecarter les mandats de controle (cf. NON_OWNER_ROLE).
+ */
+function parentCompany(dirigeants: GouvDirigeant[] | undefined): string | null {
+  const entity = dirigeants?.find(
+    (item) =>
+      (item.type_dirigeant === "personne morale" || Boolean(item.denomination)) &&
+      isOwnerRole(item.qualite),
+  );
+  return entity?.denomination?.trim() || null;
+}
+
+/**
  * `code_postal` / `departement` filtrent les ÉTABLISSEMENTS, pas le siège :
  * une entreprise remonte dès qu'une de ses antennes matche. On affiche donc le
  * site trouvé (et non le siège, souvent à l'autre bout de la France), et on
@@ -140,8 +192,12 @@ function mapResult(raw: GouvResult, geoFiltered: boolean): CompanyBase | null {
     founded_year: raw.date_creation ? Number(raw.date_creation.slice(0, 4)) || null : null,
     legal_form: formatLegalForm(raw.nature_juridique),
     leader: formatLeader(raw.dirigeants),
+    leader_person: physicalLeader(raw.dirigeants),
+    parent_company: parentCompany(raw.dirigeants),
     matched_branch: Boolean(site && site.est_siege === false),
     figures: {
+      // Date complete : elle seule permet un age exact (cf. companyAge).
+      founded_on: raw.date_creation ?? null,
       effectif_code: raw.tranche_effectif_salarie ?? null,
       company_category: raw.categorie_entreprise ?? null,
       head_office_city: headOffice !== city ? headOffice : null,

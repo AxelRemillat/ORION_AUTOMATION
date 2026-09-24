@@ -44,7 +44,13 @@ export const EXAMPLE_SIGNALS: SignalHighlight[] = [
       label: "Levée de fonds récente — budget disponible pour outiller",
       source: "Exemple",
     },
-    score: { value: 78, level: "brulant", real: false, drivers: ["levee"] },
+    score: {
+      value: 78,
+      level: "brulant",
+      real: false,
+      drivers: ["levee"],
+      breakdown: [{ label: "Donnée d'exemple", points: 78, kind: "info" }],
+    },
   },
   {
     prospectId: "exemple-b",
@@ -54,6 +60,12 @@ export const EXAMPLE_SIGNALS: SignalHighlight[] = [
       label: "Recrute des postes ops/admin — tâches répétitives à outiller",
       source: "Exemple",
     },
-    score: { value: 54, level: "chaud", real: false, drivers: ["recrutement"] },
+    score: {
+      value: 54,
+      level: "chaud",
+      real: false,
+      drivers: ["recrutement"],
+      breakdown: [{ label: "Donnée d'exemple", points: 54, kind: "info" }],
+    },
   },
 ];

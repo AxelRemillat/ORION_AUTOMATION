@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, Check, Clock } from "lucide-react";
+import { ScoreBreakdownInline } from "@/components/score-breakdown";
 import type { QueueAction } from "../../_lib/queue";
 import { GhostButton, HeatGauge, SKEW, UNSKEW } from "./row-parts";
 
@@ -117,6 +118,11 @@ export function ActionRow({
                   </p>
                 )}
                 <HeatGauge score={score} accent={accent} />
+                {action.scoreLines && (
+                  <div className="mt-1">
+                    <ScoreBreakdownInline lines={action.scoreLines} />
+                  </div>
+                )}
               </div>
             </div>
 

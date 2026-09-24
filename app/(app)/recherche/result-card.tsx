@@ -3,7 +3,7 @@
 import { ArrowRight, Check, ExternalLink, MapPin, Plus, Star, Users } from "lucide-react";
 import { Button, Card, CardContent, CardFooter, CardHeader } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
-import { heatScore, whyNow } from "@/lib/scoring";
+import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { EnrichedCompany } from "@/lib/enrichment/types";
 import { HeatGauge } from "./heat-gauge";
 import { ExampleTag, MetaChip, SignalChip } from "./signal-chip";
@@ -60,7 +60,10 @@ function KeyFigures({ company }: { company: EnrichedCompany }) {
 
 export function ResultCard({ company, state, onAdd, onProspect, onFavorite, favoriteState }: ResultCardProps) {
   const done = state === "added" || state === "duplicate";
-  const score = heatScore(company.signals, { seed: company.siren ?? company.company_name });
+  const score = heatScore(company.signals, {
+    seed: company.siren ?? company.company_name,
+    context: heatContextOf(company.key_figures),
+  });
   const why = whyNow(company.signals);
 
   // Types de signaux distincts, pour ne pas répéter la même puce.
