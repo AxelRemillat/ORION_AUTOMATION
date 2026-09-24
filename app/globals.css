@@ -85,11 +85,25 @@
   /* Bloc « Actions du jour » — surface d'alerte, volontairement HORS de la
      palette Ciel & Lagon. Identique en clair et en sombre : c'est une alarme,
      elle ne se fond pas dans le decor. Chaque arret du degrade tient >= 5:1
-     avec --flame-ink, pour que le texte reste lisible AA par-dessus. */
-  --flame-grad: linear-gradient(135deg, #c2381a 0%, #a8112b 52%, #7e1259 100%);
-  --flame-ink: #fff5ef;
-  --flame-ink-soft: rgba(255, 245, 239, 0.78);
-  --flame-line: rgba(255, 245, 239, 0.22);
+     Scene VERSUS des actions du jour.
+
+     Ces tokens ne basculent PAS avec le theme : la carte reste sombre en clair
+     comme en sombre. C'est deliberé — elle est le projecteur de la page, et
+     l'ecran de transition d'un jeu de combat n'a pas de mode clair. */
+  --vs-stage: #070b1a;
+  --vs-blue: #4cd4e6;
+  --vs-red: #ff2a2a;
+  --vs-red-deep: #c2381a;
+  --vs-ink: #f4f8ff;
+  --vs-ink-soft: rgb(var(--rgb-vs-ink) / 0.72);
+  --vs-line: rgb(var(--rgb-vs-ink) / 0.14);
+
+  /* Memes couleurs en triplets : les composants y appliquent leurs opacites
+     sans jamais reecrire une valeur en dur. */
+  --rgb-vs-stage: 7 11 26;
+  --rgb-vs-blue: 76 212 230;
+  --rgb-vs-red: 255 42 42;
+  --rgb-vs-ink: 244 248 255;
 }
 
 /* --- Crepuscule ocean : preference systeme, sauf choix explicite « light » -- */
@@ -334,4 +348,70 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+
+/* ===========================================================================
+   Scene VERSUS — animations
+   Uniquement transform et opacity : aucune ne declenche de mise en page.
+   Le bloc `prefers-reduced-motion` global plus haut les neutralise toutes.
+   =========================================================================== */
+
+@keyframes vs-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}
+
+/* Scintillement irregulier : les paliers ne sont pas repartis uniformement,
+   sinon l'oeil y lit une pulsation reguliere plutot qu'un neon fatigue. */
+@keyframes vs-flicker {
+  0%, 100% { opacity: 1; }
+  8% { opacity: 0.55; }
+  10% { opacity: 1; }
+  38% { opacity: 1; }
+  41% { opacity: 0.4; }
+  43% { opacity: 0.95; }
+  62% { opacity: 1; }
+  64% { opacity: 0.7; }
+  66% { opacity: 1; }
+}
+
+@keyframes vs-sweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(110%); }
+}
+
+@keyframes vs-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+}
+
+/* Validation : l'eclair balaie la ligne, puis elle se replie. */
+@keyframes vs-flash {
+  from { transform: translateX(-100%); opacity: 0.9; }
+  to { transform: translateX(120%); opacity: 0; }
+}
+
+@keyframes vs-collapse {
+  from { opacity: 1; transform: scaleY(1); }
+  to { opacity: 0; transform: scaleY(0.4); }
+}
+
+/* Report : la ligne glisse et se brouille, sans eclair. */
+@keyframes vs-snooze-out {
+  from { opacity: 1; transform: translateX(0); filter: blur(0); }
+  to { opacity: 0; transform: translateX(32px); filter: blur(4px); }
+}
+
+@layer utilities {
+  .vs-breathe { animation: vs-breathe 4s ease-in-out infinite; }
+  .vs-flicker { animation: vs-flicker 3.2s steps(1, end) infinite; }
+  .vs-shake { animation: vs-shake 300ms ease-in-out; }
+  .vs-flash { animation: vs-flash 200ms ease-out forwards; }
+  .vs-collapse { animation: vs-collapse 260ms 180ms ease-in forwards; }
+  .vs-snooze-out { animation: vs-snooze-out 320ms ease-in forwards; }
+  /* Le sweep de survol ne part qu'au survol du parent. */
+  .group:hover .vs-sweep { animation: vs-sweep 600ms ease-out; }
 }

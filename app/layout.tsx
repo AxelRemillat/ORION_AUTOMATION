@@ -1,5 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
+import {
+  Barlow_Condensed,
+  Bricolage_Grotesque,
+  IBM_Plex_Mono,
+  Instrument_Sans,
+} from "next/font/google";
 import { themeInitScript } from "@/lib/theme";
 import "./globals.css";
 
@@ -16,6 +21,19 @@ const sans = Instrument_Sans({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-sans",
+});
+
+/**
+ * Scene VERSUS des actions du jour : condense, tres gras, italique.
+ * Charge ici parce que next/font exige un appel au niveau module — mais la
+ * variable ne sert que dans ce bloc.
+ */
+const versus = Barlow_Condensed({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-versus",
+  weight: ["700", "800"],
+  style: ["italic", "normal"],
 });
 
 /** Chiffres, identifiants, libelles techniques. */
@@ -46,7 +64,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="fr"
       suppressHydrationWarning
-      className={`${sans.variable} ${display.variable} ${mono.variable}`}
+      className={`${sans.variable} ${display.variable} ${mono.variable} ${versus.variable}`}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />

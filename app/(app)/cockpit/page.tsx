@@ -9,7 +9,7 @@ import type {
   Reminder,
 } from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
-import { ActionQueue } from "./_components/action-queue";
+import { ActionQueueCard } from "./_components/versus/action-queue-card";
 import { InboxPanel } from "./_components/inbox-panel";
 import { ActivityCard } from "./_components/activity/activity-card";
 import { SignalsCard } from "./_components/signals-card";
@@ -101,7 +101,7 @@ export default async function CockpitPage({
         date={date.charAt(0).toUpperCase() + date.slice(1)}
       />
 
-      <ActionQueue visible={queue.visible} total={queue.total} />
+      <ActionQueueCard visible={queue.visible} total={queue.total} />
 
       <InboxPanel entries={mailbox} />
 
