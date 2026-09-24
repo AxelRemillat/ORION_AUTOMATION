@@ -57,6 +57,7 @@ puis se connecter sur `/login`.
 | `LINKUP_API_KEY` | serveur | Recherche web / signaux |
 | `HUNTER_API_KEY` | serveur | Emails professionnels |
 | `N8N_WEBHOOK_SEND_URL` | serveur | Webhook d'envoi des messages |
+| `NEXT_PUBLIC_BOOKING_URL` | client + serveur | Optionnelle — lien de RDV placé dans le CTA des emails |
 | `USD_EUR_RATE` | serveur | Optionnelle — conversion des services facturés en $ (défaut 0.92) |
 | `LINKUP_SEARCH_USD` | serveur | Optionnelle — prix d'une recherche Linkup (défaut 0.005) |
 | `PAPPERS_CREDIT_EUR` · `PAPPERS_PLAN_CREDITS` | serveur | Optionnelles — valeur d'un crédit, taille du forfait |

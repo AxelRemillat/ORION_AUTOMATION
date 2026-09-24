@@ -47,9 +47,9 @@ export function ToneSelector({
       </div>
 
       <p className="mt-2 text-[11px] leading-snug text-faint">
-        Le ton choisi accompagne la demande de génération. Il ne sera réellement pris en compte
-        qu&apos;une fois lu par <span className="font-data">/api/emails/generate</span> — le
-        brouillon affiché reste toujours celui que le modèle a produit.
+        Le registre change le débit, jamais l&apos;identité : c&apos;est la même voix. Le brouillon
+        affiché reste toujours celui que le modèle a produit — rien n&apos;est retouché côté
+        navigateur.
       </p>
     </div>
   );

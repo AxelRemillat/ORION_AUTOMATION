@@ -10,10 +10,11 @@ import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import {
   buildContext,
   extractEuroAmounts,
+  buildSystemPrompt,
   parseAnalysis,
-  SYSTEM_PROMPT,
   type Analysis,
 } from "./prompt";
+import { coerceTone, type ToneKey } from "@/lib/tones";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export const maxDuration = 60;
 
 interface GenerateBody {
   prospectId?: string;
+  /** Registre de redaction choisi dans l'ecran Prospection. */
+  tone?: string;
 }
 
 /**
@@ -50,13 +53,13 @@ function checkEuroClaims(prospect: Prospect, body: string): EnrichmentWarning | 
 }
 
 /** Appel OpenAI en mode JSON : le prompt impose déjà la forme de la réponse. */
-async function runAnalysis(prospect: Prospect): Promise<Analysis | null> {
+async function runAnalysis(prospect: Prospect, tone: ToneKey): Promise<Analysis | null> {
   const completion = await getOpenAI().chat.completions.create({
     model: OPENAI_MODEL,
     temperature: 0.5,
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt(tone) },
       { role: "user", content: buildContext(prospect) },
     ],
   });
@@ -67,7 +70,7 @@ async function runAnalysis(prospect: Prospect): Promise<Analysis | null> {
       model: OPENAI_MODEL,
       promptTokens: completion.usage.prompt_tokens ?? 0,
       completionTokens: completion.usage.completion_tokens ?? 0,
-      operation: "analyse+redaction",
+      operation: `analyse+redaction:${tone}`,
       prospectId: prospect.id,
     });
   }
@@ -103,6 +106,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Prospect manquant." }, { status: 400 });
   }
 
+  // Un registre inconnu ne doit pas faire echouer la generation : on retombe
+  // sur le registre par defaut plutot que de renvoyer une erreur.
+  const tone = coerceTone(body.tone);
+
   const { data: prospect, error } = await session.supabase
     .from("prospects")
     .select("*")
@@ -121,7 +128,7 @@ export async function POST(request: Request) {
 
   // Les deux appels sont indépendants : on ne paie pas leur latence deux fois.
   const [analysisOutcome, contactOutcome] = await Promise.allSettled([
-    runAnalysis(prospect),
+    runAnalysis(prospect, tone),
     findContact(prospect),
   ]);
 

@@ -1,19 +1,8 @@
 /**
- * Registres de rédaction proposés avant génération.
+ * Registres de rédaction — ré-export de la source unique `@/lib/tones`.
  *
- * La clé choisie est transmise à `/api/emails/generate` (champ `tone`) : la
- * route l'ignore aujourd'hui, l'écran est prêt le jour où elle le lira. Rien
- * n'est transformé côté client — un brouillon affiché est toujours celui que
- * le modèle a réellement produit.
+ * Les consignes de style vivent désormais à côté de la route de génération,
+ * qui les applique réellement. Ce fichier ne subsiste que pour garder les
+ * imports de l'écran Prospection stables.
  */
-
-export const TONES = [
-  { key: "direct", label: "Direct", hint: "Phrases courtes, une seule demande." },
-  { key: "chaleureux", label: "Chaleureux", hint: "Plus humain, un peu de contexte." },
-  { key: "factuel", label: "Factuel", hint: "Chiffres d'abord, zéro superlatif." },
-  { key: "bref", label: "Ultra-court", hint: "Cinq lignes maximum." },
-] as const;
-
-export type ToneKey = (typeof TONES)[number]["key"];
-
-export const DEFAULT_TONE: ToneKey = "direct";
+export { DEFAULT_TONE, TONES, coerceTone, toneInstruction, type ToneKey } from "@/lib/tones";
