@@ -22,21 +22,34 @@ export type ScanStop = "objectif" | "plafond" | "annuaire";
 export const STOP_LABELS: Record<ScanStop, string> = {
   objectif: "objectif atteint",
   plafond: "plafond de scan atteint",
-  annuaire: "plus de pages à lire",
+  annuaire: "toutes les pages de l'annuaire ont été lues",
 };
+
+/**
+ * Plafond de pages lisibles en une recherche.
+ *
+ * Il ne sert qu'a borner la memoire du plan : ce sont l'objectif et le budget
+ * de scan qui arretent reellement la boucle, bien avant. Il est volontairement
+ * large.
+ */
+export const MAX_PLAN_PAGES = 60;
 
 /**
  * Nombre de pages a prevoir dans le plan.
  *
- * Le budget divise par la largeur donne le minimum theorique — mais la
- * deduplication retire des candidats a chaque page, si bien qu'une page ne
- * rapporte presque jamais la largeur complete. Sans cette marge, le scan
- * s'arretait a mi-budget en annoncant « plus d'entreprises a scanner » alors
- * que l'annuaire en avait des milliers.
+ * Premiere version : `budget / largeur * 2 + 3`, soit 9 pages pour un budget
+ * de 60. Erreur de raisonnement — elle supposait qu'une page rapporte environ
+ * une pleine largeur de candidats. Avec la deduplication, une page peut n'en
+ * rapporter aucun : sur Paris, 56 entreprises ont ete ecartees et le scan
+ * s'est arrete a 42 entreprises sur un budget de 60, en annoncant « plus de
+ * pages a lire » alors qu'il en restait une centaine.
+ *
+ * Le plan couvre donc TOUTES les pages atteignables (bornees par
+ * `MAX_PLAN_PAGES`). Le cout reste tenu par le budget de scan, pas par la
+ * longueur du plan.
  */
-export function plannedPages(budget: number, scanWidth: number, available: number): number {
-  const minimum = Math.ceil(budget / Math.max(1, scanWidth));
-  return Math.max(1, Math.min(available, minimum * 2 + 3));
+export function plannedPages(available: number): number {
+  return Math.max(1, Math.min(available, MAX_PLAN_PAGES));
 }
 
 /**

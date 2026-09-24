@@ -216,21 +216,40 @@ export function demoHeatScore(seed: string): HeatScore {
   };
 }
 
-/** Un recrutement frais sur un métier directement automatisable. */
+/**
+ * Recrutement sur un metier automatisable, et ce qu'on peut en prouver.
+ *
+ * Distinction importante, corrigee apres relecture : une offre publiee sur le
+ * site officiel mais SANS DATE ne peut pas recevoir un bonus intitule « moins
+ * de 60 jours ». On ne sait pas depuis quand elle est en ligne — elle peut
+ * dater de deux ans. Elle vaut la moitie du bonus, sous son vrai libelle.
+ */
+export type HireProof = "datee" | "en ligne";
+
+export interface AutomationHire {
+  signal: ProspectSignal;
+  proof: HireProof;
+}
+
 export function hasFreshAutomationHire(
   signals: readonly ProspectSignal[],
   now: Date,
-): ProspectSignal | null {
-  return (
-    signals.find(
-      (signal) =>
-        signal.type === "recrutement" &&
-        typeof signal.category === "string" &&
-        AUTOMATION_CATEGORIES.has(signal.category) &&
-        (isFresh(typeof signal.date === "string" ? signal.date : null, now) ||
-          signal.liveOnOfficialSite === true),
-    ) ?? null
+): AutomationHire | null {
+  const automatable = signals.filter(
+    (signal) =>
+      signal.type === "recrutement" &&
+      typeof signal.category === "string" &&
+      AUTOMATION_CATEGORIES.has(signal.category),
   );
+
+  // Une offre datee et fraiche prime : c'est la seule qui prouve le « maintenant ».
+  const dated = automatable.find((signal) =>
+    isFresh(typeof signal.date === "string" ? signal.date : null, now),
+  );
+  if (dated) return { signal: dated, proof: "datee" };
+
+  const live = automatable.find((signal) => signal.liveOnOfficialSite === true);
+  return live ? { signal: live, proof: "en ligne" } : null;
 }
 
 /**
@@ -320,10 +339,19 @@ export function heatScore(
 
   const hire = hasFreshAutomationHire(list, nowDate);
   if (hire) {
-    value += FRESH_AUTOMATION_HIRE_BONUS;
+    // Meme regle que pour les points de signal : sans date, on compte moitie.
+    const points =
+      hire.proof === "datee"
+        ? FRESH_AUTOMATION_HIRE_BONUS
+        : Math.round(FRESH_AUTOMATION_HIRE_BONUS * LIVE_POSTING_FACTOR);
+    const category = String(hire.signal.category);
+    value += points;
     breakdown.push({
-      label: `Recrutement ${String(hire.category)} de moins de ${FRESH_DAYS} jours`,
-      points: FRESH_AUTOMATION_HIRE_BONUS,
+      label:
+        hire.proof === "datee"
+          ? `Recrutement ${category} de moins de ${FRESH_DAYS} jours`
+          : `Recrutement ${category} en ligne, non daté (bonus de moitié)`,
+      points,
       kind: "bonus",
     });
   }

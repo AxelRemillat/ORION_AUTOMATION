@@ -1,7 +1,7 @@
 /**
  * Point d'entree unique du design system Ciel & Lagon.
  * Les ecrans importent d'ici : `import { Button, Card } from "@/components/ui"`.
- * Voir CONTRACT.md pour les tokens de couleur et l'API detaillee.
+ * Voir CLAUDE.md pour les tokens de couleur et l'API detaillee.
  */
 export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from "./button";
 export { Input, Label, fieldClassName, type InputProps } from "./input";

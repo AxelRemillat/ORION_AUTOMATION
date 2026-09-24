@@ -434,7 +434,7 @@ export async function searchAndEnrich(
     today,
   );
   const budget = scanBudget(scanWidth);
-  const maxPages = plannedPages(budget, scanWidth, first.data.pages);
+  const maxPages = plannedPages(first.data.pages);
   const plan = pagePlan(seed, first.data.pages, maxPages);
 
   const exclude = context.exclude ?? new Set<string>();

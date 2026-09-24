@@ -168,12 +168,12 @@ async function main(): Promise<void> {
   console.log("\n6. Boucle de scan : arrêt objectif / plafond / annuaire");
   {
     check("plafond = 3× la largeur", scanBudget(20) === 60);
-    check(
-      "le plan prévoit de la marge pour la déduplication",
-      plannedPages(60, 20, 109) === 9,
-      String(plannedPages(60, 20, 109)),
-    );
-    check("il ne dépasse jamais les pages réelles", plannedPages(60, 20, 4) === 4);
+    // Le plan couvre TOUTES les pages atteignables : c'est le budget qui
+    // arrete le scan, pas la longueur du plan. L'ancienne formule rendait
+    // 9 pages et faisait annoncer « plus de pages a lire » avec 100 restantes.
+    check("le plan couvre les pages atteignables", plannedPages(109) === 60, String(plannedPages(109)));
+    check("il ne dépasse jamais les pages réelles", plannedPages(4) === 4);
+    check("jamais zéro page planifiée", plannedPages(0) === 1);
 
     const goal = shouldContinue({ scanned: 12, withSignal: 5, pagesRead: 2 }, 5, 60, 40);
     check("objectif atteint → on s'arrête", !goal.go && goal.stop === "objectif");
