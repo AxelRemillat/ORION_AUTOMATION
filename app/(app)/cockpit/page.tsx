@@ -11,11 +11,11 @@ import type {
 import { CockpitHeader } from "./_components/cockpit-header";
 import { ActionQueue } from "./_components/action-queue";
 import { InboxPanel } from "./_components/inbox-panel";
-import { KpiChart } from "./_components/kpi-chart";
+import { ActivityCard } from "./_components/activity/activity-card";
 import { SignalsCard } from "./_components/signals-card";
 import { EXAMPLE_SIGNALS } from "./_lib/example";
 import { buildQueue } from "./_lib/queue";
-import { buildAllPeriods } from "./_lib/series";
+import { buildAllPeriods, parseSeriesParam } from "./_lib/series";
 import { inboxEntries, topSignals } from "./_lib/compute";
 
 export const metadata = { title: "Cockpit — ORION" };
@@ -37,7 +37,13 @@ const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", {
  * Les chiffres détaillés vivent sur /stats : le Cockpit n'en garde qu'une
  * courbe. Tout vient des tables réelles ; rien n'est inventé.
  */
-export default async function CockpitPage() {
+export default async function CockpitPage({
+  searchParams,
+}: {
+  // La selection de series vit dans l'URL : lue ici pour eviter un
+  // clignotement entre le rendu serveur et la reprise cote client.
+  searchParams: { kpi?: string };
+}) {
   await requireUser();
   const supabase = createClient();
 
@@ -104,7 +110,10 @@ export default async function CockpitPage() {
         isExample={signals.length === 0}
       />
 
-      <KpiChart periods={buildAllPeriods({ messages, inbound, prospects, deals })} />
+      <ActivityCard
+        periods={buildAllPeriods({ messages, inbound, prospects, deals })}
+        initialSeries={parseSeriesParam(searchParams.kpi)}
+      />
     </div>
   );
 }

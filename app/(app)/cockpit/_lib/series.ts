@@ -13,23 +13,48 @@ export type SeriesKey = (typeof SERIES_KEYS)[number];
 export interface SeriesMeta {
   key: SeriesKey;
   label: string;
-  /** Token de couleur ; le graphique le lit via `var(--token)`. */
-  token: string;
+  /**
+   * Nom du token RVB.
+   *
+   * On passe par `--rgb-*` et non par le token nommé : `--violet` n'existe pas
+   * dans le thème (seul `--rgb-violet` est défini), si bien que
+   * `stroke: var(--violet)` était invalide et la courbe « Relances envoyées »
+   * héritait du `stroke: none` par défaut du SVG — invisible. Le namespace
+   * `--rgb-*` est le seul complet, et il permet en prime les opacités.
+   */
+  rgb: string;
   /** Les volumes se lisent à gauche, les euros à droite. */
   axis: "left" | "right";
   unit: "count" | "eur";
+  /** Singulier / pluriel, pour les libellés du bandeau. */
+  noun: [string, string];
 }
 
 export const SERIES: SeriesMeta[] = [
-  { key: "envoyes", label: "Emails envoyés", token: "--primary", axis: "left", unit: "count" },
-  { key: "reponses", label: "Réponses reçues", token: "--warn", axis: "left", unit: "count" },
-  { key: "relances", label: "Relances envoyées", token: "--violet", axis: "left", unit: "count" },
-  { key: "prospects", label: "Prospects ajoutés", token: "--teal", axis: "left", unit: "count" },
-  { key: "pipeline", label: "Valeur pipeline", token: "--good", axis: "right", unit: "eur" },
+  { key: "envoyes", label: "Emails envoyés", rgb: "--rgb-primary", axis: "left", unit: "count", noun: ["email", "emails"] },
+  { key: "reponses", label: "Réponses reçues", rgb: "--rgb-warn", axis: "left", unit: "count", noun: ["réponse", "réponses"] },
+  { key: "relances", label: "Relances envoyées", rgb: "--rgb-violet", axis: "left", unit: "count", noun: ["relance", "relances"] },
+  { key: "prospects", label: "Prospects ajoutés", rgb: "--rgb-teal", axis: "left", unit: "count", noun: ["prospect", "prospects"] },
+  { key: "pipeline", label: "Valeur pipeline", rgb: "--rgb-good", axis: "right", unit: "eur", noun: ["euro", "euros"] },
 ];
 
-/** Séries cochées à l'ouverture : la paire qui raconte l'essentiel. */
-export const DEFAULT_SERIES: SeriesKey[] = ["envoyes", "reponses"];
+export const SERIES_BY_KEY = new Map(SERIES.map((meta) => [meta.key, meta]));
+
+/** Couleur d'une série, opacité comprise. */
+export const seriesColor = (meta: SeriesMeta, alpha = 1) =>
+  alpha >= 1 ? `rgb(var(${meta.rgb}))` : `rgb(var(${meta.rgb}) / ${alpha})`;
+
+/** Séries cochées à l'ouverture. */
+export const DEFAULT_SERIES: SeriesKey[] = ["envoyes", "reponses", "prospects"];
+
+/** Lit `?kpi=envoyes,reponses`. Une valeur inconnue est ignorée, jamais fatale. */
+export function parseSeriesParam(raw: string | undefined): SeriesKey[] {
+  const wanted = (raw ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part): part is SeriesKey => SERIES_KEYS.includes(part as SeriesKey));
+  return wanted.length ? [...new Set(wanted)] : DEFAULT_SERIES;
+}
 
 export const PERIODS = [7, 30, 90] as const;
 export type Period = (typeof PERIODS)[number];
@@ -45,6 +70,10 @@ export interface ChartData {
   replies: number;
   /** Faux quand rien ne s'est passé : l'écran affiche alors des axes à zéro. */
   hasData: boolean;
+  /** Somme de la période — sauf le pipeline, qui est un état : sa dernière valeur. */
+  totals: Record<SeriesKey, number>;
+  /** Mêmes totaux sur la période PRÉCÉDENTE, pour la variation. */
+  previous: Record<SeriesKey, number>;
 }
 
 const DAY_MS = 86_400_000;
@@ -121,7 +150,23 @@ export function buildChartData(
     sent,
     replies,
     hasData: SERIES_KEYS.some((key) => values[key].some((value) => value > 0)),
+    totals: totalsOf(values),
+    // Renseigné par buildAllPeriods, qui rejoue la fenêtre d'avant.
+    previous: totalsOf(values),
   };
+}
+
+/** Un flux se somme ; un état (le pipeline) se lit à sa dernière valeur. */
+function totalsOf(values: Record<SeriesKey, number[]>): Record<SeriesKey, number> {
+  const out = {} as Record<SeriesKey, number>;
+  for (const meta of SERIES) {
+    const list = values[meta.key];
+    out[meta.key] =
+      meta.unit === "eur"
+        ? (list[list.length - 1] ?? 0)
+        : list.reduce((total, value) => total + value, 0);
+  }
+  return out;
 }
 
 /**
@@ -140,9 +185,12 @@ export function buildAllPeriods(
   },
   now = Date.now(),
 ): Record<Period, ChartData> {
-  return {
-    7: buildChartData(input, 7, now),
-    30: buildChartData(input, 30, now),
-    90: buildChartData(input, 90, now),
-  };
+  // La variation se lit contre la fenêtre juste avant : on rejoue le même
+  // calcul décalé d'une période, et on n'en garde que les totaux.
+  const withPrevious = (period: Period): ChartData => ({
+    ...buildChartData(input, period, now),
+    previous: buildChartData(input, period, now - period * DAY_MS).totals,
+  });
+
+  return { 7: withPrevious(7), 30: withPrevious(30), 90: withPrevious(90) };
 }
