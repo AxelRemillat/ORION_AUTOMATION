@@ -1,0 +1,116 @@
+import { z } from "zod";
+import type { DerivedFact } from "@/lib/emails/derived-facts";
+import { factsBlock } from "@/lib/emails/derived-facts";
+import type { DeepAnalysis } from "./analysis";
+import type { GeneratedEmail } from "./prompt";
+
+/**
+ * Passe critique — un appel court, uniquement sur ce qu'un code ne peut pas
+ * trancher.
+ *
+ * Le validateur déterministe attrape déjà les formules bannies, les nombres
+ * inventés et la salutation. Restent des jugements : est-ce que l'accroche
+ * APPREND quelque chose, est-ce que ça sonne humain, est-ce que la phrase
+ * tiendrait encore si on changeait le nom de l'entreprise. C'est le seul rôle
+ * du juge — et il note, il ne réécrit pas.
+ */
+
+const CRITERION = z.object({
+  score: z.number().min(0).max(5),
+  note: z.string().min(3),
+});
+
+export const CRITIQUE_SCHEMA = z.object({
+  specificite: CRITERION,
+  valeurAccroche: CRITERION,
+  pertinenceMetier: CRITERION,
+  verifiabilite: CRITERION,
+  voix: CRITERION,
+  naturel: CRITERION,
+});
+
+export type Critique = z.infer<typeof CRITIQUE_SCHEMA>;
+
+export const CRITERIA_LABELS: Record<keyof Critique, string> = {
+  specificite: "Spécificité (test de substitution)",
+  valeurAccroche: "Valeur de l'accroche",
+  pertinenceMetier: "Pertinence métier du pain",
+  verifiabilite: "Vérifiabilité",
+  voix: "Voix du persona",
+  naturel: "Naturel",
+};
+
+/** Seuil en dessous duquel une réécriture est déclenchée. */
+export const PASSING_SCORE = 3;
+
+/** Critères sous le seuil, formatés pour être renvoyés au rédacteur. */
+export function failingCriteria(critique: Critique): string[] {
+  return (Object.keys(CRITERIA_LABELS) as (keyof Critique)[])
+    .filter((key) => critique[key].score < PASSING_SCORE)
+    .map((key) => `${CRITERIA_LABELS[key]} (${critique[key].score}/5) : ${critique[key].note}`);
+}
+
+export function buildCriticPrompt(facts: DerivedFact[]): string {
+  return `Tu es relecteur exigeant d'emails de prospection a froid. Tu NOTES, tu ne
+reecris pas. Sois severe : un 5 doit se meriter.
+
+${factsBlock(facts)}
+
+Note chaque critere de 0 a 5, avec UNE phrase d'explication.
+
+- specificite : applique le TEST DE SUBSTITUTION. Remplace mentalement le nom
+  de l'entreprise par une autre du meme secteur. Si le mail tient encore tel
+  quel, c'est 0 ou 1.
+- valeurAccroche : la premiere phrase apprend-elle quelque chose au lecteur, ou
+  lui montre-t-elle qu'on a compris son modele economique ? Une reformulation
+  d'un fait public ("fondee en 1969") vaut 1. Un compliment vaut 0.
+- pertinenceMetier : le process cite appartient-il vraiment au quotidien de CE
+  metier, avec son vocabulaire ? "Gestion administrative" vaut 1.
+- verifiabilite : chaque affirmation est-elle adossee a un fait ci-dessus ?
+  Toute affirmation invente-e fait tomber la note.
+- voix : premiere personne, ton humain, pas de jargon corporate, pas de
+  promesse intenable.
+- naturel : est-ce que ca sonne comme un humain qui ecrit a un humain, ou
+  comme un texte genere ?
+
+Reponds UNIQUEMENT avec un objet JSON :
+{
+  "specificite": { "score": 0, "note": "..." },
+  "valeurAccroche": { "score": 0, "note": "..." },
+  "pertinenceMetier": { "score": 0, "note": "..." },
+  "verifiabilite": { "score": 0, "note": "..." },
+  "voix": { "score": 0, "note": "..." },
+  "naturel": { "score": 0, "note": "..." }
+}`;
+}
+
+export function buildCriticContext(analysis: DeepAnalysis, email: GeneratedEmail): string {
+  const hook = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
+  const pain = analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
+
+  return `ANALYSE QUI A SERVI
+Modele economique : ${analysis.businessModel.text}
+Accroche visee (${hook?.type}) : ${hook?.text}
+Pain vise : ${pain?.task}
+
+MAIL A NOTER
+Objet : ${email.subject}
+
+${email.body}`;
+}
+
+/** Valide la sortie du juge ; `null` si elle est inexploitable. */
+export function parseCritique(raw: string): Critique | null {
+  try {
+    const result = CRITIQUE_SCHEMA.safeParse(JSON.parse(raw));
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Note moyenne, pour l'affichage et le rapport d'evaluation. */
+export function averageScore(critique: Critique): number {
+  const keys = Object.keys(CRITERIA_LABELS) as (keyof Critique)[];
+  return keys.reduce((total, key) => total + critique[key].score, 0) / keys.length;
+}

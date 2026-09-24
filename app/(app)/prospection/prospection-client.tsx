@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Prospect } from "@/types";
 import { AnalysisPanel } from "./analysis-panel";
 import { EmailEditor } from "./email-editor";
-import { AnalysisTracks } from "./_components/analysis-tracks";
+import { ChosenAngle } from "./_components/chosen-angle";
 import { DraftPreview } from "./_components/draft-preview";
 import { ErrorBanner } from "./_components/error-banner";
 import { SequenceShell } from "./_components/sequence-shell";
@@ -56,14 +56,24 @@ export function ProspectionClient({
    * L'etape 1 est refaite : c'est le prix a payer pour que la preuve et le
    * detail unique restent coherents avec le nouveau process vise.
    */
-  async function generate(prospect: Prospect, trackIndex?: number) {
+  /**
+   * `angleIndex` bascule sur une autre accroche SANS refaire l'analyse : on
+   * renvoie celle deja calculee, donc aucun appel Linkup, Pappers ou Hunter.
+   */
+  async function generate(prospect: Prospect, angleIndex?: number) {
     setGenerating(true);
     setError(null);
     try {
       const data = await postJson<GenerateResponse>("/api/emails/generate", {
         prospectId: prospect.id,
         tone,
-        trackIndex,
+        ...(angleIndex === undefined
+          ? {}
+          : {
+              angleIndex,
+              cachedAnalysis: analysis?.analysis,
+              cachedContact: analysis?.contact,
+            }),
       });
       setAnalysis(data);
       setDraft(data.email);
@@ -151,6 +161,7 @@ export function ProspectionClient({
                 painPoint={analysis.pain_point}
                 evidence={analysis.evidence}
                 contact={analysis.contact}
+                needLead={analysis.needLead}
               />
 
               <div className="grid gap-4 xl:grid-cols-2">
@@ -170,11 +181,11 @@ export function ProspectionClient({
                 />
               </div>
 
-              {/* Sous le brouillon : le raisonnement, et de quoi en changer. */}
-              <AnalysisTracks
+              {/* Sous le brouillon : l'angle retenu, et de quoi en changer. */}
+              <ChosenAngle
                 analysis={analysis.analysis}
                 regenerating={generating}
-                onPickTrack={(index) => generate(selected, index)}
+                onOtherAngle={(index: number) => generate(selected, index)}
               />
             </>
           )}

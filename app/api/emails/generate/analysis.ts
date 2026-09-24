@@ -1,183 +1,259 @@
+import { z } from "zod";
 import type { Prospect } from "@/types";
 import type { PageContent } from "@/lib/enrichment/linkup";
 import { playbookBlock, resolvePlaybook } from "@/lib/sector-playbook";
+import { factsBlock, type DerivedFact } from "@/lib/emails/derived-facts";
 
 /**
- * ÉTAPE 1 — comprendre le métier avant d'écrire.
+ * ÉTAPE 1 — raisonner avant d'écrire.
  *
- * Constat qui a motivé ce découpage : en un seul appel, le modèle sautait
- * l'analyse et produisait le même diagnostic pour tout le monde — « processus
- * administratifs à optimiser » pour une agence d'intérim comme pour un
- * frigoriste industriel. Deux appels séparés, le premier à température basse
- * et sans souci de style, forcent le raisonnement à exister.
- *
- * Sortie : un JSON que l'étape de rédaction consomme, et que l'UI affiche pour
- * que l'utilisateur voie sur quoi le mail s'appuie — et puisse choisir une
- * autre piste.
+ * La version précédente rendait un `pain_point` en texte libre : rien ne
+ * l'obligeait à croiser deux faits, donc le modèle attrapait le fait le plus
+ * saillant (une date de création, un chiffre d'affaires) et en faisait une
+ * paraphrase — « longue expérience depuis 1969 ». Le schéma ci-dessous rend la
+ * déduction structurellement obligatoire : une implication sans deux `factIds`
+ * est rejetée par zod, pas par une consigne qu'on espère suivie.
  */
 
-export interface ProcessTrack {
-  /** Un process, dans le vocabulaire du métier. */
-  label: string;
-  /** Pourquoi il est plausible CHEZ EUX. */
-  why: string;
-}
+export const ANALYSIS_SCHEMA = z.object({
+  businessModel: z.object({
+    text: z.string().min(15),
+    factIds: z.array(z.string()).min(1),
+  }),
+  /** Déductions « donc… ». Au moins deux faits croisés, sinon ce n'est pas une déduction. */
+  implications: z
+    .array(
+      z.object({
+        text: z.string().min(15),
+        factIds: z.array(z.string()).min(2),
+        confidence: z.number().min(0).max(1),
+        isDeduction: z.boolean(),
+      }),
+    )
+    .min(2)
+    .max(3),
+  painCandidates: z
+    .array(
+      z.object({
+        task: z.string().min(5),
+        whoSuffers: z.string().min(3),
+        whyHere: z.string().min(10),
+        factIds: z.array(z.string()).min(1),
+        automationIdea: z.string().min(10),
+        specificity: z.number().min(0).max(5),
+      }),
+    )
+    .min(3)
+    .max(3),
+  hookCandidates: z
+    .array(
+      z.object({
+        type: z.enum(["observation", "question", "signal"]),
+        text: z.string().min(15),
+        factIds: z.array(z.string()).min(1),
+      }),
+    )
+    .min(2)
+    .max(3),
+  chosen: z.object({
+    hookIndex: z.number().int().min(0),
+    painIndex: z.number().int().min(0),
+    rationale: z.string().min(10),
+  }),
+});
 
-export interface DeepAnalysis {
-  /** Ce que l'entreprise vend, et à qui. */
-  business_model: string;
-  /** Trois process candidats. Le premier est celui retenu. */
-  tracks: ProcessTrack[];
-  pain_point: string;
-  /** La preuve qui justifie ce choix : signal, phrase du site, taille. */
-  pourquoi_lui: string;
-  /** Lien vérifiable quand la preuve vient d'un signal ou du site. */
-  proof_url: string | null;
-  /** L'angle d'attaque de l'accroche. */
-  angle: string;
-  /** Un élément vrai qui ne s'applique qu'à cette entreprise. */
-  detail_unique: string;
-  /**
-   * `false` quand rien ne permettait d'être spécifique. L'UI le dit alors
-   * franchement au lieu de faire passer une généralité pour une analyse.
-   */
-  specific: boolean;
-}
+export type DeepAnalysis = z.infer<typeof ANALYSIS_SCHEMA>;
+export type PainCandidate = DeepAnalysis["painCandidates"][number];
+export type HookCandidate = DeepAnalysis["hookCandidates"][number];
 
 /**
- * Formulations qui signent une analyse ratée : vraies pour toutes les
- * entreprises de France, donc sans valeur dans un mail à froid.
+ * Pains bannis sauf preuve directe. Tous constatés en production : vrais pour
+ * n'importe quelle entreprise, donc sans valeur dans un mail à froid.
  */
-const BANNED = [
-  "processus administratif",
-  "processus administratifs",
-  "back-office",
-  "back office",
-  "gagner en efficacite",
-  "gagner en efficacité",
+const BANNED_PAINS = [
+  "proposition commerciale",
+  "propositions commerciales",
+  "gestion administrative",
   "optimiser vos processus",
-  "taches administratives",
-  "tâches administratives",
-  "gain de productivite",
-  "gain de productivité",
+  "gagner du temps",
+  "processus administratif",
+  "back-office",
 ];
 
 const normalize = (value: string): string =>
   value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
-/** `true` si le texte retombe dans la généralité interdite. */
-export function isGeneric(text: string): boolean {
+export function isBannedPain(text: string): boolean {
   const haystack = normalize(text);
-  return BANNED.some((term) => haystack.includes(normalize(term)));
+  return BANNED_PAINS.some((term) => haystack.includes(normalize(term)));
 }
 
-export function buildAnalysisPrompt(prospect: Prospect): string {
+/** `true` quand l'analyse n'a produit que des généralités. */
+export function isGenericAnalysis(analysis: DeepAnalysis): boolean {
+  const pain = analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
+  return !pain || isBannedPain(`${pain.task} ${pain.whyHere}`) || pain.specificity < 2;
+}
+
+export function buildAnalysisPrompt(prospect: Prospect, facts: DerivedFact[]): string {
   const playbook = resolvePlaybook(
     typeof prospect.key_figures?.naf_code === "string" ? prospect.key_figures.naf_code : null,
     prospect.sector,
   );
 
   return `Tu es analyste. Ta seule tache : comprendre ce que fait REELLEMENT cette
-entreprise, et reperer ce qui, dans son metier, se prete a l'automatisation.
-Tu n'ecris aucun email a cette etape.
+entreprise et en DEDUIRE ou le travail repetitif se concentre. Tu n'ecris aucun
+email a cette etape.
+
+${factsBlock(facts)}
 
 ${playbookBlock(playbook)}
 
 METHODE
-1. Deduis le modele economique reel : que vendent-ils, a qui, comment ils
-   operent. Appuie-toi sur le code NAF, le secteur, la taille, les signaux
-   attestes et surtout le CONTENU DE LEUR SITE, qui est la source la plus
-   parlante.
-2. Liste TROIS process operationnels specifiques a CE metier, qui sont
-   typiquement automatisables. Emploie le vocabulaire du secteur : on doit
-   pouvoir dire de quel metier il s'agit rien qu'en les lisant.
-3. Choisis le plus pertinent et relie-le a une PREUVE : un signal date, une
-   phrase de leur site, leur taille. Pas de preuve solide : dis-le.
-4. Isole un "detail_unique" : un element VRAI qui ne s'applique qu'a cette
-   entreprise-la. Le nom d'une prestation, une zone, une specialite, un fait
-   d'actualite. C'est ce qui rendra l'accroche impossible a recycler.
+1. businessModel : en une phrase, ce qu'ils vendent et COMMENT ils gagnent de
+   l'argent. Cite les ids des faits utilises.
+2. implications : deux ou trois deductions « donc... ». Chacune DOIT croiser au
+   moins DEUX faits — par exemple NAF + CA par salarie, ou modele economique +
+   activite de maintenance. Une implication qui reformule un seul fait n'est pas
+   une deduction : c'est une paraphrase, et elle sera rejetee.
+3. painCandidates : TROIS taches repetitives, dans le vocabulaire DU METIER.
+   Interim : contrats de mission, releves d'heures, DPAE, sourcing.
+   Exploitant frigorifique : alertes de supervision, interventions, pieces,
+   reporting energie client. Pour chacune : qui la subit, pourquoi elle est
+   volumineuse ou couteuse CHEZ EUX (avec les factIds), une idee
+   d'automatisation concrete, et un score de specificite de 0 a 5.
+   INTERDITS sauf preuve directe dans les faits : "propositions commerciales",
+   "gestion administrative", "optimiser vos processus", "gagner du temps".
+4. hookCandidates : trois accroches de TYPES DIFFERENTS.
+   (a) observation : un croisement de faits et sa consequence concrete ;
+   (b) question : une question metier precise, a laquelle un dirigeant du
+       secteur repond en une seconde ;
+   (c) signal : uniquement si un fait "Signal web" existe. Sinon ne produis
+       que (a) et (b).
+   INTERDIT : tout compliment ("j'ai ete impressionne", "votre engagement"),
+   et toute simple reformulation d'un fait ("fondee en 1969", "longue
+   experience"). Une accroche doit APPRENDRE quelque chose au lecteur ou lui
+   montrer qu'on a compris son modele economique.
+5. chosen : l'accroche et le pain retenus. Critere : specificite maximale ET
+   verifiabilite. L'accroche doit passer le TEST DE SUBSTITUTION — si on
+   remplace le nom par une autre entreprise du meme code NAF, la phrase ne doit
+   plus tenir. Explique ton choix dans "rationale".
 
-INTERDIT comme pain point : "processus administratifs", "back-office",
-"taches administratives", "gagner en efficacite", "optimiser vos processus".
-Ces formules sont vraies pour toutes les entreprises, donc inutiles. Si tu n'as
-vraiment aucune matiere, mets specific a false et dis honnetement ce qui manque.
+N'invente aucun chiffre. N'affirme rien qui ne s'appuie pas sur un factId.
 
-N'invente aucun chiffre. N'affirme aucun fait absent des DONNEES.
+CONTRAINTES DE FORME, verifiees automatiquement — une reponse qui les viole
+est rejetee et tu devras recommencer :
+- "implications" : EXACTEMENT 2 ou 3 entrees, chacune avec AU MOINS 2 factIds.
+- "painCandidates" : EXACTEMENT 3 entrees.
+- "hookCandidates" : 2 ou 3 entrees, et CHACUNE doit avoir au moins 1 factId.
+  Aucune accroche sans factId, meme une question.
 
-Reponds UNIQUEMENT avec un objet JSON :
+Reponds UNIQUEMENT avec un objet JSON de cette forme (respecte le NOMBRE
+d'elements de chaque tableau) :
 {
-  "business_model": "une a deux phrases : ce qu'ils vendent, a qui",
-  "tracks": [
-    { "label": "process specifique au metier", "why": "pourquoi c'est plausible chez eux" },
-    { "label": "...", "why": "..." },
-    { "label": "...", "why": "..." }
+  "businessModel": { "text": "...", "factIds": ["f1", "f2"] },
+  "implications": [
+    { "text": "... donc ...", "factIds": ["f1", "f7"], "confidence": 0.7, "isDeduction": true },
+    { "text": "... donc ...", "factIds": ["f3", "f5"], "confidence": 0.6, "isDeduction": true }
   ],
-  "pain_point": "le process retenu, formule comme une hypothese, dans le vocabulaire du metier",
-  "pourquoi_lui": "la preuve precise qui justifie ce choix",
-  "proof_url": "l'URL de la preuve si elle vient d'un signal ou du site, sinon null",
-  "angle": "l'angle d'accroche en une phrase",
-  "detail_unique": "un element vrai propre a CETTE entreprise",
-  "specific": true
-}
-Le premier element de "tracks" doit etre le process retenu.`;
+  "painCandidates": [
+    { "task": "...", "whoSuffers": "...", "whyHere": "...", "factIds": ["f7"], "automationIdea": "...", "specificity": 4 },
+    { "task": "...", "whoSuffers": "...", "whyHere": "...", "factIds": ["f3"], "automationIdea": "...", "specificity": 3 },
+    { "task": "...", "whoSuffers": "...", "whyHere": "...", "factIds": ["f5"], "automationIdea": "...", "specificity": 3 }
+  ],
+  "hookCandidates": [
+    { "type": "observation", "text": "...", "factIds": ["f5", "f7"] },
+    { "type": "question", "text": "...", "factIds": ["f7"] }
+  ],
+  "chosen": { "hookIndex": 0, "painIndex": 0, "rationale": "..." }
+}`;
 }
 
-/** Contexte de l'etape 1 : donnees structurees + contenu du site. */
-export function buildAnalysisContext(prospect: Prospect, pages: PageContent[], base: string): string {
+/** Contexte de l'etape 1 : faits numerotes + contenu du site. */
+export function buildAnalysisContext(prospect: Prospect, pages: PageContent[]): string {
+  const header = `Entreprise : ${prospect.company_name}`;
   if (!pages.length) {
-    return `${base}
+    return `${header}
 
 SITE OFFICIEL : non lu (pas de site connu, ou lecture impossible). Appuie-toi
-sur le NAF, le secteur, la taille et les signaux.`;
+sur les faits numerotes ci-dessus.`;
   }
 
-  const site = pages
-    .map((page) => `--- ${page.url} ---\n${page.markdown}`)
-    .join("\n\n");
-
-  return `${base}
+  return `${header}
 
 CONTENU DU SITE OFFICIEL (source la plus fiable sur leur metier reel) :
-${site}`;
+${pages.map((page) => `--- ${page.url} ---\n${page.markdown}`).join("\n\n")}`;
 }
 
-const asString = (value: unknown, fallback = ""): string =>
-  typeof value === "string" ? value.trim() : fallback;
+export interface ParseOutcome {
+  analysis: DeepAnalysis | null;
+  /** Message d'erreur exploitable pour la relance, quand la validation echoue. */
+  error?: string;
+}
 
-/** Valide la sortie de l'etape 1 ; renvoie null si elle est inexploitable. */
-export function parseDeepAnalysis(raw: string): DeepAnalysis | null {
+/**
+ * Valide la sortie de l'etape 1 contre le schema.
+ *
+ * On renvoie l'erreur zod telle quelle : elle est renvoyee au modele lors de
+ * la relance, et c'est de loin le feedback le plus efficace — il voit
+ * exactement quel champ manque.
+ */
+export function parseDeepAnalysis(raw: string): ParseOutcome {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return null;
+    return { analysis: null, error: "La reponse n'est pas un JSON valide." };
   }
-  if (!parsed || typeof parsed !== "object") return null;
 
-  const source = parsed as Record<string, unknown>;
-  const painPoint = asString(source.pain_point);
-  if (!painPoint) return null;
+  const result = ANALYSIS_SCHEMA.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues
+      .slice(0, 6)
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join(" | ");
+    return { analysis: null, error: issues };
+  }
 
-  const tracks = Array.isArray(source.tracks)
-    ? source.tracks
-        .map((item) => item as Record<string, unknown>)
-        .filter((item) => asString(item.label))
-        .slice(0, 3)
-        .map((item) => ({ label: asString(item.label), why: asString(item.why) }))
-    : [];
+  const analysis = result.data;
+  // Les index choisis doivent exister : un modele peut renvoyer 3 alors qu'il
+  // n'a produit que deux accroches.
+  const clamp = (value: number, max: number) => (value >= 0 && value < max ? value : 0);
+  analysis.chosen.hookIndex = clamp(analysis.chosen.hookIndex, analysis.hookCandidates.length);
+  analysis.chosen.painIndex = clamp(analysis.chosen.painIndex, analysis.painCandidates.length);
 
-  const url = asString(source.proof_url);
+  return { analysis };
+}
 
-  return {
-    business_model: asString(source.business_model, "Modèle économique non déterminé."),
-    tracks,
-    pain_point: painPoint,
-    pourquoi_lui: asString(source.pourquoi_lui, "Aucune preuve explicite."),
-    proof_url: url.startsWith("http") ? url : null,
-    angle: asString(source.angle),
-    detail_unique: asString(source.detail_unique),
-    // Le modele peut se declarer specifique tout en sortant une generalite :
-    // c'est le texte qui tranche, pas son auto-evaluation.
-    specific: source.specific !== false && !isGeneric(painPoint),
-  };
+/**
+ * Lance l'etape 1 avec UNE relance si le schema n'est pas respecte.
+ *
+ * `ask` est injecte pour que la route (qui journalise le cout) et le script
+ * d'evaluation (qui ne le fait pas) partagent exactement la meme logique de
+ * relance. L'erreur zod est renvoyee telle quelle au modele : c'est le
+ * meilleur feedback possible, il voit quel champ manque.
+ */
+export async function runAnalysisWithRetry(
+  ask: (system: string, user: string, temperature: number, operation: string) => Promise<string>,
+  prospect: Prospect,
+  facts: DerivedFact[],
+  pages: PageContent[],
+): Promise<ParseOutcome> {
+  const system = buildAnalysisPrompt(prospect, facts);
+  const context = buildAnalysisContext(prospect, pages);
+
+  const first = parseDeepAnalysis(await ask(system, context, 0.2, "analyse-metier"));
+  if (first.analysis) return first;
+
+  const retry = parseDeepAnalysis(
+    await ask(
+      system,
+      `${context}
+
+Ta reponse precedente a ete REJETEE par la validation : ${first.error}
+Recommence en respectant a la lettre le nombre d'elements et les factIds obligatoires.`,
+      0.2,
+      "analyse-metier:retry",
+    ),
+  );
+  return retry.analysis ? retry : { analysis: null, error: retry.error ?? first.error };
 }

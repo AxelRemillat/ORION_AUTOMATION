@@ -1,76 +1,70 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getOpenAI, OPENAI_MODEL } from "@/lib/openai";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { findDecisionMaker, hasHunterKey } from "@/lib/enrichment/hunter";
 import { fetchSiteContent, hasLinkupKey, type PageContent } from "@/lib/enrichment/linkup";
 import { toDomain } from "@/lib/enrichment/http";
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
+import { buildFacts, type DerivedFact } from "@/lib/emails/derived-facts";
+import { validateEmail } from "@/lib/emails/validate";
 import { edges, maxSimilarity } from "@/lib/similarity";
 import { coerceTone, type ToneKey } from "@/lib/tones";
 import type { Prospect } from "@/types";
-// Garde d'authentification partagée avec les routes /api/prospects.
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import {
+  ANALYSIS_SCHEMA,
   buildAnalysisContext,
   buildAnalysisPrompt,
-  parseDeepAnalysis,
+  isGenericAnalysis,
+  runAnalysisWithRetry,
   type DeepAnalysis,
 } from "./analysis";
 import {
-  buildContext,
   buildWritingPrompt,
-  extractEuroAmounts,
   parseEmail,
   type Evidence,
   type GeneratedEmail,
 } from "./prompt";
+import {
+  averageScore,
+  buildCriticContext,
+  buildCriticPrompt,
+  failingCriteria,
+  parseCritique,
+  type Critique,
+} from "./critic";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Deux appels OpenAI plus une lecture de site : 60 s suffisent largement. */
-export const maxDuration = 90;
+/** Analyse + rédaction + juge, et jusqu'à une réécriture : 90 s suffisent. */
+export const maxDuration = 120;
 
-/** Au-delà, le brouillon ressemble trop à un précédent : on régénère une fois. */
 const SIMILARITY_LIMIT = 0.4;
-
-/** Nombre de mails précédents examinés pour l'anti-répétition. */
 const HISTORY = 10;
 
-interface GenerateBody {
-  prospectId?: string;
-  tone?: string;
+const CONTACT_SCHEMA = z.object({
+  email: z.string(),
+  full_name: z.string().nullable(),
+  position: z.string().nullable(),
+  confidence: z.number().nullable(),
+});
+
+const BODY_SCHEMA = z.object({
+  prospectId: z.string().min(1),
+  tone: z.string().optional(),
   /**
-   * Piste imposée par l'utilisateur, choisie parmi celles que l'analyse a
-   * écartées. Permet de régénérer sous un autre angle sans tout relancer.
+   * Analyse déjà calculée, renvoyée par une génération précédente. Sa présence
+   * fait sauter l'étape 1 ET tous les appels externes : c'est ce qui permet au
+   * bouton « Autre angle » de ne rien coûter en crédits.
    */
-  trackIndex?: number;
-}
+  cachedAnalysis: ANALYSIS_SCHEMA.optional(),
+  cachedContact: CONTACT_SCHEMA.nullish(),
+  /** Accroche et pain à utiliser, quand on bascule d'angle. */
+  angleIndex: z.number().int().min(0).optional(),
+});
 
-/**
- * Garde-fou anti-chiffres inventés : tout montant en euros du brouillon doit
- * correspondre à une donnée réellement collectée. On ne réécrit pas le texte
- * du modèle — on prévient l'utilisateur, qui relit avant d'envoyer.
- */
-function checkEuroClaims(prospect: Prospect, body: string): EnrichmentWarning | null {
-  const figures = prospect.key_figures ?? {};
-  const known = new Set(
-    [figures.revenue_eur, figures.net_income_eur, figures.capital_eur]
-      .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-      .map((value) => Math.round(value)),
-  );
-
-  const unknown = extractEuroAmounts(body).filter((amount) => !known.has(amount));
-  if (!unknown.length) return null;
-
-  return {
-    source: "openai",
-    message:
-      `Montant non vérifié dans le brouillon (${unknown.join(", ")} EUR) : ` +
-      "aucune donnée collectée ne le corrobore. Retirez-le ou corrigez-le avant envoi.",
-  };
-}
-
-/** Lecture du site officiel — best effort, jamais bloquante. */
+/** Lecture du site — best effort, jamais bloquante. */
 async function readSite(
   prospect: Prospect,
 ): Promise<{ pages: PageContent[]; warning?: EnrichmentWarning }> {
@@ -96,31 +90,31 @@ async function findContact(
   prospect: Prospect,
 ): Promise<{ contact: DecisionMakerContact | null; warning?: EnrichmentWarning }> {
   const domain = toDomain(prospect.website);
-  if (!domain) {
-    return { contact: null, warning: { source: "hunter", message: "aucun site connu pour ce prospect" } };
-  }
+  if (!domain) return { contact: null, warning: { source: "hunter", message: "aucun site connu" } };
   if (!hasHunterKey()) {
-    return { contact: null, warning: { source: "hunter", message: "clé absente : email du décideur non recherché" } };
+    return { contact: null, warning: { source: "hunter", message: "clé absente : décideur non recherché" } };
   }
-
   const leader = typeof prospect.key_figures?.leader === "string" ? prospect.key_figures.leader : null;
   const result = await findDecisionMaker(domain, leader, prospect.id);
   if (!result.ok) return { contact: null, warning: { source: "hunter", message: result.error } };
   return { contact: result.data };
 }
 
-/** ÉTAPE 1 — comprendre le métier. Température basse : on veut de la rigueur. */
-async function runDeepAnalysis(
-  prospect: Prospect,
-  pages: PageContent[],
-): Promise<DeepAnalysis | null> {
+/** Appel OpenAI générique, avec journalisation du coût réel. */
+async function ask(
+  system: string,
+  user: string,
+  temperature: number,
+  operation: string,
+  prospectId: string,
+): Promise<string> {
   const completion = await getOpenAI().chat.completions.create({
     model: OPENAI_MODEL,
-    temperature: 0.2,
+    temperature,
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: buildAnalysisPrompt(prospect) },
-      { role: "user", content: buildAnalysisContext(prospect, pages, buildContext(prospect)) },
+      { role: "system", content: system },
+      { role: "user", content: user },
     ],
   });
 
@@ -129,51 +123,23 @@ async function runDeepAnalysis(
       model: OPENAI_MODEL,
       promptTokens: completion.usage.prompt_tokens ?? 0,
       completionTokens: completion.usage.completion_tokens ?? 0,
-      operation: "analyse-metier",
-      prospectId: prospect.id,
+      operation,
+      prospectId,
     });
   }
-  return parseDeepAnalysis(completion.choices[0]?.message?.content ?? "");
+  return completion.choices[0]?.message?.content ?? "";
 }
 
-/** ÉTAPE 2 — écrire. Température haute : c'est là qu'on veut de la variété. */
-async function runWriting(
-  prospect: Prospect,
-  analysis: DeepAnalysis,
-  tone: ToneKey,
-  avoid: string[],
-): Promise<GeneratedEmail | null> {
-  const completion = await getOpenAI().chat.completions.create({
-    model: OPENAI_MODEL,
-    temperature: 0.85,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: buildWritingPrompt({ tone, analysis, avoid, seed: prospect.company_name }) },
-      { role: "user", content: `Écris le mail pour ${prospect.company_name}.` },
-    ],
-  });
-
-  if (completion.usage) {
-    await recordOpenAiUsage({
-      model: OPENAI_MODEL,
-      promptTokens: completion.usage.prompt_tokens ?? 0,
-      completionTokens: completion.usage.completion_tokens ?? 0,
-      operation: `redaction:${tone}`,
-      prospectId: prospect.id,
-    });
-  }
-  return parseEmail(completion.choices[0]?.message?.content ?? "");
-}
-
-/** Déplace la piste choisie en tête : l'étape 2 écrit toujours sur `tracks[0]`. */
-function applyTrackChoice(analysis: DeepAnalysis, index?: number): DeepAnalysis {
-  if (index === undefined || index <= 0 || index >= analysis.tracks.length) return analysis;
-  const chosen = analysis.tracks[index];
+/** Déplace l'angle choisi en tête, pour le bouton « Autre angle ». */
+function applyAngle(analysis: DeepAnalysis, index?: number): DeepAnalysis {
+  if (index === undefined) return analysis;
   return {
     ...analysis,
-    tracks: [chosen, ...analysis.tracks.filter((_, position) => position !== index)],
-    pain_point: chosen.label,
-    pourquoi_lui: chosen.why || analysis.pourquoi_lui,
+    chosen: {
+      ...analysis.chosen,
+      hookIndex: index % analysis.hookCandidates.length,
+      painIndex: index % analysis.painCandidates.length,
+    },
   };
 }
 
@@ -181,11 +147,12 @@ export async function POST(request: Request) {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  const body = await readJson<GenerateBody>(request);
-  if (!body?.prospectId) {
-    return NextResponse.json({ error: "Prospect manquant." }, { status: 400 });
+  const parsedBody = BODY_SCHEMA.safeParse(await readJson<unknown>(request));
+  if (!parsedBody.success) {
+    return NextResponse.json({ error: "Requête invalide." }, { status: 400 });
   }
-  const tone = coerceTone(body.tone);
+  const body = parsedBody.data;
+  const tone: ToneKey = coerceTone(body.tone);
 
   const { data: prospect, error } = await session.supabase
     .from("prospects")
@@ -198,113 +165,193 @@ export async function POST(request: Request) {
   }
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
-      { error: "OPENAI_API_KEY absente : la génération est indisponible. Voir .env.local.example." },
+      { error: "OPENAI_API_KEY absente : la génération est indisponible." },
       { status: 503 },
     );
   }
 
-  // Lecture du site, contact et historique en parallèle : aucun ne dépend des
-  // autres, et la latence ne doit pas s'additionner.
-  const [siteOutcome, contactOutcome, historyResult] = await Promise.all([
-    readSite(prospect),
-    findContact(prospect).catch(() => ({ contact: null, warning: undefined })),
-    session.supabase
-      .from("messages")
-      .select("body")
-      .eq("type", "intro")
-      .order("created_at", { ascending: false })
-      .limit(HISTORY),
-  ]);
-
   const warnings: EnrichmentWarning[] = [];
-  if (siteOutcome.warning) warnings.push(siteOutcome.warning);
-  if (contactOutcome.warning) warnings.push(contactOutcome.warning);
+  const reuse = Boolean(body.cachedAnalysis);
 
-  let analysis: DeepAnalysis | null;
-  try {
-    analysis = await runDeepAnalysis(prospect, siteOutcome.pages);
-  } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : "inconnue";
-    return NextResponse.json({ error: `Analyse impossible : ${reason}` }, { status: 502 });
-  }
-  if (!analysis) {
-    return NextResponse.json({ error: "Analyse inexploitable." }, { status: 502 });
-  }
-  analysis = applyTrackChoice(analysis, body.trackIndex);
+  // Bascule d'angle : on rejoue UNIQUEMENT la rédaction. Aucun appel Linkup,
+  // Pappers ou Hunter — c'est tout l'intérêt du bouton.
+  let contact: DecisionMakerContact | null = null;
+  let pages: PageContent[] = [];
 
-  if (!analysis.specific) {
+  if (reuse) {
+    contact = (body.cachedContact as DecisionMakerContact | null | undefined) ?? null;
+  } else {
+    const [siteOutcome, contactOutcome] = await Promise.all([
+      readSite(prospect),
+      findContact(prospect).catch(() => ({ contact: null, warning: undefined })),
+    ]);
+    pages = siteOutcome.pages;
+    contact = contactOutcome.contact;
+    if (siteOutcome.warning) warnings.push(siteOutcome.warning);
+    if (contactOutcome.warning) warnings.push(contactOutcome.warning);
+  }
+
+  // Les faits sont TOUJOURS recalcules cote serveur : le client n'est pas une
+  // source de verite, meme pour des donnees qu'il a recues de nous.
+  const { facts } = buildFacts(prospect, contact);
+
+  let analysis: DeepAnalysis;
+  if (body.cachedAnalysis) {
+    analysis = body.cachedAnalysis;
+  } else {
+    const outcome = await runAnalysisWithRetry(
+      (system, user, temperature, operation) => ask(system, user, temperature, operation, prospect.id),
+      prospect,
+      facts,
+      pages,
+    );
+    if (!outcome.analysis) {
+      return NextResponse.json({ error: `Analyse inexploitable : ${outcome.error}` }, { status: 502 });
+    }
+    analysis = outcome.analysis;
+  }
+  analysis = applyAngle(analysis, body.angleIndex);
+
+  if (isGenericAnalysis(analysis)) {
     warnings.push({
       source: "openai",
       message:
-        "Aucune donnée ne permettait un diagnostic spécifique : le mail reste générique. " +
+        "Aucune donnée ne permettait un diagnostic spécifique : le pain retenu reste générique. " +
         "Renseignez le site du prospect ou relancez une recherche de signaux.",
     });
   }
 
-  // Anti-répétition : on interdit explicitement les ouvertures et fins déjà
-  // servies, puis on VÉRIFIE le résultat plutôt que de faire confiance.
+  // Anti-répétition : on interdit les ouvertures déjà servies, puis on MESURE.
+  const historyResult = await session.supabase
+    .from("messages")
+    .select("body")
+    .eq("type", "intro")
+    .order("created_at", { ascending: false })
+    .limit(HISTORY);
   const previous = (historyResult.data ?? []).map((row) => (row as { body: string }).body);
   const avoid = previous.flatMap((text) => {
     const { opening, closing } = edges(text);
     return [opening, closing].filter(Boolean);
   });
 
-  let email: GeneratedEmail | null;
-  let similarity = 0;
-  try {
-    email = await runWriting(prospect, analysis, tone, avoid);
-    if (email) {
-      similarity = maxSimilarity(email.body, previous);
-      if (similarity > SIMILARITY_LIMIT) {
-        // Une seule reprise : deux appels suffisent, un troisième coûterait
-        // plus qu'il ne rapporte.
-        const retry = await runWriting(prospect, analysis, tone, [...avoid, edges(email.body).opening]);
-        if (retry) {
-          const retrySimilarity = maxSimilarity(retry.body, previous);
-          if (retrySimilarity < similarity) {
-            email = retry;
-            similarity = retrySimilarity;
-          }
-        }
-      }
-    }
-  } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : "inconnue";
-    return NextResponse.json({ error: `Rédaction impossible : ${reason}` }, { status: 502 });
-  }
+  const writingInput = {
+    tone,
+    analysis,
+    facts,
+    contact,
+    prospectId: prospect.id,
+    companyName: prospect.company_name,
+    avoid,
+  };
+
+  let email: GeneratedEmail | null = parseEmail(
+    await ask(
+      buildWritingPrompt(writingInput),
+      `Écris le mail pour ${prospect.company_name}.`,
+      0.85,
+      `redaction:${tone}`,
+      prospect.id,
+    ),
+  );
   if (!email) {
     return NextResponse.json({ error: "Brouillon inexploitable." }, { status: 502 });
   }
 
+  // --- Garde-fous déterministes, puis juge --------------------------------
+  const siteText = pages.map((page) => page.markdown).join("\n");
+  const context = { facts, contact, tone, companyName: prospect.company_name, siteText };
+  let validation = validateEmail(email, context);
+  let critique: Critique | null = parseCritique(
+    await ask(
+      buildCriticPrompt(facts),
+      buildCriticContext(analysis, email),
+      0,
+      "critique",
+      prospect.id,
+    ),
+  );
+  let failing = critique ? failingCriteria(critique) : [];
+
+  // UNE seule réécriture : au-delà, on rend la main plutôt que de boucler.
+  if (!validation.ok || failing.length > 0) {
+    const feedback = [...validation.failures, ...failing].map((line) => `- ${line}`).join("\n");
+    const rewritten = parseEmail(
+      await ask(
+        buildWritingPrompt({ ...writingInput, critique: feedback }),
+        `Réécris le mail pour ${prospect.company_name}.`,
+        0.75,
+        `redaction:${tone}:rewrite`,
+        prospect.id,
+      ),
+    );
+
+    if (rewritten) {
+      const secondValidation = validateEmail(rewritten, context);
+      const secondCritique = parseCritique(
+        await ask(
+          buildCriticPrompt(facts),
+          buildCriticContext(analysis, rewritten),
+          0,
+          "critique:rewrite",
+          prospect.id,
+        ),
+      );
+      const secondFailing = secondCritique ? failingCriteria(secondCritique) : [];
+
+      // On ne garde la réécriture que si elle est réellement meilleure.
+      const improved =
+        secondValidation.failures.length + secondFailing.length <
+        validation.failures.length + failing.length;
+      if (improved) {
+        email = rewritten;
+        validation = secondValidation;
+        critique = secondCritique;
+        failing = secondFailing;
+      }
+    }
+  }
+
+  const similarity = maxSimilarity(email.body, previous);
   if (similarity > SIMILARITY_LIMIT) {
     warnings.push({
       source: "openai",
-      message: `Ce brouillon ressemble à ${Math.round(similarity * 100)} % à un mail déjà envoyé. Relisez-le de près.`,
+      message: `Ce brouillon ressemble à ${Math.round(similarity * 100)} % à un mail déjà envoyé.`,
     });
   }
 
-  const contact = contactOutcome.contact;
-  if (contact && !prospect.email) {
+  if (contact && !prospect.email && !reuse) {
     await session.supabase.from("prospects").update({ email: contact.email }).eq("id", prospect.id);
   }
 
-  const euroWarning = checkEuroClaims(prospect, email.body);
-  if (euroWarning) warnings.push(euroWarning);
+  const hook = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
+  const pain = analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
 
-  // `evidence` reste le contrat attendu par l'écran : on le construit depuis
-  // l'analyse, dont chaque élément est adossé à une donnée réelle.
+  // « Indice de besoin » : une implication déduite, pas un chiffre isolé.
+  const lead = analysis.implications[0];
   const evidence: Evidence[] = [
-    { label: "Modèle économique", value: analysis.business_model, source: "Analyse du site et du NAF" },
-    { label: "Pourquoi eux", value: analysis.pourquoi_lui, source: analysis.proof_url ?? "Données collectées" },
-    { label: "Détail unique", value: analysis.detail_unique, source: "Site officiel / signaux" },
-  ].filter((item) => item.value);
+    { label: "Modèle économique", value: analysis.businessModel.text, source: "Analyse du site et du NAF" },
+    ...facts.map((fact) => ({
+      label: fact.label,
+      value: fact.value,
+      source: fact.source,
+      ...(fact.url ? { url: fact.url } : {}),
+    })),
+  ];
 
   return NextResponse.json({
-    pain_point: analysis.pain_point,
+    pain_point: pain?.task ?? "",
     evidence,
     email,
     analysis,
+    facts,
     contact,
     warnings,
+    critique,
+    /** Les points qui n'ont pas pu être corrigés : l'UI affiche « à revoir ». */
+    needsReview: !validation.ok || failing.length > 0,
+    reviewReasons: [...validation.failures, ...failing],
+    needLead: lead ? { text: lead.text, factIds: lead.factIds, confidence: lead.confidence } : null,
+    chosenHook: hook,
+    chosenPain: pain,
   });
 }

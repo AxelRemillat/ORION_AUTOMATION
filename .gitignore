@@ -30,3 +30,6 @@ yarn-error.log*
 
 # sortie du harnais de test
 .test-build
+
+# rapport d’évaluation, regénéré à la demande
+eval-report.md

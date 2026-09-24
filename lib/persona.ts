@@ -50,7 +50,77 @@ export const PERSONA = {
     "startup et en entreprise",
 
   signature: "Axel",
+
+  /**
+   * Preuves concretes, taguees par famille de besoin.
+   *
+   * Regle absolue : on ne cite JAMAIS un employeur, le client d'une alternance
+   * ni un projet sous NDA. Ce sont donc des descriptions de ce qu'Axel sait
+   * construire — vraies, verifiables dans une conversation, et sans nom propre.
+   * `publicOk` rend le filtre explicite : une preuve passee a false ne sortira
+   * jamais dans un mail, meme si quelqu'un l'ajoute par inadvertance.
+   */
+  proofs: [
+    {
+      id: "p1",
+      tags: ["documents", "contrats", "rh", "interim", "saisie"],
+      publicOk: true,
+      text: "j'ai deja construit des chaines qui lisent les documents entrants et pre-remplissent les pieces a produire",
+    },
+    {
+      id: "p2",
+      tags: ["maintenance", "supervision", "interventions", "stock", "terrain"],
+      publicOk: true,
+      text: "j'ai relie des flux d'alertes a des declenchements automatiques cote commande et planification",
+    },
+    {
+      id: "p3",
+      tags: ["email", "support", "relance", "client"],
+      publicOk: true,
+      text: "j'ai mis en place du tri et des relances automatiques sur des boites mail a fort volume",
+    },
+    {
+      id: "p4",
+      tags: ["rag", "recherche", "connaissance", "documentation"],
+      publicOk: true,
+      text: "j'ai construit des systemes qui repondent directement sur une base documentaire interne",
+    },
+    {
+      id: "p5",
+      tags: ["reporting", "donnees", "consolidation", "energie"],
+      publicOk: true,
+      text: "j'ai automatise des reportings recurrents a partir de donnees eparpillees dans plusieurs outils",
+    },
+  ],
 } as const;
+
+export interface PersonaProof {
+  id: string;
+  tags: readonly string[];
+  publicOk: boolean;
+  text: string;
+}
+
+/**
+ * Preuve la plus proche du pain vise, ou `null`.
+ *
+ * Aucune correspondance renvoie `null` a dessein : le prompt dit alors de
+ * decrire ce qu'Axel construit, plutot que de sortir une preuve hors sujet.
+ */
+export function pickProof(painText: string): PersonaProof | null {
+  const haystack = painText
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+  let best: { proof: PersonaProof; score: number } | null = null;
+  for (const proof of PERSONA.proofs as readonly PersonaProof[]) {
+    if (!proof.publicOk) continue;
+    const score = proof.tags.filter((tag) => haystack.includes(tag)).length;
+    if (score > 0 && (!best || score > best.score)) best = { proof, score };
+  }
+  return best?.proof ?? null;
+}
 
 /**
  * Bloc d'identité injecté dans le prompt.

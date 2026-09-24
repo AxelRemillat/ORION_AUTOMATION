@@ -1,5 +1,6 @@
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
 import type { DeepAnalysis } from "@/app/api/emails/generate/analysis";
+import type { Critique } from "@/app/api/emails/generate/critic";
 
 /**
  * Un fait REEL retenu par l'analyse, recopie des donnees collectees, avec sa
@@ -26,4 +27,11 @@ export interface GenerateResponse {
    * autre piste sans relancer une recherche.
    */
   analysis: DeepAnalysis;
+  /** Notes du juge, affichees telles quelles quand un critere est faible. */
+  critique: Critique | null;
+  /** `true` quand un garde-fou ou un critere n'a pas pu etre corrige. */
+  needsReview: boolean;
+  reviewReasons: string[];
+  /** L'implication deduite qui sert d'indice de besoin. */
+  needLead: { text: string; factIds: string[]; confidence: number } | null;
 }

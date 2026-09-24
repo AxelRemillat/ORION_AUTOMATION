@@ -4,6 +4,7 @@ import { AtSign, Copy, Target } from "lucide-react";
 import { Badge, Button, Card, CardContent, useToast } from "@/components/ui";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import type { Evidence } from "./types";
+import { FactsGrid } from "./_components/facts-grid";
 
 /**
  * Restitution de l'analyse IA : l'hypothese de pain point, puis les FAITS
@@ -17,10 +18,17 @@ export function AnalysisPanel({
   painPoint,
   evidence,
   contact,
+  needLead,
 }: {
   painPoint: string;
   evidence: Evidence[];
   contact: DecisionMakerContact | null;
+  /**
+   * Indice de besoin : une implication DEDUITE, pas un chiffre isole. Un
+   * chiffre d'affaires seul ne dit rien d'un besoin — c'est le croisement qui
+   * en dit quelque chose.
+   */
+  needLead?: { text: string; confidence: number } | null;
 }) {
   const toast = useToast();
 
@@ -35,6 +43,16 @@ export function AnalysisPanel({
               <Badge tone="neutral">hypothèse</Badge>
             </div>
             <p className="mt-1 text-sm leading-relaxed text-text">{painPoint}</p>
+
+            {needLead && (
+              <div className="mt-3 border-t border-primary/20 pt-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[13px] font-medium text-muted">Indice de besoin</p>
+                  <Badge tone="neutral">déduction · {Math.round(needLead.confidence * 100)} %</Badge>
+                </div>
+                <p className="mt-1 text-[13px] leading-relaxed text-text">{needLead.text}</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -45,20 +63,9 @@ export function AnalysisPanel({
             <p className="font-data text-[11px] font-medium uppercase tracking-wide text-muted">
               Faits réels retenus
             </p>
-            <ul className="mt-3 flex flex-col divide-y divide-line-soft">
-              {evidence.map((fact) => (
-                <li
-                  key={`${fact.label}-${fact.value}`}
-                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0"
-                >
-                  <span className="text-[13px] text-muted">{fact.label}</span>
-                  <span className="flex-1 text-right text-sm font-medium text-text">
-                    {fact.value}
-                  </span>
-                  <span className="font-data text-[11px] text-faint">{fact.source}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-3">
+              <FactsGrid facts={evidence} />
+            </div>
           </CardContent>
         </Card>
       )}

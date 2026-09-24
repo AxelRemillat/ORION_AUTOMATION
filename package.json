@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit",
     "test:signals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/signals.test.js",
     "test:usage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/usage.test.js",
-    "test": "npm run test:signals && npm run test:usage && npm run test:queue && npm run test:charts",
+    "test": "npm run test:signals && npm run test:usage && npm run test:queue && npm run test:emails",
     "test:queue": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/queue.test.js",
-    "test:charts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/charts.test.js"
+    "test:charts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/charts.test.js",
+    "test:emails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/emails.test.js",
+    "eval:emails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-emails.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",
@@ -23,7 +25,8 @@
     "openai": "^4.67.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.5.2"
+    "tailwind-merge": "^2.5.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
