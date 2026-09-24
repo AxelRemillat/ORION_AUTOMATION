@@ -34,6 +34,7 @@ import { effectifFloor } from "./naf";
 import { extractSignals, type Extraction } from "./extract";
 import { extractionToSignals, mergeSignals } from "./structured-signals";
 import { assessGroup } from "./group";
+import { attachSignals } from "./entity-match";
 import { coverSite, looksLikeDomain, type SiteCoverage } from "./site";
 import type { PappersRepresentative } from "./pappers";
 import type { WebResult } from "./linkup";
@@ -269,8 +270,31 @@ async function deepEnrich(
 
   // --- Fusion des signaux -------------------------------------------------
   const structured = extraction ? extractionToSignals(extraction) : [];
-  const webMerged = mergeSignals(structured, webSignals);
-  const signals = [...webMerged, ...structuralSignals(company, keyFigures.headcount)].slice(0, 8);
+  // Anti-homonymie : un signal qui ne porte ni le SIREN, ni le domaine
+  // verifie, ni la denomination exacte n'est pas celui du prospect. S'il
+  // nomme une entite voisine liee par un lien capitalistique prouve, il
+  // devient un signal de groupe ; sinon il est ecarte.
+  const attachment = attachSignals(
+    mergeSignals(structured, webSignals),
+    {
+      name: base.company_name,
+      siren: base.siren,
+      website: site.status === "non trouvé" ? null : company.website,
+    },
+    {
+      parentCompany: group.parentCompany,
+      parentGroup: group.parentGroup,
+      parentGroupQuote: group.parentGroupQuote,
+    },
+  );
+  for (const rejected of attachment.rejected.filter((item) => item.reason === "homonyme probable")) {
+    warnings.push({
+      source: "linkup",
+      message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}`,
+    });
+  }
+  if (attachment.foreignEntities.length) keyFigures.foreign_entities = attachment.foreignEntities;
+  const signals = [...attachment.kept, ...structuralSignals(company, keyFigures.headcount)].slice(0, 8);
 
   return { ...company, key_figures: keyFigures, signals, warnings };
 }

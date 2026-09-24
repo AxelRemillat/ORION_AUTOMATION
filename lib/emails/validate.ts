@@ -61,6 +61,8 @@ export interface ValidationContext {
   proofs?: readonly string[];
   /** Plan impose au redacteur : on verifie qu'il a bien ete suivi. */
   plan?: "A" | "B" | "C";
+  /** Entités homonymes écartées : leur nom ne doit jamais apparaître. */
+  forbiddenNames?: readonly string[];
 }
 
 export interface ValidationResult {
@@ -297,6 +299,14 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     if (shouted.test(body)) {
       failures.push(`Nom de l'entreprise en capitales dans le corps : écrivez-le en casse naturelle.`);
     }
+  }
+
+  // --- Nom d'une autre entite ----------------------------------------------
+  const foreign = (context.forbiddenNames ?? []).filter((name) =>
+    normalize(`${draft.subject} ${body}`).includes(normalize(name)),
+  );
+  if (foreign.length) {
+    failures.push(`Nom d'une autre entreprise (homonyme) : ${foreign.join(", ")}. Utilisez le nom exact du prospect.`);
   }
 
   // --- Presentation de soi -------------------------------------------------

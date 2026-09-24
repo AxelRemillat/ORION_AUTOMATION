@@ -1,19 +1,19 @@
-import { personaBlock, pickIntro, pickProof, BOOKING_URL } from "@/lib/persona";
+import { personaBlock, pickIntro, BOOKING_URL } from "@/lib/persona";
 import { toneInstruction, type ToneKey } from "@/lib/tones";
 import { greetingName, greetingSurname } from "@/lib/emails/validate";
 import { buildFacts, factsBlock, type DerivedFact } from "@/lib/emails/derived-facts";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import type { Prospect } from "@/types";
-import type { DeepAnalysis, HookCandidate, PainCandidate } from "./analysis";
+import { briefFacts, proofById, type StrategyBrief } from "@/lib/emails/strategist";
 
 /**
- * ÉTAPE 2 — la rédaction, à partir du raisonnement déjà posé.
+ * ÉTAPE 3 — le RÉDACTEUR, à partir du brief du stratège.
  *
- * Trois décisions sont prises ICI, par le code, et plus laissées au modèle :
- * la salutation (un contact connu à 99 % doit être nommé), le plan du mail
- * (sinon tous les mails ont le même squelette) et la preuve mobilisée (sinon
- * c'est toujours la même phrase creuse). Le modèle met en mots ; il ne choisit
- * plus la structure.
+ * Il reçoit UNIQUEMENT : le brief, les faits que le brief référence, le
+ * persona (voix + preuve choisie par le stratège), le ton et les règles de
+ * rédaction. Le code fixe en plus la salutation (un contact connu à 99 % doit
+ * être nommé) et le plan (sinon tous les mails ont le même squelette). Le
+ * modèle met en mots ; il ne choisit ni l'angle, ni la preuve, ni la structure.
  */
 
 /**
@@ -171,11 +171,15 @@ export interface GeneratedEmail {
 
 export interface WritingInput {
   tone: ToneKey;
-  analysis: DeepAnalysis;
+  /** Le brief du stratège : SEULE source de ce que dit le mail. */
+  brief: StrategyBrief;
+  /**
+   * Faits du prospect. Le prompt n'en garde QUE ceux que le brief référence :
+   * le rédacteur n'a pas accès au reste (test de non-régression dédié).
+   */
   facts: DerivedFact[];
   contact?: DecisionMakerContact | null;
   prospectId: string;
-  companyName: string;
   /** Ouvertures et fins des derniers mails : interdiction de les reprendre. */
   avoid: string[];
   /** Dirigeant personne physique issu du registre, quand il est connu. */
@@ -184,68 +188,49 @@ export interface WritingInput {
   critique?: string;
 }
 
-const factLine = (facts: DerivedFact[], ids: string[]): string =>
-  ids
-    .map((id) => facts.find((fact) => fact.id === id))
-    .filter((fact): fact is DerivedFact => Boolean(fact))
-    .map((fact) => `${fact.id} = ${fact.label} : ${fact.value}`)
-    .join(" ; ");
-
-/** Le plan retenu, expose pour que la route puisse verifier qu'il a ete suivi. */
-export function planFor(input: WritingInput): PlanKey {
-  const candidates = input.analysis.hookCandidates;
-  const hasSignal =
-    input.facts.some((fact) => fact.source === "Signal web") &&
-    candidates.some((hook) => hook.type === "signal");
-  const hasQuestion = candidates.some((hook) => hook.type === "question");
-  const plan = choosePlan(input.prospectId, input.tone, hasSignal);
-  // Sans accroche de type question, le plan B n'a rien a mettre en ouverture.
-  return plan === "B" && !hasQuestion ? "A" : plan;
+/** Le plan retenu, exposé pour que la route puisse vérifier qu'il a été suivi. */
+export function planFor(input: Pick<WritingInput, "brief" | "prospectId" | "tone">): PlanKey {
+  const hasSignal = input.brief.angle.type === "recrutement" || input.brief.angle.type === "signal";
+  return choosePlan(input.prospectId, input.tone, hasSignal);
 }
 
-/**
- * L'accroche qui va avec le plan.
- *
- * Le plan etait tire au sort, l'accroche choisie par l'analyse, et les deux ne
- * se parlaient pas : le plan B reclamait une question d'ouverture alors que
- * l'accroche retenue etait un constat. Le redacteur tranchait comme il pouvait,
- * et le validateur le rejetait. Ici le plan commande : B prend l'accroche de
- * type question si elle existe, C celle de type signal.
- */
-function hookFor(analysis: DeepAnalysis, plan: PlanKey): HookCandidate {
-  const fallback = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
-  if (plan === "B") return analysis.hookCandidates.find((item) => item.type === "question") ?? fallback;
-  if (plan === "C") return analysis.hookCandidates.find((item) => item.type === "signal") ?? fallback;
-  return fallback;
-}
+const factLines = (facts: DerivedFact[]): string =>
+  facts
+    .map(
+      (fact) =>
+        `[${fact.id}] ${fact.label} : ${fact.value}` +
+        `${fact.bodyUsable ? "" : "  << NE PAS ECRIRE CETTE VALEUR TELLE QUELLE >>"}` +
+        `${fact.reading ? ` — lecture du poste : ${fact.reading}` : ""}`,
+    )
+    .join("\n");
 
 export function buildWritingPrompt(input: WritingInput): string {
-  const { analysis, facts, tone, avoid } = input;
+  const { brief, tone, avoid } = input;
+  const facts = briefFacts(brief, input.facts);
   const plan = planFor(input);
-  const hook: HookCandidate = hookFor(analysis, plan);
-  const pain: PainCandidate =
-    analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
   const greeting = buildGreeting(tone, input.contact, input.leaderPerson);
   const intro = pickIntro(`${input.prospectId}:${tone}`);
+  const hookFacts = facts.filter((fact) => brief.angle.hookFactIds.includes(fact.id));
+  const whyFacts = facts.filter((fact) => brief.pain.whyThem.includes(fact.id));
 
-  // Une preuve pertinente, ou aucune : pas de preuve de remplissage.
-  const proof = pickProof(`${pain.task} ${pain.whyHere} ${pain.automationIdea}`);
+  // La preuve est choisie par le stratège ; le rédacteur ne la change pas.
+  const proof = proofById(brief.proofId);
   const proofLine = proof
     ? `PREUVE A MOBILISER, telle quelle ou presque : « ${proof.text} ». Une seule, jamais deux.`
-    : `AUCUNE PREUVE PERTINENTE pour ce pain : n'en invente pas. Decris simplement ce que tu construis, au present.`;
+    : `AUCUNE PREUVE retenue : n'en invente pas. Decris simplement ce que tu construis, au present.`;
 
   // Le creneau de 30 minutes et le lien sont reserves au ton factuel : ailleurs,
   // une question ouverte obtient bien plus de reponses.
   const cta =
     tone === "factuel" && BOOKING_URL
       ? `CTA : propose un creneau de 30 minutes avec ce lien, tel quel : ${BOOKING_URL}`
-      : `CTA : une QUESTION OUVERTE, a laquelle on repond en une ligne (par exemple « C'est un sujet chez vous en ce moment ? »). Pas de lien, pas de creneau.`;
+      : `CTA : la question du brief, reformulee naturellement : « ${brief.cta} ». Pas de lien, pas de creneau.`;
 
   const lengths = tone === "bref" ? "40 a 70 mots" : "60 a 110 mots";
 
-  const avoidBlock = avoid.length
-    ? `INTERDIT DE REUTILISER — ouvertures et fins de tes derniers mails :
-${avoid.map((line) => `- ${line}`).join("\n")}`
+  const avoidBlock = [...brief.avoid, ...avoid].length
+    ? `A NE PAS DIRE / NE PAS REPRENDRE :
+${[...brief.avoid.map((line) => `- ${line}`), ...avoid.map((line) => `- ouverture ou fin deja servie : ${line}`)].join("\n")}`
     : "";
 
   const critiqueBlock = input.critique
@@ -258,25 +243,23 @@ ${input.critique}`
 
 ${personaBlock()}
 
-CE QUE L'ANALYSE A ETABLI
-- Leur modele economique : ${analysis.businessModel.text}
-- Implications deduites :
-${analysis.implications.map((item) => `  - ${item.text}  [${factLine(facts, item.factIds)}]`).join("\n")}
-- ACCROCHE RETENUE (${hook.type}), c'est la PREMIERE PHRASE apres la salutation :
-  ${hook.text}
-  Faits qui la soutiennent : ${factLine(facts, hook.factIds)}
-- PAIN RETENU : ${pain.task}
-  Qui le subit : ${pain.whoSuffers}
-  Pourquoi chez eux : ${pain.whyHere}  [${factLine(facts, pain.factIds)}]
-  Automatisation concrete a decrire : ${pain.automationIdea}
+LE BRIEF — decide par le stratege. Tu le mets en mots, tu ne le changes pas.
+- ANGLE (${brief.angle.type}) : ${brief.angle.insight}
+  Faits d'accroche : ${hookFacts.map((fact) => fact.id).join(", ") || "aucun"}
+- PAIN : ${brief.pain.task}
+  Pourquoi chez eux : ${whyFacts.map((fact) => fact.id).join(", ") || "aucun"}
+  Flux a decrire : ${brief.pain.automationIdea}
+
+FAITS AUTORISES — les seuls sur lesquels tu peux t'appuyer :
+${factLines(facts) || "aucun"}
 
 REGLES DURES — chacune est verifiee par du code apres generation
 1. SALUTATION, exactement : « ${greeting} » Rien d'autre.
-2. La premiere phrase apres la salutation est l'accroche retenue, reformulee
+2. La premiere phrase apres la salutation porte l'ANGLE du brief, reformule
    naturellement. JAMAIS un compliment ("impressionne", "votre engagement"),
    jamais la simple reformulation d'un fait ("fondee en 1969").
 3. Le pain est pose comme une HYPOTHESE ou une QUESTION, jamais comme un constat.
-4. Aucun chiffre absent des faits ci-dessus. Les arrondis sont permis :
+4. Aucun chiffre absent des faits autorises. Les arrondis sont permis :
    40 878 286 EUR peut s'ecrire « 41 M EUR ».
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
    interruption », pas de « d'apres mes estimations ».
@@ -288,9 +271,8 @@ REGLES DURES — chacune est verifiee par du code apres generation
    « logiciel », « progiciel », « solution », « systeme de gestion integre »,
    « plateforme ». Decris ce qui circule : ce qui declenche, ce qui est lu, ce
    qui est ecrit, et dans quel outil.
-10. Le nom de l'entreprise s'ecrit en CASSE NATURELLE, jamais comme au
-    registre. « ${input.companyName} » se recopie sans ses capitales
-    (« Blue EnerFreeze », pas « BLUE ENERFREEZE »).
+10. NOM DE L'ENTREPRISE : s'il apparait, il s'ecrit EXACTEMENT
+    « ${brief.companyName} ». Aucun autre nom d'entreprise ne la designe.
 11. UNE SEULE formule d'hypothese dans tout le mail (« j'imagine »,
     « sans doute », « si je lis bien »...). Deux, et le lecteur comprend qu'on
     ne sait rien de lui.
@@ -303,7 +285,7 @@ ${cta}
 
 OBJET
 2 a 6 mots, minuscules sauf noms propres, dans le vocabulaire metier du pain.
-INTERDIT : commencer par « Automatisation de », contenir « chez ${input.companyName} »,
+INTERDIT : commencer par « Automatisation de », contenir « chez ${brief.companyName} »,
 les majuscules de mise en avant, les emojis, les points d'exclamation.
 Exemples de forme : « contrats de mission et releves d'heures »,
 « alertes, interventions et pieces », « pieces clients et relances ».

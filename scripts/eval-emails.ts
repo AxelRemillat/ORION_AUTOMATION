@@ -1,445 +1,473 @@
 /**
- * Évaluation de la génération d'emails.
+ * Évaluation de la génération d'emails : STRATÈGE → RÉDACTEUR → JUGE.
  *
- * Rejoue la chaîne complète — analyse, rédaction, validateurs, juge — sur des
- * prospects figés, dans les 4 registres, et écrit `eval-report.md`.
+ * À LANCER EN LOCAL : ce script consomme des appels OpenAI réels (et lit la
+ * base en mode --ab). Rien ici ne tourne en CI.
  *
- * Pourquoi des fixtures plutôt que la base : un rapport doit être comparable
- * d'une exécution à l'autre. Si les données bougent, on ne sait plus si c'est
- * le prompt qui a progressé ou le prospect qui a changé.
+ * ─── Commandes ──────────────────────────────────────────────────────────────
  *
- * Exécution : `npm run eval:emails` (consomme des appels OpenAI réels).
+ *   # Rapport simple (fixtures, 4 registres) avec la config de l'environnement
+ *   npm run eval:emails
+ *
+ *   # Même chose en forçant les modèles du stratège et du rédacteur
+ *   npm run eval:emails -- --strategist <modele> --writer <modele>
+ *
+ *   # A/B : config actuelle vs config forte, mêmes prospects
+ *   #   RAS, BLUE ENERFREEZE, JACQUET + 7 autres prospects de la base
+ *   #   → ab-report.md (paires anonymisées) + ab-key.json (clé, ne pas lire avant)
+ *   npm run eval:emails -- --ab --strategist <modele-fort> --writer <modele-moyen>
+ *
+ *   # Révèle quelle config a produit quelle version (aucun appel OpenAI)
+ *   #   → ab-reveal.md
+ *   npm run eval:emails -- --reveal
+ *
+ * ─── Variables ──────────────────────────────────────────────────────────────
+ *
+ *   OPENAI_API_KEY                         obligatoire (sauf --reveal)
+ *   OPENAI_MODEL_STRATEGIST / _WRITER / _JUDGE   config « actuelle » (défaut :
+ *                                          OPENAI_MODEL, sinon gpt-4o-mini)
+ *   EVAL_STRONG_STRATEGIST / _WRITER       alternative à --strategist / --writer
+ *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE, ORION_SCRIPT_USER_ID
+ *                                          --ab : lecture des prospects en base
+ *                                          (sinon repli sur les fixtures)
+ *   OPENAI_PRICES_JSON                     prix des modèles hors grille
+ *   EVAL_ONLY="ras,blue"  EVAL_TONES="direct"  EVAL_AB_TONE="direct"
+ *
+ * Le juge est le même pour les deux configs (OPENAI_MODEL_JUDGE) : on compare
+ * des rédactions, pas des correcteurs.
  */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
+import { chatJson, type AskFn } from "@/lib/ai/chat";
+import { modelFor, type AiRole } from "@/lib/ai/models";
 import { buildFacts } from "@/lib/emails/derived-facts";
-import { bodyParagraphs, validateEmail } from "@/lib/emails/validate";
-import { PERSONA } from "@/lib/persona";
+import { runStrategist, type StrategyBrief } from "@/lib/emails/strategist";
+import { bodyParagraphs } from "@/lib/emails/validate";
+import { openAiCost } from "@/lib/usage/pricing";
 import { maxSimilarity } from "@/lib/similarity";
 import { TONES, type ToneKey } from "@/lib/tones";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import type { Prospect } from "@/types";
-import {
-  runAnalysisWithRetry,
-  type DeepAnalysis,
-} from "@/app/api/emails/generate/analysis";
-import { buildWritingPrompt, parseEmail, planFor } from "@/app/api/emails/generate/prompt";
-import {
-  averageScore,
-  buildCriticContext,
-  buildCriticPrompt,
-  CRITERIA_LABELS,
-  failingCriteria,
-  parseCritique,
-  type Critique,
-} from "@/app/api/emails/generate/critic";
+import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
+import { averageScore, CRITERIA_LABELS, failingCriteria, type Critique } from "@/app/api/emails/generate/critic";
+import { FIXTURES, REFERENCE_SECTION, type Fixture } from "./eval-fixtures";
 
-const PUBLIC_PROOFS = PERSONA.proofs.filter((proof) => proof.publicOk).map((proof) => proof.text);
+// ---------------------------------------------------------------------------
+// Arguments
+// ---------------------------------------------------------------------------
 
-const NEWLINE = "\n";
+const argv = process.argv.slice(2);
+const flag = (name: string): boolean => argv.includes(`--${name}`);
+const option = (name: string): string | undefined => {
+  const index = argv.indexOf(`--${name}`);
+  const value = index >= 0 ? argv[index + 1] : undefined;
+  return value && !value.startsWith("--") ? value : undefined;
+};
 
-const MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY as string });
+const list = (raw: string | undefined) =>
+  (raw ?? "").split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
+const only = list(process.env.EVAL_ONLY);
+const toneFilter = list(process.env.EVAL_TONES);
 
-const base = (over: Partial<Prospect>): Prospect => ({
-  id: "x", user_id: "u", company_name: "", siren: null, website: null, email: null, sector: null,
-  size_range: null, city: null, source: "auto", signals: [], key_figures: {}, pain_point: null,
-  status: "nouveau", created_at: "", updated_at: "", ...over,
-});
-
-interface Fixture {
-  prospect: Prospect;
-  contact: DecisionMakerContact | null;
-  site: string;
+interface ModelConfig {
+  name: "actuelle" | "forte" | "surchargée";
+  strategist: string;
+  writer: string;
 }
 
-const FIXTURES: Fixture[] = [
-  {
-    prospect: base({
-      id: "ras-0001",
-      company_name: "RAS INTERIM JERECRUTE",
-      siren: "775614308",
-      website: "https://www.ras-interim.fr",
-      sector: "Activités des sièges sociaux",
-      size_range: "20 à 49 salariés",
-      city: "Lyon",
-      key_figures: { naf_code: "70.10Z", revenue_eur: 40_878_286, revenue_year: 2024, founded_year: 1969 },
-    }),
-    contact: null,
-    site: `R.A.S Interim, agence d'interim 24h/24 et 7j/7, 190 agences en France, environ 80 000 interimaires par an depuis 1969. Placement et missions d'interim, visite de l'entreprise avant le contrat de mission, assistance administrative, entretiens de suivi. Outils : application my R.A.S (depot de CV, propositions de missions) et plateforme my Temp pour la gestion administrative. Siege a Lyon.`,
-  },
-  {
-    prospect: base({
-      id: "blue-0002",
-      company_name: "BLUE ENERFREEZE",
-      siren: "844104851",
-      website: "https://www.blue-enerfreeze.com",
-      sector: "Production et distribution de vapeur et d'air conditionné",
-      size_range: "20 à 49 salariés",
-      city: "Lyon",
-      key_figures: {
-        naf_code: "35.30Z",
-        revenue_eur: 50_290_772,
-        revenue_year: 2024,
-        founded_year: 2018,
-        parent_company: "STEF",
-      },
-      // Les deux faits qui doivent primer sur les finances : un recrutement
-      // d'automaticien recent (rang 1) et l'appartenance au groupe (rang 2).
-      signals: [
-        {
-          type: "recrutement",
-          label: "Recrutement en cours",
-          quote: "Blue EnerFreeze recrute un automaticien H/F en CDI pour ses installations frigorifiques",
-          url: "https://www.blue-enerfreeze.com/carrieres",
-          date: new Date(Date.now() - 21 * 86_400_000).toISOString().slice(0, 10),
-          confidence: 0.9,
-        },
-      ],
-    }),
-    contact: {
-      email: "b.dumont@blue-enerfreeze.com",
-      full_name: "Benjamin Dumont",
-      position: "Managing Director",
-      confidence: 99,
-    },
-    site: `Blue EnerFreeze, producteur d'energie renouvelable et fournisseur d'energie frigorifique securisee, specialiste de la chaine du froid. Conseil en energie, production photovoltaique, securisation energetique (supervision et maintenance des installations frigorifiques), optimisation energetique. 268 points de livraison servis chaque jour, 344 GWh de consommation annuelle geree. Specialiste des operateurs de la supply chain sous temperature dirigee.`,
-  },
-  {
-    prospect: base({
-      id: "trans-0003",
-      company_name: "TRANSPORTS MERCIER",
-      siren: "402118745",
-      website: "https://www.transports-mercier.fr",
-      sector: "Transports routiers de fret interurbains",
-      size_range: "50 à 99 salariés",
-      city: "Saint-Étienne",
-      key_figures: { naf_code: "49.41A", revenue_eur: 12_400_000, revenue_year: 2024, founded_year: 1995 },
-    }),
-    contact: null,
-    site: `Transports Mercier, transporteur regional de lots et demi-lots, 60 vehicules, messagerie et affretement. Livraisons J+1 sur Auvergne-Rhone-Alpes. Suivi des expeditions, gestion des lettres de voiture et des litiges.`,
-  },
-  {
-    prospect: base({
-      id: "cab-0004",
-      company_name: "CABINET LAURENT & ASSOCIES",
-      siren: "512443901",
-      website: "https://www.laurent-associes.fr",
-      sector: "Activités comptables",
-      size_range: "10 à 19 salariés",
-      city: "Villeurbanne",
-      key_figures: { naf_code: "69.20Z", revenue_eur: 1_850_000, revenue_year: 2024, founded_year: 2004 },
-    }),
-    contact: null,
-    site: `Cabinet d'expertise comptable, 14 collaborateurs, environ 320 dossiers clients TPE et PME. Tenue, revision, bilans, paie, conseil. Portail client pour le depot des pieces comptables.`,
-  },
-  {
-    // Distributeur d'aciers inoxydables. Les montants viennent des comptes
-    // publies ; le texte de site est resume a la main a partir de leurs pages
-    // publiques, comme pour les autres fixtures.
-    prospect: base({
-      id: "jacquet-0005",
-      company_name: "JACQUET METAL SERVICE",
-      siren: "306159762",
-      website: "https://www.jacquetmetalservice.com",
-      sector: "Commerce de gros de minerais et métaux",
-      size_range: "100 à 199 salariés",
-      city: "Saint-Priest",
-      key_figures: {
-        naf_code: "46.72Z",
-        revenue_eur: 214_600_000,
-        revenue_year: 2024,
-        founded_year: 1962,
-        parent_company: "JACQUET METALS",
-      },
-      signals: [
-        {
-          type: "recrutement",
-          label: "Recrutement en cours",
-          quote:
-            "Jacquet Metal Service recrute un technicien méthodes / ordonnancement pour son site de Saint-Priest (CDI)",
-          url: "https://www.jacquetmetalservice.com/carrieres",
-          date: new Date(Date.now() - 18 * 86_400_000).toISOString().slice(0, 10),
-          confidence: 0.85,
-        },
-      ],
-    }),
-    contact: null,
-    site: `Jacquet Metal Service, distributeur de toles et produits en acier inoxydable et aluminium. Stock permanent, decoupe a la demande (sciage, oxycoupage, jet d'eau), livraison sous 24 a 48 heures depuis un reseau d'agences. Devis a la piece, bulletins de matiere et certificats 3.1 fournis avec chaque commande. Filiale du groupe Jacquet Metals.`,
-  },
-];
+const CURRENT: ModelConfig = {
+  name: "actuelle",
+  strategist: modelFor("strategist"),
+  writer: modelFor("writer"),
+};
 
-/**
- * Filtres d'execution, pour rejouer une cible sans repayer tout le rapport.
- *
- *   EVAL_ONLY="ras,blue,jacquet"  EVAL_TONES="direct"  npm run eval:emails
- */
-const only = (process.env.EVAL_ONLY ?? "").split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
-const toneFilter = (process.env.EVAL_TONES ?? "").split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
+// ---------------------------------------------------------------------------
+// Mesure : coût et latence de chaque mail
+// ---------------------------------------------------------------------------
 
-const SELECTED = only.length
-  ? FIXTURES.filter((fixture) => only.some((needle) => fixture.prospect.id.toLowerCase().includes(needle)))
-  : FIXTURES;
-const SELECTED_TONES = toneFilter.length
-  ? TONES.filter((tone) => toneFilter.includes(tone.key))
-  : TONES;
-
-async function ask(system: string, user: string, temperature: number): Promise<string> {
-  const completion = await client.chat.completions.create({
-    model: MODEL,
-    temperature,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-  });
-  return completion.choices[0]?.message?.content ?? "";
+interface Meter {
+  costEur: number;
+  latencyMs: number;
+  calls: number;
+  priceKnown: boolean;
 }
+
+const newMeter = (): Meter => ({ costEur: 0, latencyMs: 0, calls: 0, priceKnown: true });
+
+function makeAsk(client: OpenAI, config: ModelConfig, meter: Meter): AskFn {
+  const override: Partial<Record<AiRole, string>> = { strategist: config.strategist, writer: config.writer };
+  return (role, system, user, temperature, operation) =>
+    chatJson({
+      client,
+      role,
+      system,
+      user,
+      temperature,
+      operation,
+      model: override[role] ?? modelFor(role),
+      onUsage: (usage) => {
+        const cost = openAiCost(usage.model, usage.promptTokens, usage.completionTokens);
+        meter.costEur += cost.cost;
+        meter.latencyMs += usage.latencyMs;
+        meter.calls += 1;
+        meter.priceKnown &&= cost.priceKnown;
+      },
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Une génération complète — exactement la chaîne de la route
+// ---------------------------------------------------------------------------
 
 interface Row {
+  prospectId: string;
   company: string;
   tone: ToneKey;
-  plan: "A" | "B" | "C";
-  /** Le premier jet a-t-il ete remplace par la reecriture ? */
+  config: ModelConfig;
+  brief: StrategyBrief | null;
+  plan: string;
   rewritten: boolean;
   subject: string;
   body: string;
   failures: string[];
   critique: Critique | null;
+  meter: Meter;
+  error?: string;
 }
 
-(async () => {
-  const rows: Row[] = [];
-  const analyses = new Map<string, DeepAnalysis>();
+async function generate(
+  client: OpenAI,
+  config: ModelConfig,
+  fixture: Fixture,
+  tone: ToneKey,
+  avoid: string[],
+): Promise<Row> {
+  const meter = newMeter();
+  const ask = makeAsk(client, config, meter);
+  const { prospect, contact } = fixture;
+  const factsResult = buildFacts(prospect, contact);
+  const figures = prospect.key_figures ?? {};
+  const base: Row = {
+    prospectId: prospect.id, company: prospect.company_name, tone, config, brief: null, plan: "-",
+    rewritten: false, subject: "", body: "", failures: [], critique: null, meter,
+  };
 
-  for (const fixture of SELECTED) {
-    const { facts } = buildFacts(fixture.prospect, fixture.contact, new Date(), fixture.site);
-    const pages = [{ url: fixture.prospect.website ?? "", markdown: fixture.site }];
+  const outcome = await runStrategist((system, user, operation) => ask("strategist", system, user, 0.2, operation), {
+    facts: factsResult.facts,
+    companyName: factsResult.companyName,
+    isLargeGroupSubsidiary: factsResult.isLargeGroupSubsidiary,
+    parentGroup: (typeof figures.parent_group === "string" ? figures.parent_group : null) ?? factsResult.parent,
+    foreignEntities: factsResult.foreignEntities,
+    history: [],
+  });
+  if (!outcome.brief) return { ...base, error: `brief KO : ${outcome.error}` };
 
-    // Une analyse par prospect, reutilisee pour les 4 registres : c'est aussi
-    // ce que fait le bouton « Autre angle » en production.
-    const parsed = await runAnalysisWithRetry(
-      (system, user, temperature) => ask(system, user, temperature),
-      fixture.prospect,
-      facts,
-      pages,
+  const draft = await draftFromBrief({
+    ask,
+    brief: outcome.brief,
+    facts: factsResult.facts,
+    tone,
+    contact,
+    prospectId: prospect.id,
+    registryName: prospect.company_name,
+    avoid,
+    leaderPerson: factsResult.leaderPerson,
+    forbiddenNames: factsResult.foreignEntities,
+  });
+  if ("error" in draft) return { ...base, brief: outcome.brief, error: draft.error };
+
+  return {
+    ...base,
+    brief: outcome.brief,
+    plan: draft.plan,
+    rewritten: draft.rewritten,
+    subject: draft.email.subject,
+    body: draft.email.body,
+    failures: draft.validation.failures,
+    critique: draft.critique,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Prospects de la base (--ab)
+// ---------------------------------------------------------------------------
+
+const AB_NAMED = ["%RAS%INTERIM%", "%ENERFREEZE%", "%JACQUET%"];
+const AB_OTHERS = 7;
+
+async function loadAbProspects(): Promise<Fixture[]> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE;
+  const userId = process.env.ORION_SCRIPT_USER_ID;
+  if (!url || !key || !userId) {
+    console.warn(
+      "⚠️  Base non configurée (NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE, ORION_SCRIPT_USER_ID) : repli sur les fixtures.",
     );
-    if (!parsed.analysis) {
-      console.error(`Analyse KO pour ${fixture.prospect.company_name} : ${parsed.error}`);
-      continue;
-    }
-    analyses.set(fixture.prospect.id, parsed.analysis);
-
-    for (const tone of SELECTED_TONES) {
-      const writingInput = {
-        tone: tone.key,
-        analysis: parsed.analysis,
-        facts,
-        contact: fixture.contact,
-        prospectId: fixture.prospect.id,
-        companyName: fixture.prospect.company_name,
-        avoid: rows.map((row) => row.body.split("\n")[2] ?? "").filter(Boolean).slice(-6),
-      };
-      const plan = planFor(writingInput);
-
-      const email = parseEmail(
-        await ask(
-          buildWritingPrompt(writingInput),
-          `Écris le mail pour ${fixture.prospect.company_name}.`,
-          0.85,
-        ),
-      );
-      if (!email) continue;
-
-      const validation = validateEmail(email, {
-        facts,
-        contact: fixture.contact,
-        tone: tone.key,
-        companyName: fixture.prospect.company_name,
-        proofs: PUBLIC_PROOFS,
-        plan,
-      });
-      const critique = parseCritique(
-        await ask(buildCriticPrompt(facts, PUBLIC_PROOFS), buildCriticContext(parsed.analysis, email), 0),
-      );
-
-      // UNE reecriture, exactement comme la route : un rapport qui s'arrete au
-      // premier jet ne dit rien de ce que l'utilisateur voit a l'ecran.
-      let finalEmail = email;
-      let finalValidation = validation;
-      let finalCritique = critique;
-      let rewritten = false;
-      const failing = critique ? failingCriteria(critique) : [];
-
-      if (!validation.ok || failing.length > 0) {
-        const feedback = [...validation.failures, ...failing].map((line) => `- ${line}`).join(NEWLINE);
-        const second = parseEmail(
-          await ask(
-            buildWritingPrompt({ ...writingInput, critique: feedback }),
-            `Réécris le mail pour ${fixture.prospect.company_name}.`,
-            0.75,
-          ),
-        );
-        if (second) {
-          const secondValidation = validateEmail(second, {
-            facts,
-            contact: fixture.contact,
-            tone: tone.key,
-            companyName: fixture.prospect.company_name,
-            proofs: PUBLIC_PROOFS,
-            plan,
-          });
-          const secondCritique = parseCritique(
-            await ask(buildCriticPrompt(facts, PUBLIC_PROOFS), buildCriticContext(parsed.analysis, second), 0),
-          );
-          const secondFailing = secondCritique ? failingCriteria(secondCritique) : [];
-          if (secondValidation.failures.length + secondFailing.length < validation.failures.length + failing.length) {
-            finalEmail = second;
-            finalValidation = secondValidation;
-            finalCritique = secondCritique;
-            rewritten = true;
-          }
-        }
-      }
-
-      rows.push({
-        company: fixture.prospect.company_name,
-        tone: tone.key,
-        plan,
-        rewritten,
-        subject: finalEmail.subject,
-        body: finalEmail.body,
-        failures: finalValidation.failures,
-        critique: finalCritique,
-      });
-      console.log(
-        `  ${fixture.prospect.company_name} / ${tone.key} — ${finalValidation.failures.length} echec(s)` +
-          `${rewritten ? " (apres reecriture)" : ""}`,
-      );
-    }
+    return FIXTURES;
   }
+  const db = createClient(url, key, { auth: { persistSession: false } });
+  const picked: Prospect[] = [];
+  for (const pattern of AB_NAMED) {
+    const { data } = await db
+      .from("prospects")
+      .select("*")
+      .eq("user_id", userId)
+      .ilike("company_name", pattern)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (data?.[0]) picked.push(data[0] as Prospect);
+    else console.warn(`⚠️  Aucun prospect ${pattern} en base.`);
+  }
+  const { data: others } = await db
+    .from("prospects")
+    .select("*")
+    .eq("user_id", userId)
+    .neq("status", "perdu")
+    .order("updated_at", { ascending: false })
+    .limit(AB_OTHERS + picked.length);
+  for (const row of (others ?? []) as Prospect[]) {
+    if (picked.length >= AB_NAMED.length + AB_OTHERS) break;
+    if (!picked.some((item) => item.id === row.id)) picked.push(row);
+  }
+  return picked.map((prospect) => ({ prospect, contact: null as DecisionMakerContact | null }));
+}
 
-  // --- Rapport -------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Rapports
+// ---------------------------------------------------------------------------
+
+const score = (critique: Critique | null) => (critique ? averageScore(critique).toFixed(1) : "—");
+const euros = (value: number) => `${value.toFixed(4)} €`;
+
+function briefLines(brief: StrategyBrief | null): string[] {
+  if (!brief) return ["_Pas de brief._"];
+  return [
+    `- **Angle** (${brief.angle.type}, faits ${brief.angle.hookFactIds.join(", ")}) : ${brief.angle.insight}`,
+    `- **Pain** : ${brief.pain.task} — ${brief.pain.automationIdea}`,
+    `- **Preuve** : ${brief.proofId ?? "aucune"} · **CTA** : ${brief.cta}`,
+    ...(brief.targetingWarning ? [`- ⚠️ **Ciblage** : ${brief.targetingWarning}`] : []),
+    ...(brief.avoid.length ? [`- **À éviter** : ${brief.avoid.join(" ; ")}`] : []),
+  ];
+}
+
+function mailLines(row: Row): string[] {
+  if (row.error) return [`_Échec : ${row.error}_`, ""];
+  const lines = [`**Objet :** ${row.subject}`, "", "```", row.body, "```", ""];
+  lines.push(
+    row.failures.length ? `Validateurs : ${row.failures.map((failure) => `\n- ${failure}`).join("")}` : "Validateurs : aucun échec.",
+    "",
+  );
+  if (row.critique) {
+    lines.push("| Critère | Note | Commentaire |", "| --- | --- | --- |");
+    for (const key of Object.keys(CRITERIA_LABELS) as (keyof Critique)[]) {
+      lines.push(`| ${CRITERIA_LABELS[key]} | ${row.critique[key].score}/5 | ${row.critique[key].note} |`);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+
+function simpleReport(rows: Row[], config: ModelConfig): string {
   const lines: string[] = [
     "# Évaluation de la génération d'emails",
     "",
-    `Généré le ${new Date().toISOString().slice(0, 16).replace("T", " ")} · modèle \`${MODEL}\``,
+    `Généré le ${new Date().toISOString().slice(0, 16).replace("T", " ")} · stratège \`${config.strategist}\` · rédacteur \`${config.writer}\` · juge \`${modelFor("judge")}\``,
     "",
     "## Synthèse",
     "",
-    "| Entreprise | Ton | Plan | Objet | Réécrit | Validateurs | Note moyenne |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| Entreprise | Ton | Angle | Plan | Objet | Réécrit | Validateurs | Note | Coût | Latence |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
-
   for (const row of rows) {
-    const score = row.critique ? averageScore(row.critique).toFixed(1) : "—";
     lines.push(
-      `| ${row.company} | ${row.tone} | ${row.plan} | ${row.subject} | ${row.rewritten ? "oui" : "non"} | ${row.failures.length === 0 ? "OK" : `${row.failures.length} échec(s)`} | ${score}/5 |`,
+      `| ${row.company} | ${row.tone} | ${row.brief?.angle.type ?? "—"} | ${row.plan} | ${row.subject} | ${row.rewritten ? "oui" : "non"} | ${row.error ? "échec" : row.failures.length === 0 ? "OK" : `${row.failures.length} échec(s)`} | ${score(row.critique)}/5 | ${euros(row.meter.costEur)}${row.meter.priceKnown ? "" : "*"} | ${(row.meter.latencyMs / 1000).toFixed(1)} s |`,
     );
   }
+  lines.push("", "\\* prix du modèle absent de la grille : coût approximatif (voir OPENAI_PRICES_JSON).");
 
-  // Similarite croisee entre entreprises DIFFERENTES : c'est la seule qui
-  // signale un moule reutilise.
+  // Similarite croisee entre entreprises DIFFERENTES : seule signature d'un moule.
   lines.push("", "## Similarité entre entreprises différentes", "");
   let worst = 0;
   for (const row of rows) {
-    const others = rows.filter((other) => other.company !== row.company).map((other) => other.body);
-    const value = maxSimilarity(row.body, others);
+    const value = maxSimilarity(row.body, rows.filter((other) => other.company !== row.company).map((other) => other.body));
     worst = Math.max(worst, value);
-    if (value > 0.35) {
-      lines.push(`- ⚠️ ${row.company} / ${row.tone} : ${(value * 100).toFixed(0)} % — au-dessus du seuil de 35 %`);
-    }
+    if (value > 0.35) lines.push(`- ⚠️ ${row.company} / ${row.tone} : ${(value * 100).toFixed(0)} %`);
   }
   lines.push(`- Maximum observé : **${(worst * 100).toFixed(0)} %** (seuil d'alerte : 35 %)`);
 
-  // Mots d'ouverture de paragraphe : la similarite globale ne les voit pas.
-  // Deux mails peuvent partager 0 % de vocabulaire et commencer tous leurs
-  // paragraphes par « Si », « Je » et « C'est » — c'est le squelette qui est
-  // recopie, et ca se sent a la lecture bien avant les mots.
+  // Squelette : deux mails peuvent partager 0 % de vocabulaire et le même plan.
   lines.push("", "## Squelette : premiers mots des paragraphes", "");
-  const skeleton = (body: string): string =>
-    bodyParagraphs(body)
-      .map((block) => (block.split(/\s+/)[0] ?? "").toLowerCase().replace(/[^a-zà-ÿ']/g, ""))
-      .join(" · ");
-
   const seen = new Map<string, string[]>();
   for (const row of rows) {
-    const key = skeleton(row.body);
-    if (!key) continue;
-    seen.set(key, [...(seen.get(key) ?? []), `${row.company} / ${row.tone} (plan ${row.plan})`]);
+    const key = bodyParagraphs(row.body)
+      .map((block) => (block.split(/\s+/)[0] ?? "").toLowerCase().replace(/[^a-zà-ÿ']/g, ""))
+      .join(" · ");
+    if (key) seen.set(key, [...(seen.get(key) ?? []), `${row.company} / ${row.tone}`]);
   }
-  let repeated = 0;
-  for (const [key, owners] of seen) {
-    const companies = new Set(owners.map((owner) => owner.split(" / ")[0]));
-    if (companies.size < 2) continue;
-    repeated += 1;
-    lines.push(`- ⚠️ ouverture identique « ${key} » : ${owners.join(", ")}`);
-  }
-  lines.push(
-    repeated === 0
-      ? "- Aucune entreprise ne partage la suite de ses mots d'ouverture."
-      : `- ${repeated} squelette(s) partagé(s) entre entreprises différentes.`,
-  );
+  const shared = [...seen].filter(([, owners]) => new Set(owners.map((owner) => owner.split(" / ")[0])).size > 1);
+  for (const [key, owners] of shared) lines.push(`- ⚠️ « ${key} » : ${owners.join(", ")}`);
+  if (!shared.length) lines.push("- Aucune entreprise ne partage la suite de ses mots d'ouverture.");
 
   lines.push("", "## Mails générés", "");
   for (const row of rows) {
-    lines.push(`### ${row.company} — ton ${row.tone}`, "", `**Objet :** ${row.subject}`, "", "```", row.body, "```", "");
-    lines.push(
-      row.failures.length === 0
-        ? "Validateurs : aucun échec."
-        : `Validateurs : ${row.failures.map((failure) => `\n- ${failure}`).join("")}`,
-      "",
-    );
-    if (row.critique) {
-      lines.push("| Critère | Note | Commentaire |", "| --- | --- | --- |");
-      for (const key of Object.keys(CRITERIA_LABELS) as (keyof Critique)[]) {
-        lines.push(`| ${CRITERIA_LABELS[key]} | ${row.critique[key].score}/5 | ${row.critique[key].note} |`);
-      }
-      const failing = failingCriteria(row.critique);
-      if (failing.length) lines.push("", `Sous le seuil : ${failing.length} critère(s).`);
-      lines.push("");
+    lines.push(`### ${row.company} — ton ${row.tone}`, "", ...briefLines(row.brief), "", ...mailLines(row));
+    if (row.critique && failingCriteria(row.critique).length) {
+      lines.push(`Sous le seuil : ${failingCriteria(row.critique).length} critère(s).`, "");
     }
   }
+  lines.push("", ...REFERENCE_SECTION);
+  return lines.join("\n");
+}
 
-  lines.push(
-    "",
-    "## Référence de niveau attendu",
-    "",
-    "Ces deux mails ont été écrits à la main comme cible de qualité. Ils ne sont",
-    "PAS dans le prompt : ils servent uniquement de point de comparaison ici.",
-    "",
-    "**RAS — Objet : contrats de mission et relevés d'heures**",
-    "",
-    "```",
-    "Bonjour,",
-    "",
-    "41 M€ de chiffre d'affaires piloté par un siège de moins de 50 personnes : dans l'intérim, ça veut dire beaucoup de contrats de mission et de relevés d'heures qui passent par très peu de mains.",
-    "",
-    "Je suis Axel Remillat, j'automatise ce type de flux avec de l'IA : lecture des relevés, pré-remplissage des contrats, relances automatiques côté intérimaires et côté clients.",
-    "",
-    "C'est un sujet chez vous en ce moment, ou c'est déjà bien outillé ?",
-    "",
-    "Axel",
-    "```",
-    "",
-    "**Blue EnerFreeze — Objet : alertes, interventions et pièces**",
-    "",
-    "```",
-    "Bonjour Benjamin,",
-    "",
-    "Si je lis bien votre site, Blue EnerFreeze vend de l'énergie frigorifique plutôt que des machines. Du coup, une intervention qui traîne coûte chez vous, pas chez le client.",
-    "",
-    "Je construis des automatisations IA, et un cas typique chez un exploitant comme vous, c'est de relier les alertes de supervision à la commande de pièces, pour que le bon composant soit déjà en route quand le technicien part.",
-    "",
-    "Aujourd'hui, ça se fait encore à la main chez vous ?",
-    "",
-    "Bonne journée,",
-    "Axel",
-    "```",
-    "",
-  );
+interface AbKey {
+  generatedAt: string;
+  tone: ToneKey;
+  /** Code anonyme → config. */
+  codes: Record<"α" | "β", ModelConfig>;
+  pairs: {
+    company: string;
+    versions: { code: "α" | "β"; score: number | null; failures: number; costEur: number; latencyMs: number }[];
+  }[];
+}
 
-  writeFileSync("eval-report.md", lines.join("\n"), "utf8");
+function abReport(pairs: Row[][], key: AbKey): string {
+  const lines: string[] = [
+    "# A/B de modèles — paires anonymisées",
+    "",
+    `Généré le ${key.generatedAt.slice(0, 16).replace("T", " ")} · ton \`${key.tone}\` · juge \`${modelFor("judge")}\``,
+    "",
+    "Dans chaque paire, l'ordre des versions est tiré au sort. Notez vos préférences",
+    "AVANT de lancer `npm run eval:emails -- --reveal`.",
+    "",
+  ];
+  pairs.forEach((pair, index) => {
+    lines.push(`## ${index + 1}. ${pair[0].company}`, "");
+    pair.forEach((row, version) => {
+      lines.push(`### Version ${version + 1}`, "", ...briefLines(row.brief), "", ...mailLines(row));
+    });
+    lines.push("Préférence : ☐ Version 1 ☐ Version 2 ☐ égalité", "");
+  });
+
+  // Agrégats par config, sous code anonyme : ils ne disent pas quelle version
+  // de chaque paire vient de quelle config.
+  lines.push("## Coût et latence par config", "", "| Config | Coût moyen / mail | Latence moyenne / mail | Note moyenne | Mails en échec validateurs |", "| --- | --- | --- | --- | --- |");
+  for (const code of ["α", "β"] as const) {
+    const entries = key.pairs.flatMap((pair) => pair.versions.filter((version) => version.code === code));
+    const scored = entries.filter((entry) => entry.score !== null);
+    const avg = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+    lines.push(
+      `| ${code} | ${euros(avg(entries.map((entry) => entry.costEur)))} | ${(avg(entries.map((entry) => entry.latencyMs)) / 1000).toFixed(1)} s | ${scored.length ? avg(scored.map((entry) => entry.score as number)).toFixed(2) : "—"}/5 | ${entries.filter((entry) => entry.failures > 0).length}/${entries.length} |`,
+    );
+  }
+  lines.push("", "Coût calculé sur les tokens réellement facturés (grille de lib/usage/pricing.ts + OPENAI_PRICES_JSON).");
+  return lines.join("\n");
+}
+
+function reveal(): void {
+  let key: AbKey;
+  try {
+    key = JSON.parse(readFileSync("ab-key.json", "utf8")) as AbKey;
+  } catch {
+    throw new Error("ab-key.json introuvable : lancez d'abord `npm run eval:emails -- --ab ...`.");
+  }
+  const describe = (code: "α" | "β") => {
+    const config = key.codes[code];
+    return `${config.name} (stratège \`${config.strategist}\`, rédacteur \`${config.writer}\`)`;
+  };
+  const lines = [
+    "# A/B de modèles — révélation",
+    "",
+    `- **α** = ${describe("α")}`,
+    `- **β** = ${describe("β")}`,
+    "",
+    "| # | Entreprise | Version 1 | Version 2 | Notes du juge (V1 / V2) |",
+    "| --- | --- | --- | --- | --- |",
+    ...key.pairs.map(
+      (pair, index) =>
+        `| ${index + 1} | ${pair.company} | ${key.codes[pair.versions[0].code].name} | ${key.codes[pair.versions[1].code].name} | ${pair.versions.map((version) => version.score?.toFixed(1) ?? "—").join(" / ")} |`,
+    ),
+  ];
+  writeFileSync("ab-reveal.md", lines.join("\n"), "utf8");
+  console.log(lines.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// Exécution
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  if (flag("reveal")) return reveal();
+  if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY absente : ce script appelle OpenAI.");
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const strategist = option("strategist") ?? process.env.EVAL_STRONG_STRATEGIST;
+  const writer = option("writer") ?? process.env.EVAL_STRONG_WRITER;
+
+  if (flag("ab")) {
+    if (!strategist && !writer) {
+      throw new Error("--ab exige la config forte : --strategist <modele> et/ou --writer <modele>.");
+    }
+    const strong: ModelConfig = {
+      name: "forte",
+      strategist: strategist ?? CURRENT.strategist,
+      writer: writer ?? CURRENT.writer,
+    };
+    const tone = (process.env.EVAL_AB_TONE ?? "direct") as ToneKey;
+    const prospects = await loadAbProspects();
+    const codes = Math.random() < 0.5 ? { α: CURRENT, β: strong } : { α: strong, β: CURRENT };
+    const codeOf = (config: ModelConfig) => (codes.α === config ? "α" : "β") as "α" | "β";
+    const key: AbKey = { generatedAt: new Date().toISOString(), tone, codes, pairs: [] };
+    const pairs: Row[][] = [];
+
+    for (const fixture of prospects) {
+      const rows: Row[] = [];
+      for (const config of [CURRENT, strong]) {
+        rows.push(await generate(client, config, fixture, tone, []));
+        console.log(`  ${fixture.prospect.company_name} / ${config.name} — ${rows[rows.length - 1].error ?? "ok"}`);
+      }
+      if (Math.random() < 0.5) rows.reverse();
+      pairs.push(rows);
+      key.pairs.push({
+        company: fixture.prospect.company_name,
+        versions: rows.map((row) => ({
+          code: codeOf(row.config),
+          score: row.critique ? averageScore(row.critique) : null,
+          failures: row.error ? 1 : row.failures.length,
+          costEur: row.meter.costEur,
+          latencyMs: row.meter.latencyMs,
+        })),
+      });
+    }
+    writeFileSync("ab-key.json", JSON.stringify(key, null, 2), "utf8");
+    writeFileSync("ab-report.md", abReport(pairs, key), "utf8");
+    console.log(`\nRapport écrit : ab-report.md (${pairs.length} paires). Clé : ab-key.json (--reveal pour l'ouvrir).`);
+    return;
+  }
+
+  const config: ModelConfig =
+    strategist || writer
+      ? { name: "surchargée", strategist: strategist ?? CURRENT.strategist, writer: writer ?? CURRENT.writer }
+      : CURRENT;
+  const selected = only.length
+    ? FIXTURES.filter((fixture) => only.some((needle) => fixture.prospect.id.toLowerCase().includes(needle)))
+    : FIXTURES;
+  const tones = toneFilter.length ? TONES.filter((tone) => toneFilter.includes(tone.key)) : TONES;
+
+  const rows: Row[] = [];
+  for (const fixture of selected) {
+    for (const tone of tones) {
+      const avoid = rows.map((row) => row.body.split("\n")[2] ?? "").filter(Boolean).slice(-6);
+      const row = await generate(client, config, fixture, tone.key, avoid);
+      rows.push(row);
+      console.log(`  ${row.company} / ${tone.key} — ${row.error ?? `${row.failures.length} echec(s)`}`);
+    }
+  }
+  writeFileSync("eval-report.md", simpleReport(rows, config), "utf8");
   console.log(`\nRapport écrit : eval-report.md (${rows.length} mails)`);
-})();
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

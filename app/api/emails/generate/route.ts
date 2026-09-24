@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getOpenAI, OPENAI_MODEL } from "@/lib/openai";
+import { getOpenAI } from "@/lib/openai";
+import { chatJson, type AskFn } from "@/lib/ai/chat";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import {
   fetchQuota,
@@ -8,48 +9,30 @@ import {
   findEmailByName,
   hasHunterKey,
 } from "@/lib/enrichment/hunter";
-import { fetchSiteContent, hasLinkupKey, type PageContent } from "@/lib/enrichment/linkup";
 import { toDomain } from "@/lib/enrichment/http";
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
-import { buildFacts, type DerivedFact } from "@/lib/emails/derived-facts";
-import { PERSONA } from "@/lib/persona";
-import { validateEmail } from "@/lib/emails/validate";
+import { buildFacts } from "@/lib/emails/derived-facts";
+import {
+  BRIEF_SCHEMA,
+  runStrategist,
+  validateBrief,
+  type BriefAngle,
+  type BriefOutcome,
+  type HistoryMessage,
+  type StrategistInput,
+} from "@/lib/emails/strategist";
 import { describesNeed, needConfidence } from "@/lib/emails/need-lead";
 import { edges, maxSimilarity } from "@/lib/similarity";
 import { coerceTone, type ToneKey } from "@/lib/tones";
 import type { Prospect } from "@/types";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
-import {
-  ANALYSIS_SCHEMA,
-  buildAnalysisContext,
-  buildAnalysisPrompt,
-  isGenericAnalysis,
-  runAnalysisWithRetry,
-  type DeepAnalysis,
-} from "./analysis";
-import {
-  buildWritingPrompt,
-  parseEmail,
-  planFor,
-  type Evidence,
-  type GeneratedEmail,
-} from "./prompt";
-import {
-  averageScore,
-  buildCriticContext,
-  buildCriticPrompt,
-  failingCriteria,
-  parseCritique,
-  type Critique,
-} from "./critic";
+import { draftFromBrief } from "./pipeline";
+import type { Evidence } from "./prompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Analyse + rédaction + juge, et jusqu'à une réécriture : 90 s suffisent. */
+/** Stratège + rédaction + juge, et jusqu'à une réécriture. */
 export const maxDuration = 120;
-
-/** Preuves autorisees dans un mail : toute autre experience est inventee. */
-const PUBLIC_PROOFS = PERSONA.proofs.filter((proof) => proof.publicOk).map((proof) => proof.text);
 
 const SIMILARITY_LIMIT = 0.4;
 const HISTORY = 10;
@@ -61,40 +44,24 @@ const CONTACT_SCHEMA = z.object({
   confidence: z.number().nullable(),
 });
 
+const ANGLE_SCHEMA = BRIEF_SCHEMA.shape.angle;
+
 const BODY_SCHEMA = z.object({
   prospectId: z.string().min(1),
   tone: z.string().optional(),
   /**
-   * Analyse déjà calculée, renvoyée par une génération précédente. Sa présence
-   * fait sauter l'étape 1 ET tous les appels externes : c'est ce qui permet au
-   * bouton « Autre angle » de ne rien coûter en crédits.
+   * - full        : chaîne complète, contact Hunter compris ;
+   * - other_angle : relance UNIQUEMENT le stratège, angles précédents exclus.
+   *                 Aucun appel Linkup, Pappers ni Hunter ;
+   * - rewrite     : rédacteur seul, depuis le brief (éventuellement édité).
    */
-  cachedAnalysis: ANALYSIS_SCHEMA.optional(),
+  mode: z.enum(["full", "other_angle", "rewrite"]).default("full"),
   cachedContact: CONTACT_SCHEMA.nullish(),
-  /** Accroche et pain à utiliser, quand on bascule d'angle. */
-  angleIndex: z.number().int().min(0).optional(),
+  /** Angles déjà proposés, cumulés côté client pour faire tourner les angles. */
+  excludeAngles: z.array(ANGLE_SCHEMA).max(10).optional(),
+  /** Brief édité à la main, pour le mode `rewrite`. Revalidé ici. */
+  brief: z.unknown().optional(),
 });
-
-/** Lecture du site — best effort, jamais bloquante. */
-async function readSite(
-  prospect: Prospect,
-): Promise<{ pages: PageContent[]; warning?: EnrichmentWarning }> {
-  if (!prospect.website) return { pages: [] };
-  if (!hasLinkupKey()) {
-    return {
-      pages: [],
-      warning: { source: "linkup", message: "clé absente : site non lu, analyse moins précise" },
-    };
-  }
-  try {
-    return { pages: await fetchSiteContent(prospect.website, prospect.id) };
-  } catch {
-    return {
-      pages: [],
-      warning: { source: "linkup", message: "site illisible : analyse fondée sur le NAF seul" },
-    };
-  }
-}
 
 /**
  * Recherche du contact nominatif — au moment du brouillon, jamais avant.
@@ -148,47 +115,10 @@ async function findContact(
   };
 }
 
-/** Appel OpenAI générique, avec journalisation du coût réel. */
-async function ask(
-  system: string,
-  user: string,
-  temperature: number,
-  operation: string,
-  prospectId: string,
-): Promise<string> {
-  const completion = await getOpenAI().chat.completions.create({
-    model: OPENAI_MODEL,
-    temperature,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-  });
-
-  if (completion.usage) {
-    await recordOpenAiUsage({
-      model: OPENAI_MODEL,
-      promptTokens: completion.usage.prompt_tokens ?? 0,
-      completionTokens: completion.usage.completion_tokens ?? 0,
-      operation,
-      prospectId,
-    });
-  }
-  return completion.choices[0]?.message?.content ?? "";
-}
-
-/** Déplace l'angle choisi en tête, pour le bouton « Autre angle ». */
-function applyAngle(analysis: DeepAnalysis, index?: number): DeepAnalysis {
-  if (index === undefined) return analysis;
-  return {
-    ...analysis,
-    chosen: {
-      ...analysis.chosen,
-      hookIndex: index % analysis.hookCandidates.length,
-      painIndex: index % analysis.painCandidates.length,
-    },
-  };
+/** Brief stocké avec le prospect, s'il est lisible. */
+function storedAngle(prospect: Prospect): BriefAngle | null {
+  const parsed = ANGLE_SCHEMA.safeParse((prospect.brief as { angle?: unknown } | null | undefined)?.angle);
+  return parsed.success ? parsed.data : null;
 }
 
 export async function POST(request: Request) {
@@ -202,11 +132,12 @@ export async function POST(request: Request) {
   const body = parsedBody.data;
   const tone: ToneKey = coerceTone(body.tone);
 
-  const { data: prospect, error } = await session.supabase
+  const { data, error } = await session.supabase
     .from("prospects")
     .select("*")
     .eq("id", body.prospectId)
     .single();
+  const prospect = data as Prospect | null;
 
   if (error || !prospect) {
     return NextResponse.json({ error: "Prospect introuvable." }, { status: 404 });
@@ -227,57 +158,95 @@ export async function POST(request: Request) {
   }
 
   const warnings: EnrichmentWarning[] = [];
-  const reuse = Boolean(body.cachedAnalysis);
 
-  // Bascule d'angle : on rejoue UNIQUEMENT la rédaction. Aucun appel Linkup,
-  // Pappers ou Hunter — c'est tout l'intérêt du bouton.
+  // Hors génération complète, AUCUN appel Linkup, Pappers ou Hunter : le
+  // contact revient du client, les faits sont recalculés depuis la base.
   let contact: DecisionMakerContact | null = null;
-  let pages: PageContent[] = [];
-
-  if (reuse) {
-    contact = (body.cachedContact as DecisionMakerContact | null | undefined) ?? null;
+  if (body.mode === "full") {
+    const outcome = await findContact(prospect).catch(() => ({ contact: null, warning: undefined }));
+    contact = outcome.contact;
+    if (outcome.warning) warnings.push(outcome.warning);
   } else {
-    const [siteOutcome, contactOutcome] = await Promise.all([
-      readSite(prospect),
-      findContact(prospect).catch(() => ({ contact: null, warning: undefined })),
-    ]);
-    pages = siteOutcome.pages;
-    contact = contactOutcome.contact;
-    if (siteOutcome.warning) warnings.push(siteOutcome.warning);
-    if (contactOutcome.warning) warnings.push(contactOutcome.warning);
+    contact = (body.cachedContact as DecisionMakerContact | null | undefined) ?? null;
   }
 
   // Les faits sont TOUJOURS recalcules cote serveur : le client n'est pas une
   // source de verite, meme pour des donnees qu'il a recues de nous.
-  const siteText = pages.map((page) => page.markdown).join("\n");
-  const { facts, leaderPerson } = buildFacts(prospect, contact, new Date(), siteText);
-
-  let analysis: DeepAnalysis;
-  if (body.cachedAnalysis) {
-    analysis = body.cachedAnalysis;
-  } else {
-    const outcome = await runAnalysisWithRetry(
-      (system, user, temperature, operation) => ask(system, user, temperature, operation, prospect.id),
-      prospect,
-      facts,
-      pages,
-    );
-    if (!outcome.analysis) {
-      return NextResponse.json({ error: `Analyse inexploitable : ${outcome.error}` }, { status: 502 });
-    }
-    analysis = outcome.analysis;
+  const factsResult = buildFacts(prospect, contact);
+  const { facts, leaderPerson } = factsResult;
+  for (const rejected of factsResult.rejectedSignals.filter((item) => item.reason === "homonyme probable")) {
+    warnings.push({ source: "linkup", message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}` });
   }
-  analysis = applyAngle(analysis, body.angleIndex);
 
-  if (isGenericAnalysis(analysis)) {
+  const ask: AskFn = (role, system, user, temperature, operation) =>
+    chatJson({
+      client: getOpenAI(),
+      role,
+      system,
+      user,
+      temperature,
+      operation,
+      onUsage: (usage) =>
+        recordOpenAiUsage({
+          model: usage.model,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          operation: usage.operation,
+          prospectId: prospect.id,
+        }),
+    });
+
+  // --- STRATÈGE -------------------------------------------------------------
+  const sentResult = await session.supabase
+    .from("messages")
+    .select("subject, body, sent_at")
+    .eq("prospect_id", prospect.id)
+    .eq("status", "sent")
+    .order("created_at", { ascending: true });
+  const history = (sentResult.data ?? []) as HistoryMessage[];
+
+  const figures = prospect.key_figures ?? {};
+  const excludeAngles = [...(body.excludeAngles ?? [])];
+  const previous = storedAngle(prospect);
+  if (body.mode === "other_angle" && previous) excludeAngles.push(previous);
+
+  const strategistInput: StrategistInput = {
+    facts,
+    companyName: factsResult.companyName,
+    isLargeGroupSubsidiary: factsResult.isLargeGroupSubsidiary,
+    parentGroup: (typeof figures.parent_group === "string" ? figures.parent_group : null) ?? factsResult.parent,
+    foreignEntities: factsResult.foreignEntities,
+    history,
+    excludeAngles: body.mode === "full" ? [] : excludeAngles,
+  };
+
+  let outcome: BriefOutcome;
+  if (body.mode === "rewrite") {
+    // Brief édité à la main : revalidé comme une sortie du modèle, sans
+    // re-tester l'exclusion (l'angle ne change pas, seul son texte bouge).
+    outcome = validateBrief(body.brief, { ...strategistInput, excludeAngles: [] });
+    if (outcome.brief) outcome.brief.excludedAngles = excludeAngles;
+  } else {
+    outcome = await runStrategist(
+      (system, user, operation) => ask("strategist", system, user, 0.2, operation),
+      strategistInput,
+    );
+  }
+  if (!outcome.brief) {
+    return NextResponse.json({ error: `Brief inexploitable : ${outcome.error}` }, { status: 502 });
+  }
+  const brief = outcome.brief;
+
+  // Stocké avec le prospect : « Autre angle » s'en sert pour exclure l'angle.
+  const saved = await session.supabase.from("prospects").update({ brief }).eq("id", prospect.id);
+  if (saved.error) {
     warnings.push({
       source: "openai",
-      message:
-        "Aucune donnée ne permettait un diagnostic spécifique : le pain retenu reste générique. " +
-        "Renseignez le site du prospect ou relancez une recherche de signaux.",
+      message: "brief non enregistré : appliquez la migration 20260925100000_prospect_brief.sql",
     });
   }
 
+  // --- RÉDACTEUR + JUGE -----------------------------------------------------
   // Anti-répétition : on interdit les ouvertures déjà servies, puis on MESURE.
   const historyResult = await session.supabase
     .from("messages")
@@ -285,98 +254,31 @@ export async function POST(request: Request) {
     .eq("type", "intro")
     .order("created_at", { ascending: false })
     .limit(HISTORY);
-  const previous = (historyResult.data ?? []).map((row) => (row as { body: string }).body);
-  const avoid = previous.flatMap((text) => {
+  const previousBodies = (historyResult.data ?? []).map((row) => (row as { body: string }).body);
+  const avoid = previousBodies.flatMap((text) => {
     const { opening, closing } = edges(text);
     return [opening, closing].filter(Boolean);
   });
 
-  const writingInput = {
-    tone,
-    analysis,
+  const draft = await draftFromBrief({
+    ask,
+    brief,
     facts,
+    tone,
     contact,
     prospectId: prospect.id,
-    companyName: prospect.company_name,
+    registryName: prospect.company_name,
     avoid,
     leaderPerson,
-  };
-  const plan = planFor(writingInput);
-
-  let email: GeneratedEmail | null = parseEmail(
-    await ask(
-      buildWritingPrompt(writingInput),
-      `Écris le mail pour ${prospect.company_name}.`,
-      0.85,
-      `redaction:${tone}`,
-      prospect.id,
-    ),
-  );
-  if (!email) {
-    return NextResponse.json({ error: "Brouillon inexploitable." }, { status: 502 });
+    forbiddenNames: factsResult.foreignEntities,
+    judge: body.mode !== "rewrite",
+  });
+  if ("error" in draft) {
+    return NextResponse.json({ error: draft.error }, { status: 502 });
   }
+  const { email, validation, critique, failing } = draft;
 
-  // --- Garde-fous déterministes, puis juge --------------------------------
-  const context = {
-    facts,
-    contact,
-    tone,
-    companyName: prospect.company_name,
-    proofs: PUBLIC_PROOFS,
-    plan,
-  };
-  let validation = validateEmail(email, context);
-  let critique: Critique | null = parseCritique(
-    await ask(
-      buildCriticPrompt(facts, PUBLIC_PROOFS),
-      buildCriticContext(analysis, email),
-      0,
-      "critique",
-      prospect.id,
-    ),
-  );
-  let failing = critique ? failingCriteria(critique) : [];
-
-  // UNE seule réécriture : au-delà, on rend la main plutôt que de boucler.
-  if (!validation.ok || failing.length > 0) {
-    const feedback = [...validation.failures, ...failing].map((line) => `- ${line}`).join("\n");
-    const rewritten = parseEmail(
-      await ask(
-        buildWritingPrompt({ ...writingInput, critique: feedback }),
-        `Réécris le mail pour ${prospect.company_name}.`,
-        0.75,
-        `redaction:${tone}:rewrite`,
-        prospect.id,
-      ),
-    );
-
-    if (rewritten) {
-      const secondValidation = validateEmail(rewritten, context);
-      const secondCritique = parseCritique(
-        await ask(
-          buildCriticPrompt(facts, PUBLIC_PROOFS),
-          buildCriticContext(analysis, rewritten),
-          0,
-          "critique:rewrite",
-          prospect.id,
-        ),
-      );
-      const secondFailing = secondCritique ? failingCriteria(secondCritique) : [];
-
-      // On ne garde la réécriture que si elle est réellement meilleure.
-      const improved =
-        secondValidation.failures.length + secondFailing.length <
-        validation.failures.length + failing.length;
-      if (improved) {
-        email = rewritten;
-        validation = secondValidation;
-        critique = secondCritique;
-        failing = secondFailing;
-      }
-    }
-  }
-
-  const similarity = maxSimilarity(email.body, previous);
+  const similarity = maxSimilarity(email.body, previousBodies);
   if (similarity > SIMILARITY_LIMIT) {
     warnings.push({
       source: "openai",
@@ -384,39 +286,31 @@ export async function POST(request: Request) {
     });
   }
 
-  if (contact && !prospect.email && !reuse) {
+  if (contact && !prospect.email && body.mode === "full") {
     await session.supabase.from("prospects").update({ email: contact.email }).eq("id", prospect.id);
   }
 
-  const hook = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
-  const pain = analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
-
-  // « Indice de besoin » : une friction operationnelle, pas un bulletin de
-  // sante. On ecarte les implications qui decrivent une entreprise qui va
-  // bien, et la confiance se calcule sur ce qu'on a reellement collecte.
-  const lead = analysis.implications.find((item) => describesNeed(item.text)) ?? null;
+  // « Indice de besoin » : l'insight du brief, s'il décrit une friction
+  // opérationnelle ; la confiance se calcule sur ce qu'on a réellement.
+  const leadText = brief.angle.insight;
+  const siteRead = figures.site_status === "lu";
   const confidence = needConfidence({
     facts,
-    hasSiteContent: siteText.trim().length > 0,
-    vocabularyConfirmed: Boolean(
-      lead && siteText && describesNeed(siteText) && lead.factIds.length >= 2,
-    ),
+    hasSiteContent: siteRead,
+    vocabularyConfirmed: Array.isArray(figures.site_vocabulary) && figures.site_vocabulary.length > 0,
   });
-  const evidence: Evidence[] = [
-    { label: "Modèle économique", value: analysis.businessModel.text, source: "Analyse du site et du NAF" },
-    ...facts.map((fact) => ({
-      label: fact.label,
-      value: fact.value,
-      source: fact.source,
-      ...(fact.url ? { url: fact.url } : {}),
-    })),
-  ];
+  const evidence: Evidence[] = facts.map((fact) => ({
+    label: fact.label,
+    value: fact.value,
+    source: fact.source,
+    ...(fact.url ? { url: fact.url } : {}),
+  }));
 
   return NextResponse.json({
-    pain_point: pain?.task ?? "",
+    pain_point: brief.pain.task,
     evidence,
     email,
-    analysis,
+    brief,
     facts,
     contact,
     warnings,
@@ -424,16 +318,13 @@ export async function POST(request: Request) {
     /** Les points qui n'ont pas pu être corrigés : l'UI affiche « à revoir ». */
     needsReview: !validation.ok || failing.length > 0,
     reviewReasons: [...validation.failures, ...failing],
-    needLead: lead
+    needLead: describesNeed(`${leadText} ${brief.pain.task}`)
       ? {
-          text: lead.text,
-          factIds: lead.factIds,
+          text: leadText,
+          factIds: brief.angle.hookFactIds,
           confidence: confidence.value,
-          /** Detail affiche au survol : d'ou vient cette confiance. */
           confidenceDetail: confidence.explanation,
         }
       : null,
-    chosenHook: hook,
-    chosenPain: pain,
   });
 }

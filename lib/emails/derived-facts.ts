@@ -3,6 +3,12 @@ import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import { isOpaqueNaf, nafLabel } from "@/lib/naf";
 import { companyAge, frenchDate, isFresh } from "@/lib/enrichment/dates";
 import { resolvePlaybook } from "@/lib/sector-playbook";
+import {
+  attachSignals,
+  displayCompanyName,
+  type RejectedSignal,
+} from "@/lib/enrichment/entity-match";
+import { interpretJob } from "./job-roles";
 
 /**
  * Faits du prospect, calculés côté serveur.
@@ -41,6 +47,7 @@ export type HookTier = 1 | 2 | 3 | 4 | 5;
  */
 export type FactKey =
   | "signal"
+  | "group_signal"
   | "parent_group"
   | "naf"
   | "family"
@@ -70,7 +77,7 @@ const SOURCE_RANK: Record<FactSource, number> = {
 };
 
 /** Cles pouvant porter plusieurs faits : chaque signal est un evenement distinct. */
-const MULTI_VALUE: Set<FactKey> = new Set(["signal"]);
+const MULTI_VALUE: Set<FactKey> = new Set(["signal", "group_signal"]);
 
 export interface DerivedFact {
   id: string;
@@ -86,6 +93,12 @@ export interface DerivedFact {
    * corps : ratios, montants au centime.
    */
   bodyUsable: boolean;
+  /** Date ISO d'un signal, `null` s'il n'est pas daté. Absente hors signaux. */
+  date?: string | null;
+  /** Signal daté de moins de 60 jours : seul admis comme angle principal. */
+  fresh?: boolean;
+  /** Pour une offre d'emploi : ce que fait le poste, et ce que ça implique. */
+  reading?: string;
 }
 
 const ANNUAIRE = "https://annuaire-entreprises.data.gouv.fr/entreprise/";
@@ -206,6 +219,12 @@ export interface FactsResult {
   isLargeGroupSubsidiary: boolean;
   /** Indices d'appartenance a un groupe, sources melangees. */
   groupEvidence: string[];
+  /** Nom a ecrire dans un mail : denomination du registre ou enseigne confirmee. */
+  companyName: string;
+  /** Signaux web ecartes par l'anti-homonymie, avec leur raison. */
+  rejectedSignals: RejectedSignal[];
+  /** Entites voisines ecartees : leur nom ne doit jamais sortir dans un mail. */
+  foreignEntities: string[];
   /**
    * Confiance dans le modele economique, 0 a 1. Plafonnee a 0,4 quand le site
    * officiel n'a pas ete lu : sans site, on ne connait pas leur metier reel.
@@ -229,7 +248,7 @@ export function buildFacts(
     value: string | null,
     source: FactSource,
     hookTier: HookTier,
-    options: { url?: string; bodyUsable?: boolean } = {},
+    options: { url?: string; bodyUsable?: boolean; date?: string | null; fresh?: boolean; reading?: string } = {},
   ) => {
     if (!value) return;
 
@@ -253,6 +272,8 @@ export function buildFacts(
       hookTier,
       bodyUsable: options.bodyUsable !== false,
       ...(options.url ? { url: options.url } : {}),
+      ...(options.date !== undefined ? { date: options.date, fresh: Boolean(options.fresh) } : {}),
+      ...(options.reading ? { reading: options.reading } : {}),
     });
   };
 
@@ -268,9 +289,30 @@ export function buildFacts(
   const freeText = `${prospect.company_name} ${siteText ?? ""} ${signalText}`;
   const playbook = resolvePlaybook(nafCode, prospect.sector, freeText);
 
-  // --- Tier 1 : recrutement lie a l'automatisation, recent ------------------
+  // --- Anti-homonymie --------------------------------------------------------
+  // Rejoue a la generation la regle de rattachement de l'enrichissement : les
+  // prospects enrichis avant elle portent encore des signaux d'homonymes.
   const parent = str(figures.parent_company);
-  for (const signal of prospect.signals ?? []) {
+  const attachment = attachSignals(
+    prospect.signals ?? [],
+    {
+      name: prospect.company_name,
+      siren,
+      website: str(figures.site_status) === "non trouvé" ? null : str(prospect.website),
+    },
+    {
+      parentCompany: parent,
+      parentGroup: str(figures.parent_group),
+      parentGroupQuote: str(figures.parent_group_quote),
+    },
+  );
+  const storedForeign = Array.isArray(figures.foreign_entities)
+    ? (figures.foreign_entities as unknown[]).filter((item): item is string => typeof item === "string")
+    : [];
+  const foreignEntities = [...new Set([...storedForeign, ...attachment.foreignEntities])];
+
+  // --- Tier 1 : recrutement lie a l'automatisation, recent ------------------
+  for (const signal of attachment.kept) {
     const quote = str(signal.quote);
     const url = str(signal.url);
     if (!quote || !url) continue;
@@ -280,6 +322,20 @@ export function buildFacts(
 
     const date = str(signal.date);
     const fresh = isFresh(date, now);
+
+    // Signal d'une entite du groupe : contexte, jamais une nouvelle du prospect.
+    if (signal.scope === "groupe") {
+      add(
+        "group_signal",
+        `Actualité du groupe ${str(signal.entity) ?? ""}`.trim(),
+        `${cleanExcerpt(quote)} (${frenchDate(date)})`,
+        "Signal web",
+        4,
+        { url, date, fresh: false },
+      );
+      continue;
+    }
+
     // La categorie vient de l'extraction structuree quand elle a tourne ;
     // sinon on retombe sur la lecture du texte.
     const category = typeof signal.category === "string" ? signal.category : null;
@@ -289,13 +345,19 @@ export function buildFacts(
 
     // Un signal non date ou perime ne peut pas ouvrir un mail : rang 3 au mieux.
     const tier: HookTier = isAutomationHire && fresh ? 1 : fresh ? 3 : 4;
+    const job = RECRUITMENT.test(text) || signal.type === "recrutement" ? interpretJob(text) : null;
     add(
       "signal",
       isAutomationHire ? "Recrutement lié aux process" : "Signal web",
       `${cleanExcerpt(quote)} (${frenchDate(date)})`,
       "Signal web",
       tier,
-      { url },
+      {
+        url,
+        date,
+        fresh,
+        ...(job ? { reading: `${job.label} : ${job.does}. Ouverture ⇒ ${job.consequence}` } : {}),
+      },
     );
   }
 
@@ -459,6 +521,14 @@ export function buildFacts(
     leaderVia,
     isLargeGroupSubsidiary: isSubsidiary,
     groupEvidence,
+    companyName: displayCompanyName(prospect.company_name, [
+      str(figures.site_offer) ?? "",
+      ...attachment.kept
+        .filter((signal) => signal.scope !== "groupe")
+        .map((signal) => str(signal.quote) ?? ""),
+    ]),
+    rejectedSignals: attachment.rejected,
+    foreignEntities,
     businessModelConfidence:
       siteStatus === "lu" ? (str(figures.site_offer) ? 0.8 : 0.6) : siteStatus === "trouvé" ? 0.5 : 0.4,
   };
@@ -484,7 +554,9 @@ ${facts
     (fact) =>
       `[${fact.id}] (rang ${fact.hookTier} — ${tierName[fact.hookTier]}) ${fact.label} : ${fact.value}` +
       `${fact.bodyUsable ? "" : "  << NE PAS ECRIRE CETTE VALEUR TELLE QUELLE DANS LE MAIL >>"}` +
-      `  (source : ${fact.source}${fact.url ? `, ${fact.url}` : ""})`,
+      `${fact.date !== undefined ? (fact.fresh ? "  [date < 60 j]" : "  [NON DATE OU > 60 J : jamais en angle principal]") : ""}` +
+      `  (source : ${fact.source}${fact.url ? `, ${fact.url}` : ""})` +
+      `${fact.reading ? `\n      Lecture du poste : ${fact.reading}` : ""}`,
   )
   .join("\n")}`;
 }
@@ -514,4 +586,25 @@ export function knownNumbers(facts: DerivedFact[]): Set<number> {
     }
   }
   return known;
+}
+
+/**
+ * Retire d'un texte les nombres qui ne viennent pas des faits.
+ *
+ * Une consigne ne suffit pas : « 268 points de livraison » et « 80 000
+ * interimaires » revenaient dans les accroches parce que le modele pioche le
+ * chiffre le plus spectaculaire d'une plaquette. On enleve le nombre et son
+ * unite immediate, pas la phrase : « vos 80 000 interimaires » devient « vos
+ * interimaires », ce qui reste vrai.
+ */
+export function stripUnknownNumbers(text: string, allowed: Set<number>): string {
+  return text
+    .replace(/(\d[\d\s]*(?:[.,]\d+)?)(\s*(?:%|€|EUR|M€|k€|GWh|MWh|kWh|tonnes?|t))?/gi, (match, digits: string) => {
+      const value = Number(String(digits).replace(/\s/g, "").replace(",", "."));
+      if (!Number.isFinite(value)) return match;
+      return allowed.has(value) || allowed.has(Math.round(value)) ? match : "";
+    })
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s([,.;:])/g, "$1")
+    .trim();
 }
