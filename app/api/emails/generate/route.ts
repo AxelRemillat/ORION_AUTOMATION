@@ -218,6 +218,8 @@ export async function POST(request: Request) {
     foreignEntities: factsResult.foreignEntities,
     history,
     excludeAngles: body.mode === "full" ? [] : excludeAngles,
+    // Sert a reperer un pain qui ne fait que redire l'activite de l'entreprise.
+    sector: prospect.sector,
   };
 
   let outcome: BriefOutcome;

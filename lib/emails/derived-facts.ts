@@ -9,6 +9,7 @@ import {
   type RejectedSignal,
 } from "@/lib/enrichment/entity-match";
 import { interpretJob } from "./job-roles";
+import { looksLikeSubsidiaryByFigures } from "@/lib/enrichment/headcount";
 
 /**
  * Faits du prospect, calculés côté serveur.
@@ -84,7 +85,19 @@ export interface DerivedFact {
   /** Cle canonique : deux faits de meme cle ne coexistent pas. */
   key: FactKey;
   label: string;
+  /**
+   * Valeur BRUTE, exacte. C'est elle qu'on affiche.
+   *
+   * Elle ne contient JAMAIS de consigne de redaction : « 500000 salariés (à
+   * écrire « une 500000aine de personnes ») » est parti en production parce
+   * que la consigne destinee au modele etait concatenee ici.
+   */
   value: string;
+  /**
+   * Consigne destinee au REDACTEUR uniquement : comment dire ce fait dans un
+   * mail. Jamais affichee dans l'interface.
+   */
+  writerHint?: string;
   source: FactSource;
   url?: string;
   hookTier: HookTier;
@@ -248,7 +261,15 @@ export function buildFacts(
     value: string | null,
     source: FactSource,
     hookTier: HookTier,
-    options: { url?: string; bodyUsable?: boolean; date?: string | null; fresh?: boolean; reading?: string } = {},
+    options: {
+      url?: string;
+      bodyUsable?: boolean;
+      date?: string | null;
+      fresh?: boolean;
+      reading?: string;
+      /** Comment ECRIRE ce fait ; jamais affiche. */
+      writerHint?: string;
+    } = {},
   ) => {
     if (!value) return;
 
@@ -271,6 +292,7 @@ export function buildFacts(
       source,
       hookTier,
       bodyUsable: options.bodyUsable !== false,
+      ...(options.writerHint ? { writerHint: options.writerHint } : {}),
       ...(options.url ? { url: options.url } : {}),
       ...(options.date !== undefined ? { date: options.date, fresh: Boolean(options.fresh) } : {}),
       ...(options.reading ? { reading: options.reading } : {}),
@@ -369,7 +391,12 @@ export function buildFacts(
   const groupEvidence = Array.isArray(figures.group_evidence)
     ? (figures.group_evidence as unknown[]).filter((item): item is string => typeof item === "string")
     : [];
-  const isSubsidiary = figures.is_large_group_subsidiary === true;
+  // Le drapeau vient normalement de l'enrichissement. On le rededuit ici des
+  // chiffres pour qu'il vaille AUSSI sur une fiche deja en base ou un jeu de
+  // test : 1,296 Md€ de CA pour 75 salaries, c'est une filiale, toujours.
+  const isSubsidiary =
+    figures.is_large_group_subsidiary === true ||
+    looksLikeSubsidiaryByFigures(num(figures.revenue_eur), num(figures.headcount));
 
   add(
     "parent_group",
@@ -429,7 +456,9 @@ export function buildFacts(
 
   const exact = num(figures.headcount);
   if (exact !== null) {
-    add("headcount", "Effectif", `${exact} salariés (à écrire « ${roundedHeadcount(exact)} »)`, "Pappers", 5);
+    add("headcount", "Effectif", `${exact} salariés`, "Pappers", 5, {
+      writerHint: `à écrire « ${roundedHeadcount(exact)} »`,
+    });
   }
   const headcount = exact ?? headcountMidpoint(sizeRange);
 
@@ -439,7 +468,7 @@ export function buildFacts(
     "revenue",
     "Chiffre d'affaires",
     revenue !== null
-      ? `${euros(revenue)}${revenueYear ? ` (exercice ${revenueYear})` : ""} — à écrire « ${roundedEuros(revenue)} »`
+      ? `${euros(revenue)}${revenueYear ? ` (exercice ${revenueYear})` : ""}`
       : null,
     "Pappers",
     5,
@@ -556,6 +585,7 @@ ${facts
       `${fact.bodyUsable ? "" : "  << NE PAS ECRIRE CETTE VALEUR TELLE QUELLE DANS LE MAIL >>"}` +
       `${fact.date !== undefined ? (fact.fresh ? "  [date < 60 j]" : "  [NON DATE OU > 60 J : jamais en angle principal]") : ""}` +
       `  (source : ${fact.source}${fact.url ? `, ${fact.url}` : ""})` +
+      `${fact.writerHint ? `  << ${fact.writerHint} >>` : ""}` +
       `${fact.reading ? `\n      Lecture du poste : ${fact.reading}` : ""}`,
   )
   .join("\n")}`;

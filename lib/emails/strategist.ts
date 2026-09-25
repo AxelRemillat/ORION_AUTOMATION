@@ -75,6 +75,8 @@ export interface StrategistInput {
   history: HistoryMessage[];
   /** Angles à ne pas reprendre (« Autre angle »). */
   excludeAngles?: BriefAngle[];
+  /** Secteur ou activité déclarée : sert à repérer un pain qui redit l'offre. */
+  sector?: string | null;
 }
 
 const PUBLIC_PROOFS = (PERSONA.proofs as readonly PersonaProof[]).filter((proof) => proof.publicOk);
@@ -213,6 +215,104 @@ export type BriefOutcome = { brief: StrategyBrief; error?: undefined } | { brief
  * Pains bannis : vrais pour n'importe quelle entreprise, donc sans valeur
  * dans un mail à froid. Tous constatés en production.
  */
+/**
+ * Ce que l'entreprise VEND n'est pas ce qu'elle VIT.
+ *
+ * Le mail parti a ANDRA LEARNING disait « Andra Learning s'efforce de deployer
+ * l'excellence » puis proposait d'automatiser « vos processus de formation » —
+ * c'est-a-dire leur METIER, leur raison d'etre. On ne vend pas a quelqu'un en
+ * lui presentant son offre comme un probleme.
+ *
+ * Une liste blanche d'operations a ete essayee puis abandonnee : « tri des
+ * alarmes de supervision » est une operation interne parfaitement valable et
+ * n'y figurait pas. On detecte donc l'inverse — la RESTITUTION de l'offre —
+ * en comparant le pain au secteur et a l'activite declaree de l'entreprise.
+ */
+const OFFER_ECHO = [
+  "votre offre",
+  "votre proposition de valeur",
+  "vos prestations",
+  "votre cœur de metier",
+  "votre coeur de metier",
+  "ce que vous vendez",
+  "votre savoir-faire",
+  "votre mission",
+];
+
+/**
+ * Verbes de plaquette : les reprendre revient a paraphraser leur slogan.
+ * « s'efforce de deployer l'excellence » etait mot pour mot leur accueil.
+ */
+const SLOGAN = [
+  "s'efforce",
+  "se veut",
+  "ambitionne",
+  "a coeur de",
+  "se positionne comme",
+  "excellence",
+  "expertise reconnue",
+  "acteur majeur",
+  "met un point d'honneur",
+];
+
+/**
+ * Mots vides : ils ne portent pas le sens et fausseraient le recoupement.
+ *
+ * « processus », « gestion » et consorts sont inclus a dessein : ils donnent
+ * l'ILLUSION d'un contenu. « processus de formation » n'ajoute rien a
+ * « formation » — c'est le metier, repeint en probleme.
+ */
+const STOP_WORDS = new Set([
+  "des", "les", "leur", "leurs", "pour", "avec", "dans", "vos", "votre", "une",
+  "cette", "aux", "par", "sur", "chez", "que", "qui", "est", "sont", "plus",
+  "processus", "process", "gestion", "gerer", "traitement", "traiter", "suivi",
+  "activite", "activites", "service", "services", "demarche", "demarches",
+  "operations", "metier", "quotidien", "interne", "internes",
+]);
+
+const significant = (text: string): Set<string> =>
+  new Set(
+    (normalize(text).match(/[a-z]{5,}/g) ?? []).filter((word) => !STOP_WORDS.has(word)),
+  );
+
+/**
+ * Le pain restitue-t-il simplement l'activite de l'entreprise ?
+ *
+ * On compare son vocabulaire a celui du secteur declare : si le pain n'apporte
+ * AUCUN mot que le secteur ne contienne deja, il ne dit rien de nouveau — il
+ * renomme leur metier en probleme.
+ */
+export function restatesTheOffer(painTask: string, sectorOrActivity: string | null): boolean {
+  if (OFFER_ECHO.some((term) => normalize(painTask).includes(normalize(term)))) return true;
+  if (!sectorOrActivity) return false;
+
+  const pain = significant(painTask);
+  if (pain.size === 0) return false;
+  const sector = significant(sectorOrActivity);
+  return [...pain].every((word) => sector.has(word));
+}
+
+/** `true` si le texte reprend le vocabulaire de plaquette de l'entreprise. */
+export function paraphrasesSlogan(text: string): boolean {
+  const haystack = normalize(text);
+  return SLOGAN.some((word) => haystack.includes(normalize(word)));
+}
+
+/**
+ * La preuve recoupe-t-elle le pain ?
+ *
+ * Le mail ANDRA LEARNING mobilisait « j'ai relie des flux d'alertes a des
+ * declenchements automatiques cote commande et planification » pour un pain de
+ * formation : hors sujet, et donc pire que pas de preuve du tout.
+ */
+export function proofMatchesPain(proofId: string | null, painText: string): boolean {
+  if (!proofId) return true; // aucune preuve : toujours permis
+  const proof = proofById(proofId);
+  if (!proof) return false;
+  const haystack = normalize(painText);
+  return proof.tags.some((tag) => haystack.includes(normalize(tag)));
+}
+
 const BANNED_PAINS = [
   "proposition commerciale",
   "propositions commerciales",
@@ -280,6 +380,22 @@ export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcom
     errors.push(`pain.task « ${data.pain.task} » est générique : nomme une tâche du métier`);
   }
 
+  // Le pain porte sur les OPERATIONS, jamais sur l'offre de l'entreprise.
+  if (restatesTheOffer(data.pain.task, input.sector ?? null)) {
+    errors.push(
+      `pain.task « ${data.pain.task} » redit ce que l'entreprise VEND, pas ce qu'elle VIT. ` +
+        "Nomme une opération interne qui tourne AUTOUR du métier : onboarding client, " +
+        "facturation, planification des intervenants, reporting client, relances…",
+    );
+  }
+
+
+  // Paraphrase de plaquette : ça ne dit rien et ça se voit.
+  const slogan = [data.angle.insight, data.pain.task].find(paraphrasesSlogan);
+  if (slogan) {
+    errors.push(`« ${slogan.slice(0, 60)} » reprend le slogan du site : dis un fait, pas leur promesse`);
+  }
+
   const excluded = input.excludeAngles ?? [];
   if (excluded.some((angle) => sameAngle(angle, data.angle))) {
     errors.push("angle identique à un angle déjà refusé : change de type ou de fait d'accroche");
@@ -293,12 +409,19 @@ export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcom
     (name) => `Ne jamais nommer « ${name} » : entreprise distincte, homonyme probable.`,
   );
 
+  // Une preuve hors sujet dessert plus qu'elle ne sert : on la RETIRE plutot
+  // que de rejeter tout le brief. Le mail ANDRA LEARNING mobilisait « j'ai
+  // relie des flux d'alertes » pour un pain de formation — mieux vaut ne rien
+  // citer que de citer a cote.
+  const painText = `${data.pain.task} ${data.pain.automationIdea}`;
+  const proofId = proofMatchesPain(data.proofId, painText) ? data.proofId : null;
+
   return {
     brief: {
       rankedFacts: data.rankedFacts,
       angle: { ...data.angle, insight: clean(data.angle.insight) },
       pain: { ...data.pain, task: clean(data.pain.task), automationIdea: clean(data.pain.automationIdea) },
-      proofId: data.proofId,
+      proofId,
       cta: data.cta.trim(),
       avoid: [...new Set([...data.avoid, ...forbidden])],
       // Jamais laissé au modèle : dérivé des faits de groupe.

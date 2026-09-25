@@ -93,6 +93,11 @@ export interface SearchCriteria {
   /** Interroge Linkup (coûteux) — désactivable depuis le formulaire. */
   withSignals?: boolean;
   /**
+   * Autorise le scan a depasser `scanWidth` pour atteindre l'objectif de
+   * fiches, jusqu'au plafond de 3x. `false` = on s'arrete au nombre demande.
+   */
+  goFurther?: boolean;
+  /**
    * PHASE 2 — nombre maximal d'entreprises enrichies en profondeur (Pappers).
    *
    * Ne s'applique QU'AUX entreprises porteuses d'un signal atteste : une
