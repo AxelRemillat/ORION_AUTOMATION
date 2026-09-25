@@ -6,6 +6,7 @@
 import { fetchJson, toDomain } from "./http";
 import { effectifLabel } from "./naf";
 import type { Result } from "./http";
+import type { ResolvedZone } from "./geo";
 import type { CompanyBase, SearchCriteria } from "./types";
 
 const BASE_URL = "https://recherche-entreprises.api.gouv.fr/search";
@@ -206,51 +207,96 @@ function mapResult(raw: GouvResult, geoFiltered: boolean): CompanyBase | null {
   };
 }
 
-/** Ajoute le filtre géographique le plus précis que la saisie permette. */
-function applyZone(params: URLSearchParams, zone: string | undefined, terms: string[]): boolean {
-  const value = zone?.trim();
-  if (!value) return false;
-  if (/^\d{5}$/.test(value)) params.set("code_postal", value);
-  else if (/^(\d{2}|\d{3}|2[AB])$/i.test(value)) params.set("departement", value.toUpperCase());
-  else {
-    terms.push(value); // nom de commune : la recherche plein texte l'indexe
-    return false;
-  }
-  return true;
+/**
+ * Plafond dur de l'annuaire : au-dela, `total_results` reste bloque a 10 000 et
+ * les pages profondes sont refusees. C'est ce chiffre qui s'affichait tel quel
+ * dans l'UI (« sur 10000 entreprises »), en donnant l'illusion d'un comptage.
+ */
+export const ANNUAIRE_RESULT_CAP = 10_000;
+
+/** Nombre de pages reellement atteignables pour un total et une taille de page. */
+export function pageCount(total: number, perPage: number): number {
+  const reachable = Math.min(total, ANNUAIRE_RESULT_CAP);
+  return Math.max(1, Math.ceil(reachable / Math.max(1, perPage)));
 }
 
-export async function searchCompanies(
+export interface SearchPage {
+  companies: CompanyBase[];
+  total: number;
+  /** `true` quand le total est plafonne par l'API et n'est donc pas exact. */
+  capped: boolean;
+  /** Page effectivement demandee. */
+  page: number;
+  pages: number;
+  /** Libelle de la zone resolue, a afficher a cote du total. */
+  zoneLabel: string | null;
+}
+
+export interface SearchOptions {
+  perPage?: number;
+  page?: number;
+  /** Zone deja resolue par `resolveZone` — la seule source de filtre geo. */
+  zone?: ResolvedZone | null;
+}
+
+/** Parametres envoyes a l'annuaire. Exporte pour etre verifiable en test. */
+export function buildSearchParams(
   criteria: SearchCriteria,
-  perPage = 12,
-): Promise<Result<{ companies: CompanyBase[]; total: number }>> {
+  options: SearchOptions = {},
+): { params: URLSearchParams; geoFiltered: boolean } | { error: string } {
+  const perPage = Math.max(1, Math.min(25, options.perPage ?? 12));
   const params = new URLSearchParams({
-    page: "1",
+    page: String(Math.max(1, options.page ?? 1)),
     per_page: String(perPage),
     etat_administratif: "A", // entreprises en activité uniquement
   });
 
-  const terms: string[] = [];
-  if (criteria.q?.trim()) terms.push(criteria.q.trim());
-  const geoFiltered = applyZone(params, criteria.zone, terms);
-  if (terms.length) params.set("q", terms.join(" "));
+  if (criteria.q?.trim()) params.set("q", criteria.q.trim());
   if (criteria.section) params.set("section_activite_principale", criteria.section);
   if (criteria.tranches?.length) {
     params.set("tranche_effectif_salarie", criteria.tranches.join(","));
   }
 
-  // L'API exige au moins un critère : sans rien, on renverrait l'annuaire entier.
-  if (![...params.keys()].some((k) => !["page", "per_page", "etat_administratif"].includes(k))) {
-    return { ok: false, error: "Renseignez au moins un critère (secteur, taille ou zone)." };
-  }
+  // La zone n'entre JAMAIS dans `q` : ce sont deux choses differentes, et les
+  // confondre faisait remonter des entreprises dont le nom contient « Paris ».
+  const geoFiltered = Boolean(options.zone);
+  if (options.zone) params.set(options.zone.param, options.zone.value);
 
-  const response = await fetchJson<GouvResponse>(`${BASE_URL}?${params}`);
+  // L'API exige au moins un critère : sans rien, on renverrait l'annuaire entier.
+  const structural = ["page", "per_page", "etat_administratif"];
+  if (![...params.keys()].some((key) => !structural.includes(key))) {
+    return { error: "Renseignez au moins un critère (secteur, taille ou zone)." };
+  }
+  return { params, geoFiltered };
+}
+
+export async function searchCompanies(
+  criteria: SearchCriteria,
+  perPage = 12,
+  options: SearchOptions = {},
+): Promise<Result<SearchPage>> {
+  const built = buildSearchParams(criteria, { ...options, perPage });
+  if ("error" in built) return { ok: false, error: built.error };
+
+  const response = await fetchJson<GouvResponse>(`${BASE_URL}?${built.params}`);
   if (!response.ok) return response;
 
   const companies = (response.data.results ?? [])
-    .map((raw) => mapResult(raw, geoFiltered))
+    .map((raw) => mapResult(raw, built.geoFiltered))
     .filter((company): company is CompanyBase => company !== null);
 
-  return { ok: true, data: { companies, total: response.data.total_results ?? companies.length } };
+  const total = response.data.total_results ?? companies.length;
+  return {
+    ok: true,
+    data: {
+      companies,
+      total,
+      capped: total >= ANNUAIRE_RESULT_CAP,
+      page: Number(built.params.get("page")) || 1,
+      pages: pageCount(total, perPage),
+      zoneLabel: options.zone?.label ?? null,
+    },
+  };
 }
 
 /**

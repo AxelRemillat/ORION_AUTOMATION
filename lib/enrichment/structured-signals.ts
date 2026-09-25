@@ -51,13 +51,23 @@ function hostOf(url: string): string {
 
 function jobSignal(posting: JobPosting): ProspectSignal {
   const host = hostOf(posting.url);
+  // « en ligne » remplace la date manquante par ce qu'on sait vraiment : la
+  // page repond encore aujourd'hui sur le domaine de l'entreprise.
+  const when = posting.postedAt
+    ? frenchDate(posting.postedAt)
+    : posting.freshness === "en ligne"
+      ? "en ligne, non datée"
+      : frenchDate(null);
+
   return {
     type: "recrutement",
-    label: `Poste ouvert : ${posting.title} — ${host}, ${frenchDate(posting.postedAt)}`,
+    label: `Poste ouvert : ${posting.title} — ${host}, ${when}`,
     url: posting.url,
     source: host,
     ...(posting.postedAt ? { date: posting.postedAt } : {}),
     ...(posting.dateBasis ? { dateBasis: posting.dateBasis } : {}),
+    ...(posting.freshness ? { freshness: posting.freshness } : {}),
+    ...(posting.freshness === "en ligne" ? { liveOnOfficialSite: true } : {}),
     quote: posting.evidenceQuote,
     confidence: confidenceOf(Boolean(posting.postedAt)),
     category: posting.category,
@@ -83,7 +93,8 @@ function eventSignal(event: CompanyEvent): ProspectSignal {
 /** Signaux issus de l'extraction, les mieux datés d'abord. */
 export function extractionToSignals(extraction: Extraction): ProspectSignal[] {
   const signals = [
-    ...extraction.jobPostings.map(jobSignal),
+    // Une offre dont `validThrough` est depasse ne dit plus rien du present.
+    ...extraction.jobPostings.filter((posting) => posting.freshness !== "périmée").map(jobSignal),
     ...extraction.events.map(eventSignal),
   ];
   // Un signal daté passe devant : c'est le seul qui pourra porter une accroche.

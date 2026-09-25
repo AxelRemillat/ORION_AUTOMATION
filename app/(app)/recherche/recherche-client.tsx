@@ -35,6 +35,16 @@ interface SearchResponse {
   withSignal: number;
   /** Fiches Pappers reellement ouvertes (phase 2). */
   analysed: number;
+  /** `true` quand le total de l'annuaire est plafonne. */
+  totalCapped?: boolean;
+  /** Zone reellement appliquee, telle que resolue. */
+  zoneLabel?: string | null;
+  /** Entreprises ecartees car deja vues. */
+  skippedKnown?: number;
+  /** Pages d'annuaire lues. */
+  pagesRead?: number;
+  /** Pourquoi la boucle s'est arretee. */
+  stopReason?: string;
   warnings: EnrichmentWarning[];
 }
 
@@ -51,6 +61,8 @@ export function RechercheClient() {
   const [warnings, setWarnings] = useState<EnrichmentWarning[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [addStates, setAddStates] = useState<Record<string, AddState>>({});
+  // Id de la fiche deja en portefeuille, pour pouvoir y renvoyer depuis la carte.
+  const [duplicateIds, setDuplicateIds] = useState<Record<string, string>>({});
   const [signalFilter, setSignalFilter] = useState<string[]>([]);
   const [favoriteStates, setFavoriteStates] = useState<Record<string, FavoriteState>>({});
   // Incremente a chaque mise en favori : reveille le panneau des favoris.
@@ -141,6 +153,11 @@ export function RechercheClient() {
           analysed: data.analysed ?? data.results.length,
           // Une recherche sauvegardee avant la refonte n'a pas de plafond.
           requested: criteria.limit ?? DEFAULT_ANALYSIS_LIMIT,
+          totalCapped: data.totalCapped ?? false,
+          zoneLabel: data.zoneLabel ?? null,
+          skippedKnown: data.skippedKnown ?? 0,
+          pagesRead: data.pagesRead ?? 0,
+          stopReason: data.stopReason,
         },
       };
     });
@@ -177,8 +194,21 @@ export function RechercheClient() {
     } catch (cause) {
       const duplicate = cause instanceof ApiError && cause.status === 409;
       setAddStates((current) => ({ ...current, [key]: duplicate ? "duplicate" : "idle" }));
+
+      // Un doublon n'est PAS une erreur : l'entreprise est deja suivie, on le
+      // dit comme une information et on garde le lien vers sa fiche.
+      if (duplicate) {
+        const prospectId =
+          cause instanceof ApiError && typeof cause.payload?.prospectId === "string"
+            ? cause.payload.prospectId
+            : null;
+        if (prospectId) setDuplicateIds((current) => ({ ...current, [key]: prospectId }));
+        toast.toast(`${company.company_name} est déjà dans ton portefeuille.`);
+        return "duplicate";
+      }
+
       toast.error(cause instanceof Error ? cause.message : "Ajout impossible.");
-      return duplicate ? "duplicate" : "idle";
+      return "idle";
     }
   }
 
@@ -311,6 +341,7 @@ export function RechercheClient() {
                   onProspect={prospect}
                   onFavorite={favorite}
                   favoriteState={favoriteStates[keyOf(company)] ?? "idle"}
+                  duplicateId={duplicateIds[keyOf(company)] ?? null}
                 />
               ))}
             </div>

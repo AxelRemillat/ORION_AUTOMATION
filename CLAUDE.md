@@ -1,24 +1,48 @@
-# CONTRACT — design system « Ciel & Lagon »
+# CLAUDE.md — ORION (application PROSPECT)
 
-Référence pour les **Agents 2 et 3**. Tout ce qui est listé ici est stable :
-construisez dessus, ne le redéfinissez pas.
+Application de prospection freelance, mono-utilisateur. Next.js 14 (App Router),
+TypeScript strict, Tailwind v3, Supabase.
 
-**Règle unique et non négociable : aucune couleur en dur.** Pas de `#hex`, pas
-de `text-white`, pas de `bg-slate-800`. Uniquement les tokens ci-dessous, via
-les classes Tailwind ou `var(--token)`.
+Ce fichier remplace l'ancien `CONTRACT.md`, dont la moitié décrivait un
+découpage en « Agent 1 / 2 / 3 » qui n'a plus cours : le dépôt n'est plus
+partagé de cette façon, et la table de propriété des fichiers empêchait de
+corriger un bug hors de son lot. Le reste — le design system — était juste et
+est repris tel quel ci-dessous.
 
-Propriété des fichiers :
+## Règles de travail
 
-| Fichier | Propriétaire |
+- **Aucune couleur en dur.** Pas de `#hex`, pas de `text-white`, pas de
+  `bg-slate-800`. Uniquement les tokens ci-dessous, via les classes Tailwind ou
+  `var(--token)`.
+- **Ne jamais logger ni committer un secret.** Les clés vivent dans
+  `.env.local`, qui est ignoré par git.
+- **Supabase héberge aussi la production de VEGA** (table `ax_documents`).
+  Interdiction absolue de `supabase db reset`, de tout `drop`/`alter` sur une
+  table existante, et de toucher `ax_documents`. Les migrations sont
+  **additives** et s'appliquent une par une.
+- **Migrations** : `db.<ref>.supabase.co` ne résout qu'en IPv6 et n'est pas
+  joignable depuis la machine de dev. Passer par le pooler IPv4
+  (`aws-0-eu-west-1.pooler.supabase.com:5432`, utilisateur
+  `postgres.<project-ref>`). Une policy RLS sans `GRANT` donne un `42501` :
+  les deux vont toujours ensemble.
+- **Ne jamais `npm run build` pendant un `next dev`** : `.next` est écrasé et la
+  page devient blanche.
+
+## Tests et scripts
+
+Le harnais est sans dépendance : `tsc -p tsconfig.test.json` compile dans
+`.test-build`, puis `node -r ./scripts/alias.cjs` résout l'alias `@/`.
+
+| Commande | Ce qu'elle couvre |
 | --- | --- |
-| `app/globals.css`, `tailwind.config.ts`, `lib/theme.ts` | Agent 1 — **ne pas modifier** |
-| `components/ui/**`, `components/layout/**` | Agent 1 — **ne pas modifier** |
-| `app/(app)/layout.tsx`, `app/layout.tsx`, `app/(auth)/**` | Agent 1 — **ne pas modifier** |
-| `app/(app)/recherche/**`, `app/(app)/prospection/**` | Agent 2 |
-| `app/(app)/suivi/**`, `app/(app)/stats/**`, `lib/charts/**` | Agent 3 |
+| `npm test` | toutes les suites, à enchaîner avant de pousser |
+| `npm run test:recherche` | zone, déduplication, boucle de scan, JSON-LD, couleurs canvas |
+| `npm run test:emails` / `test:emails-extra` | validateurs et garde-fous de rédaction |
+| `npm run eval:emails` | évaluation LLM sur fixtures (**consomme des appels payants**) |
+| `npx tsx scripts/debug-search.ts [bloc]` | diagnostic recherche ; `live` et `bluefull` sont **payants** |
 
-Besoin d'un composant ou d'un token qui n'existe pas ? Demandez-le à l'Agent 1
-plutôt que de dupliquer ou d'ouvrir `components/ui`.
+`tsc --noEmit`, `next lint`, `npm test` et `next build` doivent être verts avant
+tout push.
 
 ---
 
@@ -123,7 +147,7 @@ Le thème vit dans `data-theme` sur `<html>` : absent = préférence système
 
 **Vous n'avez rien à faire** : en utilisant les tokens, vos écrans suivent le
 thème automatiquement. N'écrivez pas de variante `dark:` — si une couleur ne
-va pas dans un thème, c'est le token qu'il faut corriger (demandez à l'Agent 1).
+va pas dans un thème, c'est le token qu'il faut corriger (corrigez le token).
 
 ---
 
@@ -161,23 +185,22 @@ continuent de fonctionner tels quels.
 ## 5. Navigation
 
 La barre horizontale (`components/layout/top-nav.tsx`) lit `NAV_ITEMS` dans
-`components/layout/nav-items.ts`. Un futur onglet **Cockpit** viendra en tête
-de ce tableau — rien d'autre à modifier. N'ajoutez pas d'entrée pour une route
-qui n'existe pas encore : le lien serait mort.
+`components/layout/nav-items.ts`. N'ajoutez pas d'entrée pour une route qui n'existe pas encore : le lien serait
+mort.
 
 Le contenu est rendu en pleine largeur (`max-w-[1600px]`) sous la barre.
 Commencez chaque page par un `<PageHeader />`.
 
 ---
 
-## 6. Graphiques (Agent 3)
+## 6. Graphiques
 
 `lib/charts/palette.ts` lit aujourd'hui les variables `--accent`, `--success`,
 `--info`, `--violet`, `--border`, `--fg`, `--warning`, `--danger` : elles sont
 **maintenues** en triplets RVB et pointent sur la nouvelle palette. Ce fichier
 continue donc de fonctionner.
 
-Deux points à reprendre côté Agent 3 quand vous toucherez ce fichier :
+Deux points à reprendre quand on touche ce fichier :
 
 1. **`--muted` et `--teal` sont désormais des hex** (tokens publics du spec),
    plus des triplets. `rgb(#557488)` est invalide : lisez `--rgb-muted` et

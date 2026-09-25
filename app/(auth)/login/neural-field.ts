@@ -11,6 +11,8 @@
  * toujours a sa forme d'origine et ne peut pas s'agglutiner sous le pointeur.
  */
 
+import { toCanvasColor } from "@/lib/canvas-color";
+
 export interface Palette {
   /** Triplets RVB lus sur les tokens de theme. */
   link: [number, number, number];
@@ -86,8 +88,8 @@ function mulberry32(seed: number) {
   };
 }
 
-const rgba = ([r, g, b]: [number, number, number], alpha: number) =>
-  `rgba(${r}, ${g}, ${b}, ${alpha})`;
+/** Meme helper que partout ailleurs : un seul endroit sait ecrire une couleur. */
+const rgba = (triplet: [number, number, number], alpha: number) => toCanvasColor(triplet, alpha);
 
 export class NeuralField {
   private nodes: Node[] = [];

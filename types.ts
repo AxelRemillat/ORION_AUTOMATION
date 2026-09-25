@@ -275,6 +275,29 @@ export type ApiUsage = {
  * Pas de `user_id` : la donnée mise en cache est publique, et la mutualiser
  * évite qu'un utilisateur repaie un crédit déjà dépensé par un autre.
  */
+/**
+ * Memoire des entreprises deja scannees : evite de rescanner (et de repayer)
+ * les memes SIREN d'une recherche a l'autre.
+ */
+export type ScanHistory = {
+  id: string;
+  user_id: string;
+  siren: string;
+  company_name: string | null;
+  had_signal: boolean;
+  scanned_at: string;
+};
+
+export type ScanHistoryInsert = {
+  siren: string;
+  company_name?: string | null;
+  had_signal?: boolean;
+  scanned_at?: string;
+  user_id?: string;
+};
+
+export type ScanHistoryUpdate = Partial<ScanHistoryInsert>;
+
 export type EnrichmentCache = {
   key: string;
   payload: unknown;
@@ -427,6 +450,12 @@ export type Database = {
         Row: EnrichmentCache;
         Insert: EnrichmentCacheInsert;
         Update: EnrichmentCacheUpdate;
+        Relationships: [];
+      };
+      scan_history: {
+        Row: ScanHistory;
+        Insert: ScanHistoryInsert;
+        Update: ScanHistoryUpdate;
         Relationships: [];
       };
     };
