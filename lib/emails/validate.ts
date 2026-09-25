@@ -48,6 +48,15 @@ const BLACKLIST = [
   "m'a interesse",
   "j'ai ete impressionne",
   "dans votre secteur",
+  // Sources legales : le fait est bon, le NOM de la source ne se dit pas dans
+  // un mail a froid — « vous avez ouvert une agence » et non « le BODACC
+  // annonce la creation d'un etablissement ».
+  "bodacc",
+  "annonce legale",
+  "annonces legales",
+  "journal officiel",
+  "au registre",
+  "du registre",
 ];
 
 /** Le créneau de 30 minutes est un élément de CTA, pas une donnée chiffrée. */

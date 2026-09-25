@@ -54,11 +54,26 @@ export function failingCriteria(critique: Critique): string[] {
     .map((key) => `${CRITERIA_LABELS[key]} (${critique[key].score}/5) : ${critique[key].note}`);
 }
 
-export function buildCriticPrompt(facts: DerivedFact[], proofs: readonly string[] = []): string {
+export function buildCriticPrompt(
+  facts: DerivedFact[],
+  proofs: readonly string[] = [],
+  /**
+   * Ce qu'Axel s'engage a faire (page /offre) : delai de mise en place, « sans
+   * changer d'outil », validation humaine, demande d'entree.
+   *
+   * Sans cette liste, le juge notait la verifiabilite a 1 ou 2 sur 5 en
+   * reprochant un « delai non etaye par les faits ». C'etait une erreur de
+   * grille : un engagement du vendeur n'a pas a etre prouve par un fait sur le
+   * prospect.
+   */
+  commitments: readonly string[] = [],
+): string {
   return `Tu es relecteur exigeant d'emails de prospection a froid. Tu NOTES, tu ne
 reecris pas. Sois severe : un 5 doit se meriter.
 
 ${factsBlock(facts)}
+
+${commitments.length ? `ENGAGEMENTS D'AXEL — legitimes par nature, ils n'ont PAS a etre etayes par un fait sur le prospect :\n${commitments.map((line) => `- ${line}`).join("\n")}` : ""}
 
 ${proofs.length ? "PREUVES AUTORISEES — seules experiences qu'Axel peut revendiquer :\n" + proofs.map((proof) => "- " + proof).join("\n") : "PREUVES AUTORISEES : aucune. Toute affirmation d'experience passee vaut 0."}
 
@@ -77,8 +92,11 @@ Note chaque critere de 0 a 5, avec UNE phrase d'explication.
   d'un fait public ("fondee en 1969") vaut 1. Un compliment vaut 0.
 - pertinenceMetier : le process cite appartient-il vraiment au quotidien de CE
   metier, avec son vocabulaire ? "Gestion administrative" vaut 1.
-- verifiabilite : chaque affirmation est-elle adossee a un fait ci-dessus ?
-  Toute affirmation invente-e fait tomber la note.
+- verifiabilite : chaque affirmation SUR LE PROSPECT est-elle adossee a un fait
+  ci-dessus ? Les ENGAGEMENTS d'Axel (delai de mise en place, « sans changer
+  d'outil », validation humaine, duree de la demande d'entree) ne sont PAS des
+  affirmations sur le prospect : ils ne demandent aucun fait. Ne les compte pas
+  comme non verifiables.
 - voix : premiere personne, ton humain, pas de jargon corporate, pas de
   promesse intenable.
 - naturel : est-ce que ca sonne comme un humain qui ecrit a un humain, ou
