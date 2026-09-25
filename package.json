@@ -11,12 +11,13 @@
     "test:signals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/signals.test.js",
     "test:enrichment": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/enrichment.test.js",
     "test:usage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/usage.test.js",
-    "test": "npm run test:signals && npm run test:usage && npm run test:queue && npm run test:emails && npm run test:emails-extra",
+    "test": "npm run test:signals && npm run test:usage && npm run test:queue && npm run test:emails && npm run test:emails-extra && npm run test:strategist",
     "test:queue": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/queue.test.js",
     "test:charts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/charts.test.js",
     "test:emails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/emails.test.js",
     "eval:emails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-emails.js",
-    "test:emails-extra": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/emails-extra.test.js"
+    "test:emails-extra": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/emails-extra.test.js",
+    "test:strategist": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/strategist.test.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

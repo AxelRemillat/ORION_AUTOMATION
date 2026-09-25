@@ -30,7 +30,7 @@ const envNumber = (name: string, fallback: number): number => {
 // OpenAI — prix au million de tokens, en dollars
 // ---------------------------------------------------------------------------
 
-interface ModelPrice {
+export interface ModelPrice {
   inputPerMillion: number;
   outputPerMillion: number;
 }
@@ -47,7 +47,41 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
   "gpt-4.1-nano": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
 };
 
+// TODO(tarifs) : ajouter ici les modeles retenus pour le stratege, le
+// redacteur, l'extraction et le juge (lib/ai/models.ts, PROPOSED_MODELS), avec
+// les prix relus sur developers.openai.com/api/docs/pricing. La page n'etait
+// pas accessible lors de l'ecriture : aucun prix n'a ete devine. En attendant,
+// OPENAI_PRICES_JSON permet de les renseigner sans redeployer le code.
+
 const DEFAULT_MODEL_PRICE: ModelPrice = { inputPerMillion: 0.15, outputPerMillion: 0.6 };
+
+/**
+ * Prix fournis par l'environnement, prioritaires sur la grille :
+ *   OPENAI_PRICES_JSON='{"mon-modele":{"input":1.25,"output":10}}'
+ * En dollars par million de tokens. Une entree mal formee est ignoree.
+ */
+export function envModelPrices(raw = process.env.OPENAI_PRICES_JSON): Record<string, ModelPrice> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown }>;
+    const prices: Record<string, ModelPrice> = {};
+    for (const [model, value] of Object.entries(parsed ?? {})) {
+      const input = Number(value?.input);
+      const output = Number(value?.output);
+      if (Number.isFinite(input) && Number.isFinite(output) && input >= 0 && output >= 0) {
+        prices[model] = { inputPerMillion: input, outputPerMillion: output };
+      }
+    }
+    return prices;
+  } catch {
+    return {};
+  }
+}
+
+/** Prix d'un modele : environnement, puis grille, sinon `null` (inconnu). */
+export function modelPrice(model: string): ModelPrice | null {
+  return envModelPrices()[model] ?? MODEL_PRICES[model] ?? null;
+}
 
 export interface OpenAiCost {
   /** Cout en euros de l'appel. */
@@ -64,7 +98,7 @@ export function openAiCost(
   promptTokens: number,
   completionTokens: number,
 ): OpenAiCost {
-  const known = MODEL_PRICES[model];
+  const known = modelPrice(model);
   const price = known ?? DEFAULT_MODEL_PRICE;
   const usd =
     (promptTokens / 1_000_000) * price.inputPerMillion +

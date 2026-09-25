@@ -1,9 +1,13 @@
 import OpenAI from "openai";
 import { requireEnv } from "@/lib/env";
 import { recordOpenAiUsage } from "@/lib/usage/record";
+import { LEGACY_DEFAULT_MODEL, samplingParams, type AiRole } from "@/lib/ai/models";
 
-/** Modèle par défaut, surchargeable via OPENAI_MODEL. */
-export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+/**
+ * Modèle historique, surchargeable via OPENAI_MODEL. Les appels passent
+ * désormais par `modelFor(role)` (lib/ai/models.ts), qui retombe sur lui.
+ */
+export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? LEGACY_DEFAULT_MODEL;
 
 let client: OpenAI | null = null;
 
@@ -26,14 +30,18 @@ export async function completeText(params: {
   user: string;
   model?: string;
   temperature?: number;
+  /** Rôle dont on prend le modèle quand `model` est absent. Défaut : rédacteur. */
+  role?: AiRole;
   /** Operation journalisee dans api_usage. */
   operation?: string;
   prospectId?: string | null;
 }): Promise<string> {
-  const model = params.model ?? OPENAI_MODEL;
+  const sampling = samplingParams(params.role ?? "writer", params.temperature ?? 0.7, {
+    model: params.model,
+  });
+  const model = sampling.model;
   const response = await getOpenAI().chat.completions.create({
-    model,
-    temperature: params.temperature ?? 0.7,
+    ...sampling,
     messages: [
       { role: "system", content: params.system },
       { role: "user", content: params.user },

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getOpenAI, OPENAI_MODEL } from "@/lib/openai";
+import { getOpenAI } from "@/lib/openai";
+import { samplingParams } from "@/lib/ai/models";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import type { InboundMessage, Message, Prospect } from "@/types";
@@ -75,9 +76,9 @@ export async function POST(request: Request) {
   const thread = buildThread(messages, inbounds);
 
   try {
+    const sampling = samplingParams("writer", 0.6);
     const completion = await getOpenAI().chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0.6,
+      ...sampling,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: buildReplySystemPrompt(answering.category) },
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
 
     if (completion.usage) {
       await recordOpenAiUsage({
-        model: OPENAI_MODEL,
+        model: sampling.model,
         promptTokens: completion.usage.prompt_tokens,
         completionTokens: completion.usage.completion_tokens,
         operation: "reply",
