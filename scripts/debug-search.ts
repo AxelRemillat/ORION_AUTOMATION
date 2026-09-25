@@ -478,6 +478,7 @@ async function blockSignaux(): Promise<void> {
   console.log(`  fiches ouvertes chez Pappers (PAYANT)      : ${outcome.analysed}`);
   console.log(`  ecartees sur l'effectif                    : ${outcome.outOfBracket.length}`);
   console.log(`  deja connues                               : ${outcome.skippedKnown}`);
+  console.log(`  signaux non rapproches                     : ${outcome.unmatched}`);
 
   console.log("");
   console.log("Fiches obtenues :");

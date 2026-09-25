@@ -21,6 +21,9 @@ import { cleanText, excerpt } from "@/lib/enrichment/clean";
 /** Poids d'intention par type, sur une échelle interne 0-30. */
 const SIGNAL_WEIGHTS: Record<string, number> = {
   levee: 30, // budget débloqué
+  // Une prise de fonctions ouvre la seule fenêtre où les outils se rediscutent
+  // sans avoir à justifier l'existant : c'est le meilleur moment pour entrer.
+  direction: 28,
   recrutement: 26, // douleur + capacité à payer
   support: 24, // douleur directement automatisable
   digital: 22, // chantier ouvert : fenêtre de tir
@@ -44,6 +47,7 @@ export interface SignalMeta {
 
 export const SIGNAL_META: Record<string, SignalMeta> = {
   levee: { label: "Levée de fonds", tone: "hot" },
+  direction: { label: "Nouvelle direction", tone: "hot" },
   recrutement: { label: "Recrutement", tone: "hot" },
   support: { label: "Support client", tone: "hot" },
   digital: { label: "Chantier digital", tone: "warm" },
@@ -211,6 +215,22 @@ const confidenceFactor = (signal: ProspectSignal): number => {
 };
 
 /**
+ * FORCE commerciale du signal.
+ *
+ * Un changement de denomination et une prise de fonctions sont tous deux des
+ * faits officiels et dates : le referentiel de types ne les distingue pas
+ * toujours, la force si. Sans ce facteur, « Modification au registre » pesait
+ * autant qu'un nouveau gerant.
+ *
+ * Un signal sans force declaree vaut 1 : le mode par criteres n'en pose pas,
+ * et son comportement ne doit pas changer.
+ */
+const STRENGTH_FACTOR: Record<string, number> = { fort: 1, moyen: 0.7, faible: 0.45 };
+
+const strengthFactor = (signal: ProspectSignal): number =>
+  STRENGTH_FACTOR[signal.strength ?? ""] ?? 1;
+
+/**
  * Qualite de la SOURCE.
  *
  * Un agregateur qui annonce « 12 offres » sans en nommer aucune ne vaut pas
@@ -362,6 +382,7 @@ export function heatScore(
         (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
         recencyFactor(signal, now) *
         confidenceFactor(signal) *
+        strengthFactor(signal) *
         sourceFactor(signal) *
         roleFactor(signal) *
         concordanceBonus(list, signal.type ?? "presse"),
