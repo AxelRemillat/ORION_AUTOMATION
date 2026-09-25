@@ -36,3 +36,6 @@ eval-report.md
 ab-report.md
 ab-key.json
 ab-reveal.md
+
+# état local de la CLI Supabase
+supabase/.temp

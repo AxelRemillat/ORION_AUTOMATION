@@ -1,32 +1,80 @@
 # CLAUDE.md — ORION (application PROSPECT)
 
-Application de prospection freelance, mono-utilisateur. Next.js 14 (App Router),
-TypeScript strict, Tailwind v3, Supabase.
+Application de prospection freelance, mono-utilisateur : Next.js 14 (App
+Router), TypeScript strict, Tailwind v3, Supabase, OpenAI, n8n. Voir
+`README.md` pour l'architecture ; le design system est décrit plus bas, dans ce
+même fichier.
 
-Ce fichier remplace l'ancien `CONTRACT.md`, dont la moitié décrivait un
-découpage en « Agent 1 / 2 / 3 » qui n'a plus cours : le dépôt n'est plus
-partagé de cette façon, et la table de propriété des fichiers empêchait de
-corriger un bug hors de son lot. Le reste — le design system — était juste et
-est repris tel quel ci-dessous.
+Ce fichier remplace `CONTRACT.md`, dont la table de propriété des fichiers par
+« Agent 1 / 2 / 3 » n'a plus cours : elle empêchait de corriger un bug hors de
+son lot. Le découpage du travail est décrit par « Parallélisme » ci-dessous.
+
+**Avant tout push** : `npx tsc --noEmit`, `npm run lint`, `npm test`,
+`npm run build` (placeholders `NEXT_PUBLIC_SUPABASE_URL` et
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` si les vraies valeurs manquent). La CI
+(`.github/workflows/ci.yml`) rejoue exactement cela sur chaque PR.
+
+## Autonomie
+
+Objectif : qu'Axel n'ait rien à faire à la main qu'un agent ou la CI puisse
+faire à sa place.
+
+- **Migrations Supabase** : appliquées par la CI au merge sur `main`
+  (`.github/workflows/migrate.yml`, `supabase db push`). Ne jamais demander à
+  Axel de coller du SQL dans le dashboard, ne jamais lancer `psql` contre la
+  base. Une migration est un NOUVEAU fichier `supabase/migrations/AAAAMMJJHHMMSS_nom.sql`,
+  jamais la modification d'un fichier déjà appliqué.
+- **Toute migration est idempotente** : `create table if not exists`,
+  `add column if not exists`, `create index if not exists`,
+  `drop policy if exists` avant `create policy`, `do $$ … if not exists … $$`
+  pour les types et les rôles. Elle doit passer `npm run check:migrations` :
+  DROP TABLE, DROP COLUMN, TRUNCATE, DELETE sans WHERE et GRANT/REVOKE hors du
+  schéma `public` sont refusés, sauf en-tête `-- allow-destructive: <raison>`
+  justifié dans la PR.
+- **Agent LOCAL (VS Code)** : il lance lui-même les scripts qui lisent
+  `.env.local` (`npm run eval:emails`, `scripts/reenrich.ts`,
+  `scripts/enrichment-metrics.ts`…) plutôt que de demander à Axel de le faire.
+  Il n'affiche JAMAIS une clé, un mot de passe ou une chaîne de connexion
+  (ni dans le terminal, ni dans un fichier, ni dans un commit).
+- **Agent CLOUD** : aucune clé n'est disponible, et il n'en demande pas. Il ne
+  lance pas ces scripts : il écrit le code, le teste avec des mocks et des
+  fixtures, et documente la commande exacte à lancer en local.
+- **Jamais** de merge, **jamais** de push sur `main`. Le travail part sur une
+  branche et une PR ; Axel merge.
+
+## Parallélisme : 1 agent = 1 dossier ou 1 session cloud = 1 branche
+
+- Deux agents LOCAUX ne travaillent jamais dans le même dossier de travail :
+  chacun a son clone ou son `git worktree`, sur sa propre branche.
+- Une session CLOUD travaille sur UNE branche et n'en pousse aucune autre ;
+  une branche porte au plus une PR ouverte. Un sujet distinct = une autre
+  session (donc une autre branche et une autre PR), jamais un empilement sur
+  une PR en cours de revue.
+- Avant de toucher un fichier partagé (`types.ts`, `package.json`,
+  `supabase/migrations/`), partir de `main` à jour. En cas de conflit :
+  merger `main` dans la branche, ne jamais réécrire l'historique d'une branche
+  déjà poussée.
+- Deux migrations créées en parallèle doivent avoir des horodatages
+  différents : prendre l'heure réelle de création, pas une valeur ronde.
 
 ## Règles de travail
 
 - **Aucune couleur en dur.** Pas de `#hex`, pas de `text-white`, pas de
-  `bg-slate-800`. Uniquement les tokens ci-dessous, via les classes Tailwind ou
-  `var(--token)`.
-- **Ne jamais logger ni committer un secret.** Les clés vivent dans
-  `.env.local`, qui est ignoré par git.
+  `bg-slate-800`. Uniquement les tokens décrits plus bas, via les classes
+  Tailwind ou `var(--token)`.
 - **Supabase héberge aussi la production de VEGA** (table `ax_documents`).
   Interdiction absolue de `supabase db reset`, de tout `drop`/`alter` sur une
-  table existante, et de toucher `ax_documents`. Les migrations sont
-  **additives** et s'appliquent une par une.
-- **Migrations** : `db.<ref>.supabase.co` ne résout qu'en IPv6 et n'est pas
-  joignable depuis la machine de dev. Passer par le pooler IPv4
-  (`aws-0-eu-west-1.pooler.supabase.com:5432`, utilisateur
-  `postgres.<project-ref>`). Une policy RLS sans `GRANT` donne un `42501` :
-  les deux vont toujours ensemble.
+  table existante, et de toucher `ax_documents`.
+- **Une policy RLS sans `GRANT` donne un `42501`** : les deux vont toujours
+  ensemble, dans la même migration.
 - **Ne jamais `npm run build` pendant un `next dev`** : `.next` est écrasé et la
   page devient blanche.
+- **Secours quand la CI ne peut pas appliquer une migration** (secret
+  `SUPABASE_DB_URL` absent) : `db.<ref>.supabase.co` ne résout qu'en IPv6 et
+  n'est pas joignable depuis la machine de dev ; passer par le pooler IPv4
+  (`aws-0-eu-west-1.pooler.supabase.com:5432`, utilisateur
+  `postgres.<project-ref>`). C'est un secours, pas la voie normale — la voie
+  normale reste `migrate.yml`.
 
 ## Tests et scripts
 
@@ -37,12 +85,11 @@ Le harnais est sans dépendance : `tsc -p tsconfig.test.json` compile dans
 | --- | --- |
 | `npm test` | toutes les suites, à enchaîner avant de pousser |
 | `npm run test:recherche` | zone, déduplication, boucle de scan, JSON-LD, couleurs canvas |
+| `npm run test:strategist` | pré-tri du stratège, angles, exclusions |
 | `npm run test:emails` / `test:emails-extra` | validateurs et garde-fous de rédaction |
+| `npm run check:migrations` | garde-fou anti-destructif sur `supabase/migrations` |
 | `npm run eval:emails` | évaluation LLM sur fixtures (**consomme des appels payants**) |
 | `npx tsx scripts/debug-search.ts [bloc]` | diagnostic recherche ; `live` et `bluefull` sont **payants** |
-
-`tsc --noEmit`, `next lint`, `npm test` et `next build` doivent être verts avant
-tout push.
 
 ---
 
