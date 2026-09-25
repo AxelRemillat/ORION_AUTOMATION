@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, Trash2 } from "lucide-react";
+import { BadgeCheck, LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo, ThemeToggle } from "@/components/ui";
 import { ScanBanner } from "./scan-banner";
@@ -68,6 +68,15 @@ export function TopNav({ email, trashCount = 0 }: { email: string; trashCount?: 
                 {trashCount > 99 ? "99+" : trashCount}
               </span>
             )}
+          </Link>
+          <Link
+            href="/offre"
+            aria-label="Mon offre"
+            title="Mon offre — signature, preuves, demande d'entrée"
+            aria-current={pathname.startsWith("/offre") ? "page" : undefined}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-text"
+          >
+            <BadgeCheck className="h-4 w-4" aria-hidden />
           </Link>
           <ThemeToggle />
           <form action="/auth/signout" method="post">

@@ -3,7 +3,8 @@ import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { validateEmail, type ValidationResult } from "@/lib/emails/validate";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
-import { PERSONA } from "@/lib/persona";
+import { chooseProof, signatureFor } from "@/lib/offer/model";
+import type { UserOffer } from "@/types";
 import type { ToneKey } from "@/lib/tones";
 import {
   buildCriticContext,
@@ -21,7 +22,9 @@ import { buildWritingPrompt, parseEmail, planFor, type GeneratedEmail, type Plan
  * ce que l'utilisateur voit à l'écran.
  */
 
-const PUBLIC_PROOFS = PERSONA.proofs.filter((proof) => proof.publicOk).map((proof) => proof.text);
+/** Phrases de preuve citables : elles viennent de /offre, plus du code. */
+const publicProofsOf = (offer: UserOffer): string[] =>
+  (offer.proofs ?? []).filter((proof) => proof.publicOk).map((proof) => proof.sentence);
 
 export interface DraftInput {
   ask: AskFn;
@@ -32,6 +35,8 @@ export interface DraftInput {
   prospectId: string;
   /** Dénomination du registre : sert au contrôle des capitales. */
   registryName: string;
+  /** Ce qu'Axel vend et comment il signe (page /offre). */
+  offer: UserOffer;
   /** Ouvertures et fins déjà servies. */
   avoid: string[];
   leaderPerson?: string | null;
@@ -49,6 +54,48 @@ export interface DraftOutcome {
   rewritten: boolean;
 }
 
+/**
+ * Retire une signature que le modele aurait ecrite malgre la consigne.
+ *
+ * Il glisse souvent un « Axel » seul sur la derniere ligne — c'est ce qu'il a
+ * vu mille fois. On l'enleve avant d'ajouter la vraie, sinon le mail se
+ * termine par deux signatures.
+ */
+/**
+ * Chiffres que l'offre autorise dans le corps.
+ *
+ * « 2 a 3 semaines » et « 15 min » viennent de /offre : ce sont NOS chiffres.
+ * Le validateur les refusait comme « absents des faits », ce qui faisait
+ * echouer tout mail qui annonçait un delai.
+ */
+export function offerNumbers(offer: UserOffer): number[] {
+  const found = new Set<number>();
+  for (const text of [offer.lead_time, offer.entry_duration, offer.entry_pitch]) {
+    for (const match of (text ?? "").matchAll(/\d+/g)) {
+      const value = Number(match[0]);
+      if (Number.isFinite(value)) found.add(value);
+    }
+  }
+  // « quinze minutes » s'ecrit aussi en lettres : on ne peut pas tout couvrir,
+  // mais les formes chiffrees de l'offre suffisent au cas courant.
+  return [...found];
+}
+
+export function stripSignature(body: string): string {
+  const lines = body.trimEnd().split(/\r?\n/);
+  while (lines.length) {
+    const last = (lines[lines.length - 1] ?? "").trim();
+    const isSignature =
+      last === "" ||
+      /^(bien |tres )?cordialement[.,]?$/i.test(last) ||
+      /^bonne (journee|journée|soiree|soirée)[.,]?$/i.test(last) ||
+      (last.split(/\s+/).length <= 4 && /^[A-ZÀ-Ý][\p{L}'-]*( [A-ZÀ-Ý][\p{L}'-]*)*[.,]?$/u.test(last));
+    if (!isSignature) break;
+    lines.pop();
+  }
+  return lines.join("\n").trimEnd();
+}
+
 export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | { error: string }> {
   const { ask, brief, tone } = input;
   const writingInput = {
@@ -59,8 +106,12 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     prospectId: input.prospectId,
     avoid: input.avoid,
     leaderPerson: input.leaderPerson,
+    offer: input.offer,
   };
   const plan = planFor(writingInput);
+  // La signature est POSEE PAR LE CODE : le modele ne l'ecrit pas, et elle ne
+  // compte pas dans les mots. Avant, le mail se terminait par « Axel » seul.
+  const signature = signatureFor(input.offer);
   // Le validateur et le juge ne connaissent, eux aussi, que les faits du brief.
   const allowedFacts = briefFacts(brief, input.facts);
   const context = {
@@ -68,10 +119,17 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     contact: input.contact,
     tone,
     companyName: input.registryName,
-    proofs: PUBLIC_PROOFS,
+    signature,
+    offerNumbers: offerNumbers(input.offer),
+    proofs: publicProofsOf(input.offer),
     plan,
     forbiddenNames: input.forbiddenNames,
   };
+
+  const sign = (email: GeneratedEmail | null): GeneratedEmail | null =>
+    email ? { ...email, body: `${stripSignature(email.body)}
+
+${signature}` } : null;
 
   const write = (critique?: string) =>
     ask(
@@ -80,10 +138,10 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
       `${critique ? "Réécris" : "Écris"} le mail pour ${brief.companyName}.`,
       critique ? 0.75 : 0.85,
       `redaction:${tone}${critique ? ":rewrite" : ""}`,
-    ).then(parseEmail);
+    ).then(parseEmail).then(sign);
 
   const judge = (email: GeneratedEmail, operation: string) =>
-    ask("judge", buildCriticPrompt(allowedFacts, PUBLIC_PROOFS), buildCriticContext(brief, email), 0, operation).then(
+    ask("judge", buildCriticPrompt(allowedFacts, publicProofsOf(input.offer)), buildCriticContext(brief, email), 0, operation).then(
       parseCritique,
     );
 

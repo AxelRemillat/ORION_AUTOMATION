@@ -1,12 +1,16 @@
-import { PERSONA } from "@/lib/persona";
 import type { StrategyBrief } from "@/lib/emails/strategist";
+import { chooseProof, entryOfferLabel } from "@/lib/offer/model";
+import type { UserOffer } from "@/types";
 
 /**
  * Partie non éditable du brief : ce qui fonde l'angle et ce qu'il ne faut
  * pas dire. Lu d'un coup d'œil avant d'envoyer.
  */
-export function BriefDetails({ brief }: { brief: StrategyBrief }) {
-  const proof = PERSONA.proofs.find((item) => item.id === brief.proofId && item.publicOk);
+export function BriefDetails({ brief, offer }: { brief: StrategyBrief; offer: UserOffer }) {
+  // La preuve et la demande d'entree viennent de /offre : on montre ce qui a
+  // reellement ete retenu, pas ce que le stratege avait propose.
+  const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`);
+  const entry = entryOfferLabel(offer);
 
   return (
     <dl className="grid gap-3 text-[13px] leading-relaxed">
@@ -14,7 +18,26 @@ export function BriefDetails({ brief }: { brief: StrategyBrief }) {
       <Row label="Pourquoi eux">
         faits {brief.pain.whyThem.join(", ")} · accroche sur {brief.angle.hookFactIds.join(", ")}
       </Row>
-      <Row label="Preuve">{proof ? `« ${proof.text} »` : "aucune — le mail décrit ce qu'Axel construit"}</Row>
+      <Row label="Preuve retenue">
+        {choice.sentence ? (
+          <>
+            <span className="font-data text-faint">{choice.proof?.id}</span> « {choice.sentence} »
+            <span className="block text-[12px] text-muted">{choice.reason}</span>
+          </>
+        ) : (
+          <>
+            aucune — le mail décrit ce qu&apos;Axel construit
+            <span className="block text-[12px] text-muted">{choice.reason}</span>
+          </>
+        )}
+      </Row>
+      <Row label="Demande d'entrée">
+        {entry ? `${entry}${offer.entry_pitch ? ` — « ${offer.entry_pitch} »` : ""}` : "aucune : complétez /offre"}
+      </Row>
+      <Row label="Test de substitution">
+        appliqué par le juge sur la première phrase — un score de spécificité sous 3 déclenche une
+        réécriture
+      </Row>
       <Row label="Question de fin">{brief.cta}</Row>
       {brief.avoid.length > 0 && (
         <Row label="À ne pas dire">

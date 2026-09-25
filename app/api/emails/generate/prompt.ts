@@ -1,4 +1,10 @@
-import { personaBlock, pickIntro, BOOKING_URL } from "@/lib/persona";
+import {
+  chooseProof,
+  entryOfferLabel,
+  promiseLines,
+  signatureFor,
+} from "@/lib/offer/model";
+import type { UserOffer } from "@/types";
 import { toneInstruction, type ToneKey } from "@/lib/tones";
 import { greetingName, greetingSurname } from "@/lib/emails/validate";
 import { buildFacts, factsBlock, type DerivedFact } from "@/lib/emails/derived-facts";
@@ -203,6 +209,8 @@ export interface WritingInput {
   avoid: string[];
   /** Dirigeant personne physique issu du registre, quand il est connu. */
   leaderPerson?: string | null;
+  /** Ce qu'Axel vend et comment il signe (page /offre). */
+  offer: UserOffer;
   /** Retour du juge, lors de l'unique réécriture. */
   critique?: string;
 }
@@ -235,28 +243,23 @@ const factLines = (facts: DerivedFact[]): string =>
     .join("\n");
 
 export function buildWritingPrompt(input: WritingInput): string {
-  const { brief, tone, avoid } = input;
+  const { brief, tone, avoid, offer } = input;
   const facts = briefFacts(brief, input.facts);
-  const plan = planFor(input);
   const greeting = buildGreeting(tone, input.contact, input.leaderPerson);
-  const intro = pickIntro(`${input.prospectId}:${tone}`);
   const hookFacts = facts.filter((fact) => brief.angle.hookFactIds.includes(fact.id));
   const whyFacts = facts.filter((fact) => brief.pain.whyThem.includes(fact.id));
 
-  // La preuve est choisie par le stratège ; le rédacteur ne la change pas.
-  const proof = proofById(brief.proofId);
-  const proofLine = proof
-    ? `PREUVE A MOBILISER, telle quelle ou presque : « ${proof.text} ». Une seule, jamais deux.`
-    : `AUCUNE PREUVE retenue : n'en invente pas. Decris simplement ce que tu construis, au present.`;
+  // La preuve vient de /offre et se choisit par recoupement avec le pain. Le
+  // modele ne la choisit pas : une preuve hors sujet dessert plus qu'elle ne
+  // sert, et il n'a aucun moyen de juger la pertinence d'une reference.
+  const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`);
+  const proofLine = choice.sentence
+    ? `PREUVE A MOBILISER, reprise FIDELEMENT : « ${choice.sentence} ». Une seule, jamais deux.` +
+      (choice.demo ? "\n  C'est une demo NOMMEE : dis laquelle, c'est ce qui la rend verifiable." : "")
+    : "AUCUNE PREUVE ne recoupe ce pain : n'en cite aucune. Decris ce que tu construis, au present.";
 
-  // Le creneau de 30 minutes et le lien sont reserves au ton factuel : ailleurs,
-  // une question ouverte obtient bien plus de reponses.
-  const cta =
-    tone === "factuel" && BOOKING_URL
-      ? `CTA : propose un creneau de 30 minutes avec ce lien, tel quel : ${BOOKING_URL}`
-      : `CTA : la question du brief, reformulee naturellement : « ${brief.cta} ». Pas de lien, pas de creneau.`;
-
-  const lengths = tone === "bref" ? "40 a 70 mots" : "60 a 110 mots";
+  const promise = promiseLines(offer);
+  const entry = entryOfferLabel(offer);
 
   const avoidBlock = [...brief.avoid, ...avoid].length
     ? `A NE PAS DIRE / NE PAS REPRENDRE :
@@ -269,9 +272,18 @@ Corrige precisement ces points, ne repars pas de zero :
 ${input.critique}`
     : "";
 
-  return `Tu ecris un email de prospection a froid A LA PLACE d'Axel. Tu es lui.
+  return `Tu ecris un email de prospection a froid A LA PLACE d'${offer.full_name ?? "Axel Remillat"}.
+Tu es lui.
 
-${personaBlock()}
+QUI TU ES — repris de sa page « Mon offre », a ne pas reinventer
+- ${offer.full_name ?? "Axel Remillat"}, ${offer.title ?? "freelance"}.
+- Ce que tu proposes en premier contact : ${entry ?? "un echange court"}.
+  ${offer.entry_pitch ? `Formulation de reference : « ${offer.entry_pitch} »` : ""}
+${promise.length ? `- Ce que tu peux promettre : ${promise.join(" ; ")}.` : ""}
+- Ne mentionne JAMAIS un employeur, une alternance, des cours ou un stage.
+- Aucun chiffre qui ne soit pas verifiable publiquement.
+- Aucune URL dans le corps : « testable sur mon site » suffit, le lien est
+  dans la signature.
 
 LE BRIEF — decide par le stratege. Tu le mets en mots, tu ne le changes pas.
 - ANGLE (${brief.angle.type}) : ${brief.angle.insight}
@@ -283,46 +295,47 @@ LE BRIEF — decide par le stratege. Tu le mets en mots, tu ne le changes pas.
 FAITS AUTORISES — les seuls sur lesquels tu peux t'appuyer :
 ${factLines(facts) || "aucun"}
 
+STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
+1. ACCROCHE : UN fait propre a CETTE entreprise (signal date, page de son site,
+   etablissement, recrutement...). Elle doit echouer au TEST DE SUBSTITUTION :
+   si la phrase reste vraie en remplaçant le nom par un concurrent du meme code
+   NAF, elle est refusee. Interdit de commencer par « Dans le/la <secteur> » :
+   c'est le contraire d'une accroche.
+2. QUI + PREUVE : « Je suis ${offer.full_name ?? "Axel Remillat"}, » suivi de ton
+   titre reformule naturellement (pas recopie mot pour mot), puis la preuve
+   ci-dessous.
+3. OFFRE POUR EUX : le flux applique a LEUR cas — ce qui declenche, ce qui est
+   lu, ce qui est ecrit, dans quel outil — plus le delai type, « sans changer
+   d'outil » et la validation humaine. Une a deux phrases.
+4. DEMANDE FACILE : ton offre d'entree, formulee en question FERMEE a laquelle
+   on repond oui ou non (« Est-ce que ca vous parlerait ? »).
+
 REGLES DURES — chacune est verifiee par du code apres generation
 1. SALUTATION, exactement : « ${greeting} » Rien d'autre.
-2. La premiere phrase apres la salutation porte l'ANGLE du brief, reformule
-   naturellement. JAMAIS un compliment ("impressionne", "votre engagement"),
-   jamais la simple reformulation d'un fait ("fondee en 1969").
-3. Le pain est pose comme une HYPOTHESE ou une QUESTION, jamais comme un constat.
-4. Aucun chiffre absent des faits autorises. Les arrondis sont permis :
-   40 878 286 EUR peut s'ecrire « 41 M EUR ».
+2. EXACTEMENT QUATRE paragraphes, separes par une ligne vide — un par bloc.
+   80 a 110 mots au TOTAL, signature non comprise. UNE seule phrase par
+   paragraphe, sauf le bloc 3 qui peut en avoir deux. C'est cette contrainte
+   qui tient la longueur : un mail de 131 mots est refuse.
+3. UNE SEULE question dans tout le mail : celle du bloc 4.
+4. Aucun chiffre absent des faits autorises. Les arrondis sont permis.
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
-   interruption », pas de « d'apres mes estimations ».
-6. 3 a 4 paragraphes COURTS, separes par une LIGNE VIDE. ${lengths}.
-   Compte-les : au plus DEUX phrases par paragraphe. C'est la contrainte qui
-   tient la longueur, pas la bonne volonte.
-7. Signature : « Axel » seul sur la derniere ligne.
-8. PRESENTATION DE TOI, si tu te presentes : pars de cette formulation, telle
-   quelle ou presque — « ${intro} ». Le mot « ingenieur » est INTERDIT.
-9. L'offre est un FLUX branche sur leurs outils existants. Interdits :
-   « logiciel », « progiciel », « solution », « systeme de gestion integre »,
-   « plateforme ». Decris ce qui circule : ce qui declenche, ce qui est lu, ce
-   qui est ecrit, et dans quel outil.
-10. NOM DE L'ENTREPRISE : s'il apparait, il s'ecrit EXACTEMENT
-    « ${brief.companyName} ». Aucun autre nom d'entreprise ne la designe.
-11. UNE SEULE QUESTION dans tout le mail. Si l'accroche est une question, la
-    cloture n'en est pas une, et inversement.
-12. UNE SEULE formule d'hypothese dans tout le mail (« j'imagine »,
-    « sans doute », « si je lis bien »...). Deux, et le lecteur comprend qu'on
-    ne sait rien de lui.
-
-${PLANS[plan]}
+   interruption ».
+6. L'offre est un FLUX branche sur leurs outils. Interdits : « logiciel »,
+   « progiciel », « solution », « systeme de gestion integre », « plateforme ».
+7. NOM DE L'ENTREPRISE : s'il apparait, il s'ecrit EXACTEMENT
+   « ${brief.companyName} ».
+8. UNE SEULE formule d'hypothese dans tout le mail.
+9. Tournures INTERDITES, mot pour mot : « Mon metier, c'est de », « peut
+   demander de », « m'a interesse », « j'ai ete impressionne », « dans votre
+   secteur ».
+10. N'ECRIS PAS la signature : elle est ajoutee par le code.
 
 ${proofLine}
-
-${cta}
 
 OBJET
 2 a 6 mots, minuscules sauf noms propres, dans le vocabulaire metier du pain.
 INTERDIT : commencer par « Automatisation de », contenir « chez ${brief.companyName} »,
 les majuscules de mise en avant, les emojis, les points d'exclamation.
-Exemples de forme : « contrats de mission et releves d'heures »,
-« alertes, interventions et pieces », « pieces clients et relances ».
 
 REGISTRE
 ${toneInstruction(tone)}
@@ -331,8 +344,8 @@ ${avoidBlock}
 
 ${critiqueBlock}
 
-TROIS EXEMPLES — secteurs differents, plans differents, entreprises FICTIVES.
-Ce sont des exemples de TON et de STRUCTURE. N'en reutilise aucune phrase.
+DEUX EXEMPLES — entreprises FICTIVES, structure en quatre blocs. Ce sont des
+exemples de TON et de FORME. N'en reutilise aucune phrase.
 ${VOICE_EXAMPLES.join("\n\n")}
 
 Reponds UNIQUEMENT avec un objet JSON :

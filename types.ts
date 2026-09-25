@@ -349,6 +349,59 @@ export type ExcludedCompanyUpdate = Partial<ExcludedCompanyInsert>;
  * Memoire des entreprises deja scannees : evite de rescanner (et de repayer)
  * les memes SIREN d'une recherche a l'autre.
  */
+/** Type d'offre d'entree : la demande la plus legere qu'on puisse faire. */
+export type EntryOfferType = "demo" | "appel" | "audit" | "pilote";
+
+export const ENTRY_OFFER_LABELS: Record<EntryOfferType, string> = {
+  demo: "Démo",
+  appel: "Appel découverte",
+  audit: "Audit",
+  pilote: "Pilote",
+};
+
+/**
+ * Une preuve publique : ce qu'Axel peut citer dans un mail.
+ *
+ * `publicOk` a false = la preuve existe mais ne sort jamais. Elle remplace
+ * `PERSONA.proofs`, qui vivait en dur dans le code.
+ */
+export type OfferProof = {
+  id: string;
+  title: string;
+  /** Phrase d'UNE ligne, reprise telle quelle dans le mail. */
+  sentence: string;
+  tags: string[];
+  url?: string | null;
+  publicOk: boolean;
+};
+
+/** Ce qu'Axel vend, et comment il signe. Une ligne par utilisateur. */
+export type UserOffer = {
+  user_id: string;
+  full_name: string | null;
+  title: string | null;
+  portfolio_url: string | null;
+  phone: string | null;
+  show_phone: boolean;
+  entry_type: EntryOfferType | null;
+  entry_duration: string | null;
+  entry_pitch: string | null;
+  entry_url: string | null;
+  lead_time: string | null;
+  no_tool_change: boolean;
+  human_validation: boolean;
+  proofs: OfferProof[];
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * `updated_at` reste ecrivable : la route le pose a chaque sauvegarde pour que
+ * l'ordre des modifications soit lisible sans trigger.
+ */
+export type UserOfferInsert = Partial<UserOffer>;
+export type UserOfferUpdate = UserOfferInsert;
+
 export type ScanHistory = {
   id: string;
   user_id: string;
@@ -593,6 +646,12 @@ export type Database = {
         Row: ScanHistory;
         Insert: ScanHistoryInsert;
         Update: ScanHistoryUpdate;
+        Relationships: [];
+      };
+      user_offer: {
+        Row: UserOffer;
+        Insert: UserOfferInsert;
+        Update: UserOfferUpdate;
         Relationships: [];
       };
     };
