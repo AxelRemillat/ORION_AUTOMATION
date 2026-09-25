@@ -280,6 +280,8 @@ console.log("\n12. La source légale ne se nomme jamais dans le mail");
   check("« annonce légale » refusé", mail("Une annonce légale signale votre nouvelle agence.").includes("interdites"));
   check("« Journal officiel » refusé", mail("Le Journal officiel mentionne votre création.").includes("interdites"));
   check("« au registre » refusé", mail("Vous êtes représentée par J.DIS au registre.").includes("interdites"));
+  // Cas reellement parti en production : la preposition changeait, pas le mot.
+  check("« Le registre indique » refusé", mail("Le registre indique que J.DIS vous représente.").includes("interdites"));
   check(
     "le même fait, dit humainement, passe",
     !mail("Vous avez ouvert une agence à Lavelanet au printemps.").includes("interdites"),
