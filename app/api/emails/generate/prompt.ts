@@ -294,6 +294,8 @@ REGLES DURES — chacune est verifiee par du code apres generation
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
    interruption », pas de « d'apres mes estimations ».
 6. 3 a 4 paragraphes COURTS, separes par une LIGNE VIDE. ${lengths}.
+   Compte-les : au plus DEUX phrases par paragraphe. C'est la contrainte qui
+   tient la longueur, pas la bonne volonte.
 7. Signature : « Axel » seul sur la derniere ligne.
 8. PRESENTATION DE TOI, si tu te presentes : pars de cette formulation, telle
    quelle ou presque — « ${intro} ». Le mot « ingenieur » est INTERDIT.

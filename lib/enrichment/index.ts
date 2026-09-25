@@ -61,8 +61,15 @@ import type { CompanyBase, EnrichedCompany, EnrichmentWarning, SearchCriteria } 
 
 /** Enrichissements profonds menes en parallele (menage les quotas Pappers). */
 const CONCURRENCY = 4;
-/** Le scan est plus large mais plus leger : on le parallelise davantage. */
-const SCAN_CONCURRENCY = 6;
+/**
+ * Concurrence du scan.
+ *
+ * Abaissee de 6 a 3 : chaque candidat declenche un appel Linkup ET, en
+ * cascade, des lectures de site. A 6 en parallele sur 60 candidats, l'annuaire
+ * repondait 429 (« page 463/41/57 illisible »). Le limiteur de debit protege
+ * deja l'annuaire ; borner la concurrence protege les autres sources.
+ */
+const SCAN_CONCURRENCY = 3;
 
 /** Colonnes chiffrees deja fournies gratuitement par l'annuaire public. */
 function baseKeyFigures(base: CompanyBase): ProspectKeyFigures {

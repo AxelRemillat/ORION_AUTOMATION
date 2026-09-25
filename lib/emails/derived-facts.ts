@@ -80,6 +80,17 @@ const SOURCE_RANK: Record<FactSource, number> = {
 /** Cles pouvant porter plusieurs faits : chaque signal est un evenement distinct. */
 const MULTI_VALUE: Set<FactKey> = new Set(["signal", "group_signal"]);
 
+/**
+ * Au-dela de cet age, un exercice ne dit plus rien de l'entreprise
+ * d'aujourd'hui. « CA 2017 » affiche sans reserve laissait croire a un chiffre
+ * courant, et le stratege s'en servait comme angle.
+ */
+export const STALE_FINANCE_YEARS = 3;
+
+export function isStaleFinance(year: number | null | undefined, now = new Date()): boolean {
+  return typeof year === "number" && Number.isFinite(year) && now.getFullYear() - year > STALE_FINANCE_YEARS;
+}
+
 export interface DerivedFact {
   id: string;
   /** Cle canonique : deux faits de meme cle ne coexistent pas. */
@@ -464,11 +475,12 @@ export function buildFacts(
 
   const revenue = num(figures.revenue_eur);
   const revenueYear = num(figures.revenue_year);
+  const staleFinance = isStaleFinance(revenueYear, now);
   add(
     "revenue",
     "Chiffre d'affaires",
     revenue !== null
-      ? `${euros(revenue)}${revenueYear ? ` (exercice ${revenueYear})` : ""}`
+      ? `${euros(revenue)}${revenueYear ? ` (exercice ${revenueYear}${staleFinance ? ", ancien" : ""})` : ""}`
       : null,
     "Pappers",
     5,

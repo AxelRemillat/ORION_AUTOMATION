@@ -51,49 +51,20 @@ export function modelFor(role: AiRole, env: Env = process.env): string {
   return env[MODEL_ENV[role]]?.trim() || env.OPENAI_MODEL?.trim() || LEGACY_DEFAULT_MODEL;
 }
 
-/**
- * Modèle de raisonnement : familles o1/o3/o4… et gpt-5 (hors variantes
- * « -chat », qui se comportent comme un modèle classique).
- * Ces modèles refusent `temperature` et acceptent `reasoning_effort`.
- */
-export function isReasoningModel(model: string): boolean {
-  const name = model.toLowerCase();
-  if (name.includes("-chat")) return false;
-  return /^(o\d|gpt-5)/.test(name);
-}
-
 export type ReasoningEffort = "low" | "medium" | "high";
 const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high"];
 
 /**
  * Effort de raisonnement d'un rôle : OPENAI_REASONING_EFFORT_<ROLE>, sinon
  * « medium » pour le stratège (c'est lui qui réfléchit) et « low » ailleurs.
+ *
+ * Il n'est ENVOYÉ que si le modèle le supporte — c'est `lib/ai/params.ts` qui
+ * en décide. Ce module ne dit plus rien des capacités : la détection par
+ * expression régulière sur le nom (`/^(o\d|gpt-5)/`) a laissé passer
+ * `gpt-6-*` et fait tomber toute la chaîne en 400.
  */
 export function reasoningEffortFor(role: AiRole, env: Env = process.env): ReasoningEffort {
   const raw = env[`OPENAI_REASONING_EFFORT_${role.toUpperCase()}`]?.trim().toLowerCase();
   if (raw && (EFFORTS as readonly string[]).includes(raw)) return raw as ReasoningEffort;
   return role === "strategist" ? "medium" : "low";
-}
-
-export type SamplingParams =
-  | { model: string; temperature: number }
-  | { model: string; reasoning_effort: ReasoningEffort };
-
-/**
- * Paramètres d'échantillonnage adaptés au modèle.
- *
- * Un modèle de raisonnement rejette `temperature` (erreur 400) : on envoie à
- * la place l'effort de raisonnement du rôle. Un modèle classique garde la
- * température demandée par l'appelant.
- */
-export function samplingParams(
-  role: AiRole,
-  temperature: number,
-  options: { model?: string; env?: Env } = {},
-): SamplingParams {
-  const env = options.env ?? process.env;
-  const model = options.model ?? modelFor(role, env);
-  return isReasoningModel(model)
-    ? { model, reasoning_effort: reasoningEffortFor(role, env) }
-    : { model, temperature };
 }
