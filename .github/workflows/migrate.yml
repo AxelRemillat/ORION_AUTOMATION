@@ -75,13 +75,20 @@ jobs:
         with:
           version: 2.117.0
 
+      # `--include-all` : deux branches en parallele produisent des migrations
+      # dont l'horodatage n'est pas dans l'ordre du merge. Sans ce drapeau, la
+      # CLI refuse d'appliquer une migration plus ancienne que la derniere
+      # enregistree et le workflow reste bloque — constate au merge de la #4,
+      # ou `20260924100000_inbound_messages` precedait `20260925100000`.
+      # C'est sans risque ici : toute migration du depot est additive et
+      # idempotente (`if not exists`), et `check:migrations` le verifie.
       - name: supabase db push
         env:
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
         run: |
           set +e
           # shellcheck disable=SC2086
-          supabase db push --db-url "$SUPABASE_DB_URL" --yes $DRY_RUN 2>&1 | tee push.log
+          supabase db push --db-url "$SUPABASE_DB_URL" --yes --include-all $DRY_RUN 2>&1 | tee push.log
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then

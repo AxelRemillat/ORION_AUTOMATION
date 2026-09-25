@@ -179,6 +179,17 @@ export const PROVEN_CONFIDENCE = 0.75;
  */
 const UNPROVEN_CEILING = 60;
 
+/**
+ * Plafond quand il n'y a QUE des signaux structurels.
+ *
+ * Ces signaux sont deduits du code NAF et de l'effectif : ils decrivent la
+ * forme de l'entreprise, jamais son actualite. Trois d'entre eux donnaient
+ * 17/100 — exactement le meme score pour SEMAPHORES, EG RETAIL et VIVAUTO
+ * PLVL, qui n'ont rien en commun. Les plafonner dit la verite : on ne sait
+ * rien de leur moment, seulement de leur taille.
+ */
+const STRUCTURAL_ONLY_CEILING = 20;
+
 /** Un signal issu du web, date et attestant nommement l'entreprise. */
 const isProven = (signal: ProspectSignal): boolean =>
   typeof signal.url === "string" &&
@@ -194,6 +205,56 @@ const confidenceFactor = (signal: ProspectSignal): number => {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return 0.5;
   return Math.max(0, Math.min(1, raw));
 };
+
+/**
+ * Qualite de la SOURCE.
+ *
+ * Un agregateur qui annonce « 12 offres » sans en nommer aucune ne vaut pas
+ * une annonce publiee sur le site de l'entreprise. `sourceWeight` est pose par
+ * la qualification (cf. `lib/enrichment/job-source.ts`).
+ */
+const sourceFactor = (signal: ProspectSignal): number => {
+  const raw = signal.sourceWeight;
+  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 1;
+};
+
+/**
+ * Specificite du POSTE recrute.
+ *
+ * Trois entreprises sortaient a 17/100 parce que leurs seuls signaux etaient
+ * structurels — identiques pour tout le monde. Un recrutement d'automaticien
+ * et un recrutement de vendeur ne disent pourtant pas la meme chose de notre
+ * capacite a aider : le premier prouve qu'ils automatisent deja.
+ */
+const ROLE_FACTOR: Record<string, number> = {
+  automation: 1.5,
+  data: 1.35,
+  it: 1.25,
+  ops: 1.2,
+  sales: 0.8,
+  other: 0.9,
+};
+
+const roleFactor = (signal: ProspectSignal): number => {
+  if (signal.type !== "recrutement") return 1;
+  const category = typeof signal.category === "string" ? signal.category : null;
+  return category ? (ROLE_FACTOR[category] ?? 1) : 1;
+};
+
+/**
+ * Nombre de SOURCES distinctes qui disent la meme chose.
+ *
+ * Deux medias independants qui annoncent la meme levee valent mieux qu'un
+ * seul. On plafonne vite : au-dela de trois, c'est de la reprise de depeche.
+ */
+export function concordanceBonus(signals: readonly ProspectSignal[], type: string): number {
+  const hosts = new Set(
+    signals
+      .filter((signal) => (signal.type ?? "presse") === type && typeof signal.source === "string")
+      .map((signal) => String(signal.source).toLowerCase()),
+  );
+  return 1 + Math.min(2, Math.max(0, hosts.size - 1)) * 0.15;
+}
 
 /**
  * Score démo, stable pour une même entrée (hash du nom) : sert uniquement à
@@ -296,7 +357,10 @@ export function heatScore(
       points:
         (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
         recencyFactor(signal, now) *
-        confidenceFactor(signal),
+        confidenceFactor(signal) *
+        sourceFactor(signal) *
+        roleFactor(signal) *
+        concordanceBonus(list, signal.type ?? "presse"),
     }))
     .sort((a, b) => b.points - a.points);
 
@@ -372,11 +436,19 @@ export function heatScore(
     });
   }
 
-  const ceiling = list.some(isProven) ? 100 : UNPROVEN_CEILING;
+  // Uniquement des deductions INSEE : on le dit, et on plafonne bas.
+  const structuralOnly = list.length > 0 && list.every((signal) => signal.type === "structure");
+  const ceiling = structuralOnly
+    ? STRUCTURAL_ONLY_CEILING
+    : list.some(isProven)
+      ? 100
+      : UNPROVEN_CEILING;
   const capped = Math.max(0, Math.min(ceiling, value));
   if (capped < value) {
     breakdown.push({
-      label: `Plafonné à ${UNPROVEN_CEILING} : aucune preuve solide`,
+      label: structuralOnly
+        ? `Plafonné à ${STRUCTURAL_ONLY_CEILING} : aucune actualité, seulement des déductions INSEE`
+        : `Plafonné à ${UNPROVEN_CEILING} : aucune preuve solide`,
       points: capped - value,
       kind: "info",
     });
@@ -531,17 +603,29 @@ export function whyNow(
     (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
     recencyFactor(signal, now) *
     confidenceFactor(signal) *
-    categoryFactor(signal);
+    categoryFactor(signal) *
+    // Un agregateur ne porte l'accroche que si rien d'autre n'existe.
+    sourceFactor(signal);
 
   const best = [...citable].sort((a, b) => weight(b) - weight(a))[0];
   const date = typeof best.date === "string" ? frenchDate(best.date) : null;
   // Une offre verifiee en ligne n'a pas de date : on le dit, on n'en fabrique pas.
   const when = date ?? (best.liveOnOfficialSite === true ? "en ligne, non datée" : null);
 
+  // Un agregateur ne prouve qu'une chose : l'entreprise a des offres quelque
+  // part. Son extrait brut — « terdici vegetal 2 offres d'emploi terdici
+  // vegetal en France. » — n'apprend rien et se lit mal. On le remplace par ce
+  // qu'il dit vraiment.
+  const weakSource = best.sourceWeight !== undefined && Number(best.sourceWeight) < 1;
+  const offerCount = /(\d+)\s+(?:offres?|postes?|annonces?)/i.exec(String(best.quote ?? ""))?.[1];
+  const headline = weakSource
+    ? `${offerCount ?? "Plusieurs"} offre${offerCount === "1" ? "" : "s"} listée${offerCount === "1" ? "" : "s"} sur un agrégateur (non datées)`
+    : excerpt(cleanText(best.quote, 400), 260);
+
   return {
     // Les citations arrivent brutes du web : liens markdown, puces, emojis.
     // Les afficher telles quelles donnait « - [Voir l'offre](https://…) 🔥 ».
-    headline: excerpt(cleanText(best.quote, 400), 260),
+    headline,
     evidence: [best.source, when].filter(Boolean).join(" · ") || "source web",
     url: best.url,
     signalType: best.type ?? "presse",

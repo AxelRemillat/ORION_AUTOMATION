@@ -22,6 +22,8 @@ export interface ScanStats {
   pagesRead?: number;
   /** Pourquoi la boucle s'est arrêtée, en clair. */
   stopReason?: string;
+  /** Entreprises enrichies puis écartées : effectif hors de la tranche. */
+  outOfBracket?: string[];
 }
 
 function Figure({ value, label }: { value: number; label: string }) {
@@ -77,6 +79,22 @@ export function ScanSummary({ scan }: { scan: ScanStats }) {
           </span>
         )}
       </div>
+
+      {/* Hors tranche : elles ont coûté un enrichissement, on dit lesquelles
+          et pourquoi plutôt que de les faire disparaître en silence. */}
+      {scan.outOfBracket && scan.outOfBracket.length > 0 && (
+        <details className="mt-2.5">
+          <summary className="cursor-pointer text-[13px] text-muted">
+            {scan.outOfBracket.length} entreprise{scan.outOfBracket.length > 1 ? "s" : ""} écartée
+            {scan.outOfBracket.length > 1 ? "s" : ""} : effectif hors de la tranche demandée
+          </summary>
+          <ul className="mt-1 space-y-0.5 text-[12px] text-faint">
+            {scan.outOfBracket.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {(scan.stopReason || scan.skippedKnown || scan.pagesRead) && (
         <p className="mt-2 font-data text-[11px] text-faint">

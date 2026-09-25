@@ -137,24 +137,43 @@ export function emailBelongsTo(email: string | null | undefined, person: string 
  * quand l'adresse est bien la sienne : c'est la donnée la plus sûre qu'on ait,
  * et elle justifie le « Monsieur » formel quel que soit le registre.
  */
+/**
+ * Prenom et nom d'une personne, quel que soit le nombre de prenoms.
+ *
+ * L'ancien code prenait « tout sauf le premier mot » comme nom de famille :
+ * « Victor Grynbaum » devenait donc « Monsieur Victor Grynbaum ». Le nom est
+ * le DERNIER mot, le prenom usuel est le PREMIER.
+ */
+export function splitPerson(fullName: string): { first: string; last: string } | null {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return null;
+  return { first: parts[0], last: parts[parts.length - 1] };
+}
+
+/**
+ * Salutation.
+ *
+ * Deux sources de prenom, dans cet ordre : le contact Hunter quand sa
+ * confiance atteint 80, sinon le dirigeant du registre. Le registre ne sert
+ * que de repli — c'est l'adresse qui recoit le mail qui compte.
+ *
+ * Forme : prenom seul pour Direct, Chaleureux et Bref ; « Monsieur <Nom> »
+ * pour Factuel. JAMAIS « Monsieur <Prenom> <Nom> », qui ne se dit pas.
+ */
 export function buildGreeting(
   tone: ToneKey,
   contact?: DecisionMakerContact | null,
   leaderPerson?: string | null,
 ): string {
-  if (leaderPerson && emailBelongsTo(contact?.email, leaderPerson)) {
-    const parts = leaderPerson.trim().split(/\s+/);
-    const surname = parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
-    return `Bonjour Monsieur ${surname},`;
-  }
+  const fromHunter = greetingName(contact) ? contact?.full_name ?? null : null;
+  // Le dirigeant du registre ne vaut que si le mail part bien chez lui.
+  const fromRegistry =
+    leaderPerson && emailBelongsTo(contact?.email, leaderPerson) ? leaderPerson : null;
 
-  const first = greetingName(contact);
-  if (!first) return "Bonjour,";
-  if (tone === "factuel") {
-    const surname = greetingSurname(contact);
-    return surname ? `Bonjour Monsieur ${surname},` : `Bonjour ${first},`;
-  }
-  return `Bonjour ${first},`;
+  const person = splitPerson(fromHunter ?? fromRegistry ?? "");
+  if (!person) return "Bonjour,";
+
+  return tone === "factuel" ? `Bonjour Monsieur ${person.last},` : `Bonjour ${person.first},`;
 }
 
 export interface Evidence {
@@ -189,9 +208,20 @@ export interface WritingInput {
 }
 
 /** Le plan retenu, exposé pour que la route puisse vérifier qu'il a été suivi. */
+/**
+ * Plan retenu pour ce mail.
+ *
+ * Le plan B ouvre sur une question. Or un mail ne porte qu'UNE question, et
+ * c'est le CTA : quand le stratege a ecrit un CTA interrogatif, le plan B
+ * demanderait donc deux questions. Le modele tranchait alors tout seul — et le
+ * validateur rejetait. On derive le plan du CTA plutot que de l'imposer
+ * contre lui.
+ */
 export function planFor(input: Pick<WritingInput, "brief" | "prospectId" | "tone">): PlanKey {
   const hasSignal = input.brief.angle.type === "recrutement" || input.brief.angle.type === "signal";
-  return choosePlan(input.prospectId, input.tone, hasSignal);
+  const plan = choosePlan(input.prospectId, input.tone, hasSignal);
+  const ctaIsQuestion = input.brief.cta.trim().endsWith("?");
+  return plan === "B" && ctaIsQuestion ? "A" : plan;
 }
 
 const factLines = (facts: DerivedFact[]): string =>
@@ -264,6 +294,8 @@ REGLES DURES — chacune est verifiee par du code apres generation
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
    interruption », pas de « d'apres mes estimations ».
 6. 3 a 4 paragraphes COURTS, separes par une LIGNE VIDE. ${lengths}.
+   Compte-les : au plus DEUX phrases par paragraphe. C'est la contrainte qui
+   tient la longueur, pas la bonne volonte.
 7. Signature : « Axel » seul sur la derniere ligne.
 8. PRESENTATION DE TOI, si tu te presentes : pars de cette formulation, telle
    quelle ou presque — « ${intro} ». Le mot « ingenieur » est INTERDIT.
@@ -273,7 +305,9 @@ REGLES DURES — chacune est verifiee par du code apres generation
    qui est ecrit, et dans quel outil.
 10. NOM DE L'ENTREPRISE : s'il apparait, il s'ecrit EXACTEMENT
     « ${brief.companyName} ». Aucun autre nom d'entreprise ne la designe.
-11. UNE SEULE formule d'hypothese dans tout le mail (« j'imagine »,
+11. UNE SEULE QUESTION dans tout le mail. Si l'accroche est une question, la
+    cloture n'en est pas une, et inversement.
+12. UNE SEULE formule d'hypothese dans tout le mail (« j'imagine »,
     « sans doute », « si je lis bien »...). Deux, et le lecteur comprend qu'on
     ne sait rien de lui.
 

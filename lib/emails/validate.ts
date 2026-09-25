@@ -119,8 +119,18 @@ export function wordCount(body: string): number {
 }
 
 /** Bornes de longueur par registre. « bref » est volontairement plus serré. */
+/**
+ * Bornes de longueur par registre.
+ *
+ * Le plafond de 110 mots avait ete calibre sur gpt-4o-mini. Les modeles gpt-6
+ * n'acceptent pas `temperature: 0` et ecrivent une prose plus riche : mesure
+ * sur deux series, ils atterrissent a 118-119 mots avec des notes de 4,4 et
+ * 4,5 sur 5. Traiter huit mots d'ecart comme un defaut faisait echouer des
+ * mails corrects et declenchait une reecriture inutile. On remonte donc le
+ * plafond a 125 — au-dela, c'est vraiment trop long pour un premier contact.
+ */
 function lengthBounds(tone: ToneKey): { min: number; max: number } {
-  return tone === "bref" ? { min: 40, max: 70 } : { min: 60, max: 110 };
+  return tone === "bref" ? { min: 40, max: 80 } : { min: 60, max: 125 };
 }
 
 /** Nombres écrits dans le corps, y compris « 41 M€ » et « 40,9 M ». */
@@ -258,6 +268,41 @@ export function planApplied(plan: "A" | "B" | "C" | undefined, body: string): bo
   return plan === "B" ? isQuestion : !isQuestion;
 }
 
+/**
+ * Questions posees dans le corps.
+ *
+ * Le mail ANDRA LEARNING ouvrait sur « Comment standardisez-vous… ? » et se
+ * fermait sur « Comment gerez-vous actuellement… ? ». Deux questions, c'est
+ * une seule de trop : le lecteur ne sait plus a laquelle repondre, et aucune
+ * n'obtient de reponse. Une seule question par mail, et c'est le CTA.
+ */
+export function questionsIn(body: string): string[] {
+  return bodyParagraphs(body)
+    .flatMap((block) => block.split(/(?<=[?!.])\s+/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.endsWith("?"));
+}
+
+/**
+ * Tournures de plaquette recopiees depuis le site du prospect.
+ * « s'efforce de deployer l'excellence » etait leur propre accroche.
+ */
+const SLOGAN_ECHO = [
+  "s'efforce",
+  "se veut",
+  "ambitionne",
+  "a coeur de",
+  "acteur majeur",
+  "expertise reconnue",
+  "d'apres ce que je comprends",
+  "si je comprends bien votre",
+];
+
+export function echoesSlogan(body: string): string[] {
+  const haystack = normalize(body);
+  return SLOGAN_ECHO.filter((term) => haystack.includes(normalize(term)));
+}
+
 export function validateEmail(draft: EmailDraft, context: ValidationContext): ValidationResult {
   const failures: string[] = [];
   const body = draft.body.trim();
@@ -329,6 +374,21 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     );
   }
 
+  // --- Une seule question --------------------------------------------------
+  const questions = questionsIn(body);
+  if (questions.length > 1) {
+    failures.push(
+      `${questions.length} questions dans le mail : une seule, et c'est le CTA. ` +
+        `À supprimer : « ${questions[0].slice(0, 70)} »`,
+    );
+  }
+
+  // --- Paraphrase du site ---------------------------------------------------
+  const slogan = echoesSlogan(body);
+  if (slogan.length) {
+    failures.push(`Reprise du slogan du site : ${slogan.join(", ")}. Dites un fait, pas leur promesse.`);
+  }
+
   // --- Salutation ----------------------------------------------------------
   const first = greetingName(context.contact);
   const surname = greetingSurname(context.contact);
@@ -353,7 +413,14 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   const words = wordCount(body);
   const { min, max } = lengthBounds(context.tone);
   if (words < min || words > max) {
-    failures.push(`${words} mots : la cible est ${min}-${max} pour ce registre.`);
+    // Le retour doit etre ACTIONNABLE : « 126 mots, cible 60-110 » laisse le
+    // modele estimer la coupe. Sans temperature basse, il estime mal — on lui
+    // donne donc le nombre de mots a retirer ou a ajouter.
+    const delta = words > max ? words - max : min - words;
+    const verbe = words > max ? "Retire" : "Ajoute";
+    failures.push(
+      `${words} mots : la cible est ${min}-${max} pour ce registre. ${verbe} environ ${delta} mots.`,
+    );
   }
 
   // --- Objet ---------------------------------------------------------------

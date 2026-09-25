@@ -23,6 +23,12 @@ export interface SearchCriteriaInput {
   limit: number;
   /** Phase 1 : candidats passes au scan Linkup. */
   scanWidth: number;
+  /**
+   * Autorise le scan a depasser le nombre demande pour atteindre l'objectif
+   * de fiches (jusqu'au plafond de 3x). Decoche = on s'arrete au nombre
+   * demande, quitte a rendre moins de fiches.
+   */
+  goFurther?: boolean;
 }
 
 const EMPTY: SearchCriteriaInput = {
@@ -33,6 +39,7 @@ const EMPTY: SearchCriteriaInput = {
   withSignals: true,
   limit: DEFAULT_ANALYSIS_LIMIT,
   scanWidth: DEFAULT_SCAN_WIDTH,
+  goFurther: true,
 };
 
 /** Mode A — critères envoyés à l'annuaire public des entreprises. */
@@ -134,6 +141,17 @@ export function SearchForm({
               )
             }
           />
+          <p className="mt-1 text-[12px] leading-snug text-faint">
+            ORION peut aller jusqu&apos;à 3× ce nombre pour atteindre tes fiches (plafond).
+          </p>
+          <label className="mt-1.5 flex items-center gap-2 text-[12px] text-muted">
+            <input
+              type="checkbox"
+              checked={criteria.goFurther !== false}
+              onChange={(event) => update("goFurther", event.target.checked)}
+            />
+            Aller plus loin si besoin
+          </label>
         </div>
 
         <div>

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getOpenAI } from "@/lib/openai";
-import { samplingParams } from "@/lib/ai/models";
+import { modelFor, reasoningEffortFor } from "@/lib/ai/models";
+import { buildParams } from "@/lib/ai/params";
+import { withParamFallback } from "@/lib/ai/chat";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import { activeProspects, TRASHED_ERROR } from "@/lib/trash/scope";
@@ -78,19 +80,24 @@ export async function POST(request: Request) {
   const thread = buildThread(messages, inbounds);
 
   try {
-    const sampling = samplingParams("writer", 0.6);
-    const completion = await getOpenAI().chat.completions.create({
-      ...sampling,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: buildReplySystemPrompt(answering.category) },
-        { role: "user", content: buildReplyContext(prospect, thread, answering) },
-      ],
-    });
+    const model = modelFor("writer");
+    const completion = await withParamFallback(
+      model,
+      () => buildParams({ model, temperature: 0.6, reasoningEffort: reasoningEffortFor("writer") }),
+      (params) =>
+        getOpenAI().chat.completions.create({
+          ...(params as { model: string }),
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: buildReplySystemPrompt(answering.category) },
+            { role: "user", content: buildReplyContext(prospect, thread, answering) },
+          ],
+        }),
+    );
 
     if (completion.usage) {
       await recordOpenAiUsage({
-        model: sampling.model,
+        model,
         promptTokens: completion.usage.prompt_tokens,
         completionTokens: completion.usage.completion_tokens,
         operation: "reply",

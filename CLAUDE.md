@@ -39,8 +39,43 @@ faire à sa place.
 - **Agent CLOUD** : aucune clé n'est disponible, et il n'en demande pas. Il ne
   lance pas ces scripts : il écrit le code, le teste avec des mocks et des
   fixtures, et documente la commande exacte à lancer en local.
-- **Jamais** de merge, **jamais** de push sur `main`. Le travail part sur une
-  branche et une PR ; Axel merge.
+- **Jamais** de push direct ni de force push sur `main`. Le travail part sur une
+  branche et une PR. Le merge de cette PR par l'agent est autorisé, mais
+  seulement aux conditions de « Merge automatique » ci-dessous.
+
+## Merge automatique
+
+Axel a autorisé les agents à merger eux-mêmes sur `main` à la fin de chaque
+itération. Cette autonomie tient à une condition : les cinq portes.
+
+Chaque tâche = une branche + une PR. L'agent merge lui-même
+(`gh pr merge <n> --squash --delete-branch`) **si et seulement si** les cinq
+portes sont vertes :
+
+1. `npx tsc --noEmit`
+2. `npm run lint`
+3. `npm test` — toutes les suites
+4. `npm run build`
+5. la CI GitHub sur la PR : attendre la **fin** des checks, pas leur démarrage.
+
+**Avant le merge** : `git fetch`, merger `origin/main` dans la branche, résoudre
+les conflits, puis **rejouer les cinq portes**. Une porte verte avant
+l'intégration de `main` ne prouve rien.
+
+**Après le merge** : attendre que le déploiement Vercel de production soit
+« Ready », puis faire un smoke test en prod — au minimum `/login` en 200, plus
+le parcours que la PR a touché. Si la prod casse : `git revert` du commit de
+merge, via une PR de revert mergée immédiatement, puis rapport.
+
+**Interdits, qui ne bougent pas.** Push direct ou force push sur `main`. Merge
+avec une porte rouge. Migration destructive (`check:migrations`). Suppression
+de données. Affichage d'un secret. Dans ces cas : on s'arrête et on demande.
+
+**Parallélisme** : une seule PR mergée à la fois. Si deux agents travaillent,
+celui qui merge en second intègre `main` dans sa branche avant de merger.
+
+**Rapport final**, court, à chaque itération : ce qui a changé, le hash du
+merge, le résultat du smoke test.
 
 ## Parallélisme : 1 agent = 1 dossier ou 1 session cloud = 1 branche
 

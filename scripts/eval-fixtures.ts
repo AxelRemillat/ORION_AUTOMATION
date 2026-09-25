@@ -102,6 +102,85 @@ const RAW_FIXTURES: Fixture[] = [
     site: `Cabinet d'expertise comptable, 14 collaborateurs, environ 320 dossiers clients TPE et PME. Tenue, revision, bilans, paie, conseil. Portail client pour le depot des pieces comptables.`,
   },
   {
+    // Negociant en produits horticoles. Deux cas de production a la fois : son
+    // dernier exercice publie date de 2017 (badge « ancien », jamais un angle)
+    // et son seul signal web vient d'un agregateur d'offres sans intitule.
+    prospect: base({
+      id: "terdici-0009",
+      company_name: "TERDICI VEGETAL",
+      siren: "320182702",
+      website: "https://www.terdici.fr",
+      sector: "Commerce de gros de fleurs et plantes",
+      size_range: "20 à 49 salariés",
+      city: "Torcé",
+      key_figures: {
+        naf_code: "46.21Z",
+        revenue_eur: 23_177_510,
+        revenue_year: 2017,
+        headcount: 35,
+        founded_year: 1980,
+      },
+      signals: [
+        {
+          type: "recrutement",
+          label: "Recrutement en cours — fr.trabajo.org",
+          url: "https://fr.trabajo.org/emploi-terdici-vegetal",
+          source: "fr.trabajo.org",
+          quote: "terdici vegetal 2 offres d'emploi terdici vegetal en France.",
+          confidence: 0.7,
+          sourceWeight: 0.25,
+          date: new Date(Date.now() - 12 * 86_400_000).toISOString().slice(0, 10),
+        },
+      ],
+    }),
+    contact: null,
+    site: `Terdici Vegetal, negociant en plantes et fleurs coupees pour jardineries et fleuristes. Commandes quotidiennes, preparation et expedition en camions frigorifiques, saisonnalite forte au printemps. Catalogue de plusieurs milliers de references, tarifs revus chaque semaine, bons de livraison et retours a traiter par client.`,
+  },
+  {
+    // Organisme de formation, 5 salaries. Cas de production : la salutation
+    // partait en « Monsieur Victor Grynbaum » et le pain reformulait leur
+    // offre (« vos processus de formation »).
+    prospect: base({
+      id: "andra-0007",
+      company_name: "ANDRA LEARNING",
+      siren: "985149434",
+      website: "https://www.andra-learning.fr",
+      sector: "Formation continue d'adultes",
+      size_range: "1 à 9 salariés",
+      city: "Paris",
+      key_figures: { naf_code: "85.59A", headcount: 5, founded_year: 2024 },
+    }),
+    contact: {
+      email: "s.grynbaum@andra-learning.fr",
+      full_name: "Sacha Grynbaum",
+      position: "Directeur général",
+      confidence: 92,
+    },
+    site: `Andra Learning, organisme de formation professionnelle certifie Qualiopi. Formations sur mesure en presentiel et a distance, catalogue de parcours pour les entreprises. Inscription des stagiaires, conventions de formation, emargements, attestations de fin de parcours et questionnaires d'evaluation a chaque session. Reseau de formateurs independants intervenant sur toute la France.`,
+  },
+  {
+    // Societe de distribution : 1,296 Md€ de CA pour 50 a 99 salaries. Le
+    // ratio trahit une filiale, et le malus doit s'appliquer.
+    prospect: base({
+      id: "egretail-0008",
+      company_name: "EG RETAIL (FRANCE) SAS",
+      siren: "439793811",
+      website: "https://www.egretail.fr",
+      sector: "Commerce de détail de carburants en magasin spécialisé",
+      size_range: "50 à 99 salariés",
+      city: "Nanterre",
+      key_figures: {
+        naf_code: "47.30Z",
+        revenue_eur: 1_296_004_123,
+        revenue_year: 2025,
+        headcount: 75,
+        founded_year: 2001,
+      },
+    }),
+    contact: null,
+    site: `EG Retail France exploite un reseau de stations-service et de boutiques de proximite. Approvisionnement carburant, gestion des stocks boutique, releves de cuves, plannings des equipes de station, remontee des ventes et reporting quotidien par site.`,
+  },
+  {
     // Distributeur d'aciers inoxydables. Les montants viennent des comptes
     // publies ; le texte de site est resume a la main a partir de leurs pages
     // publiques, comme pour les autres fixtures.

@@ -25,6 +25,8 @@ interface SearchBody {
   limit?: number;
   /** Largeur du scan Linkup (5-25). */
   scanWidth?: number;
+  /** Autorise le depassement jusqu'au plafond de 3x (defaut : oui). */
+  goFurther?: boolean;
 }
 
 /**
@@ -56,6 +58,7 @@ export async function POST(request: Request) {
       // Bornes cote serveur : le client ne peut pas faire exploser la facture.
       limit: clampAnalysisLimit(body.limit),
       scanWidth: clampScanWidth(body.scanWidth),
+      goFurther: body.goFurther !== false,
     },
     {
       exclude,
