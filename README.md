@@ -34,6 +34,7 @@ Appliquer les fichiers de `supabase/migrations/` **dans l'ordre des noms** :
 | `20260920100000_purge_unproven_signals.sql` | Supprime les signaux web sans preuve (ancien format sans `quote` ni `url`) |
 | `20260920110000_api_usage.sql` | Table `api_usage` : consommation et coût réels des APIs tierces, RLS + GRANT |
 | `20260920120000_favorites.sql` | Table `favorites` : entreprises déjà enrichies mises en réserve, RLS + GRANT |
+| `20260925100000_prospect_brief.sql` | Colonne `prospects.brief` : dernier brief du stratège (angle, pain, preuve, ciblage) |
 
 Une migration oubliée se voit tout de suite : les requêtes échouent sur une
 colonne inconnue.
@@ -52,7 +53,10 @@ puis se connecter sur `/login`.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client + serveur | Clé publique (soumise à la RLS) |
 | `SUPABASE_SERVICE_ROLE` | serveur | Clé admin, **ignore la RLS** — jobs et webhooks uniquement |
 | `OPENAI_API_KEY` | serveur | Génération des messages |
-| `OPENAI_MODEL` | serveur | Optionnel, défaut `gpt-4o-mini` |
+| `OPENAI_MODEL` | serveur | Optionnel, défaut `gpt-4o-mini` — repli de tous les rôles ci-dessous |
+| `OPENAI_MODEL_EXTRACT` · `OPENAI_MODEL_STRATEGIST` · `OPENAI_MODEL_WRITER` · `OPENAI_MODEL_JUDGE` | serveur | Optionnelles — modèle par rôle (`lib/ai/models.ts`). Absentes = `OPENAI_MODEL` |
+| `OPENAI_REASONING_EFFORT_<ROLE>` | serveur | Optionnelle — `low`/`medium`/`high` pour un modèle de raisonnement (défaut : `medium` pour le stratège, `low` ailleurs). La température n'est alors pas envoyée |
+| `OPENAI_PRICES_JSON` | serveur | Optionnelle — prix des modèles hors grille, `{"modele":{"input":1.25,"output":10}}` en $ / million de tokens |
 | `PAPPERS_API_KEY` | serveur | Données légales des entreprises |
 | `LINKUP_API_KEY` | serveur | Recherche web / signaux |
 | `HUNTER_API_KEY` | serveur | Emails professionnels |

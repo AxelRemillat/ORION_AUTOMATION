@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { MousePointerClick } from "lucide-react";
 import { EmptyState, Skeleton, useToast } from "@/components/ui";
-import { postJson } from "@/lib/enrichment/api-client";
 import { createClient } from "@/lib/supabase/client";
 import type { Prospect } from "@/types";
 import { AnalysisPanel } from "./analysis-panel";
@@ -14,12 +13,10 @@ import { DraftPreview } from "./_components/draft-preview";
 import { ErrorBanner } from "./_components/error-banner";
 import { SequenceShell } from "./_components/sequence-shell";
 import { DEFAULT_TONE, type ToneKey } from "./_lib/tones";
+import { useGeneration } from "./_lib/use-generation";
 import type { SequenceStep } from "./_lib/sequence";
 import { ProspectHeader } from "./prospect-header";
 import { ProspectPicker } from "./prospect-picker";
-import type { GenerateResponse } from "./types";
-
-type Draft = { subject: string; body: string };
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -38,52 +35,13 @@ export function ProspectionClient({
   const [prospects, setProspects] = useState(initialProspects);
   const [selected, setSelected] = useState<Prospect | null>(null);
   const [tone, setTone] = useState<ToneKey>(DEFAULT_TONE);
-  const [analysis, setAnalysis] = useState<GenerateResponse | null>(null);
-  const [draft, setDraft] = useState<Draft>({ subject: "", body: "" });
-  const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { result: analysis, draft, setDraft, generating, error, reset, generate, otherAngle, rewrite } =
+    useGeneration(tone);
 
   function select(prospect: Prospect) {
     setSelected(prospect);
-    setAnalysis(null);
-    setDraft({ subject: "", body: "" });
-    setError(null);
-  }
-
-  /**
-   * `trackIndex` rejoue la generation sur une piste ecartee par l'analyse.
-   * L'etape 1 est refaite : c'est le prix a payer pour que la preuve et le
-   * detail unique restent coherents avec le nouveau process vise.
-   */
-  /**
-   * `angleIndex` bascule sur une autre accroche SANS refaire l'analyse : on
-   * renvoie celle deja calculee, donc aucun appel Linkup, Pappers ou Hunter.
-   */
-  async function generate(prospect: Prospect, angleIndex?: number) {
-    setGenerating(true);
-    setError(null);
-    try {
-      const data = await postJson<GenerateResponse>("/api/emails/generate", {
-        prospectId: prospect.id,
-        tone,
-        ...(angleIndex === undefined
-          ? {}
-          : {
-              angleIndex,
-              cachedAnalysis: analysis?.analysis,
-              cachedContact: analysis?.contact,
-            }),
-      });
-      setAnalysis(data);
-      setDraft(data.email);
-      data.warnings.forEach((warning) => toast.toast(`${warning.source} : ${warning.message}`));
-    } catch (cause) {
-      setAnalysis(null);
-      setError(cause instanceof Error ? cause.message : "Génération impossible.");
-    } finally {
-      setGenerating(false);
-    }
+    reset();
   }
 
   /** Enregistre le brouillon relu et avance le prospect dans le pipeline. */
@@ -183,9 +141,11 @@ export function ProspectionClient({
 
               {/* Sous le brouillon : l'angle retenu, et de quoi en changer. */}
               <ChosenAngle
-                analysis={analysis.analysis}
+                key={JSON.stringify(analysis.brief.angle) + analysis.brief.pain.task}
+                brief={analysis.brief}
                 regenerating={generating}
-                onOtherAngle={(index: number) => generate(selected, index)}
+                onOtherAngle={() => otherAngle(selected)}
+                onRewrite={(brief) => rewrite(selected, brief)}
               />
             </>
           )}

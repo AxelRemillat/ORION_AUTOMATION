@@ -1,39 +1,54 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, RefreshCw } from "lucide-react";
-import { Badge, Button } from "@/components/ui";
-import type { DeepAnalysis } from "@/app/api/emails/generate/analysis";
+import { ChevronDown, PenLine, RefreshCw } from "lucide-react";
+import { Badge, Button, Label, Textarea } from "@/components/ui";
+import type { StrategyBrief } from "@/lib/emails/strategist";
+import { BriefDetails } from "./brief-details";
+import { TargetingWarning } from "./targeting-warning";
+
+const ANGLE_LABELS: Record<StrategyBrief["angle"]["type"], string> = {
+  recrutement: "recrutement",
+  groupe: "groupe",
+  signal: "signal",
+  "modèle_éco": "modèle économique",
+  "métier": "métier",
+};
 
 /**
- * « Angle choisi » — repliable.
+ * « Angle choisi » — le BRIEF du stratège.
  *
- * Deux usages : vérifier d'un coup d'œil sur quoi le mail s'appuie (un
- * diagnostic faux se repère ici bien plus vite qu'en relisant le mail), et
- * basculer sur un autre angle. Ce second bouton ne rejoue QUE la rédaction :
- * l'analyse est renvoyée telle quelle au serveur, donc zéro appel Linkup,
+ * L'insight et le pain sont éditables : « Réécrire depuis le brief » relance
+ * le rédacteur SEUL sur la version corrigée. « Autre angle » relance le
+ * stratège seul, angle actuel exclu. Aucun des deux ne rappelle Linkup,
  * Pappers ou Hunter.
+ *
+ * Le parent remonte ce composant (prop `key`) à chaque nouveau brief : les
+ * champs repartent alors du brief reçu.
  */
 export function ChosenAngle({
-  analysis,
+  brief,
   regenerating,
   onOtherAngle,
+  onRewrite,
 }: {
-  analysis: DeepAnalysis;
+  brief: StrategyBrief;
   regenerating: boolean;
-  /** Rejoue la rédaction avec l'angle suivant. */
-  onOtherAngle: (nextIndex: number) => void;
+  onOtherAngle: () => void;
+  onRewrite: (edited: StrategyBrief) => void;
 }) {
   const [open, setOpen] = useState(true);
+  const [insight, setInsight] = useState(brief.angle.insight);
+  const [task, setTask] = useState(brief.pain.task);
+  const edited = insight.trim() !== brief.angle.insight || task.trim() !== brief.pain.task;
 
-  const hookIndex = analysis.chosen.hookIndex;
-  const painIndex = analysis.chosen.painIndex;
-  const hook = analysis.hookCandidates[hookIndex];
-  const pain = analysis.painCandidates[painIndex];
-
-  const otherHooks = analysis.hookCandidates
-    .map((candidate, index) => ({ candidate, index }))
-    .filter((entry) => entry.index !== hookIndex);
+  function rewrite() {
+    onRewrite({
+      ...brief,
+      angle: { ...brief.angle, insight: insight.trim() },
+      pain: { ...brief.pain, task: task.trim() },
+    });
+  }
 
   return (
     <div className="rounded-xl border border-line bg-surface shadow-mist">
@@ -43,8 +58,12 @@ export function ChosenAngle({
         aria-expanded={open}
         className="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left"
       >
-        <span className="font-data text-[11px] font-medium uppercase tracking-wide text-muted">
-          Angle choisi
+        <span className="flex items-center gap-2">
+          <span className="font-data text-[11px] font-medium uppercase tracking-wide text-muted">
+            Angle choisi
+          </span>
+          <Badge tone="accent">{ANGLE_LABELS[brief.angle.type]}</Badge>
+          {brief.targetingWarning && <Badge tone="warning">ciblage</Badge>}
         </span>
         <ChevronDown
           className={`h-4 w-4 text-muted motion-safe:transition-transform ${open ? "rotate-180" : ""}`}
@@ -54,53 +73,47 @@ export function ChosenAngle({
 
       {open && (
         <div className="flex flex-col gap-4 border-t border-line-soft px-5 py-4">
+          {brief.targetingWarning && <TargetingWarning message={brief.targetingWarning} />}
+
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-medium text-muted">Accroche retenue</span>
-              <Badge tone="accent">{hook?.type ?? "observation"}</Badge>
-            </div>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-text">{hook?.text}</p>
+            <Label htmlFor="brief-insight">Insight</Label>
+            <Textarea
+              id="brief-insight"
+              className="mt-1.5 min-h-[64px] text-[13px]"
+              value={insight}
+              onChange={(event) => setInsight(event.target.value)}
+            />
           </div>
 
           <div>
-            <span className="text-[12px] font-medium text-muted">Pain retenu</span>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-text">{pain?.task}</p>
-            {pain && (
-              <p className="mt-1 text-[12px] leading-relaxed text-faint">
-                {pain.whoSuffers} · {pain.whyHere} · spécificité {pain.specificity}/5
-              </p>
-            )}
+            <Label htmlFor="brief-pain">Pain</Label>
+            <Textarea
+              id="brief-pain"
+              className="mt-1.5 min-h-[56px] text-[13px]"
+              value={task}
+              onChange={(event) => setTask(event.target.value)}
+            />
           </div>
 
-          {otherHooks.length > 0 && (
-            <div>
-              <p className="mb-2 text-[12px] font-medium text-muted">
-                Alternatives — régénère uniquement la rédaction, sans nouvel appel API
-              </p>
-              <ul className="flex flex-col gap-2">
-                {otherHooks.map(({ candidate, index }) => (
-                  <li
-                    key={candidate.text}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line-soft bg-surface-2 px-3.5 py-2.5"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <Badge tone="neutral">{candidate.type}</Badge>
-                      <p className="mt-1 text-[13px] leading-relaxed text-text">{candidate.text}</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      loading={regenerating}
-                      onClick={() => onOtherAngle(index)}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                      Autre angle
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <BriefDetails brief={brief} />
+
+          <div className="flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
+            <Button
+              size="sm"
+              variant={edited ? "primary" : "outline"}
+              loading={regenerating}
+              disabled={insight.trim().length < 15 || task.trim().length < 5}
+              onClick={rewrite}
+            >
+              <PenLine className="h-3.5 w-3.5" aria-hidden />
+              Réécrire depuis le brief
+            </Button>
+            <Button size="sm" variant="outline" loading={regenerating} onClick={onOtherAngle}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+              Autre angle
+            </Button>
+            <p className="text-[12px] text-faint">Aucun nouvel appel Linkup, Pappers ou Hunter.</p>
+          </div>
         </div>
       )}
     </div>

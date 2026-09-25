@@ -1,5 +1,5 @@
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
-import type { DeepAnalysis } from "@/app/api/emails/generate/analysis";
+import type { StrategyBrief } from "@/lib/emails/strategist";
 import type { Critique } from "@/app/api/emails/generate/critic";
 
 /**
@@ -22,11 +22,11 @@ export interface GenerateResponse {
   contact: DecisionMakerContact | null;
   warnings: EnrichmentWarning[];
   /**
-   * Resultat de l'etape d'analyse metier. Affiche sous le brouillon pour que
-   * l'utilisateur voie sur quoi le mail s'appuie — et puisse basculer sur une
-   * autre piste sans relancer une recherche.
+   * BRIEF du stratège : angle, insight, pain, preuve, avertissement de
+   * ciblage. Affiché sous le brouillon, éditable, et renvoyé au serveur pour
+   * « Réécrire depuis le brief ».
    */
-  analysis: DeepAnalysis;
+  brief: StrategyBrief;
   /** Notes du juge, affichees telles quelles quand un critere est faible. */
   critique: Critique | null;
   /** `true` quand un garde-fou ou un critere n'a pas pu etre corrige. */

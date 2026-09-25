@@ -77,6 +77,13 @@ export interface ProspectSignal {
   dateBasis?: string;
   /** `true` pour un signal issu de l'extraction structurée (citation vérifiée). */
   structured?: boolean;
+  /**
+   * « groupe » quand le signal nomme une entité voisine liée au prospect par
+   * un lien capitalistique prouvé : il décrit le groupe, pas le prospect.
+   */
+  scope?: "groupe";
+  /** Entité réellement nommée par un signal de groupe. */
+  entity?: string;
   [key: string]: unknown;
 }
 
@@ -109,6 +116,8 @@ export interface ProspectKeyFigures {
   site_vocabulary?: string[];
   /** État de la couverture du site : trouvé, lu, ou explicitement absent. */
   site_status?: "lu" | "trouvé" | "non trouvé";
+  /** Entités homonymes écartées : leur nom ne doit jamais sortir dans un mail. */
+  foreign_entities?: string[];
   [key: string]: unknown;
 }
 
@@ -138,6 +147,11 @@ export type Prospect = {
   /** Toujours un objet côté app (défaut SQL `'{}'::jsonb`). */
   key_figures: ProspectKeyFigures;
   pain_point: string | null;
+  /**
+   * Dernier BRIEF du stratège (lib/emails/strategist.ts). Colonne ajoutée par
+   * la migration 20260925100000 : absente tant qu'elle n'est pas appliquée.
+   */
+  brief?: Record<string, unknown> | null;
   status: ProspectStatus;
   created_at: string;
   updated_at: string;
@@ -331,6 +345,7 @@ export type ProspectInsert = Insert<
   | "signals"
   | "key_figures"
   | "pain_point"
+  | "brief"
   | "status"
 >;
 export type ProspectUpdate = Update<Prospect>;

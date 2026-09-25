@@ -20,6 +20,7 @@ import { effectifFloor } from "./naf";
 import { toDomain } from "./http";
 import type { CompanyBase } from "./types";
 import type { WebResult } from "./linkup";
+import { mentionsExactDenomination } from "./entity-match";
 
 interface Rule {
   type: string;
@@ -240,7 +241,8 @@ export function qualifyWebResults(
     // Un registre ne prouve rien : il republie la fiche d'immatriculation.
     if (isRegistryHost(host)) continue;
     const onOwnSite = Boolean(ownDomain && host.endsWith(ownDomain));
-    const namedInTitle = aliases.some((alias) => normalize(result.title).includes(alias));
+    // Denomination EXACTE : « Jacquet Metal Service » ne nomme pas JACQUET PARIS.
+    const namedInTitle = mentionsExactDenomination(result.title, target.name);
 
     // On cherche LA phrase qui prouve, dans le contenu reel de la source.
     const candidates = [...sentences(result.snippet), result.title].filter(Boolean);
@@ -254,7 +256,7 @@ export function qualifyWebResults(
           rule.pattern.test(candidate) && rule.pattern.test(maskCompanyName(candidate, aliases)),
       );
       if (!sentence) continue;
-      const named = aliases.some((alias) => normalize(sentence).includes(alias));
+      const named = mentionsExactDenomination(sentence, target.name);
       // Ancrage obligatoire : la preuve doit concerner CETTE entreprise.
       if (!named && !onOwnSite) continue;
       matched = { rule, sentence, named };

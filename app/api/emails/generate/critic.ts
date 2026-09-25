@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { factsBlock } from "@/lib/emails/derived-facts";
-import type { DeepAnalysis } from "./analysis";
+import type { StrategyBrief } from "@/lib/emails/strategist";
 import type { GeneratedEmail } from "./prompt";
 
 /**
@@ -28,6 +28,7 @@ export const CRITIQUE_SCHEMA = z.object({
   voix: CRITERION,
   naturel: CRITERION,
   experienceVerifiee: CRITERION,
+  respectBrief: CRITERION,
 });
 
 export type Critique = z.infer<typeof CRITIQUE_SCHEMA>;
@@ -40,6 +41,7 @@ export const CRITERIA_LABELS: Record<keyof Critique, string> = {
   voix: "Voix du persona",
   naturel: "Naturel",
   experienceVerifiee: "Expérience réellement vécue",
+  respectBrief: "Respect du brief",
 };
 
 /** Seuil en dessous duquel une réécriture est déclenchée. */
@@ -81,6 +83,10 @@ Note chaque critere de 0 a 5, avec UNE phrase d'explication.
   correspondre a une des PREUVES AUTORISEES ci-dessous. Toute autre
   affirmation d'experience vaut 0 : c'est une invention, et elle se verifie en
   rendez-vous. Un mail qui decrit au present ce qu'Axel sait faire vaut 5.
+- respectBrief : le mail suit-il le BRIEF ci-dessous ? L'accroche porte
+  l'angle du brief, le pain est celui du brief, rien de la liste « a eviter »
+  n'apparait, et l'entreprise est designee par son nom EXACT (celui du brief)
+  — jamais par le nom d'une autre entite. Un autre nom d'entreprise vaut 0.
 
 Reponds UNIQUEMENT avec un objet JSON :
 {
@@ -90,18 +96,18 @@ Reponds UNIQUEMENT avec un objet JSON :
   "verifiabilite": { "score": 0, "note": "..." },
   "voix": { "score": 0, "note": "..." },
   "naturel": { "score": 0, "note": "..." },
-  "experienceVerifiee": { "score": 0, "note": "..." }
+  "experienceVerifiee": { "score": 0, "note": "..." },
+  "respectBrief": { "score": 0, "note": "..." }
 }`;
 }
 
-export function buildCriticContext(analysis: DeepAnalysis, email: GeneratedEmail): string {
-  const hook = analysis.hookCandidates[analysis.chosen.hookIndex] ?? analysis.hookCandidates[0];
-  const pain = analysis.painCandidates[analysis.chosen.painIndex] ?? analysis.painCandidates[0];
-
-  return `ANALYSE QUI A SERVI
-Modele economique : ${analysis.businessModel.text}
-Accroche visee (${hook?.type}) : ${hook?.text}
-Pain vise : ${pain?.task}
+export function buildCriticContext(brief: StrategyBrief, email: GeneratedEmail): string {
+  return `BRIEF QUI A SERVI
+Nom exact de l'entreprise : ${brief.companyName}
+Angle (${brief.angle.type}) : ${brief.angle.insight}
+Pain : ${brief.pain.task}
+Flux propose : ${brief.pain.automationIdea}
+A eviter : ${brief.avoid.length ? brief.avoid.join(" ; ") : "rien de particulier"}
 
 MAIL A NOTER
 Objet : ${email.subject}
