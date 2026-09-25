@@ -24,16 +24,18 @@ export function CockpitHeader({
         aria-hidden
         className="bg-brand-grad pointer-events-none absolute inset-x-0 top-0 h-1"
       />
-      {/* Scene decorative : bandeau en haut sur mobile, moitie droite ensuite. */}
-      <HeroScene />
-
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{ background: "var(--halo)" }}
       />
 
-      <div className="relative p-6 sm:p-8">
+      {/* Scène décorative : bandeau en haut sur mobile, moitié droite ensuite.
+          Posée APRÈS le halo, pour qu'il ne la voile pas. */}
+      <HeroScene />
+
+      {/* Le texte reste dans la moitié gauche : jamais sur la scène. */}
+      <div className="relative p-6 sm:w-1/2 sm:p-8">
         <p className="font-data text-[11px] font-semibold uppercase tracking-[0.12em] text-primary-ink">
           {date}
         </p>
