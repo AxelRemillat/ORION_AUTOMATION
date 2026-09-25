@@ -58,6 +58,58 @@ export function buildQuery(company: {
   return parts.join(" ");
 }
 
+/**
+ * Delai d'attente d'une recherche.
+ *
+ * Mesure du 25/09 sur 28 appels reels : mediane 1,29 s, p95 1,67 s, max
+ * 1,67 s, zero echec. 12 s laissent donc sept fois le p95 — au-dela, on
+ * n'attend plus une reponse lente, on attend une reponse qui ne viendra pas.
+ */
+const SEARCH_TIMEOUT_MS = 12_000;
+
+/**
+ * Concurrence propre a Linkup.
+ *
+ * A ne pas confondre avec le limiteur de `rate-limit.ts`, qui ne vaut QUE
+ * pour l'annuaire public (7 appels/s annonces). Linkup n'impose pas ce
+ * plafond : mesure a 3 en parallele, la latence ne bouge pas (1,36 s de mur
+ * pour 3 appels).
+ */
+export const LINKUP_CONCURRENCY = 6;
+
+/**
+ * Une recherche, avec UNE reprise sur delai depasse.
+ *
+ * Un delai depasse est presque toujours un accident reseau isole : le rejouer
+ * une fois recupere l'entreprise au lieu de la compter a tort « sans signal ».
+ * On ne rejoue PAS les autres erreurs (cle invalide, quota) : elles se
+ * reproduiraient a l'identique.
+ */
+async function searchWithRetry(
+  key: string,
+  company: { name: string; city?: string | null; website?: string | null },
+): Promise<Result<LinkupApiResponse>> {
+  const call = () =>
+    fetchJson<LinkupApiResponse>(
+      SEARCH_URL,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          q: buildQuery(company),
+          depth: "standard",
+          outputType: "searchResults",
+          includeImages: false,
+        }),
+      },
+      SEARCH_TIMEOUT_MS,
+    );
+
+  const first = await call();
+  if (first.ok || !first.error.includes("délai dépassé")) return first;
+  return call();
+}
+
 export async function fetchWebResults(company: {
   name: string;
   city?: string | null;
@@ -66,20 +118,8 @@ export async function fetchWebResults(company: {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };
 
-  const response = await fetchJson<LinkupApiResponse>(
-    SEARCH_URL,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        q: buildQuery(company),
-        depth: "standard",
-        outputType: "searchResults",
-        includeImages: false,
-      }),
-    },
-    15_000,
-  );
+  const response = await searchWithRetry(key, company);
+
   // Linkup ne facture pas les requetes en echec : on ne journalise que le succes.
   if (response.ok) {
     await recordUnitUsage({ service: "linkup", operation: "search", units: 1 });

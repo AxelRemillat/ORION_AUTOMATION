@@ -61,6 +61,12 @@ export interface ProspectSignal {
   type?: string;
   label: string;
   url?: string;
+  /**
+   * « faible » quand la preuve tient mais que sa source est un agrégateur ou
+   * qu'elle n'est pas datée. Un signal faible reste AFFICHÉ, classé plus bas :
+   * l'écarter faisait perdre 45 % des résultats du scan.
+   */
+  strength?: "faible";
   /** Date ISO du signal, telle que fournie par la source. */
   date?: string;
   source?: string;

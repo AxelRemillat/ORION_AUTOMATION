@@ -15,6 +15,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { resolveAndEnrich, searchAndEnrich } from "@/lib/enrichment";
+import { searchCompanies } from "@/lib/enrichment/gouv";
+import { fetchWebResults } from "@/lib/enrichment/linkup";
+import { tranchesForBucket } from "@/lib/enrichment/naf";
+import { guessOwnWebsite, qualifyWebResults, type QualifyTrace } from "@/lib/enrichment/signals";
 import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { Database } from "@/types";
 
@@ -355,6 +359,77 @@ async function blockBlueFull(): Promise<void> {
   );
 }
 
+/**
+ * Entonnoir du scan, sur de vrais appels — PAYANT (une recherche Linkup par
+ * entreprise). Repond a une seule question : entre 20 entreprises et 0 signal,
+ * ou exactement le compte se perd-il ?
+ */
+async function blockFunnel(): Promise<void> {
+  title("ENTONNOIR — la recherche du rapport, etape par etape (PAYANT)");
+
+  const criteria = { tranches: tranchesForBucket("petite") };
+  const search = await searchCompanies(criteria, 20, { page: 1 });
+  if (!search.ok) return console.log(`annuaire illisible : ${search.error}`);
+
+  const companies = search.data.companies.slice(0, 20);
+  console.log(`Annuaire : ${companies.length} candidats sur ${search.data.total} annonces
+`);
+
+  const totals = { ok: 0, timeout: 0, error: 0, raw: 0, emitted: 0, withSignal: 0 };
+  const durations: number[] = [];
+  const reasons = new Map<string, number>();
+
+  for (const base of companies) {
+    const started = Date.now();
+    const web = await fetchWebResults({
+      name: base.company_name,
+      city: base.city,
+      website: base.website,
+    });
+    const ms = Date.now() - started;
+    durations.push(ms);
+    const label = base.company_name.slice(0, 32).padEnd(32);
+
+    if (!web.ok) {
+      const timedOut = web.error.includes("délai dépassé");
+      if (timedOut) totals.timeout += 1;
+      else totals.error += 1;
+      console.log(`  ${String(ms).padStart(5)}ms  ${timedOut ? "DELAI  " : "ERREUR "} ${label} ${web.error}`);
+      continue;
+    }
+
+    totals.ok += 1;
+    const website = base.website ?? guessOwnWebsite(base.company_name, web.data);
+    const trace: QualifyTrace = { raw: 0, emitted: 0, rejected: [] };
+    const signals = qualifyWebResults(web.data, { name: base.company_name, website }, trace);
+    totals.raw += trace.raw;
+    totals.emitted += trace.emitted;
+    if (signals.length) totals.withSignal += 1;
+    for (const item of trace.rejected) {
+      reasons.set(item.reason, (reasons.get(item.reason) ?? 0) + 1);
+    }
+    console.log(
+      `  ${String(ms).padStart(5)}ms  ok      ${label} ${String(trace.raw).padStart(3)} bruts -> ${signals.length} signal(aux)`,
+    );
+  }
+
+  const sorted = durations.sort((a, b) => a - b);
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0;
+
+  console.log(`
+--- TOTAUX -------------------------------------------------`);
+  console.log(`Linkup     : ${totals.ok} ok · ${totals.timeout} délai dépassé · ${totals.error} erreur`);
+  console.log(`Latence    : médiane ${at(0.5)} ms · p95 ${at(0.95)} ms · max ${at(1)} ms`);
+  console.log(`Résultats  : ${totals.raw} bruts`);
+  console.log(`Signaux    : ${totals.emitted} émis · ${totals.withSignal} entreprise(s) avec signal`);
+  console.log(`
+Rejets par raison :`);
+  for (const [reason, count] of [...reasons.entries()].sort((a, b) => b[1] - a[1])) {
+    const share = totals.raw ? ((100 * count) / totals.raw).toFixed(1) : "0.0";
+    console.log(`  ${reason.padEnd(24)} ${String(count).padStart(5)}  (${share} %)`);
+  }
+}
+
 async function main(): Promise<void> {
   const only = process.argv[2];
   const blocks: Record<string, () => Promise<void>> = {
@@ -365,10 +440,11 @@ async function main(): Promise<void> {
     job: blockJobPosting,
     bluefull: blockBlueFull,
     live: blockLive,
+    funnel: blockFunnel,
   };
   for (const [name, run] of Object.entries(blocks)) {
     // `live` est payant : il ne part jamais dans une execution complete.
-    if (only ? only !== name : name === "live" || name === "bluefull") continue;
+    if (only ? only !== name : name === "live" || name === "bluefull" || name === "funnel") continue;
     await run();
   }
   console.log("");

@@ -231,21 +231,74 @@ export interface QualifyTarget {
  * taguer n'importe qui. La confiance obtenue doit ensuite depasser le seuil
  * de la regle, sinon rien n'est emis — un prospect sans signal reste froid.
  */
+/**
+ * Un signal faible franchit un seuil abaisse de 30 %.
+ *
+ * L'ancrage sur l'entreprise, lui, reste obligatoire : on assouplit la
+ * CONFIANCE dans la source, jamais la preuve que l'evenement la concerne.
+ */
+const WEAK_THRESHOLD_RATIO = 0.7;
+
+/**
+ * Plancher d'un signal faible : la valeur de l'ancrage seul.
+ *
+ * Le profil dominant d'un signal faible — la preuve nomme l'entreprise, mais
+ * elle n'est ni datee ni sur une source de premiere main — vaut exactement
+ * 0,5. Sans ce plancher, les regles les plus exigeantes (levee a 0,8, donc
+ * 0,56 en faible) le rejetaient d'un cheveu, et la souplesse ne servait a
+ * rien la ou elle est justement utile.
+ *
+ * Ce qui reste ecarte : le bruit (aucune regle) et les homonymes (preuve non
+ * ancree). L'ancrage n'est JAMAIS assoupli.
+ */
+const WEAK_FLOOR = 0.5;
+
+/** Pourquoi un resultat n'a pas produit de signal. */
+export type RejectReason =
+  | "registre"
+  | "aucune-regle"
+  | "non-ancre"
+  | "source-emploi-absente"
+  | "intitule-manquant"
+  | "sous-le-seuil"
+  | "quota-par-type"
+  | "plafond-signaux";
+
+/** Entonnoir d'un scan, renseigne a la demande. Aucun cout quand absent. */
+export interface QualifyTrace {
+  raw: number;
+  emitted: number;
+  rejected: { reason: RejectReason; host: string; type?: string; confidence?: number }[];
+}
+
 export function qualifyWebResults(
   results: WebResult[],
   target: QualifyTarget,
+  trace?: QualifyTrace,
 ): ProspectSignal[] {
   const aliases = companyAliases(target.name);
   const ownDomain = toDomain(target.website ?? null);
   const counts = new Map<string, number>();
   const signals: ProspectSignal[] = [];
 
-  for (const result of results) {
-    if (signals.length >= MAX_SIGNALS) break;
+  if (trace) trace.raw += results.length;
 
+  for (const result of results) {
     const host = hostOf(result.url);
-    // Un registre ne prouve rien : il republie la fiche d'immatriculation.
-    if (isRegistryHost(host)) continue;
+    const drop = (reason: RejectReason, extra?: { type?: string; confidence?: number }) => {
+      trace?.rejected.push({ reason, host, ...extra });
+    };
+
+    if (signals.length >= MAX_SIGNALS) {
+      drop("plafond-signaux");
+      continue;
+    }
+
+    // Un registre republie la fiche d'immatriculation : il ne prouve pas un
+    // evenement, mais il n'est pas du bruit pour autant. On ne le jette plus
+    // ici — la decision est prise APRES l'ancrage, et il ressort en signal
+    // faible plutot que de disparaitre (45 % des resultats finissaient la).
+    const fromRegistry = isRegistryHost(host);
     const onOwnSite = Boolean(ownDomain && host.endsWith(ownDomain));
     // Denomination EXACTE : « Jacquet Metal Service » ne nomme pas JACQUET PARIS.
     const namedInTitle = mentionsExactDenomination(result.title, target.name);
@@ -268,7 +321,18 @@ export function qualifyWebResults(
       matched = { rule, sentence, named };
       break;
     }
-    if (!matched) continue;
+    if (!matched) {
+      // Distinguer les deux echecs : aucune regle ne matche, ou une regle
+      // matche mais la preuve ne nomme pas l'entreprise.
+      const anyRule = RULES.some((rule) =>
+        candidates.some(
+          (candidate) =>
+            rule.pattern.test(candidate) && rule.pattern.test(maskCompanyName(candidate, aliases)),
+        ),
+      );
+      drop(anyRule ? "non-ancre" : "aucune-regle");
+      continue;
+    }
 
     const { rule, sentence, named } = matched;
     const date = result.date ? extractDate(result.date) : null;
@@ -282,7 +346,10 @@ export function qualifyWebResults(
     let jobTitle: string | null = null;
     if (rule.type === "recrutement") {
       const kind = classifyJobSource(result.url, ownDomain);
-      if (kind === "aucune") continue;
+      if (kind === "aucune") {
+        drop("source-emploi-absente", { type: rule.type });
+        continue;
+      }
       jobTitle = jobTitleIn(`${result.title} ${result.snippet}`);
       // Un agregateur ne prouve qu'une chose : l'entreprise existe. On le
       // garde comme signal faible, jamais comme accroche — et on oublie
@@ -293,7 +360,10 @@ export function qualifyWebResults(
       }
       // Sur une source officielle, l'intitule reste exige : « nous recrutons »
       // sans metier ne permet ni d'ecrire, ni de juger l'automatisabilite.
-      if (kind === "officielle" && !jobTitle && !onOwnSite) continue;
+      if (kind === "officielle" && !jobTitle && !onOwnSite) {
+        drop("intitule-manquant", { type: rule.type });
+        continue;
+      }
     }
 
     let confidence = 0;
@@ -305,10 +375,23 @@ export function qualifyWebResults(
     if (rule.pattern.test(maskCompanyName(result.title, aliases))) confidence += 0.1;
     confidence = Math.min(1, Number(confidence.toFixed(2)));
 
-    if (confidence < rule.minConfidence) continue;
+    // Faible = la preuve tient, mais sa source ou sa datation laissent un
+    // doute. Elle reste visible, classee plus bas, jamais presentee comme une
+    // actualite datee.
+    const weak = fromRegistry || !foundDate;
+    const bar = weak
+      ? Math.min(rule.minConfidence * WEAK_THRESHOLD_RATIO, WEAK_FLOOR)
+      : rule.minConfidence;
+    if (confidence < bar) {
+      drop("sous-le-seuil", { type: rule.type, confidence });
+      continue;
+    }
 
     const count = counts.get(rule.type) ?? 0;
-    if (count >= MAX_PER_TYPE) continue;
+    if (count >= MAX_PER_TYPE) {
+      drop("quota-par-type", { type: rule.type });
+      continue;
+    }
     counts.set(rule.type, count + 1);
 
     signals.push({
@@ -326,9 +409,11 @@ export function qualifyWebResults(
       ...(sourceWeight < 1 ? { sourceWeight, weakSource: true } : {}),
       quote: sentence.slice(0, 260),
       confidence,
+      ...(weak ? { strength: "faible" as const } : {}),
     });
   }
 
+  if (trace) trace.emitted += signals.length;
   return signals;
 }
 
