@@ -13,16 +13,19 @@ import { FavoritesPanel } from "./favorites-panel";
 import { ResultCard, type AddState, type FavoriteState } from "./result-card";
 import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
+import { SignalsForm, type SignalCriteriaInput } from "./signals-form";
+import type { SignalSourceState } from "@/lib/signals/shared";
 import { DEFAULT_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
 import { ScanProgress } from "./scan-progress";
 import { ScanSummary, type ScanStats } from "./scan-summary";
 import { useSearchRun } from "./use-search-run";
 import { SignalFilters } from "./signal-filters";
 
-type Mode = "auto" | "manuel" | "favoris";
+type Mode = "auto" | "signaux" | "manuel" | "favoris";
 
 const TAB_LABELS: Record<Mode, string> = {
   auto: "Recherche par critères",
+  signaux: "Signaux d'abord",
   manuel: "Ajout manuel",
   favoris: "Favoris",
 };
@@ -52,6 +55,35 @@ interface SearchResponse {
   /** Entreprises ecartees apres enrichissement : effectif hors tranche. */
   outOfBracket?: string[];
   warnings: EnrichmentWarning[];
+}
+
+interface SignalsResponse {
+  results: EnrichedCompany[];
+  sources: SignalSourceState[];
+  /** Signaux datés lus dans les sources, avant tout rapprochement. */
+  signalsFound: number;
+  /** Identités demandées à l'annuaire — gratuites. */
+  lookups: number;
+  analysed: number;
+  skippedKnown: number;
+  outOfBracket: string[];
+  warnings: EnrichmentWarning[];
+}
+
+/**
+ * Résumé des sources, affiché là où le mode par critères dit pourquoi le scan
+ * s'est arrêté. Une source indisponible doit se voir dans le bilan, pas
+ * seulement dans le formulaire : sinon un résultat maigre passe pour un marché
+ * vide alors qu'il manque une source.
+ */
+function sourceSummary(sources: SignalSourceState[]): string {
+  return sources
+    .map((source) =>
+      source.available
+        ? `${source.label} : ${source.count} signaux`
+        : `${source.label} : ${source.unavailableReason}`,
+    )
+    .join(" · ");
 }
 
 /** Identifie une carte de façon stable entre deux rendus. */
@@ -204,6 +236,42 @@ export function RechercheClient() {
     });
   };
 
+  const searchBySignals = (criteria: SignalCriteriaInput) => {
+    // Pas de `setLastCriteria` : les recherches sauvegardees sont au format du
+    // mode par criteres, et melanger les deux rendrait leur relecture fausse.
+    setLastCriteria(null);
+    return runSearch(async () => {
+      const opened = await postJson<{ id: string }>("/api/search/runs", criteria);
+      setRunId(opened.id);
+      const data = await postJson<SignalsResponse>("/api/prospects/signals", {
+        ...criteria,
+        runId: opened.id,
+      });
+      setRunId(null);
+      return {
+        results: data.results,
+        warnings: data.warnings,
+        scan: {
+          // Ce mode ne lit pas l'annuaire par pages : « total » est le nombre de
+          // signaux lus, et « scannees » celui des identites resolues. Les deux
+          // sont gratuits, contrairement au scan Linkup du mode par criteres.
+          total: data.signalsFound,
+          scanned: data.lookups,
+          unverified: 0,
+          withSignal: data.results.length,
+          analysed: data.analysed,
+          requested: criteria.limit,
+          totalCapped: false,
+          zoneLabel: `département ${criteria.departement}`,
+          skippedKnown: data.skippedKnown,
+          pagesRead: 0,
+          stopReason: sourceSummary(data.sources),
+          outOfBracket: data.outOfBracket,
+        },
+      };
+    });
+  };
+
   const searchManual = (query: string) => {
     setLastCriteria(null);
     return runSearch(async () => {
@@ -320,6 +388,7 @@ export function RechercheClient() {
               loading={loading}
             />
           )}
+          {mode === "signaux" && <SignalsForm onSubmit={searchBySignals} loading={loading} />}
           {mode === "manuel" && <ManualForm onSubmit={searchManual} loading={loading} />}
           {mode === "favoris" && <FavoritesPanel refreshKey={favoritesKey} />}
           {mode !== "favoris" && (

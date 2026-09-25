@@ -9,6 +9,7 @@
  *   npx tsx scripts/debug-search.ts
  *   npx tsx scripts/debug-search.ts zone        (un seul bloc)
  *   npx tsx scripts/debug-search.ts live        (relance reelle, PAYANTE)
+ *   npx tsx scripts/debug-search.ts signaux     (mode « signaux d'abord », PAYANT)
  *
  * Seul le bloc `live` ecrit en base et consomme des credits.
  */
@@ -18,6 +19,8 @@ import { resolveAndEnrich, searchAndEnrich } from "@/lib/enrichment";
 import { searchCompanies } from "@/lib/enrichment/gouv";
 import { fetchWebResults } from "@/lib/enrichment/linkup";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
+import { collectSignals, searchBySignals } from "@/lib/signals";
+import { sinceDate } from "@/lib/signals/bodacc";
 import { guessOwnWebsite, qualifyWebResults, type QualifyTrace } from "@/lib/enrichment/signals";
 import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { Database } from "@/types";
@@ -430,6 +433,88 @@ Rejets par raison :`);
   }
 }
 
+/**
+ * Mode « Signaux d'abord », de bout en bout — PAYANT (une fiche Pappers par
+ * resultat). Repond a la question du critere d'acceptation : « departement 69,
+ * 10-49 salaries, 5 fiches » rend-il 5 fiches portant un signal date de moins
+ * de 60 jours, et a quel cout ?
+ */
+async function blockSignaux(): Promise<void> {
+  title("SIGNAUX D'ABORD — BODACC + France Travail, mesure reelle (PAYANT)");
+
+  const criteria = { departement: "69", tranches: tranchesForBucket("petite"), days: 60, limit: 5 };
+
+  const startedAt = Date.now();
+  const collected = await collectSignals(criteria);
+  const collectMs = Date.now() - startedAt;
+
+  console.log(`Sources (${collectMs} ms) :`);
+  for (const source of collected.sources) {
+    const state = source.available
+      ? `${source.count} signaux retenus`
+      : `INDISPONIBLE — ${source.unavailableReason}`;
+    console.log(`  ${source.label.padEnd(24)} ${state}`);
+  }
+  for (const warning of collected.warnings) {
+    console.log(`  avertissement : ${warning.message}`);
+  }
+
+  const window = sinceDate(criteria.days);
+  const dated = collected.signals.filter((signal) => signal.date >= window);
+  console.log("");
+  console.log(
+    `Signaux dates : ${collected.signals.length} au total, ${dated.length} dans la fenetre de ${criteria.days} jours`,
+  );
+  console.log(`  le plus recent : ${collected.signals[0]?.date ?? "aucun"}`);
+  console.log(`  le plus ancien : ${collected.signals.at(-1)?.date ?? "aucun"}`);
+
+  const resolveStart = Date.now();
+  const outcome = await searchBySignals(criteria);
+  const totalMs = Date.now() - resolveStart;
+
+  console.log("");
+  console.log(`Resolution + fiches (${totalMs} ms) :`);
+  console.log(`  identites demandees a l'annuaire (gratuit) : ${outcome.lookups}`);
+  console.log(`  fiches ouvertes chez Pappers (PAYANT)      : ${outcome.analysed}`);
+  console.log(`  ecartees sur l'effectif                    : ${outcome.outOfBracket.length}`);
+  console.log(`  deja connues                               : ${outcome.skippedKnown}`);
+
+  console.log("");
+  console.log("Fiches obtenues :");
+  for (const company of outcome.results) {
+    const signal = company.signals[0];
+    const age = signal?.date ? Math.round((Date.now() - Date.parse(signal.date)) / 86_400_000) : null;
+    console.log(
+      `  ${company.company_name.slice(0, 32).padEnd(32)} ` +
+        `${String(company.key_figures.headcount ?? "?").padStart(4)} sal.  ` +
+        `${signal?.source ?? "?"} il y a ${age ?? "?"} j — ${signal?.label ?? "aucun signal"}`,
+    );
+  }
+  for (const line of outcome.outOfBracket) {
+    console.log(`  ecartee : ${line}`);
+  }
+
+  // Le cout par fiche est le seul chiffre comparable entre les deux modes : le
+  // mode par criteres paie un appel Linkup par entreprise SCANNEE, celui-ci ne
+  // paie qu'une fiche Pappers par entreprise RETENUE.
+  const perFiche = outcome.analysed ? (outcome.lookups / outcome.analysed).toFixed(1) : "—";
+  console.log("");
+  console.log(
+    `Rendement : ${outcome.analysed} fiches pour ${outcome.signalsFound} signaux lus et ` +
+      `${outcome.lookups} identites resolues (${perFiche} identites gratuites par fiche, ` +
+      `1 appel Pappers par fiche, 0 appel Linkup, 0 appel OpenAI).`,
+  );
+
+  const met = outcome.results.filter((company) => {
+    const date = company.signals[0]?.date;
+    return Boolean(date && date >= window);
+  }).length;
+  console.log(
+    `Critere d'acceptation : ${met} fiche(s) avec un signal date de moins de ${criteria.days} jours ` +
+      `(attendu : au moins 5) — ${met >= 5 ? "ATTEINT" : "NON ATTEINT"}`,
+  );
+}
+
 async function main(): Promise<void> {
   const only = process.argv[2];
   const blocks: Record<string, () => Promise<void>> = {
@@ -441,10 +526,12 @@ async function main(): Promise<void> {
     bluefull: blockBlueFull,
     live: blockLive,
     funnel: blockFunnel,
+    signaux: blockSignaux,
   };
   for (const [name, run] of Object.entries(blocks)) {
     // `live` est payant : il ne part jamais dans une execution complete.
-    if (only ? only !== name : name === "live" || name === "bluefull" || name === "funnel") continue;
+    const payants = ["live", "bluefull", "funnel", "signaux"];
+    if (only ? only !== name : payants.includes(name)) continue;
     await run();
   }
   console.log("");

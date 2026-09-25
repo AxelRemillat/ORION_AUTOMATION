@@ -26,6 +26,9 @@ const SIGNAL_WEIGHTS: Record<string, number> = {
   digital: 22, // chantier ouvert : fenêtre de tir
   croissance: 20, // les process vont saturer
   ecommerce: 18, // flux répétitifs
+  // Officiel et daté, mais une entreprise qui vient de naître n'a ni budget ni
+  // process saturés : le signal est vrai, sa valeur commerciale est faible.
+  creation: 12,
   presse: 6, // simple accroche
   structure: 8, // déduit des données INSEE, pas d'une actualité
 };
@@ -46,6 +49,7 @@ export const SIGNAL_META: Record<string, SignalMeta> = {
   digital: { label: "Chantier digital", tone: "warm" },
   croissance: { label: "Croissance", tone: "warm" },
   ecommerce: { label: "E-commerce", tone: "warm" },
+  creation: { label: "Création récente", tone: "cool" },
   presse: { label: "Actualité", tone: "cool" },
   structure: { label: "Structurel", tone: "cool" },
 };
