@@ -17,12 +17,13 @@
  */
 
 /** Pourquoi la boucle s'est arrêtée. Affiché tel quel dans l'UI. */
-export type ScanStop = "objectif" | "plafond" | "annuaire";
+export type ScanStop = "objectif" | "plafond" | "annuaire" | "arrete";
 
 export const STOP_LABELS: Record<ScanStop, string> = {
   objectif: "objectif atteint",
   plafond: "plafond de scan atteint",
   annuaire: "toutes les pages de l'annuaire ont été lues",
+  arrete: "arrêté à votre demande",
 };
 
 /**

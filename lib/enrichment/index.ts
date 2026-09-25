@@ -411,7 +411,43 @@ export interface SearchContext {
   onScanned?: (rows: { siren: string; company_name: string; had_signal: boolean }[]) => Promise<void>;
   /** Date du jour, injectee pour rendre la graine testable. */
   today?: string;
+  /**
+   * Avancement, appele apres chaque lot.
+   *
+   * Le scan n'a pas a savoir ou va cette information : la route l'ecrit dans
+   * `search_runs`, les tests la collectent en memoire.
+   */
+  onProgress?: (progress: ScanProgress) => Promise<void>;
+  /**
+   * Demande d'arret, relue entre deux lots. On ne coupe jamais au milieu d'un
+   * lot : les appels sont deja payes, autant en garder le resultat.
+   */
+  shouldStop?: () => Promise<boolean>;
 }
+
+/** Ce que l'ecran affiche pendant qu'un scan tourne. */
+export interface ScanProgress {
+  /** jsonb en base : la forme doit rester assignable a un objet libre. */
+  [key: string]: unknown;
+  /**
+   * Laquelle des deux phases tourne. L'ecran en a besoin pour choisir sur quoi
+   * appuyer la barre : les pages ne bougent plus une fois le scan fini, et une
+   * barre immobile pendant que les fiches s'ouvrent se lit comme un gel.
+   */
+  phase: ScanPhase;
+  /** Pages d'annuaire lues et prevues. */
+  pagesRead: number;
+  pagesPlanned: number;
+  scanned: number;
+  withSignal: number;
+  analysed: number;
+  /** Fiches visees : le plafond demande, borne par les entreprises a signal. */
+  analysedPlanned: number;
+  /** Etape en clair, deja redigee pour l'ecran. */
+  step: string;
+}
+
+export type ScanPhase = "annuaire" | "fiches";
 
 /**
  * Mode A — recherche par criteres, en deux phases.
@@ -489,6 +525,11 @@ export async function searchAndEnrich(
   let scannedCount = 0;
 
   for (const page of plan) {
+    if (context.shouldStop && (await context.shouldStop())) {
+      stop = "arrete";
+      break;
+    }
+
     const check = shouldContinue(
       { scanned: scannedCount, withSignal: hot.length, pagesRead },
       limit,
@@ -528,6 +569,17 @@ export async function searchAndEnrich(
       if (item.warning) warnings.push(item.warning);
       if (hasProvenSignal(item.signals)) hot.push(item);
     }
+
+    await context.onProgress?.({
+      phase: "annuaire",
+      pagesRead,
+      pagesPlanned: plan.length,
+      scanned: scannedCount,
+      withSignal: hot.length,
+      analysed: 0,
+      analysedPlanned: limit,
+      step: `Lecture de l'annuaire ${pagesRead}/${plan.length}`,
+    });
 
     // Memoire du scan : ecrite lot par lot, pour qu'un abandon en cours de
     // route ne fasse pas rescanner ce qu'on vient de payer.
@@ -577,6 +629,24 @@ export async function searchAndEnrich(
   // On pioche au-dela du plafond pour pouvoir remplacer les ecartees : une
   // entreprise hors tranche ne doit pas consommer une place de fiche.
   const queue = hot.slice(0, Math.min(hot.length, limit * 2));
+
+  // Cible affichee : on ne promet pas cinq fiches si le scan n'a trouve que
+  // deux entreprises a signal.
+  const analysedPlanned = Math.min(limit, queue.length);
+  const reportEnrich = (step: string) =>
+    context.onProgress?.({
+      phase: "fiches",
+      pagesRead,
+      pagesPlanned: plan.length,
+      scanned: scannedCount,
+      withSignal: hot.length,
+      analysed: results.length,
+      analysedPlanned,
+      step,
+    });
+
+  if (queue.length) await reportEnrich("Ouverture des fiches");
+
   for (let index = 0; index < queue.length && results.length < limit; index += CONCURRENCY) {
     const batch = queue.slice(index, index + CONCURRENCY);
     const enriched = await mapWithConcurrency(batch, CONCURRENCY, (item) =>
@@ -597,6 +667,8 @@ export async function searchAndEnrich(
       }
       results.push(company);
     }
+
+    await reportEnrich(`Ouverture des fiches ${results.length}/${analysedPlanned}`);
   }
 
   return {
