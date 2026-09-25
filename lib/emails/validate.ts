@@ -73,6 +73,8 @@ export interface ValidationContext {
    * echouer des mails de bonne longueur.
    */
   signature?: string;
+  /** Chiffres venant de /offre : delai, duree de la demande d'entree. */
+  offerNumbers?: readonly number[];
   /** Entités homonymes écartées : leur nom ne doit jamais apparaître. */
   forbiddenNames?: readonly string[];
 }
@@ -117,11 +119,17 @@ export function paragraphs(body: string): string[] {
  * de 4 paragraphes puis « Axel » donnait 6 blocs, donc un rejet, alors que la
  * regle porte sur le corps du message.
  */
-export function bodyParagraphs(body: string): string[] {
-  const blocks = paragraphs(body);
+export function bodyParagraphs(body: string, signature?: string): string[] {
+  const blocks = paragraphs(withoutSignature(body, signature));
   const withoutGreeting = /^bonjour\b/i.test(blocks[0] ?? "") ? blocks.slice(1) : blocks;
+
+  // Quand la signature est FOURNIE, elle a deja ete retiree : appliquer en plus
+  // l'heuristique « derniere ligne courte = signature » mangeait le bloc 4,
+  // souvent tres court (« Est-ce que ca vous parlerait ? »).
+  if (signature) return withoutGreeting;
+
+  // Sans signature connue (donnees anterieures), on retombe sur l'heuristique.
   const last = withoutGreeting[withoutGreeting.length - 1] ?? "";
-  // Une signature fait au plus quelques mots (« Bonne journee, » / « Axel »).
   const isSignature = last.split(/\s+/).length <= 4;
   return isSignature ? withoutGreeting.slice(0, -1) : withoutGreeting;
 }
@@ -271,9 +279,9 @@ export function hedgesUsed(body: string): string[] {
  * chose qui distingue structurellement les trois plans. Sans ce controle, le
  * modele recevait trois plans et ecrivait toujours le meme.
  */
-export function planApplied(plan: "A" | "B" | "C" | undefined, body: string): boolean {
+export function planApplied(plan: "A" | "B" | "C" | undefined, body: string, signature?: string): boolean {
   if (!plan) return true;
-  const first = bodyParagraphs(body)[0] ?? "";
+  const first = bodyParagraphs(body, signature)[0] ?? "";
   if (!first) return false;
   const isQuestion = first.trim().endsWith("?");
   // B ouvre sur une question metier ; A et C ouvrent sur un constat.
@@ -288,8 +296,8 @@ export function planApplied(plan: "A" | "B" | "C" | undefined, body: string): bo
  * une seule de trop : le lecteur ne sait plus a laquelle repondre, et aucune
  * n'obtient de reponse. Une seule question par mail, et c'est le CTA.
  */
-export function questionsIn(body: string): string[] {
-  return bodyParagraphs(body)
+export function questionsIn(body: string, signature?: string): string[] {
+  return bodyParagraphs(withoutSignature(body, signature))
     .flatMap((block) => block.split(/(?<=[?!.])\s+/))
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence.endsWith("?"));
@@ -330,8 +338,8 @@ export function withoutSignature(body: string, signature?: string): string {
  * France, donc une phrase qui ne dit rien de ce prospect. Une accroche qui
  * ouvre sur le secteur est une non-accroche.
  */
-export function opensOnSector(body: string): boolean {
-  const first = bodyParagraphs(body)[0] ?? "";
+export function opensOnSector(body: string, signature?: string): boolean {
+  const first = bodyParagraphs(body, signature)[0] ?? "";
   if (!first) return false;
   // « Dans le commerce de gros, » / « Dans la formation, » / « En interim, »
   return /^(dans|au sein d)\s+(le|la|les|l'|du|de|des)\s/i.test(first.trim());
@@ -354,6 +362,10 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   // n'importe quel chiffre d'un dump de 2 500 caracteres. Seuls les FAITS
   // comptent — ils incluent les citations de signaux.
   const known = knownNumbers(context.facts);
+  // Le delai de mise en place et la duree de la demande d'entree viennent de
+  // /offre : ce sont nos chiffres, pas ceux du prospect. Les refuser comme
+  // « absents des faits » etait un faux positif.
+  for (const value of context.offerNumbers ?? []) known.add(value);
   const invented = numbersIn(body).filter(
     (value) => !known.has(value) && !known.has(Math.round(value)) && !CTA_NUMBERS.has(value),
   );
@@ -400,7 +412,7 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   }
 
   // --- Plan impose ---------------------------------------------------------
-  if (!planApplied(context.plan, body)) {
+  if (!planApplied(context.plan, body, context.signature)) {
     failures.push(
       context.plan === "B"
         ? "Plan B : le mail doit s'ouvrir sur une question métier, pas sur un constat."
@@ -409,7 +421,7 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   }
 
   // --- Accroche generique ---------------------------------------------------
-  if (opensOnSector(body)) {
+  if (opensOnSector(body, context.signature)) {
     failures.push(
       "L'accroche ouvre sur le secteur (« Dans le/la… ») : elle serait vraie pour " +
         "n'importe quel concurrent. Pars d'un fait propre à cette entreprise.",
@@ -417,7 +429,7 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   }
 
   // --- Une seule question --------------------------------------------------
-  const questions = questionsIn(body);
+  const questions = questionsIn(body, context.signature);
   if (questions.length > 1) {
     failures.push(
       `${questions.length} questions dans le mail : une seule, et c'est le CTA. ` +
@@ -445,10 +457,11 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   }
 
   // --- Forme ---------------------------------------------------------------
-  const blocks = bodyParagraphs(body);
-  if (blocks.length < 3 || blocks.length > 4) {
+  const blocks = bodyParagraphs(body, context.signature);
+  if (blocks.length !== 4) {
     failures.push(
-      `${blocks.length} paragraphe(s) de corps : il en faut 3 à 4, séparés par une ligne vide.`,
+      `${blocks.length} paragraphe(s) de corps : il en faut EXACTEMENT 4 — accroche, ` +
+        "qui + preuve, offre pour eux, demande.",
     );
   }
 

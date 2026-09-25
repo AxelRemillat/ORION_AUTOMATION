@@ -61,6 +61,26 @@ export interface DraftOutcome {
  * vu mille fois. On l'enleve avant d'ajouter la vraie, sinon le mail se
  * termine par deux signatures.
  */
+/**
+ * Chiffres que l'offre autorise dans le corps.
+ *
+ * « 2 a 3 semaines » et « 15 min » viennent de /offre : ce sont NOS chiffres.
+ * Le validateur les refusait comme « absents des faits », ce qui faisait
+ * echouer tout mail qui annonçait un delai.
+ */
+export function offerNumbers(offer: UserOffer): number[] {
+  const found = new Set<number>();
+  for (const text of [offer.lead_time, offer.entry_duration, offer.entry_pitch]) {
+    for (const match of (text ?? "").matchAll(/\d+/g)) {
+      const value = Number(match[0]);
+      if (Number.isFinite(value)) found.add(value);
+    }
+  }
+  // « quinze minutes » s'ecrit aussi en lettres : on ne peut pas tout couvrir,
+  // mais les formes chiffrees de l'offre suffisent au cas courant.
+  return [...found];
+}
+
 export function stripSignature(body: string): string {
   const lines = body.trimEnd().split(/\r?\n/);
   while (lines.length) {
@@ -100,6 +120,7 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     tone,
     companyName: input.registryName,
     signature,
+    offerNumbers: offerNumbers(input.offer),
     proofs: publicProofsOf(input.offer),
     plan,
     forbiddenNames: input.forbiddenNames,

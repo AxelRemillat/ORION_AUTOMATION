@@ -18,8 +18,8 @@ import {
   withDefaults,
 } from "../lib/offer/model";
 import { defaultOffer } from "../lib/offer/read";
-import { stripSignature } from "../app/api/emails/generate/pipeline";
-import { opensOnSector, validateEmail, withoutSignature, wordCount } from "../lib/emails/validate";
+import { offerNumbers, stripSignature } from "../app/api/emails/generate/pipeline";
+import { bodyParagraphs, opensOnSector, validateEmail, withoutSignature, wordCount } from "../lib/emails/validate";
 import { buildFacts } from "../lib/emails/derived-facts";
 import type { Prospect } from "../types";
 
@@ -184,6 +184,65 @@ console.log("\n8. Complétude de l'offre");
   check("la valeur fournie gagne", partial.full_name === "Axel R.");
   check("le reste vient du défaut", partial.title === offer.title);
   check("l'utilisateur est conservé", partial.user_id === "u1");
+}
+
+console.log("\n9. La signature de deux lignes n'est pas un paragraphe de corps");
+{
+  const signature = signatureFor(offer);
+  const mail =
+    "Bonjour,\n\nAccroche.\n\nQui je suis.\n\nCe que je propose.\n\n" +
+    `Une question ?\n\n${signature}`;
+  const blocks = bodyParagraphs(mail, signature);
+  check("quatre blocs de corps", blocks.length === 4, `${blocks.length} : ${blocks.join(" | ")}`);
+  check("la salutation est exclue", !blocks.some((b) => b.startsWith("Bonjour")));
+  check("la signature est exclue", !blocks.some((b) => b.includes("axelremillat.com")));
+  check(
+    "sans signature fournie, elle compterait",
+    bodyParagraphs(mail).length > 4,
+    String(bodyParagraphs(mail).length),
+  );
+}
+
+console.log("\n10. Les chiffres de l'offre sont autorisés dans le corps");
+{
+  const nums = offerNumbers(offer);
+  check("le délai « 2 à 3 semaines » donne 2 et 3", nums.includes(2) && nums.includes(3), nums.join(","));
+  check("la durée « 15 min » donne 15", nums.includes(15), nums.join(","));
+
+  const facts = buildFacts({
+    id: "p", user_id: "u", company_name: "X", siren: "1", website: null, email: null,
+    sector: "Commerce", size_range: null, city: "Lyon", source: "auto", signals: [],
+    key_figures: {}, pain_point: null, status: "nouveau", created_at: "", updated_at: "",
+  } as Prospect).facts;
+  const signature = signatureFor(offer);
+  const result = validateEmail(
+    {
+      subject: "commandes et bons de livraison",
+      body:
+        "Bonjour,\n\nVous préparez des commandes chaque jour depuis votre catalogue.\n\n" +
+        "Je suis Axel Remillat, j'automatise des tâches pour les PME.\n\n" +
+        "La mise en place prend 2 à 3 semaines, sans changer d'outil, avec validation humaine.\n\n" +
+        `Je peux vous montrer ça en 15 minutes : est-ce que ça vous parlerait ?\n\n${signature}`,
+      },
+    { facts, contact: null, tone: "direct", companyName: "X", signature, offerNumbers: nums },
+  );
+  check(
+    "2, 3 et 15 ne sont plus « absents des faits »",
+    !result.failures.some((f) => f.includes("Nombre absent")),
+    result.failures.join(" | "),
+  );
+  check(
+    "sans les chiffres de l'offre, ils seraient refusés",
+    validateEmail(
+      {
+        subject: "commandes et bons de livraison",
+        body:
+          "Bonjour,\n\nVous préparez des commandes.\n\nJe suis Axel Remillat.\n\n" +
+          `Comptez 2 à 3 semaines.\n\nEst-ce que ça vous parlerait ?\n\n${signature}`,
+      },
+      { facts, contact: null, tone: "direct", companyName: "X", signature },
+    ).failures.some((f) => f.includes("Nombre absent")),
+  );
 }
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

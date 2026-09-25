@@ -39,3 +39,4 @@ ab-reveal.md
 
 # état local de la CLI Supabase
 supabase/.temp
+scripts/.*.ts
