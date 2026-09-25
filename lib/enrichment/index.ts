@@ -28,6 +28,7 @@ import { compareHeat, heatScore } from "@/lib/scoring";
 import { mapWithConcurrency, toDomain } from "./http";
 import { resolveCompany, searchCompanies } from "./gouv";
 import { resolveZone, type ResolvedZone } from "./geo";
+import { bracketOfTranches, checkBracket, outOfBracketReason } from "./headcount";
 import {
   filterCandidates,
   pagePlan,
@@ -264,6 +265,8 @@ async function deepEnrich(
     knownLeaderPerson: base.leader_person,
     parentGroup: extraction ? extraction.parentGroup : null,
     allowHoldingLookup: hasPappersKey(),
+    revenueEur: keyFigures.revenue_eur ?? null,
+    headcount: keyFigures.headcount ?? null,
   });
 
   if (group.leaderPerson) {
@@ -381,6 +384,11 @@ export interface SearchOutcome {
   analysed: number;
   /** Entreprises ecartees parce que deja vues (prospects, favoris, scan < 30 j). */
   skippedKnown: number;
+  /**
+   * Entreprises enrichies puis ECARTEES parce que leur effectif reel sort de
+   * la tranche demandee. Une ligne par entreprise, affichee dans le detail.
+   */
+  outOfBracket: string[];
   /** Pages d'annuaire lues pour y arriver. */
   pagesRead: number;
   /** Pourquoi la boucle s'est arretee, en clair. */
@@ -435,6 +443,7 @@ export async function searchAndEnrich(
     withSignal: 0,
     analysed: 0,
     skippedKnown: 0,
+    outOfBracket: [],
     pagesRead: 1,
     stopReason: STOP_LABELS[stop],
     warnings,
@@ -457,7 +466,8 @@ export async function searchAndEnrich(
     [criteria.q, criteria.section, (criteria.tranches ?? []).join(","), zone?.value, scanWidth, limit],
     today,
   );
-  const budget = scanBudget(scanWidth);
+  // « Aller plus loin si besoin » decoche : on s'arrete au nombre demande.
+  const budget = criteria.goFurther === false ? scanWidth : scanBudget(scanWidth);
   const maxPages = plannedPages(first.data.pages);
   const plan = pagePlan(seed, first.data.pages, maxPages);
 
@@ -547,13 +557,40 @@ export async function searchAndEnrich(
     ),
   );
 
-  const results = await mapWithConcurrency(hot.slice(0, limit), CONCURRENCY, (item) =>
-    deepEnrich(
-      { ...item.base, website: item.base.website ?? item.website },
-      item.signals,
-      item.web,
-    ),
-  );
+  // --- PHASE 2 : enrichissement, puis controle de la tranche ---------------
+  //
+  // L'annuaire filtre bien sur la tranche INSEE, mais celle-ci est parfois
+  // absente (« NN ») ou perimee. Pappers donne l'effectif reel : c'est LUI qui
+  // fait foi une fois la fiche ouverte. Sans ce controle, une recherche
+  // « 10 a 49 salaries » rendait des entreprises de 99 et 199 personnes.
+  const bracket = bracketOfTranches(criteria.tranches);
+  const outOfBracket: string[] = [];
+  const results: EnrichedCompany[] = [];
+
+  // On pioche au-dela du plafond pour pouvoir remplacer les ecartees : une
+  // entreprise hors tranche ne doit pas consommer une place de fiche.
+  const queue = hot.slice(0, Math.min(hot.length, limit * 2));
+  for (let index = 0; index < queue.length && results.length < limit; index += CONCURRENCY) {
+    const batch = queue.slice(index, index + CONCURRENCY);
+    const enriched = await mapWithConcurrency(batch, CONCURRENCY, (item) =>
+      deepEnrich(
+        { ...item.base, website: item.base.website ?? item.website },
+        item.signals,
+        item.web,
+      ),
+    );
+
+    for (const company of enriched) {
+      if (results.length >= limit) break;
+      const headcount =
+        typeof company.key_figures.headcount === "number" ? company.key_figures.headcount : null;
+      if (bracket && checkBracket(headcount, bracket) === "hors tranche") {
+        outOfBracket.push(outOfBracketReason(company.company_name, headcount, bracket));
+        continue;
+      }
+      results.push(company);
+    }
+  }
 
   return {
     results,
@@ -564,6 +601,7 @@ export async function searchAndEnrich(
     withSignal: hot.length,
     analysed: results.length,
     skippedKnown,
+    outOfBracket,
     pagesRead,
     stopReason: STOP_LABELS[stop],
     warnings: dedupeWarnings(results, warnings),

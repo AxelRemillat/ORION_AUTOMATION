@@ -258,6 +258,41 @@ export function planApplied(plan: "A" | "B" | "C" | undefined, body: string): bo
   return plan === "B" ? isQuestion : !isQuestion;
 }
 
+/**
+ * Questions posees dans le corps.
+ *
+ * Le mail ANDRA LEARNING ouvrait sur « Comment standardisez-vous… ? » et se
+ * fermait sur « Comment gerez-vous actuellement… ? ». Deux questions, c'est
+ * une seule de trop : le lecteur ne sait plus a laquelle repondre, et aucune
+ * n'obtient de reponse. Une seule question par mail, et c'est le CTA.
+ */
+export function questionsIn(body: string): string[] {
+  return bodyParagraphs(body)
+    .flatMap((block) => block.split(/(?<=[?!.])\s+/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.endsWith("?"));
+}
+
+/**
+ * Tournures de plaquette recopiees depuis le site du prospect.
+ * « s'efforce de deployer l'excellence » etait leur propre accroche.
+ */
+const SLOGAN_ECHO = [
+  "s'efforce",
+  "se veut",
+  "ambitionne",
+  "a coeur de",
+  "acteur majeur",
+  "expertise reconnue",
+  "d'apres ce que je comprends",
+  "si je comprends bien votre",
+];
+
+export function echoesSlogan(body: string): string[] {
+  const haystack = normalize(body);
+  return SLOGAN_ECHO.filter((term) => haystack.includes(normalize(term)));
+}
+
 export function validateEmail(draft: EmailDraft, context: ValidationContext): ValidationResult {
   const failures: string[] = [];
   const body = draft.body.trim();
@@ -327,6 +362,21 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
         ? "Plan B : le mail doit s'ouvrir sur une question métier, pas sur un constat."
         : `Plan ${context.plan} : le mail doit s'ouvrir sur un constat, pas sur une question.`,
     );
+  }
+
+  // --- Une seule question --------------------------------------------------
+  const questions = questionsIn(body);
+  if (questions.length > 1) {
+    failures.push(
+      `${questions.length} questions dans le mail : une seule, et c'est le CTA. ` +
+        `À supprimer : « ${questions[0].slice(0, 70)} »`,
+    );
+  }
+
+  // --- Paraphrase du site ---------------------------------------------------
+  const slogan = echoesSlogan(body);
+  if (slogan.length) {
+    failures.push(`Reprise du slogan du site : ${slogan.join(", ")}. Dites un fait, pas leur promesse.`);
   }
 
   // --- Salutation ----------------------------------------------------------

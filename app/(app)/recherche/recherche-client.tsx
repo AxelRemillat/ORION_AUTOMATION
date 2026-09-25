@@ -45,6 +45,8 @@ interface SearchResponse {
   pagesRead?: number;
   /** Pourquoi la boucle s'est arretee. */
   stopReason?: string;
+  /** Entreprises ecartees apres enrichissement : effectif hors tranche. */
+  outOfBracket?: string[];
   warnings: EnrichmentWarning[];
 }
 
@@ -158,6 +160,7 @@ export function RechercheClient() {
           skippedKnown: data.skippedKnown ?? 0,
           pagesRead: data.pagesRead ?? 0,
           stopReason: data.stopReason,
+          outOfBracket: data.outOfBracket ?? [],
         },
       };
     });

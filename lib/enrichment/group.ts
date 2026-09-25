@@ -1,6 +1,7 @@
 import { fetchHoldingProfile, type PappersRepresentative } from "./pappers";
 import type { ParentGroup } from "./extract";
 import { LARGE_GROUP_HEADCOUNT, LARGE_GROUP_REVENUE_EUR } from "./entity-match";
+import { looksLikeSubsidiaryByFigures } from "./headcount";
 
 /**
  * Appartenance à un groupe, et dirigeant réel derrière une holding.
@@ -31,6 +32,8 @@ const isOwner = (item: PappersRepresentative): boolean =>
   !item.role || !NON_OWNER_ROLE.test(item.role);
 
 export { LARGE_GROUP_HEADCOUNT, LARGE_GROUP_REVENUE_EUR } from "./entity-match";
+
+export { SUBSIDIARY_HEADCOUNT_HINT, SUBSIDIARY_REVENUE_HINT_EUR, looksLikeSubsidiaryByFigures } from "./headcount";
 
 export interface GroupAssessment {
   /** Société mère issue du registre (représentant personne morale). */
@@ -80,6 +83,9 @@ export interface GroupInput {
    * scan : ces crédits sont réservés à la phase 2 (analyse).
    */
   allowHoldingLookup?: boolean;
+  /** Chiffres de l'entreprise : un ratio CA/effectif aberrant trahit une filiale. */
+  revenueEur?: number | null;
+  headcount?: number | null;
 }
 
 export async function assessGroup(input: GroupInput): Promise<GroupAssessment> {
@@ -100,6 +106,16 @@ export async function assessGroup(input: GroupInput): Promise<GroupAssessment> {
     result.parentGroupUrl = input.parentGroup.url;
     result.isLargeGroupSubsidiary = true;
     result.evidence.push(`Web : « ${input.parentGroup.evidenceQuote} » (${input.parentGroup.url})`);
+  }
+
+  // --- Indice CHIFFRES ----------------------------------------------------
+  // Il vaut meme sans representant personne morale : c'est le cas d'EG RETAIL.
+  if (looksLikeSubsidiaryByFigures(input.revenueEur, input.headcount)) {
+    result.isLargeGroupSubsidiary = true;
+    result.evidence.push(
+      `Chiffres : ${eur(input.revenueEur as number)} de CA pour ${input.headcount} salariés — ` +
+        "volume incompatible avec une structure autonome",
+    );
   }
 
   if (!moral) return result;
