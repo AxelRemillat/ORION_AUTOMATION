@@ -64,7 +64,12 @@ ${proofs.length ? "PREUVES AUTORISEES — seules experiences qu'Axel peut revend
 
 Note chaque critere de 0 a 5, avec UNE phrase d'explication.
 
-- specificite : applique le TEST DE SUBSTITUTION. Remplace mentalement le nom
+- specificite : applique le TEST DE SUBSTITUTION a la PREMIERE PHRASE apres la
+  salutation. Remplace mentalement le nom de l'entreprise par celui d'un
+  concurrent du meme code NAF. Si la phrase reste VRAIE, l'accroche est
+  generique : 0 ou 1, et cela declenche une reecriture. Une ouverture sur le
+  secteur (« Dans le commerce de gros... ») vaut 0 d'office.
+  Puis, pour le reste du mail : remplace mentalement le nom
   de l'entreprise par une autre du meme secteur. Si le mail tient encore tel
   quel, c'est 0 ou 1.
 - valeurAccroche : la premiere phrase apprend-elle quelque chose au lecteur, ou

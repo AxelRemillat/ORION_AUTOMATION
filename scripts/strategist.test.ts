@@ -33,6 +33,7 @@ import { buildWritingPrompt } from "../app/api/emails/generate/prompt";
 import { draftFromBrief } from "../app/api/emails/generate/pipeline";
 import type { AskFn } from "../lib/ai/chat";
 import type { Prospect } from "../types";
+import { defaultOffer } from "../lib/offer/read";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -255,6 +256,7 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     };
     const again = await runStrategist((system, user, operation) => mockAsk("strategist", system, user, 0, operation), exclusion);
     await draftFromBrief({
+      offer: defaultOffer(),
       ask: mockAsk, brief: again.brief!, facts: blueFacts.facts, tone: "direct", contact: null,
       prospectId: "p1", registryName: "BLUE ENERFREEZE", avoid: [], judge: false,
     });
@@ -272,12 +274,22 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     check("le CA n'est pas dans le brief", !allowed.includes(revenue.id));
 
     const prompt = buildWritingPrompt({
+      offer: defaultOffer(),
       tone: "direct", brief, facts: blueFacts.facts, contact: null, prospectId: "p1", avoid: [],
     });
     check("la valeur du CA est absente du prompt", !prompt.includes("50 290 772") && !prompt.includes(revenue.value));
     check("le fait non référencé est absent", !prompt.includes("nouveau site logistique"));
     check("le fait d'accroche est présent", prompt.includes("automaticien"));
-    check("la preuve choisie par le stratège est citée", prompt.includes("flux d'alertes"));
+    // Les preuves viennent desormais de /offre, choisies par recoupement de
+    // tags avec le pain — plus de `persona.proofs` en dur.
+    check("l'identité vient de /offre", prompt.includes("Axel Remillat"));
+    check("le titre de /offre est transmis", prompt.includes("Automatisation & IA en production pour PME"));
+    check("l'offre d'entrée est transmise", prompt.includes("une démo de 15 min"));
+    check("la promesse est transmise", prompt.includes("sans changer d'outil"));
+    check(
+      "aucune preuve hors sujet n'est imposée",
+      prompt.includes("AUCUNE PREUVE ne recoupe ce pain") || prompt.includes("PREUVE A MOBILISER"),
+    );
     check("le nom exact est imposé", prompt.includes(`« ${brief.companyName} »`));
 
     const numbers = validateEmail(

@@ -30,6 +30,7 @@ import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import { draftFromBrief } from "./pipeline";
 import type { Evidence } from "./prompt";
 import { AiCallError } from "@/lib/ai/chat";
+import { loadOffer } from "@/lib/offer/read";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -150,6 +151,9 @@ export async function POST(request: Request) {
 async function generate(request: Request) {
   const session = await requireSession();
   if (!session.ok) return session.response;
+
+  // L'offre pilote la signature, la preuve et la demande : on la lit avant tout.
+  const loaded = await loadOffer(session.supabase, session.userId);
 
   const parsedBody = BODY_SCHEMA.safeParse(await readJson<unknown>(request));
   if (!parsedBody.success) {
@@ -286,6 +290,7 @@ async function generate(request: Request) {
   });
 
   const draft = await draftFromBrief({
+    offer: loaded.offer,
     ask,
     brief,
     facts,

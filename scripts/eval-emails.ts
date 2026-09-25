@@ -52,6 +52,7 @@ import type { Prospect } from "@/types";
 import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
 import { averageScore, CRITERIA_LABELS, failingCriteria, type Critique } from "@/app/api/emails/generate/critic";
 import { FIXTURES, REFERENCE_SECTION, type Fixture } from "./eval-fixtures";
+import { defaultOffer } from "@/lib/offer/read";
 
 /**
  * Charge `.env.local` : le script doit etre lancable tel quel, sans sourcing
@@ -181,6 +182,7 @@ async function generate(
   if (!outcome.brief) return { ...base, error: `brief KO : ${outcome.error}` };
 
   const draft = await draftFromBrief({
+      offer: defaultOffer(),
     ask,
     brief: outcome.brief,
     facts: factsResult.facts,

@@ -17,6 +17,8 @@ import { useGeneration } from "./_lib/use-generation";
 import type { SequenceStep } from "./_lib/sequence";
 import { ProspectHeader } from "./prospect-header";
 import { ProspectPicker } from "./prospect-picker";
+import type { UserOffer } from "@/types";
+import { OfferBanner } from "./_components/offer-banner";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -26,9 +28,15 @@ import { ProspectPicker } from "./prospect-picker";
 export function ProspectionClient({
   initialProspects,
   sequences,
+  offer,
+  offerComplete,
 }: {
   initialProspects: Prospect[];
   sequences: Record<string, SequenceStep[]>;
+  /** Ce qu'Axel vend : signature, preuves, demande d'entrée. */
+  offer: UserOffer;
+  /** `false` tant que /offre n'est pas remplie : les mails restent impersonnels. */
+  offerComplete: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -85,7 +93,11 @@ export function ProspectionClient({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+    <div className="flex flex-col gap-4">
+      {/* Sans offre remplie, le mail ne dit ni qui ecrit ni ce qu'on propose. */}
+      {!offerComplete && <OfferBanner />}
+
+      <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <ProspectPicker
         prospects={prospects}
         selectedId={selected?.id ?? null}
@@ -151,6 +163,7 @@ export function ProspectionClient({
 
               {/* Sous le brouillon : l'angle retenu, et de quoi en changer. */}
               <ChosenAngle
+                  offer={offer}
                 key={JSON.stringify(analysis.brief.angle) + analysis.brief.pain.task}
                 brief={analysis.brief}
                 regenerating={generating}
@@ -161,6 +174,7 @@ export function ProspectionClient({
           )}
         </div>
       )}
+    </div>
     </div>
   );
 }

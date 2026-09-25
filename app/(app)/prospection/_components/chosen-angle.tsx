@@ -6,6 +6,7 @@ import { Badge, Button, Label, Textarea } from "@/components/ui";
 import type { StrategyBrief } from "@/lib/emails/strategist";
 import { BriefDetails } from "./brief-details";
 import { TargetingWarning } from "./targeting-warning";
+import type { UserOffer } from "@/types";
 
 const ANGLE_LABELS: Record<StrategyBrief["angle"]["type"], string> = {
   recrutement: "recrutement",
@@ -28,11 +29,14 @@ const ANGLE_LABELS: Record<StrategyBrief["angle"]["type"], string> = {
  */
 export function ChosenAngle({
   brief,
+  offer,
   regenerating,
   onOtherAngle,
   onRewrite,
 }: {
   brief: StrategyBrief;
+  /** Ce qu'Axel vend : la preuve et la demande d'entrée en viennent. */
+  offer: UserOffer;
   regenerating: boolean;
   onOtherAngle: () => void;
   onRewrite: (edited: StrategyBrief) => void;
@@ -95,7 +99,7 @@ export function ChosenAngle({
             />
           </div>
 
-          <BriefDetails brief={brief} />
+          <BriefDetails brief={brief} offer={offer} />
 
           <div className="flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
             <Button

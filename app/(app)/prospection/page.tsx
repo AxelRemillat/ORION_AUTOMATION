@@ -7,6 +7,7 @@ import { DeliverabilityBanner } from "./_components/deliverability-banner";
 import { buildDeliverability } from "./_lib/deliverability";
 import { buildSequence, type SequenceStep } from "./_lib/sequence";
 import { ProspectionClient } from "./prospection-client";
+import { loadOffer } from "@/lib/offer/read";
 
 export const metadata = { title: "Prospection · ORION" };
 
@@ -16,8 +17,12 @@ export const metadata = { title: "Prospection · ORION" };
  * relit et valide avant enregistrement du brouillon. L'envoi part du Suivi.
  */
 export default async function ProspectionPage() {
-  await requireUser();
+  const user = await requireUser();
   const supabase = createClient();
+
+  // L'offre pilote la signature, la preuve et la demande : le client en a
+  // besoin pour afficher le brief, et pour signaler si elle est incomplete.
+  const loadedOffer = await loadOffer(supabase, user.id);
 
   const { prospects, messages, reminders, error } = await loadPortfolio(
     supabase,
@@ -58,7 +63,12 @@ export default async function ProspectionPage() {
           }
         />
       ) : (
-        <ProspectionClient initialProspects={prospects} sequences={sequences} />
+        <ProspectionClient
+          initialProspects={prospects}
+          sequences={sequences}
+          offer={loadedOffer.offer}
+          offerComplete={loadedOffer.complete}
+        />
       )}
     </>
   );
