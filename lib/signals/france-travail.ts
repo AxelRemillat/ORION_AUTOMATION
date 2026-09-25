@@ -206,9 +206,42 @@ export interface JobQuery {
   env?: EnvLike;
 }
 
-/** `minCreationDate` attend un ISO complet en UTC, pas une date seule. */
-export function minCreationDate(days: number, today = new Date()): string {
-  return new Date(today.getTime() - days * 86_400_000).toISOString().slice(0, 19) + "Z";
+/** L'API attend un ISO complet en UTC, pas une date seule. */
+function isoSecond(date: Date): string {
+  return date.toISOString().slice(0, 19) + "Z";
+}
+
+/**
+ * Bornes de la fenêtre de publication.
+ *
+ * Les DEUX sont obligatoires : envoyer `minCreationDate` seul fait répondre
+ * « HTTP 400 — les paramètres minCreationDate et maxCreationDate sont
+ * dépendants et doivent être renseignés ensemble ». Mesuré contre l'API le
+ * 25/09/2026 ; la borne haute est le moment de l'appel.
+ */
+export function creationWindow(days: number, today = new Date()): { min: string; max: string } {
+  return { min: isoSecond(new Date(today.getTime() - days * 86_400_000)), max: isoSecond(today) };
+}
+
+/**
+ * Agence d'intérim, cabinet de recrutement ou ESN de placement ?
+ *
+ * Mesuré sur les 150 premières offres du Rhône : Gojob, APROJOB, Randstad,
+ * Michael Page… Ces entreprises publient pour LEURS CLIENTS. Les prospecter
+ * revient à viser l'intermédiaire au lieu de l'employeur, exactement le faux
+ * positif qui avait déjà coûté une fiche (« RAS INTERIM JERECRUTE »).
+ *
+ * Le filtre par NAF (78.20Z, 78.10Z) vient plus tard, à l'identification ; ce
+ * filtre-ci est gratuit et s'applique tout de suite, sur le nom.
+ */
+const STAFFING_NAME =
+  /\b(interim|intérim|int[ée]rimaire|randstad|adecco|manpower|synergie|proman|actual|groupe crit|crit interim|startpeople|start people|supplay|temporis|domino|aprojob|gojob|page ?personnel|michael ?page|hays|expectra|fed |walters people|lynx ?rh|gi group|triangle|leader ?interim|job ?link|solano|abalone|menway|kelly services|spring ?france|fiderim|nexiium|talents?|cabinet de recrutement|recrutement)\b/i;
+
+export function looksLikeStaffingAgency(name: string): boolean {
+  const normalised = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // On ne teste QUE la forme sans accents : en JS, « \b » est ASCII, donc un
+  // « é » compte comme frontiere de mot et « Décrit » declencherait « crit ».
+  return STAFFING_NAME.test(normalised);
 }
 
 /**
@@ -227,7 +260,7 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
   const auth = await accessToken(env);
   if (!auth.ok) return auth;
 
-  const since = minCreationDate(query.days, query.today);
+  const window = creationWindow(query.days, query.today);
   const signals: JobSignal[] = [];
   const seen = new Set<string>();
 
@@ -235,7 +268,8 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
     const end = Math.min(start + FT_PAGE_SIZE, query.max) - 1;
     const params = new URLSearchParams({
       departement: query.departement,
-      minCreationDate: since,
+      minCreationDate: window.min,
+      maxCreationDate: window.max,
       codeROME: FT_ROME_CODES.join(","),
       range: `${start}-${end}`,
       sort: "1",
@@ -243,7 +277,9 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
     const url = `${SEARCH_URL}?${params.toString()}`;
 
     const page = await cached<SearchResponse>(
-      `france-travail:${query.departement}:${query.days}:${start}-${end}`,
+      // La borne haute bouge à chaque appel : elle est volontairement HORS de
+      // la clé, sinon le cache d'un jour ne servirait jamais.
+      `france-travail:v2:${query.departement}:${query.days}:${start}-${end}:${window.min.slice(0, 10)}`,
       async () => {
         await spacerFor("france-travail", FT_RATE_PER_SECOND).wait();
         const response = await fetchJson<SearchResponse>(
@@ -264,6 +300,9 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
     const rows = page.resultats ?? [];
     for (const row of rows) {
       const signal = toJobSignal(row);
+      // Un intermédiaire recrute pour quelqu'un d'autre : ce n'est pas lui la
+      // cible, et sa fiche coûterait un appel Pappers pour rien.
+      if (signal && looksLikeStaffingAgency(signal.companyName)) continue;
       // Une entreprise qui publie dix offres reste une seule cible : on garde
       // la plus récente, c'est-à-dire la première vue.
       const key = signal && `${signal.companyName.toLowerCase()}|${signal.city ?? ""}`;

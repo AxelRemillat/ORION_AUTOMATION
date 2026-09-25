@@ -6,8 +6,16 @@ import { bracketOfTranches, checkBracket } from "@/lib/enrichment/headcount";
 import { effectifLabel } from "@/lib/enrichment/naf";
 import type { CompanyBase, EnrichedCompany, EnrichmentWarning } from "@/lib/enrichment/types";
 import type { ProspectSignal } from "@/types";
-import { recentNotices, type BodaccNotice } from "./bodacc";
+import {
+  compareNotices,
+  groupBySiren,
+  recentNotices,
+  type BodaccLeader,
+  type BodaccNotice,
+  type SignalStrength,
+} from "./bodacc";
 import { DEFAULT_SIGNAL_DAYS, type SignalSourceId, type SignalSourceState } from "./shared";
+import { STRENGTH_RANK } from "./bodacc-parse";
 import {
   franceTravailStatus,
   recentJobSignals,
@@ -53,6 +61,15 @@ export const MAX_IDENTITY_LOOKUPS = 250;
 /** Annonces ramenées par source. Au-delà, on scanne du vieux pour rien. */
 const MAX_NOTICES_PER_SOURCE = 600;
 
+/**
+ * Renforts retenus en plus du signal principal.
+ *
+ * Trois annonces en deux mois disent plus qu'une, mais la dixième n'apprend
+ * rien : le cumul est donc plafonné. Le score décroît déjà avec le rang
+ * (`1 / (1 + 0,4 × rang)`), ce plafond évite seulement d'encombrer la carte.
+ */
+export const MAX_REINFORCEMENTS = 2;
+
 /** Un signal officiel, déjà rattaché à une entreprise nommée. */
 export interface OfficialSignal {
   /** SIREN quand la source le donne. BODACC oui, France Travail non. */
@@ -61,9 +78,16 @@ export interface OfficialSignal {
   city: string | null;
   postalCode: string | null;
   sourceId: SignalSourceId;
-  /** Date ISO, toujours présente : c'est la raison d'être de ce mode. */
+  /** Date ISO du signal principal : c'est la raison d'être de ce mode. */
   date: string;
-  signal: ProspectSignal;
+  /** Force du signal principal — celle qui décide de l'angle et du tri. */
+  strength: SignalStrength;
+  /** Signal principal EN PREMIER, puis les renforts. */
+  signals: ProspectSignal[];
+  /** Dirigeants entrants nommés par l'annonce, pour la rédaction. */
+  newLeaders: BodaccLeader[];
+  /** Capital déclaré après l'opération, quand l'annonce le donne. */
+  capitalAmount: number | null;
 }
 
 
@@ -85,37 +109,47 @@ const OFFICIAL_CONFIDENCE = 0.98;
  */
 const MATCHED_CONFIDENCE = 0.9;
 
-/** Libellé lisible d'une annonce BODACC. */
-function bodaccLabel(notice: BodaccNotice): string {
-  const base =
-    notice.family === "Ventes et cessions"
-      ? "Cession de fonds"
-      : notice.family === "Modifications diverses"
-        ? "Modification au registre"
-        : "Immatriculation";
-  return notice.nature ? `${base} — ${notice.nature}` : base;
+/** Une annonce BODACC, au format consommé par le scoring et la fiche. */
+export function noticeToSignal(notice: BodaccNotice): ProspectSignal {
+  return {
+    type: notice.signalType,
+    label: `${notice.label} (${frenchDate(notice.publishedAt)})`,
+    url: notice.url,
+    date: notice.publishedAt,
+    source: "BODACC",
+    dateBasis: "source",
+    confidence: OFFICIAL_CONFIDENCE,
+    strength: notice.strength,
+    // La citation est le libellé officiel : il n'y a pas de phrase à extraire
+    // d'une page web, l'annonce est déjà normalisée par le greffe.
+    quote: notice.nature ?? notice.family,
+  };
 }
 
-function toOfficialSignal(notice: BodaccNotice): OfficialSignal {
+/**
+ * Une entreprise et tout ce que BODACC dit d'elle sur la fenêtre.
+ *
+ * La plus forte annonce donne l'angle, les suivantes ne sont que du renfort —
+ * d'où le tri par force puis par date, et le plafond de renforts.
+ */
+export function toOfficialSignal(notices: readonly BodaccNotice[]): OfficialSignal {
+  const sorted = [...notices].sort(compareNotices);
+  const main = sorted[0];
+  const kept = sorted.slice(0, 1 + MAX_REINFORCEMENTS);
+
   return {
-    siren: notice.siren,
-    companyName: notice.companyName,
-    city: notice.city,
-    postalCode: notice.postalCode,
+    siren: main.siren,
+    companyName: main.companyName,
+    city: main.city,
+    postalCode: main.postalCode,
     sourceId: "bodacc",
-    date: notice.publishedAt,
-    signal: {
-      type: notice.signalType,
-      label: `${bodaccLabel(notice)} (${frenchDate(notice.publishedAt)})`,
-      url: notice.url,
-      date: notice.publishedAt,
-      source: "BODACC",
-      dateBasis: "source",
-      confidence: OFFICIAL_CONFIDENCE,
-      // La citation est le libellé officiel : il n'y a pas de phrase à extraire
-      // d'une page web, l'annonce est déjà normalisée par le greffe.
-      quote: notice.nature ?? notice.family,
-    },
+    date: main.publishedAt,
+    strength: main.strength,
+    signals: kept.map(noticeToSignal),
+    // Les dirigeants entrants de TOUTES les annonces retenues : un changement
+    // de gérant et une modification de capital peuvent être deux annonces.
+    newLeaders: kept.flatMap((notice) => notice.newLeaders),
+    capitalAmount: kept.find((notice) => notice.capitalAmount !== null)?.capitalAmount ?? null,
   };
 }
 
@@ -127,16 +161,24 @@ function jobToOfficialSignal(job: JobSignal): OfficialSignal {
     postalCode: job.postalCode,
     sourceId: "france-travail",
     date: job.publishedAt,
-    signal: {
-      type: "recrutement",
-      label: `Recrutement : ${job.title} (${frenchDate(job.publishedAt)})`,
-      url: job.url,
-      date: job.publishedAt,
-      source: "France Travail",
-      dateBasis: "source",
-      confidence: MATCHED_CONFIDENCE,
-      quote: job.title,
-    },
+    // Une offre publiée est un fait daté, déclaré par l'employeur lui-même :
+    // c'est aussi engageant qu'une décision au registre.
+    strength: "fort",
+    signals: [
+      {
+        type: "recrutement",
+        label: `Recrutement : ${job.title} (${frenchDate(job.publishedAt)})`,
+        url: job.url,
+        date: job.publishedAt,
+        source: "France Travail",
+        dateBasis: "source",
+        confidence: MATCHED_CONFIDENCE,
+        strength: "fort",
+        quote: job.title,
+      },
+    ],
+    newLeaders: [],
+    capitalAmount: null,
   };
 }
 
@@ -198,8 +240,11 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
 
   const bodaccState = sources.find((source) => source.id === "bodacc");
   if (bodacc.ok) {
-    for (const notice of bodacc.data) signals.push(toOfficialSignal(notice));
-    if (bodaccState) bodaccState.count = bodacc.data.length;
+    // Une entreprise = un candidat, quelles que soient ses annonces.
+    for (const group of groupBySiren(bodacc.data).values()) {
+      signals.push(toOfficialSignal(group));
+    }
+    if (bodaccState) bodaccState.count = signals.length;
   } else {
     warnings.push({ source: "gouv", message: bodacc.error });
     if (bodaccState) {
@@ -227,10 +272,34 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
     }
   }
 
-  // Le plus frais d'abord : c'est ce tri qui donne son sens au plafond de
-  // résolutions d'identité — on coupe les vieux signaux, jamais les récents.
-  signals.sort((a, b) => b.date.localeCompare(a.date));
+  // Le plus FORT d'abord, puis le plus frais. Ce tri décide deux choses à la
+  // fois : l'ordre des fiches rendues, et où part le budget de résolutions
+  // d'identité — on coupe les signaux faibles, jamais les forts.
+  signals.sort(
+    (a, b) => STRENGTH_RANK[b.strength] - STRENGTH_RANK[a.strength] || b.date.localeCompare(a.date),
+  );
   return { signals, sources, warnings };
+}
+
+/**
+ * Activités d'intermédiation sur l'emploi.
+ *
+ * Ces entreprises publient des offres POUR LEURS CLIENTS. Le filtre par nom
+ * (`looksLikeStaffingAgency`) attrape les marques connues ; celui-ci est exact
+ * et gratuit, puisque l'annuaire vient de rendre le code NAF. Mesuré sur 12
+ * offres du Rhône : FIDERIM, General Emploi et NEXIIUM TALENT passaient le
+ * filtre par nom.
+ *
+ *   78.10Z activités des agences de placement de main-d'œuvre
+ *   78.20Z activités des agences de travail temporaire
+ *   78.30Z autre mise à disposition de ressources humaines
+ */
+const STAFFING_NAF = new Set(["7810Z", "7820Z", "7830Z"]);
+
+/** Le code NAF est écrit « 78.20Z » ou « 7820Z » selon la source. */
+export function isStaffingNaf(naf: string | null | undefined): boolean {
+  if (!naf) return false;
+  return STAFFING_NAF.has(naf.replace(/[^0-9A-Za-z]/g, "").toUpperCase());
 }
 
 /** Rang d'un candidat : confirmé en tranche, ou tranche non déclarée. */
@@ -238,7 +307,12 @@ export type CandidateTier = "en-tranche" | "tranche-inconnue";
 
 export interface SignalCandidate {
   base: CompanyBase;
+  /** Signal principal en premier, puis ses renforts. */
   signals: ProspectSignal[];
+  /** Force du signal principal : c'est elle qui trie les fiches. */
+  strength: SignalStrength;
+  newLeaders: BodaccLeader[];
+  capitalAmount: number | null;
   tier: CandidateTier;
   sourceId: SignalSourceId;
 }
@@ -256,13 +330,21 @@ export function tierOf(effectifCode: string | null, tranches: readonly string[])
   return tranches.includes(effectifCode) ? "en-tranche" : null;
 }
 
-/** Commune comparable : accents, casse et arrondissements mis de côté. */
+/**
+ * Commune comparable : accents, casse et arrondissements mis de cote.
+ *
+ * France Travail ecrit « Lyon 1er Arrondissement » la ou l'annuaire dit
+ * « Lyon ». Sans ce nettoyage, AUCUNE offre publiee dans un arrondissement ne
+ * pouvait etre rapprochee — soit tout le bassin lyonnais et tout Paris.
+ */
 export function normalizeCity(value: string | null | undefined): string {
   if (!value) return "";
   return value
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    // « lyon 1er arrondissement », « paris 15e arrondissement », « lyon 03 ».
+    .replace(/\s*\d+\s*(?:er|ere|eme|e)?\s*arrondissement\s*$/, "")
     .replace(/\s+\d+$/, "")
     .replace(/[^a-z]+/g, " ")
     .trim();
@@ -271,25 +353,38 @@ export function normalizeCity(value: string | null | undefined): string {
 /**
  * Le candidat de l'annuaire correspond-il bien au signal ?
  *
- * Pour BODACC la question ne se pose pas : le SIREN fait foi. Pour une offre
- * d'emploi, le rapprochement passe par le nom, donc il faut une confirmation
- * indépendante — la commune. Sans elle, « MARTIN » à Lyon et « MARTIN » à Lille
- * deviendraient la même entreprise, exactement le faux positif que le mode par
- * critères a déjà coûté une fois.
+ * Pour BODACC la question ne se pose pas : le SIREN fait foi.
+ *
+ * Pour une offre d'emploi il n'y a pas de SIREN, et la premiere version
+ * comparait les communes. C'etait FAUX, et mesure : 1 offre sur 12 seulement
+ * passait. L'annuaire rend la commune du SIEGE, l'offre donne le LIEU DE
+ * TRAVAIL — IRIUM SOFTWARE a son siege a Tille et recrute a Lyon, FOKUS siege
+ * a Saint-Denis et recrute a Lyon. Ce sont les memes entreprises.
+ *
+ * La confirmation geographique est obtenue autrement, et mieux : la recherche
+ * annuaire est filtree sur le DEPARTEMENT, filtre qui porte sur les
+ * etablissements. Un homonyme situe ailleurs ne remonte pas du tout, et une
+ * entreprise multi-sites n'est plus perdue. Il ne reste ici qu'a verifier que
+ * le nom correspond vraiment — l'annuaire repond de facon floue.
  */
 export function confirmsMatch(signal: OfficialSignal, base: CompanyBase): boolean {
   if (signal.siren) return base.siren === signal.siren;
 
-  const signalCity = normalizeCity(signal.city);
-  const baseCity = normalizeCity(base.city);
-  if (!signalCity || !baseCity) return false;
-  if (signalCity !== baseCity) return false;
-
-  // Le nom doit correspondre au-delà de la casse : l'annuaire renvoie le
-  // meilleur resultat d'une recherche floue, pas forcement le bon.
-  const left = signal.companyName.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-  const right = base.company_name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const left = simplifyName(signal.companyName);
+  const right = simplifyName(base.company_name);
+  if (!left || !right) return false;
   return left.includes(right) || right.includes(left);
+}
+
+/** Nom comparable : sans accents, sans casse, sans forme juridique. */
+export function simplifyName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(sas|sarl|sasu|eurl|sa|sci|scop|snc|selarl|societe)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 export interface ResolveContext {
@@ -308,6 +403,8 @@ export interface ResolvedCandidates {
   lookups: number;
   /** Entreprises écartées parce que déjà connues. */
   skippedKnown: number;
+  /** Signaux qu'on n'a pas su rattacher à une entreprise de l'annuaire. */
+  unmatched: number;
   /** Écartées sur la tranche déclarée à l'annuaire. */
   outOfBracket: string[];
   warnings: EnrichmentWarning[];
@@ -329,6 +426,17 @@ export async function resolveCandidates(
   const maxLookups = context.maxLookups ?? MAX_IDENTITY_LOOKUPS;
   const bracket = bracketOfTranches(criteria.tranches);
 
+  // Zone construite a la main : le numero de departement est deja connu, aller
+  // le redemander a geo.api.gouv.fr serait un appel pour rien. Ce filtre porte
+  // sur les ETABLISSEMENTS, c'est lui qui remplace la comparaison de communes.
+  const zone = {
+    kind: "departement" as const,
+    label: `département ${criteria.departement}`,
+    param: "departement" as const,
+    value: criteria.departement,
+    departement: criteria.departement,
+  };
+
   const confirmed: SignalCandidate[] = [];
   const unknownTranche: SignalCandidate[] = [];
   const outOfBracket: string[] = [];
@@ -336,6 +444,9 @@ export async function resolveCandidates(
   const seen = new Set<string>();
   let lookups = 0;
   let skippedKnown = 0;
+  // Une offre qu'on n'a pas su rattacher n'est NI une entreprise hors cible NI
+  // une absence de signal : sans ce compteur, l'echec etait invisible.
+  let unmatched = 0;
 
   // On visera deux fois l'objectif : une entreprise peut encore sortir en
   // phase 2 sur son effectif reel, et il faut de quoi la remplacer.
@@ -355,16 +466,32 @@ export async function resolveCandidates(
     seen.add(key);
 
     lookups += 1;
-    const page = await searchCompanies({ q: signal.siren ?? signal.companyName }, 1);
+    // Un SIREN se cherche seul : il est unique, le filtre geographique ne
+    // ferait que risquer d'ecarter un siege hors departement.
+    const page = signal.siren
+      ? await searchCompanies({ q: signal.siren }, 1)
+      : await searchCompanies({ q: signal.companyName }, 3, { zone });
     if (!page.ok) {
       warnings.push({ source: "gouv", message: page.error });
       continue;
     }
 
-    const [base] = page.data.companies;
-    if (!base || !confirmsMatch(signal, base)) continue;
+    // L'annuaire repond de facon floue : on prend le premier candidat dont le
+    // nom correspond vraiment, pas le premier tout court.
+    const base = page.data.companies.find((company) => confirmsMatch(signal, company));
+    if (!base) {
+      unmatched += 1;
+      continue;
+    }
     if (base.siren && exclude.has(base.siren)) {
       skippedKnown += 1;
+      continue;
+    }
+
+    // Un intermédiaire recrute pour quelqu'un d'autre : viser lui plutôt que
+    // l'employeur, c'est le faux positif « RAS INTERIM JERECRUTE ».
+    if (isStaffingNaf(base.naf_code)) {
+      outOfBracket.push(`${base.company_name} — agence d'emploi, elle recrute pour ses clients`);
       continue;
     }
 
@@ -383,7 +510,10 @@ export async function resolveCandidates(
 
     const candidate: SignalCandidate = {
       base,
-      signals: [signal.signal],
+      signals: signal.signals,
+      strength: signal.strength,
+      newLeaders: signal.newLeaders,
+      capitalAmount: signal.capitalAmount,
       tier,
       sourceId: signal.sourceId,
     };
@@ -394,9 +524,14 @@ export async function resolveCandidates(
   }
 
   // Les confirmés d'abord, les tranches non déclarées ensuite : c'est l'ordre
-  // qui décide où part le budget Pappers.
+  // qui décide où part le budget Pappers. À l'intérieur de chaque rang, le
+  // signal le plus fort passe devant — les fiches sortent donc déjà triées.
+  const byStrength = (a: SignalCandidate, b: SignalCandidate) =>
+    STRENGTH_RANK[b.strength] - STRENGTH_RANK[a.strength];
+  confirmed.sort(byStrength);
+  unknownTranche.sort(byStrength);
   const candidates = [...confirmed, ...unknownTranche].slice(0, wanted);
-  return { candidates, lookups, skippedKnown, outOfBracket, warnings };
+  return { candidates, lookups, skippedKnown, unmatched, outOfBracket, warnings };
 }
 
 /** Verdict d'effectif réel, une fois la fiche ouverte. */
@@ -419,6 +554,8 @@ export interface SignalSearchOutcome {
   /** Fiches réellement ouvertes chez Pappers : c'est la seule ligne payante. */
   analysed: number;
   skippedKnown: number;
+  /** Signaux qu'on n'a pas su rattacher à une entreprise de l'annuaire. */
+  unmatched: number;
   outOfBracket: string[];
   warnings: EnrichmentWarning[];
 }
@@ -487,6 +624,7 @@ export async function searchBySignals(
     lookups: resolved.lookups,
     analysed: results.length,
     skippedKnown: resolved.skippedKnown,
+    unmatched: resolved.unmatched,
     outOfBracket,
     warnings,
   };
