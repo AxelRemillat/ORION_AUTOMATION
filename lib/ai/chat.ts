@@ -1,5 +1,14 @@
 import type OpenAI from "openai";
-import { samplingParams, type AiRole } from "./models";
+import { modelFor, reasoningEffortFor, type AiRole } from "./models";
+import {
+  buildParams,
+  capabilityToDrop,
+  isUnsupportedParamError,
+  readOpenAiError,
+  rememberUnsupported,
+  unsupportedParamMessage,
+  type ChatParams,
+} from "./params";
 
 /**
  * Un appel JSON à OpenAI pour un rôle donné.
@@ -8,6 +17,9 @@ import { samplingParams, type AiRole } from "./models";
  * l'appelant. La route journalise dans `api_usage` ; le script d'évaluation
  * cumule coût et latence en mémoire. Les deux passent par le même code, donc
  * par les mêmes paramètres de modèle.
+ *
+ * Tous les paramètres viennent de `buildParams` : aucun `temperature` ni
+ * `max_tokens` en dur ici ni ailleurs.
  */
 
 export interface ChatUsage {
@@ -18,34 +30,100 @@ export interface ChatUsage {
   operation: string;
 }
 
+/** Erreur d'appel destinée à être AFFICHÉE : elle dit quoi et pourquoi. */
+export class AiCallError extends Error {
+  constructor(
+    message: string,
+    readonly model: string,
+    readonly param?: string,
+    readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = "AiCallError";
+  }
+}
+
 export interface ChatJsonRequest {
   client: OpenAI;
   role: AiRole;
   system: string;
   user: string;
-  /** Ignorée pour un modèle de raisonnement (effort de raisonnement à la place). */
+  /** Température VOULUE. Ignorée par un modèle qui ne la supporte pas. */
   temperature: number;
   operation: string;
   /** Force un modèle précis — A/B du script d'évaluation. */
   model?: string;
+  /** Plafond de sortie, posé sous le nom attendu par le modèle. */
+  maxOutputTokens?: number;
   onUsage?: (usage: ChatUsage) => void | Promise<void>;
+  /** Journalisation des avertissements ; `console.warn` par défaut. */
+  onWarn?: (message: string) => void;
+}
+
+/**
+ * Rejoue un appel une fois quand le modele refuse un parametre.
+ *
+ * Partage par tous les appels OpenAI du projet : `chatJson`, l'extraction et
+ * la generation de reponses. Le `build` est rappele APRES la mise a jour des
+ * capacites, pour que le second essai parte avec le bon corps.
+ */
+export async function withParamFallback<T>(
+  model: string,
+  build: () => ChatParams,
+  send: (params: ChatParams) => Promise<T>,
+  onWarn: (message: string) => void = (message) => console.warn(message),
+): Promise<T> {
+  try {
+    return await send(build());
+  } catch (error) {
+    const info = readOpenAiError(error);
+    if (!isUnsupportedParamError(info)) throw error;
+
+    const patch = capabilityToDrop(info.param);
+    if (!patch) throw new AiCallError(unsupportedParamMessage(model, info), model, info.param, error);
+
+    rememberUnsupported(model, patch);
+    onWarn(
+      `[ai] ${model} refuse « ${info.param} » (${info.code ?? "sans code"}) : ` +
+        "capacité retirée, appel rejoué sans elle.",
+    );
+    try {
+      return await send(build());
+    } catch (retryError) {
+      const retryInfo = readOpenAiError(retryError);
+      throw new AiCallError(unsupportedParamMessage(model, retryInfo), model, retryInfo.param, retryError);
+    }
+  }
 }
 
 export async function chatJson(request: ChatJsonRequest): Promise<string> {
-  const params = samplingParams(request.role, request.temperature, { model: request.model });
+  const model = request.model ?? modelFor(request.role);
   const started = Date.now();
-  const completion = await request.client.chat.completions.create({
-    ...params,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: request.system },
-      { role: "user", content: request.user },
-    ],
-  });
+
+  const completion = await withParamFallback(
+    model,
+    () =>
+      buildParams({
+        model,
+        temperature: request.temperature,
+        reasoningEffort: reasoningEffortFor(request.role),
+        maxOutputTokens: request.maxOutputTokens,
+      }),
+    (params) =>
+      request.client.chat.completions.create({
+        ...(params as { model: string }),
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: request.system },
+          { role: "user", content: request.user },
+        ],
+      }),
+    request.onWarn,
+  );
 
   if (request.onUsage) {
     await request.onUsage({
-      model: params.model,
+      model,
       promptTokens: completion.usage?.prompt_tokens ?? 0,
       completionTokens: completion.usage?.completion_tokens ?? 0,
       latencyMs: Date.now() - started,

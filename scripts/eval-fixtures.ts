@@ -102,6 +102,41 @@ const RAW_FIXTURES: Fixture[] = [
     site: `Cabinet d'expertise comptable, 14 collaborateurs, environ 320 dossiers clients TPE et PME. Tenue, revision, bilans, paie, conseil. Portail client pour le depot des pieces comptables.`,
   },
   {
+    // Negociant en produits horticoles. Deux cas de production a la fois : son
+    // dernier exercice publie date de 2017 (badge « ancien », jamais un angle)
+    // et son seul signal web vient d'un agregateur d'offres sans intitule.
+    prospect: base({
+      id: "terdici-0009",
+      company_name: "TERDICI VEGETAL",
+      siren: "320182702",
+      website: "https://www.terdici.fr",
+      sector: "Commerce de gros de fleurs et plantes",
+      size_range: "20 à 49 salariés",
+      city: "Torcé",
+      key_figures: {
+        naf_code: "46.21Z",
+        revenue_eur: 23_177_510,
+        revenue_year: 2017,
+        headcount: 35,
+        founded_year: 1980,
+      },
+      signals: [
+        {
+          type: "recrutement",
+          label: "Recrutement en cours — fr.trabajo.org",
+          url: "https://fr.trabajo.org/emploi-terdici-vegetal",
+          source: "fr.trabajo.org",
+          quote: "terdici vegetal 2 offres d'emploi terdici vegetal en France.",
+          confidence: 0.7,
+          sourceWeight: 0.25,
+          date: new Date(Date.now() - 12 * 86_400_000).toISOString().slice(0, 10),
+        },
+      ],
+    }),
+    contact: null,
+    site: `Terdici Vegetal, negociant en plantes et fleurs coupees pour jardineries et fleuristes. Commandes quotidiennes, preparation et expedition en camions frigorifiques, saisonnalite forte au printemps. Catalogue de plusieurs milliers de references, tarifs revus chaque semaine, bons de livraison et retours a traiter par client.`,
+  },
+  {
     // Organisme de formation, 5 salaries. Cas de production : la salutation
     // partait en « Monsieur Victor Grynbaum » et le pain reformulait leur
     // offre (« vos processus de formation »).

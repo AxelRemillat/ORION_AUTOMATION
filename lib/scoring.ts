@@ -603,17 +603,29 @@ export function whyNow(
     (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
     recencyFactor(signal, now) *
     confidenceFactor(signal) *
-    categoryFactor(signal);
+    categoryFactor(signal) *
+    // Un agregateur ne porte l'accroche que si rien d'autre n'existe.
+    sourceFactor(signal);
 
   const best = [...citable].sort((a, b) => weight(b) - weight(a))[0];
   const date = typeof best.date === "string" ? frenchDate(best.date) : null;
   // Une offre verifiee en ligne n'a pas de date : on le dit, on n'en fabrique pas.
   const when = date ?? (best.liveOnOfficialSite === true ? "en ligne, non datée" : null);
 
+  // Un agregateur ne prouve qu'une chose : l'entreprise a des offres quelque
+  // part. Son extrait brut — « terdici vegetal 2 offres d'emploi terdici
+  // vegetal en France. » — n'apprend rien et se lit mal. On le remplace par ce
+  // qu'il dit vraiment.
+  const weakSource = best.sourceWeight !== undefined && Number(best.sourceWeight) < 1;
+  const offerCount = /(\d+)\s+(?:offres?|postes?|annonces?)/i.exec(String(best.quote ?? ""))?.[1];
+  const headline = weakSource
+    ? `${offerCount ?? "Plusieurs"} offre${offerCount === "1" ? "" : "s"} listée${offerCount === "1" ? "" : "s"} sur un agrégateur (non datées)`
+    : excerpt(cleanText(best.quote, 400), 260);
+
   return {
     // Les citations arrivent brutes du web : liens markdown, puces, emojis.
     // Les afficher telles quelles donnait « - [Voir l'offre](https://…) 🔥 ».
-    headline: excerpt(cleanText(best.quote, 400), 260),
+    headline,
     evidence: [best.source, when].filter(Boolean).join(" · ") || "source web",
     url: best.url,
     signalType: best.type ?? "presse",

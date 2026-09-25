@@ -353,6 +353,18 @@ export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcom
   const unknown = briefFactIds(data).filter((id) => !byId.has(id));
   if (unknown.length) errors.push(`factIds inexistants : ${unknown.join(", ")}`);
 
+  // Un exercice de plus de trois ans ne porte pas une accroche : « votre CA
+  // 2017 » se voit tout de suite et date le mail autant que le chiffre.
+  const staleFinance = data.angle.hookFactIds
+    .map((id) => byId.get(id))
+    .filter((fact): fact is DerivedFact => Boolean(fact && /, ancien\)/.test(fact.value)));
+  if (staleFinance.length) {
+    errors.push(
+      `angle.hookFactIds : ${staleFinance.map((fact) => fact.id).join(", ")} porte(nt) un exercice de plus de ` +
+        "trois ans, inutilisable comme angle",
+    );
+  }
+
   // Fraîcheur : aucun signal non daté ou périmé dans l'accroche.
   const stale = data.angle.hookFactIds
     .map((id) => byId.get(id))

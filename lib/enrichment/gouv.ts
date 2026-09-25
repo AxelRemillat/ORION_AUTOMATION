@@ -4,12 +4,17 @@
  * SIREN (mode manuel). Toutes les autres sources viennent se greffer dessus.
  */
 import { fetchJson, toDomain } from "./http";
+import { cached } from "./cache";
+import { ANNUAIRE_RATE_PER_SECOND, limitedFetch } from "./rate-limit";
 import { effectifLabel } from "./naf";
 import type { Result } from "./http";
 import type { ResolvedZone } from "./geo";
 import type { CompanyBase, SearchCriteria } from "./types";
 
 const BASE_URL = "https://recherche-entreprises.api.gouv.fr/search";
+
+/** Duree de cache d'une page d'annuaire. */
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 interface GouvDirigeant {
   type_dirigeant?: string;
@@ -278,8 +283,31 @@ export async function searchCompanies(
   const built = buildSearchParams(criteria, { ...options, perPage });
   if ("error" in built) return { ok: false, error: built.error };
 
-  const response = await fetchJson<GouvResponse>(`${BASE_URL}?${built.params}`);
-  if (!response.ok) return response;
+  // Une page d'annuaire ne bouge pas dans la journée : la mettre en cache 24 h
+  // supprime la quasi-totalité du trafic répété d'un scan à l'autre, et donc
+  // l'essentiel du risque de 429.
+  const key = `gouv:search:${built.params.toString()}`;
+  const data = await cached<GouvResponse>(key, async () => {
+    const outcome = await limitedFetch(`${BASE_URL}?${built.params}`, {
+      key: "annuaire",
+      ratePerSecond: ANNUAIRE_RATE_PER_SECOND,
+      attempts: 3,
+      init: { headers: { Accept: "application/json" } },
+      onRetry: (message) => console.warn(message),
+    });
+    if (!outcome.response?.ok) return null;
+    return (await outcome.response.json()) as GouvResponse;
+  }, ONE_DAY_MS);
+
+  if (!data) {
+    return {
+      ok: false,
+      error:
+        "annuaire momentanément saturé (429) : réessayez dans quelques secondes, " +
+        "le débit est déjà limité côté serveur",
+    };
+  }
+  const response = { ok: true as const, data };
 
   const companies = (response.data.results ?? [])
     .map((raw) => mapResult(raw, built.geoFiltered))

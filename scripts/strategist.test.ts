@@ -26,7 +26,8 @@ import {
   mentionsExactDenomination,
 } from "../lib/enrichment/entity-match";
 import { isAnchored } from "../lib/enrichment/extract";
-import { modelFor, samplingParams } from "../lib/ai/models";
+import { modelFor, reasoningEffortFor } from "../lib/ai/models";
+import { buildParams } from "../lib/ai/params";
 import { envModelPrices, openAiCost } from "../lib/usage/pricing";
 import { buildWritingPrompt } from "../app/api/emails/generate/prompt";
 import { draftFromBrief } from "../app/api/emails/generate/pipeline";
@@ -386,13 +387,16 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     check("OPENAI_MODEL reste le repli", modelFor("writer", { OPENAI_MODEL: "gpt-4.1-mini" }) === "gpt-4.1-mini");
     check("variable de rôle prioritaire", modelFor("judge", { OPENAI_MODEL: "a", OPENAI_MODEL_JUDGE: "b" }) === "b");
 
-    const classic = samplingParams("writer", 0.85, { model: "gpt-4.1-mini", env: {} });
-    check("modèle classique : température conservée", "temperature" in classic && classic.temperature === 0.85);
-    const reasoning = samplingParams("strategist", 0.2, { model: "o3-mini", env: {} });
+    // Les capacites sont desormais decidees par `buildParams` (lib/ai/params).
+    const classic = buildParams({ model: "gpt-4.1-mini", temperature: 0.85 });
+    check("modèle classique : température conservée", classic.temperature === 0.85);
+    const reasoning = buildParams({ model: "o3-mini", temperature: 0.2, reasoningEffort: "medium" });
     check("modèle de raisonnement : pas de température", !("temperature" in reasoning));
-    check("effort de raisonnement du stratège", "reasoning_effort" in reasoning && reasoning.reasoning_effort === "medium");
-    const tuned = samplingParams("strategist", 0.2, { model: "gpt-5", env: { OPENAI_REASONING_EFFORT_STRATEGIST: "high" } });
-    check("effort réglable par variable", "reasoning_effort" in tuned && tuned.reasoning_effort === "high");
+    check("effort de raisonnement transmis", reasoning.reasoning_effort === "medium");
+    check(
+      "effort réglable par variable",
+      reasoningEffortFor("strategist", { OPENAI_REASONING_EFFORT_STRATEGIST: "high" }) === "high",
+    );
 
     const prices = envModelPrices('{"modele-x":{"input":1,"output":4},"casse":{"input":"x"}}');
     check("prix fournis par OPENAI_PRICES_JSON", prices["modele-x"]?.outputPerMillion === 4 && !prices.casse);

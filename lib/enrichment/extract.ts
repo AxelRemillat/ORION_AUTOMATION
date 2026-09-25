@@ -25,7 +25,9 @@
  */
 import { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
-import { samplingParams } from "@/lib/ai/models";
+import { modelFor, reasoningEffortFor } from "@/lib/ai/models";
+import { buildParams } from "@/lib/ai/params";
+import { withParamFallback } from "@/lib/ai/chat";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { cleanText, excerpt, normalizeForMatch, quoteIsGrounded } from "./clean";
 import { parseTextDate, resolvePostedAt, type DateBasis } from "./dates";
@@ -410,20 +412,34 @@ export async function extractSignals(
 
   const user = buildUserPrompt(company, prepared);
 
-  const sampling = samplingParams("extract", 0);
+  const model = modelFor("extract");
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const completion = await getOpenAI().chat.completions.create({
-      ...sampling,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: attempt === 0 ? user : `${user}\n\nTa réponse précédente n'était pas conforme au schéma. Recommence, JSON strict uniquement.` },
-      ],
-    });
+    const content =
+      attempt === 0
+        ? user
+        : `${user}\n\nTa réponse précédente n'était pas conforme au schéma. Recommence, JSON strict uniquement.`;
+
+    // `buildParams` n'envoie que ce que le modele accepte, et le filet rejoue
+    // une fois s'il refuse quand meme : c'est ce qui manquait quand gpt-6-*
+    // a remplace gpt-4o-mini et que `temperature: 0` faisait tomber toute
+    // l'extraction en 400.
+    const completion = await withParamFallback(
+      model,
+      () => buildParams({ model, temperature: 0, reasoningEffort: reasoningEffortFor("extract") }),
+      (params) =>
+        getOpenAI().chat.completions.create({
+          ...(params as { model: string }),
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content },
+          ],
+        }),
+    );
 
     if (completion.usage) {
       await recordOpenAiUsage({
-        model: sampling.model,
+        model,
         promptTokens: completion.usage.prompt_tokens ?? 0,
         completionTokens: completion.usage.completion_tokens ?? 0,
         operation: "extract-signals",

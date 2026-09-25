@@ -29,6 +29,7 @@ import { activeProspects } from "@/lib/trash/scope";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import { draftFromBrief } from "./pipeline";
 import type { Evidence } from "./prompt";
+import { AiCallError } from "@/lib/ai/chat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,7 +123,31 @@ function storedAngle(prospect: Prospect): BriefAngle | null {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * Enveloppe la generation : plus jamais de 500 muette.
+ *
+ * Quand le modele refuse un parametre, l'utilisateur voyait « 500 » sans rien
+ * d'autre — il ne pouvait ni comprendre, ni agir. On rend 502 avec le nom du
+ * modele et le parametre fautif, et le detail part dans les logs serveur.
+ */
 export async function POST(request: Request) {
+  try {
+    return await generate(request);
+  } catch (error) {
+    if (error instanceof AiCallError) {
+      console.error(`[emails/generate] ${error.model} — ${error.message}`, error.cause);
+      return NextResponse.json({ error: error.message }, { status: 502 });
+    }
+    const message = error instanceof Error ? error.message : "erreur inconnue";
+    console.error("[emails/generate] échec inattendu", error);
+    return NextResponse.json(
+      { error: `Génération impossible : ${message}` },
+      { status: 500 },
+    );
+  }
+}
+
+async function generate(request: Request) {
   const session = await requireSession();
   if (!session.ok) return session.response;
 

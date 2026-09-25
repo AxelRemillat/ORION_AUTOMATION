@@ -36,7 +36,7 @@
  * Le juge est le même pour les deux configs (OPENAI_MODEL_JUDGE) : on compare
  * des rédactions, pas des correcteurs.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { chatJson, type AskFn } from "@/lib/ai/chat";
@@ -52,6 +52,23 @@ import type { Prospect } from "@/types";
 import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
 import { averageScore, CRITERIA_LABELS, failingCriteria, type Critique } from "@/app/api/emails/generate/critic";
 import { FIXTURES, REFERENCE_SECTION, type Fixture } from "./eval-fixtures";
+
+/**
+ * Charge `.env.local` : le script doit etre lancable tel quel, sans sourcing
+ * shell prealable. Les valeurs deja presentes dans l'environnement gagnent,
+ * pour qu'un `OPENAI_MODEL_WRITER=x npm run eval:emails` reste possible.
+ */
+function loadEnv(file = ".env.local"): void {
+  if (!existsSync(file)) return;
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line);
+    if (match && !process.env[match[1]]) {
+      process.env[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
+    }
+  }
+}
+loadEnv();
+
 
 // ---------------------------------------------------------------------------
 // Arguments
