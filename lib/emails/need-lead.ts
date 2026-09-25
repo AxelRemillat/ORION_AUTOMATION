@@ -21,6 +21,9 @@ export interface ConfidenceStep {
   applied: boolean;
 }
 
+/** Confiance maximale tant qu'aucun signal daté ne vient confirmer. */
+export const NO_SIGNAL_CEILING = 0.6;
+
 export interface NeedConfidence {
   value: number;
   steps: ConfidenceStep[];
@@ -79,11 +82,17 @@ export function needConfidence(input: {
     { label: "Vocabulaire métier confirmé sur le site", weight: 0.1, applied: input.vocabularyConfirmed },
   ];
 
-  const value = Number(
-    steps.reduce((total, step) => total + (step.applied ? step.weight : 0), 0).toFixed(2),
-  );
+  const raw = steps.reduce((total, step) => total + (step.applied ? step.weight : 0), 0);
 
-  const explanation = steps
+  // Plafond sans signal direct : le site dit ce que l'entreprise VEUT montrer,
+  // jamais ce qu'elle vit. Annoncer 70 % de confiance sur cette seule base
+  // donnait a une lecture de plaquette l'apparence d'une mesure.
+  const value = Number((hasDirectSignal ? raw : Math.min(NO_SIGNAL_CEILING, raw)).toFixed(2));
+
+  const explanation = (hasDirectSignal
+    ? steps
+    : [...steps, { label: `Plafonné à ${NO_SIGNAL_CEILING} : aucun signal direct`, weight: 0, applied: true }]
+  )
     .map((step) => `${step.applied ? "+" : "—"} ${step.label} (${step.applied ? `+${step.weight}` : "0"})`)
     .join("\n");
 

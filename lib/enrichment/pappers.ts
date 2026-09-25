@@ -6,6 +6,7 @@
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
 import { cached } from "./cache";
+import { readPappersHeadcount } from "./headcount";
 import type { Result } from "./http";
 
 const BASE_URL = "https://api.pappers.fr/v2/entreprise";
@@ -154,7 +155,13 @@ export async function fetchPappers(siren: string): Promise<Result<PappersData>> 
       sector: raw.libelle_code_naf ?? raw.domaine_activite ?? null,
       legal_form: raw.forme_juridique ?? null,
       capital_eur: raw.capital ?? null,
-      headcount: finance?.effectif ?? raw.effectif_max ?? raw.effectif_min ?? null,
+      // `effectif_max` seul est un piege : il vaut 500000 pour une fourchette
+      // ouverte (« Au moins 1 salarie »), et c'est ce chiffre qui s'affichait.
+      headcount: readPappersHeadcount({
+        financeHeadcount: finance?.effectif,
+        min: raw.effectif_min,
+        max: raw.effectif_max,
+      }).value,
       revenue_eur: finance?.chiffre_affaires ?? null,
       revenue_year: finance?.chiffre_affaires != null ? (finance.annee ?? null) : null,
       net_income_eur: finance?.resultat ?? null,

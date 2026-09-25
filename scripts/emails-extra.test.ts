@@ -270,10 +270,17 @@ console.log("\n11. Salutation : le dirigeant du registre quand l'adresse est la 
   };
   check("l'adresse porte le nom du dirigeant", emailBelongsTo(contact.email, "Benjamin Dumont"));
   check("une adresse générique ne compte pas", !emailBelongsTo("contact@blue-enerfreeze.com", "Benjamin Dumont"));
+  // Regle revue : « Monsieur + nom » est reserve au registre FACTUEL. En
+  // Direct, Chaleureux et Bref, on appelle les gens par leur prenom.
   check(
-    "salutation formelle depuis le registre",
-    buildGreeting("direct", contact, "Benjamin Dumont") === "Bonjour Monsieur Dumont,",
+    "Direct : prénom, même avec un dirigeant connu",
+    buildGreeting("direct", contact, "Benjamin Dumont") === "Bonjour Benjamin,",
     buildGreeting("direct", contact, "Benjamin Dumont"),
+  );
+  check(
+    "Factuel : Monsieur + nom",
+    buildGreeting("factuel", contact, "Benjamin Dumont") === "Bonjour Monsieur Dumont,",
+    buildGreeting("factuel", contact, "Benjamin Dumont"),
   );
   check(
     "sans correspondance, on retombe sur le prénom",
@@ -299,8 +306,11 @@ console.log("\n13. Indice de besoin : la confiance se calcule");
   const nothing = needConfidence({ facts: [], hasSiteContent: false, vocabularyConfirmed: false });
   check("socle seul = 0,4", nothing.value === 0.4, String(nothing.value));
 
+  // Regle revue : sans signal direct, on plafonne a 0,6. Le site dit ce que
+  // l'entreprise veut montrer, pas ce qu'elle vit — annoncer 70 % sur cette
+  // seule base donnait a une lecture de plaquette l'allure d'une mesure.
   const withSite = needConfidence({ facts: [], hasSiteContent: true, vocabularyConfirmed: true });
-  check("site + vocabulaire = 0,7", withSite.value === 0.7, String(withSite.value));
+  check("site + vocabulaire, sans signal : plafonné à 0,6", withSite.value === 0.6, String(withSite.value));
 
   const signalFacts = buildFacts(
     prospect({

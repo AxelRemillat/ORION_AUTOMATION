@@ -21,6 +21,7 @@ import { toDomain } from "./http";
 import type { CompanyBase } from "./types";
 import type { WebResult } from "./linkup";
 import { mentionsExactDenomination } from "./entity-match";
+import { classifyJobSource, jobTitleIn, listsOffersWithoutTitle, JOB_SOURCE_WEIGHT } from "./job-source";
 
 interface Rule {
   type: string;
@@ -160,6 +161,11 @@ function frenchDate(iso: string): string {
  * publiee chez eux est au contraire une preuve valable de recrutement.
  */
 const REGISTRY_HOSTS = [
+  // Fiches d'entreprise : elles existent pour toute societe immatriculee et
+  // ne disent rien de son actualite. Une offre LinkedIn (/jobs/view/) reste
+  // valable — elle est traitee a part par `classifyJobSource`.
+  "linkedin.com",
+  "fr.linkedin.com",
   "annuaire-entreprises.data.gouv.fr",
   "entreprise.data.gouv.fr",
   "data.gouv.fr",
@@ -268,6 +274,28 @@ export function qualifyWebResults(
     const date = result.date ? extractDate(result.date) : null;
     const foundDate = date ?? extractDate(`${result.title} ${result.snippet}`);
 
+    // --- Recrutement : une offre, pas une page qui en liste ---------------
+    //
+    // Sans ce filtre, « 12 offres d'emploi chez X » sur un agregateur valait
+    // autant qu'une annonce d'automaticien sur le site de l'entreprise.
+    let sourceWeight = 1;
+    let jobTitle: string | null = null;
+    if (rule.type === "recrutement") {
+      const kind = classifyJobSource(result.url, ownDomain);
+      if (kind === "aucune") continue;
+      jobTitle = jobTitleIn(`${result.title} ${result.snippet}`);
+      // Un agregateur ne prouve qu'une chose : l'entreprise existe. On le
+      // garde comme signal faible, jamais comme accroche — et on oublie
+      // l'intitule qu'il aurait devine, il n'est pas fiable.
+      if (kind === "agregateur") {
+        sourceWeight = JOB_SOURCE_WEIGHT.agregateur;
+        if (listsOffersWithoutTitle(result.title)) jobTitle = null;
+      }
+      // Sur une source officielle, l'intitule reste exige : « nous recrutons »
+      // sans metier ne permet ni d'ecrire, ni de juger l'automatisabilite.
+      if (kind === "officielle" && !jobTitle && !onOwnSite) continue;
+    }
+
     let confidence = 0;
     if (named) confidence += 0.5;
     // Etre sur le domaine de l'entreprise vaut identification : c'est sa page.
@@ -286,10 +314,16 @@ export function qualifyWebResults(
     signals.push({
       type: rule.type,
       // Le libelle decrit la PREUVE, jamais une promesse commerciale.
-      label: `${rule.claim} — ${host}${foundDate ? `, ${frenchDate(foundDate)}` : ""}`,
+      label: jobTitle
+        ? `Poste ouvert : ${jobTitle} — ${host}${foundDate ? `, ${frenchDate(foundDate)}` : ""}`
+        : `${rule.claim} — ${host}${foundDate ? `, ${frenchDate(foundDate)}` : ""}`,
       url: result.url,
       source: host,
       ...(foundDate ? { date: foundDate } : {}),
+      ...(jobTitle ? { jobTitle } : {}),
+      // Part des points selon la qualite de la source : un agregateur
+      // generique ne pese qu'un quart, et ne peut pas porter l'accroche.
+      ...(sourceWeight < 1 ? { sourceWeight, weakSource: true } : {}),
       quote: sentence.slice(0, 260),
       confidence,
     });
@@ -313,11 +347,15 @@ export function structuralSignals(
   const size = headcount ?? effectifFloor(company.figures.effectif_code);
 
   if (size != null && size >= 20) {
+    // La confiance croit avec la taille : a 20 personnes le back-office peut
+    // tenir dans un tableur, a 200 il ne tient plus. Sans cette variation,
+    // toutes les entreprises sans actualite recevaient le meme score.
+    const confidence = Math.min(0.7, 0.35 + Math.log10(size / 10) * 0.25);
     signals.push({
       type: "structure",
       label: `Effectif d'au moins ${size} personnes — back-office et reporting à fort volume`,
       source: "Données INSEE",
-      confidence: 0.5,
+      confidence: Number(confidence.toFixed(2)),
     });
   }
   if (company.naf_section === "G" && company.website) {
