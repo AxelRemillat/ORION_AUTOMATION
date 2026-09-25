@@ -312,7 +312,10 @@ STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
 
 REGLES DURES — chacune est verifiee par du code apres generation
 1. SALUTATION, exactement : « ${greeting} » Rien d'autre.
-2. 80 a 110 mots, signature NON COMPRISE. Au plus deux phrases par paragraphe.
+2. EXACTEMENT QUATRE paragraphes, separes par une ligne vide — un par bloc.
+   80 a 110 mots au TOTAL, signature non comprise. UNE seule phrase par
+   paragraphe, sauf le bloc 3 qui peut en avoir deux. C'est cette contrainte
+   qui tient la longueur : un mail de 131 mots est refuse.
 3. UNE SEULE question dans tout le mail : celle du bloc 4.
 4. Aucun chiffre absent des faits autorises. Les arrondis sont permis.
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
