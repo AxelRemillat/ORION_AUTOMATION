@@ -449,6 +449,7 @@ console.log("\n12. Rapprochement : le SIREN fait foi, sinon nom ET commune");
     signals: [{ label: "x" }],
     newLeaders: [],
     capitalAmount: null,
+    jobTitle: null,
     ...over,
   });
 

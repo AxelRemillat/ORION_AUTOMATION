@@ -29,6 +29,7 @@ import { mapWithConcurrency, toDomain } from "./http";
 import { resolveCompany, searchCompanies } from "./gouv";
 import { resolveZone, type ResolvedZone } from "./geo";
 import { bracketOfTranches, checkBracket, outOfBracketReason } from "./headcount";
+import { exclusionOf } from "@/lib/signals/targeting";
 import {
   filterCandidates,
   pagePlan,
@@ -430,6 +431,13 @@ export interface SearchOutcome {
    * la tranche demandee. Une ligne par entreprise, affichee dans le detail.
    */
   outOfBracket: string[];
+  /**
+   * Entreprises ecartees par le CIBLAGE, pas par la tranche : association,
+   * organisme public, entreprise individuelle sans salarie, secteur exclu.
+   * Comptees a part pour qu'un resultat maigre ne passe pas pour un marche
+   * vide alors que c'est un reglage qui filtre.
+   */
+  excluded: string[];
   /** Pages d'annuaire lues pour y arriver. */
   pagesRead: number;
   /** Pourquoi la boucle s'est arretee, en clair. */
@@ -445,6 +453,10 @@ export interface SearchContext {
   onScanned?: (rows: { siren: string; company_name: string; had_signal: boolean }[]) => Promise<void>;
   /** Date du jour, injectee pour rendre la graine testable. */
   today?: string;
+  /** Prefixes NAF ecartes, tels que regles par l'utilisateur. */
+  excludedSectors?: readonly string[];
+  /** Passe outre le ciblage, pour une recherche ponctuelle. */
+  includeExcluded?: boolean;
   /**
    * Avancement, appele apres chaque lot.
    *
@@ -522,6 +534,7 @@ export async function searchAndEnrich(
     unverified: 0,
     skippedKnown: 0,
     outOfBracket: [],
+    excluded: [],
     pagesRead: 1,
     stopReason: STOP_LABELS[stop],
     warnings,
@@ -667,11 +680,23 @@ export async function searchAndEnrich(
   // « 10 a 49 salaries » rendait des entreprises de 99 et 199 personnes.
   const bracket = bracketOfTranches(criteria.tranches);
   const outOfBracket: string[] = [];
+  const excluded: string[] = [];
   const results: EnrichedCompany[] = [];
+
+  // Ciblage applique AVANT la phase 2 : une association ou une auto-ecole ne
+  // doit pas consommer un appel Pappers. Le meme module sert aux deux modes,
+  // pour qu'un reglage ne puisse pas valoir dans l'un et pas dans l'autre.
+  const targeted = context.includeExcluded
+    ? hot
+    : hot.filter((item) => {
+        const exclusion = exclusionOf(item.base, context.excludedSectors ?? []);
+        if (exclusion) excluded.push(exclusion.reason);
+        return !exclusion;
+      });
 
   // On pioche au-dela du plafond pour pouvoir remplacer les ecartees : une
   // entreprise hors tranche ne doit pas consommer une place de fiche.
-  const queue = hot.slice(0, Math.min(hot.length, limit * 2));
+  const queue = targeted.slice(0, Math.min(targeted.length, limit * 2));
 
   // Cible affichee : on ne promet pas cinq fiches si le scan n'a trouve que
   // deux entreprises a signal.
@@ -725,6 +750,7 @@ export async function searchAndEnrich(
     unverified,
     skippedKnown,
     outOfBracket,
+    excluded,
     pagesRead,
     stopReason: STOP_LABELS[stop],
     warnings: dedupeWarnings(results, warnings),

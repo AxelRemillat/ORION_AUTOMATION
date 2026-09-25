@@ -14,6 +14,8 @@ export interface SignalCriteriaInput {
   /** Fenêtre d'antériorité, en jours. */
   days: number;
   limit: number;
+  /** Passe outre le ciblage, le temps d'une recherche. */
+  includeExcluded: boolean;
 }
 
 const EMPTY: SignalCriteriaInput = {
@@ -21,6 +23,7 @@ const EMPTY: SignalCriteriaInput = {
   size: "petite",
   days: DEFAULT_SIGNAL_DAYS,
   limit: DEFAULT_ANALYSIS_LIMIT,
+  includeExcluded: false,
 };
 
 /**
@@ -149,6 +152,15 @@ export function SignalsForm({
           ))}
         </ul>
       )}
+
+      <label className="flex items-center gap-2 text-[12px] text-muted">
+        <input
+          type="checkbox"
+          checked={criteria.includeExcluded}
+          onChange={(event) => update("includeExcluded", event.target.checked)}
+        />
+        Inclure les exclus (associations, organismes publics, secteurs écartés)
+      </label>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-[46rem] text-[13px] leading-snug text-muted">

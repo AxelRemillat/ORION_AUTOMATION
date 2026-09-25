@@ -130,6 +130,36 @@ export interface ProspectKeyFigures {
   site_status?: "lu" | "trouvé" | "non trouvé";
   /** Entités homonymes écartées : leur nom ne doit jamais sortir dans un mail. */
   foreign_entities?: string[];
+  /**
+   * FAITS DU SIGNAL qui a fait remonter la fiche.
+   *
+   * Stockés à plat et en clair, parce qu'ils sont relus bien plus tard —
+   * la fiche vit des semaines après la recherche qui l'a trouvée, et le signal
+   * d'origine n'est alors plus recalculable : une annonce BODACC sort de la
+   * fenêtre de 60 jours, une offre d'emploi est dépubliée.
+   */
+  signal_source?: "bodacc" | "france-travail";
+  signal_type?: string;
+  signal_strength?: "fort" | "moyen" | "faible";
+  /** Date ISO du signal principal. */
+  signal_date?: string;
+  /** Formulation lisible du fait, telle qu'affichée sur la carte. */
+  signal_label?: string;
+  /** Nombre d'annonces retenues pour cette entreprise sur la fenêtre. */
+  signal_count?: number;
+  /** Dirigeant entrant nommé par l'annonce : prénom puis nom. */
+  new_leader_name?: string;
+  /** Fonction prise (« gérant », « président », « directeur général »). */
+  new_leader_role?: string;
+  /** Offre d'emploi : intitulé publié et date de publication. */
+  job_title?: string;
+  job_posted_at?: string;
+  /**
+   * Capital déclaré APRÈS l'opération. Le précédent n'est pas publié par
+   * BODACC : le sens du mouvement n'est donc pas connu depuis cette valeur
+   * seule, et rien ici ne doit laisser croire à une augmentation.
+   */
+  capital_after_eur?: number;
   [key: string]: unknown;
 }
 
@@ -438,6 +468,22 @@ export type SearchRun = {
   updated_at: string;
 };
 
+/**
+ * Réglages de recherche d'un utilisateur.
+ *
+ * `excluded_sectors` contient des PRÉFIXES NAF, pas des codes complets :
+ * « 8553Z » vise les auto-écoles, « 85 » viserait tout l'enseignement.
+ */
+export type SearchSettings = {
+  user_id: string;
+  excluded_sectors: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type SearchSettingsInsert = Insert<SearchSettings, "excluded_sectors">;
+export type SearchSettingsUpdate = Update<SearchSettings>;
+
 export type SearchRunInsert = Insert<
   SearchRun,
   "criteria" | "status" | "progress" | "results" | "warnings" | "error" | "stop_requested"
@@ -511,6 +557,12 @@ export type Database = {
         Row: InboundMessage;
         Insert: InboundMessageInsert;
         Update: InboundMessageUpdate;
+        Relationships: [];
+      };
+      search_settings: {
+        Row: SearchSettings;
+        Insert: SearchSettingsInsert;
+        Update: SearchSettingsUpdate;
         Relationships: [];
       };
       search_runs: {

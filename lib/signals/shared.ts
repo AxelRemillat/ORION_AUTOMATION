@@ -7,7 +7,16 @@
  * formes — rien qui appelle quoi que ce soit.
  */
 
-export type SignalSourceId = "bodacc" | "france-travail";
+export type SignalSourceId = "bodacc" | "france-travail" | "labonneboite";
+
+/**
+ * Sources qui produisent réellement des candidats.
+ *
+ * La Bonne Boite est déclarée à l'écran (« non activée ») mais n'est jamais
+ * interrogée : son autorisation n'est pas accordée. Elle ne peut donc pas être
+ * l'origine d'une fiche, et le type le dit.
+ */
+export type ProducingSourceId = Exclude<SignalSourceId, "labonneboite">;
 
 /** Ce que l'écran affiche pour chaque source, y compris indisponible. */
 export interface SignalSourceState {

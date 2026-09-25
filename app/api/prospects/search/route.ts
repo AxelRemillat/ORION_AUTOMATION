@@ -3,6 +3,7 @@ import { clampAnalysisLimit, clampScanWidth, searchAndEnrich } from "@/lib/enric
 import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { finishRun, isStopRequested, saveProgress } from "@/lib/search/runs";
+import { readExcludedSectors } from "@/lib/signals/settings";
 import { readJson, requireSession } from "../_guard";
 
 export const runtime = "nodejs";
@@ -33,6 +34,8 @@ interface SearchBody {
   runId?: string;
   /** Autorise le depassement jusqu'au plafond de 3x (defaut : oui). */
   goFurther?: boolean;
+  /** Passe outre le ciblage pour cette recherche seulement. */
+  includeExcluded?: boolean;
 }
 
 /**
@@ -56,6 +59,10 @@ export async function POST(request: Request) {
   const exclude = await knownSirens(session.supabase).catch(() => new Set<string>());
 
   const runId = typeof body.runId === "string" ? body.runId : null;
+  const includeExcluded = body.includeExcluded === true;
+  // Un reglage illisible ne bloque pas une recherche : `readExcludedSectors`
+  // retombe sur les valeurs par defaut.
+  const excludedSectors = includeExcluded ? [] : await readExcludedSectors(session.supabase);
 
   const outcome = await searchAndEnrich(
     {
@@ -70,6 +77,8 @@ export async function POST(request: Request) {
     },
     {
       exclude,
+      excludedSectors,
+      includeExcluded,
       // L'avancement et l'arret ne servent qu'au mode suivi : sans `runId`,
       // aucun de ces deux appels n'est pose, donc aucune requete en plus.
       ...(runId
