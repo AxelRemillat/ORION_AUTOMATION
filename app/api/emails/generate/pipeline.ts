@@ -3,7 +3,7 @@ import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { validateEmail, type ValidationResult } from "@/lib/emails/validate";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
-import { chooseProof, signatureFor } from "@/lib/offer/model";
+import { chooseProof, entryOfferLabel, promiseLines, signatureFor } from "@/lib/offer/model";
 import type { UserOffer } from "@/types";
 import type { ToneKey } from "@/lib/tones";
 import {
@@ -68,6 +68,14 @@ export interface DraftOutcome {
  * Le validateur les refusait comme « absents des faits », ce qui faisait
  * echouer tout mail qui annonçait un delai.
  */
+/** Ce qu'Axel s'engage a faire : le juge n'a pas a l'exiger des faits. */
+export function commitmentsOf(offer: UserOffer): string[] {
+  const entry = entryOfferLabel(offer);
+  return [...promiseLines(offer), entry ? `propose ${entry}` : null].filter(
+    (line): line is string => Boolean(line),
+  );
+}
+
 export function offerNumbers(offer: UserOffer): number[] {
   const found = new Set<number>();
   for (const text of [offer.lead_time, offer.entry_duration, offer.entry_pitch]) {
@@ -141,7 +149,7 @@ ${signature}` } : null;
     ).then(parseEmail).then(sign);
 
   const judge = (email: GeneratedEmail, operation: string) =>
-    ask("judge", buildCriticPrompt(allowedFacts, publicProofsOf(input.offer)), buildCriticContext(brief, email), 0, operation).then(
+    ask("judge", buildCriticPrompt(allowedFacts, publicProofsOf(input.offer), commitmentsOf(input.offer)), buildCriticContext(brief, email), 0, operation).then(
       parseCritique,
     );
 
