@@ -55,8 +55,10 @@ const BLACKLIST = [
   "annonce legale",
   "annonces legales",
   "journal officiel",
-  "au registre",
-  "du registre",
+  // « au registre » et « du registre » ne suffisaient pas : un mail est sorti
+  // avec « Le registre indique que… ». Le mot lui-meme n'a aucune raison
+  // d'apparaitre dans un mail a froid, quelle que soit la preposition.
+  "registre",
 ];
 
 /** Le créneau de 30 minutes est un élément de CTA, pas une donnée chiffrée. */
