@@ -6,7 +6,7 @@ import { formatEur } from "@/lib/utils";
 import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { EnrichedCompany } from "@/lib/enrichment/types";
 import { HeatGauge } from "./heat-gauge";
-import { ExampleTag, MetaChip, SignalChip } from "./signal-chip";
+import { ExampleTag, MetaChip, SignalChip, StrengthBadge, strengthRank } from "./signal-chip";
 import { WhyNowCard } from "./why-now";
 import Link from "next/link";
 
@@ -106,8 +106,18 @@ export function ResultCard({
     (typeof figures.parent_company === "string" && figures.parent_company) ||
     null;
 
-  // Types de signaux distincts, pour ne pas répéter la même puce.
-  const chipTypes = [...new Set((company.signals ?? []).map((signal) => signal.type ?? "presse"))];
+  // Types de signaux distincts, pour ne pas répéter la même puce. Chaque puce
+  // porte la force du MEILLEUR signal de son type : une entreprise peut avoir
+  // une preuve solide et une anecdote sur le même thème.
+  const signals = company.signals ?? [];
+  const chipTypes = [...new Set(signals.map((signal) => signal.type ?? "presse"))];
+  const bestOf = (type: string) =>
+    signals
+      .filter((signal) => (signal.type ?? "presse") === type)
+      .sort((a, b) => strengthRank(b.strength) - strengthRank(a.strength))[0];
+  const bestStrength = signals
+    .map((signal) => signal.strength)
+    .sort((a, b) => strengthRank(b) - strengthRank(a))[0];
 
   return (
     <Card className="flex flex-col">
@@ -116,7 +126,10 @@ export function ResultCard({
           <h3 className="text-[15px] font-semibold tracking-tight" style={{ color: "var(--text)" }}>
             {company.company_name}
           </h3>
-          {!score.real && <ExampleTag label="score exemple" />}
+          <span className="flex shrink-0 items-center gap-1.5">
+            <StrengthBadge strength={bestStrength} />
+            {!score.real && <ExampleTag label="score exemple" />}
+          </span>
         </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -151,7 +164,8 @@ export function ResultCard({
               <SignalChip
                 key={type}
                 type={type}
-                title={company.signals.find((s) => (s.type ?? "presse") === type)?.label}
+                title={bestOf(type)?.label}
+                strength={bestOf(type)?.strength}
               />
             ))}
           </div>

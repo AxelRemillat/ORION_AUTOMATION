@@ -62,11 +62,17 @@ export interface ProspectSignal {
   label: string;
   url?: string;
   /**
-   * « faible » quand la preuve tient mais que sa source est un agrégateur ou
-   * qu'elle n'est pas datée. Un signal faible reste AFFICHÉ, classé plus bas :
-   * l'écarter faisait perdre 45 % des résultats du scan.
+   * Force commerciale de la preuve.
+   *
+   * « faible » quand la preuve tient mais que sa source est un agrégateur, ou
+   * qu'elle n'est pas datée, ou que le fait n'engage personne (un changement de
+   * dénomination). Un signal faible reste AFFICHÉ, classé plus bas : l'écarter
+   * faisait perdre 45 % des résultats du scan.
+   *
+   * « fort » est réservé à un fait engageant et daté — nouveau dirigeant,
+   * mouvement de capital, reprise de fonds, offre d'emploi publiée.
    */
-  strength?: "faible";
+  strength?: "fort" | "moyen" | "faible";
   /** Date ISO du signal, telle que fournie par la source. */
   date?: string;
   source?: string;
