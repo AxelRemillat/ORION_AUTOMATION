@@ -40,7 +40,7 @@ import {
   type ScanStop,
 } from "./scan-plan";
 import { fetchPappers, hasPappersKey } from "./pappers";
-import { fetchWebResults, hasLinkupKey } from "./linkup";
+import { fetchWebResults, LINKUP_CONCURRENCY, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
 import { extractSignals, type Extraction } from "./extract";
@@ -69,7 +69,9 @@ const CONCURRENCY = 4;
  * repondait 429 (« page 463/41/57 illisible »). Le limiteur de debit protege
  * deja l'annuaire ; borner la concurrence protege les autres sources.
  */
-const SCAN_CONCURRENCY = 3;
+// Concurrence du scan = celle de Linkup, mesuree, et distincte du limiteur de
+// l'annuaire (qui ne vaut que pour recherche-entreprises.api.gouv.fr).
+const SCAN_CONCURRENCY = LINKUP_CONCURRENCY;
 
 /** Colonnes chiffrees deja fournies gratuitement par l'annuaire public. */
 function baseKeyFigures(base: CompanyBase): ProspectKeyFigures {
@@ -389,6 +391,12 @@ export interface SearchOutcome {
   withSignal: number;
   /** Enrichissements profonds (Pappers) reellement effectues. */
   analysed: number;
+  /**
+   * Entreprises dont l'appel Linkup a echoue : elles ne sont NI chaudes NI
+   * froides, on ne sait rien d'elles. Les confondre avec « sans signal »
+   * faisait passer une panne reseau pour un marche vide.
+   */
+  unverified: number;
   /** Entreprises ecartees parce que deja vues (prospects, favoris, scan < 30 j). */
   skippedKnown: number;
   /**
@@ -485,6 +493,7 @@ export async function searchAndEnrich(
     scanned: 0,
     withSignal: 0,
     analysed: 0,
+    unverified: 0,
     skippedKnown: 0,
     outOfBracket: [],
     pagesRead: 1,
@@ -523,6 +532,8 @@ export async function searchAndEnrich(
   type Scanned = Awaited<ReturnType<typeof scanSignals>>;
   const hot: Scanned[] = [];
   let scannedCount = 0;
+  /** Entreprises dont l'appel Linkup a echoue : ni chaudes, ni froides. */
+  let unverified = 0;
 
   for (const page of plan) {
     if (context.shouldStop && (await context.shouldStop())) {
@@ -563,10 +574,16 @@ export async function searchAndEnrich(
     }
 
     const scanned = await mapWithConcurrency(batch, SCAN_CONCURRENCY, scanSignals);
-    scannedCount += batch.length;
 
     for (const item of scanned) {
-      if (item.warning) warnings.push(item.warning);
+      if (item.warning) {
+        // Un appel perdu n'est PAS une entreprise sans signal : on ne sait
+        // simplement rien d'elle. La compter comme froide serait un mensonge.
+        unverified += 1;
+        warnings.push(item.warning);
+        continue;
+      }
+      scannedCount += 1;
       if (hasProvenSignal(item.signals)) hot.push(item);
     }
 
@@ -679,6 +696,7 @@ export async function searchAndEnrich(
     scanned: scannedCount,
     withSignal: hot.length,
     analysed: results.length,
+    unverified,
     skippedKnown,
     outOfBracket,
     pagesRead,

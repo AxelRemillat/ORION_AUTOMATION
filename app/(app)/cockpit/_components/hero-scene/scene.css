@@ -1,109 +1,99 @@
 /**
- * Scene decorative de l'en-tete du Cockpit.
+ * Scène de l'en-tête du Cockpit.
  *
- * Tout est en CSS : le basculement jour / nuit reprend EXACTEMENT les
- * selecteurs de theme de globals.css, si bien qu'aucun JavaScript ne lit le
- * theme. Les deux scenes sont dans le DOM en permanence et se croisent en
- * opacite — c'est ce qui garantit l'absence d'ecart d'hydratation.
- *
- * Les animations ne touchent que `transform` et `opacity`.
+ * Le canvas (ciel et mer) est fondu vers la gauche par un masque long ; le
+ * premier plan ne l'est pas, pour que la lune et le palmier restent entiers.
+ * Le basculement jour / nuit reprend les sélecteurs de thème de globals.css :
+ * le CSS croise les illustrations, la boucle croise le shader, 800 ms chacun.
  */
 
-/* Le masque depend de l'orientation du bandeau : a droite sur large ecran,
-   en haut sur mobile ou la scene devient une baniere. */
-.hero-scene {
-  -webkit-mask-image: linear-gradient(to bottom, black 68%, transparent);
-  mask-image: linear-gradient(to bottom, black 68%, transparent);
+.hero-scene__sky {
+  -webkit-mask-image: linear-gradient(to bottom, black 62%, transparent);
+  mask-image: linear-gradient(to bottom, black 62%, transparent);
 }
 
 @media (min-width: 640px) {
-  .hero-scene {
-    -webkit-mask-image: linear-gradient(to right, transparent, black 35%);
-    mask-image: linear-gradient(to right, transparent, black 35%);
+  .hero-scene__sky {
+    -webkit-mask-image: linear-gradient(to right, transparent, rgb(0 0 0 / 0.25) 10%, rgb(0 0 0 / 0.75) 22%, black 32%);
+    mask-image: linear-gradient(to right, transparent, rgb(0 0 0 / 0.25) 10%, rgb(0 0 0 / 0.75) 22%, black 32%);
   }
 }
 
-.hero-scene__layer {
-  position: absolute;
-  inset: 0;
-  transition: opacity 600ms ease-in-out;
+/* Couche 3 de la parallaxe (--mx / --my : -1 → 1, posés par la boucle). */
+.hero-fg {
+  transform: translate(calc(var(--mx, 0) * -7px), calc(var(--my, 0) * -3px));
 }
 
-/* Jour par defaut ; la nuit prend le relais aux memes conditions que les
-   tokens sombres : preference systeme non contredite, ou choix explicite. */
-.hero-scene__day {
-  opacity: 1;
+/* --- Jour ↔ nuit ----------------------------------------------------------- */
+.hero-fg__day,
+.hero-fg__night {
+  transition: opacity 800ms ease-in-out;
 }
-.hero-scene__night {
-  opacity: 0;
-}
+.hero-fg__day { opacity: 1; }
+.hero-fg__night { opacity: 0; visibility: hidden; transition: opacity 800ms ease-in-out, visibility 0s 800ms; }
+.hero-fg__moon { transform: translateY(22%); transition: transform 800ms ease-in-out; }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .hero-scene__day {
-    opacity: 0;
-  }
-  :root:not([data-theme="light"]) .hero-scene__night {
-    opacity: 1;
-  }
+  :root:not([data-theme="light"]) .hero-fg__day { opacity: 0; visibility: hidden; transition: opacity 800ms ease-in-out, visibility 0s 800ms; }
+  :root:not([data-theme="light"]) .hero-fg__night { opacity: 1; visibility: visible; transition-delay: 0s; }
+  :root:not([data-theme="light"]) .hero-fg__moon { transform: translateY(0); }
+}
+:root[data-theme="dark"] .hero-fg__day { opacity: 0; visibility: hidden; transition: opacity 800ms ease-in-out, visibility 0s 800ms; }
+:root[data-theme="dark"] .hero-fg__night { opacity: 1; visibility: visible; transition-delay: 0s; }
+:root[data-theme="dark"] .hero-fg__moon { transform: translateY(0); }
+
+/* --- Palmier : deux découpes de la même image ------------------------------ */
+/* La plage (bas) reste fixe ; le palmier (haut) se balance autour du pied du
+   tronc (≈ 81 % / 84 % de l'image). Les découpes se chevauchent de 1 % autour
+   de 76 % : sans ce recouvrement, l'anticrénelage laisse un filet clair. */
+.hero-fg__sand { clip-path: inset(75.5% 0 0 0); }
+.hero-fg__palm {
+  clip-path: inset(0 0 23.5% 0);
+  transform-origin: 81% 84%;
+  animation: hero-palm-sway 7s ease-in-out infinite alternate;
+}
+@keyframes hero-palm-sway {
+  from { transform: rotate(-0.9deg); }
+  to { transform: rotate(1.3deg); }
 }
 
-:root[data-theme="dark"] .hero-scene__day {
+/* --- Lune et ligne de pêche ------------------------------------------------ */
+.hero-fg__night .hero-fg__moon > picture img,
+.hero-fg__night .hero-fg__moon > svg {
+  animation: hero-moon-bob 9s ease-in-out infinite alternate;
+}
+@keyframes hero-moon-bob {
+  from { translate: 0 -1.2%; }
+  to { translate: 0 1.2%; }
+}
+
+.fishing-line {
+  stroke: rgb(var(--rgb-warn) / 0.55);
+  stroke-width: 0.35;
+  stroke-linecap: round;
+  transition: transform 800ms ease-in;
+}
+.fishing-pendulum { animation: hero-swing 3.6s ease-in-out infinite alternate; }
+@keyframes hero-swing {
+  from { transform: rotate(-7deg); }
+  to { transform: rotate(7deg); }
+}
+.fishing-star { transition: transform 900ms cubic-bezier(0.4, 0, 0.2, 1), opacity 600ms; }
+.fishing-star[data-phase="fly"] {
+  transition: transform 1400ms cubic-bezier(0.5, 0, 0.9, 0.4), opacity 1400ms;
   opacity: 0;
 }
-:root[data-theme="dark"] .hero-scene__night {
-  opacity: 1;
+.fishing-star__halo { animation: hero-star-pulse 2.4s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: center; }
+@keyframes hero-star-pulse {
+  from { opacity: 0.55; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1.15); }
 }
 
-/* Bonus : pendant le fondu, le soleil se couche et la lune se leve. */
-.scene-sun-group,
-.scene-moon-group {
-  transition: transform 600ms ease-in-out;
-}
-.scene-sun-group {
-  transform: translateY(0);
-}
-.scene-moon-group {
-  transform: translateY(64px);
-}
+/* --- Pause et mouvement réduit --------------------------------------------- */
+.hero-scene[data-paused="true"] * { animation-play-state: paused !important; }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .scene-sun-group {
-    transform: translateY(76px);
-  }
-  :root:not([data-theme="light"]) .scene-moon-group {
-    transform: translateY(0);
-  }
+@media (prefers-reduced-motion: reduce) {
+  .hero-scene *,
+  .hero-scene *::before { animation: none !important; }
+  .hero-fg { transform: none; }
 }
-:root[data-theme="dark"] .scene-sun-group {
-  transform: translateY(76px);
-}
-:root[data-theme="dark"] .scene-moon-group {
-  transform: translateY(0);
-}
-
-/* Pivots de rotation.
-   `transform-box: fill-box` cale l'origine sur la boite propre de l'element :
-   sans lui, l'origine se rapporte au systeme du viewBox et une palme greffee
-   sur un groupe deja translate tournerait autour d'un point arbitraire. */
-.scene-pivot-top {
-  transform-box: fill-box;
-  transform-origin: 50% 0%;
-}
-.scene-pivot-corner {
-  transform-box: fill-box;
-  transform-origin: 0% 100%;
-}
-
-/* --------------------------------------------------------------------------
-   Mise en pause — hors ecran ou onglet cache.
-   `animation-play-state` fige sans reinitialiser : la scene reprend ou elle
-   s'etait arretee.
-   -------------------------------------------------------------------------- */
-.hero-scene[data-paused="true"] * {
-  animation-play-state: paused !important;
-}
-
-/* --------------------------------------------------------------------------
-   Animations. Les etats de BASE sont deja composes : en mouvement reduit,
-   toutes les animations sont coupees et la scene reste jolie, figee.
-   -------------------------------------------------------------------------- */

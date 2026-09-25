@@ -12,6 +12,8 @@ export interface ScanStats {
   analysed: number;
   /** Plafond demandé par l'utilisateur. */
   requested: number;
+  /** Appels Linkup perdus : ni chaudes, ni froides. */
+  unverified?: number;
   /** `true` quand l'annuaire plafonne son total : « plus de 10 000 ». */
   totalCapped?: boolean;
   /** Zone réellement appliquée (« Paris (75) »). */
@@ -68,6 +70,13 @@ export function ScanSummary({ scan }: { scan: ScanStats }) {
         <Figure value={scan.scanned} label="scannées" />
         <Figure value={scan.withSignal} label="avec signal" />
         <Figure value={scan.analysed} label="fiches ouvertes" />
+        {/* Un appel perdu n'est pas une entreprise froide : il se compte a part. */}
+        {scan.unverified ? (
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-data text-sm font-semibold text-warn-ink">{scan.unverified}</span>
+            <span className="text-[12px] text-muted">non vérifiées</span>
+          </span>
+        ) : null}
 
         {scan.total > scan.scanned && (
           <span className="text-[12px] text-faint">

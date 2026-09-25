@@ -37,6 +37,8 @@ interface SearchResponse {
   withSignal: number;
   /** Fiches Pappers reellement ouvertes (phase 2). */
   analysed: number;
+  /** Appels Linkup perdus, comptes a part. */
+  unverified?: number;
   /** `true` quand le total de l'annuaire est plafonne. */
   totalCapped?: boolean;
   /** Zone reellement appliquee, telle que resolue. */
@@ -186,6 +188,7 @@ export function RechercheClient() {
         scan: {
           total: data.total,
           scanned: data.scanned ?? 0,
+          unverified: data.unverified ?? 0,
           withSignal: data.withSignal ?? data.results.length,
           analysed: data.analysed ?? data.results.length,
           // Une recherche sauvegardee avant la refonte n'a pas de plafond.

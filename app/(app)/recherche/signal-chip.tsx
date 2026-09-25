@@ -18,11 +18,24 @@ const TONE_CLASS: Record<SignalTone, string> = {
 const BASE =
   "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4";
 
-export function SignalChip({ type, title }: { type: string | undefined; title?: string }) {
+export function SignalChip({
+  type,
+  title,
+  strength,
+}: {
+  type: string | undefined;
+  title?: string;
+  /** « faible » : preuve tenue mais source ou datation incertaine. */
+  strength?: "faible";
+}) {
   const meta = signalMeta(type);
+  // Un signal faible garde sa couleur de type mais se declare : il ne doit ni
+  // disparaitre, ni se faire passer pour une actualite datee.
+  const tone = strength === "faible" ? TONE_CLASS.cool : TONE_CLASS[meta.tone];
   return (
-    <span title={title} className={`${BASE} ${TONE_CLASS[meta.tone]}`}>
+    <span title={title} className={`${BASE} ${tone}`}>
       {meta.label}
+      {strength === "faible" && <span className="opacity-70">· faible</span>}
     </span>
   );
 }
