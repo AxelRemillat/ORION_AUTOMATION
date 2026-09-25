@@ -407,6 +407,37 @@ export type InboundMessageInsert = Insert<
 > & { user_id: string };
 export type InboundMessageUpdate = Update<InboundMessage>;
 
+/** Etat d'un scan suivi en direct. */
+export const SEARCH_RUN_STATUSES = ["running", "done", "stopped", "error"] as const;
+export type SearchRunStatus = (typeof SEARCH_RUN_STATUSES)[number];
+
+/**
+ * Un lancement de recherche, observable pendant qu'il tourne.
+ *
+ * `results` reste en jsonb : ce sont des entreprises enrichies, pas encore des
+ * prospects. Les normaliser obligerait à les détruire au scan suivant.
+ */
+export type SearchRun = {
+  id: string;
+  user_id: string;
+  criteria: Record<string, unknown>;
+  status: SearchRunStatus;
+  progress: Record<string, unknown>;
+  results: unknown[];
+  warnings: unknown[];
+  error: string | null;
+  /** Passe à vrai quand l'utilisateur clique « Arrêter » ; le scan le relit. */
+  stop_requested: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SearchRunInsert = Insert<
+  SearchRun,
+  "criteria" | "status" | "progress" | "results" | "warnings" | "error" | "stop_requested"
+>;
+export type SearchRunUpdate = Update<SearchRun>;
+
 export type ApiUsageInsert = Insert<ApiUsage, "units" | "unit_cost" | "cost" | "prospect_id">;
 export type ApiUsageUpdate = Update<ApiUsage>;
 
@@ -474,6 +505,12 @@ export type Database = {
         Row: InboundMessage;
         Insert: InboundMessageInsert;
         Update: InboundMessageUpdate;
+        Relationships: [];
+      };
+      search_runs: {
+        Row: SearchRun;
+        Insert: SearchRunInsert;
+        Update: SearchRunUpdate;
         Relationships: [];
       };
       api_usage: {

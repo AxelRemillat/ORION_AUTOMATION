@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, SearchX } from "lucide-react";
 import { Card, CardContent, EmptyState, Skeleton, useToast } from "@/components/ui";
@@ -14,7 +14,9 @@ import { ResultCard, type AddState, type FavoriteState } from "./result-card";
 import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
 import { DEFAULT_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
+import { ScanProgress } from "./scan-progress";
 import { ScanSummary, type ScanStats } from "./scan-summary";
+import { useSearchRun } from "./use-search-run";
 import { SignalFilters } from "./signal-filters";
 
 type Mode = "auto" | "manuel" | "favoris";
@@ -60,6 +62,11 @@ export function RechercheClient() {
   const toast = useToast();
   const [mode, setMode] = useState<Mode>("auto");
   const [loading, setLoading] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  /** Identifiant du scan suivi : tant qu'il vit, la barre s'affiche. */
+  const [runId, setRunId] = useState<string | null>(null);
+  /** Vrai une fois le dernier scan relu : evite d'ecraser sa reprise. */
+  const restored = useRef(false);
   const [searched, setSearched] = useState(false);
   const [results, setResults] = useState<EnrichedCompany[]>([]);
   const [warnings, setWarnings] = useState<EnrichmentWarning[]>([]);
@@ -114,8 +121,28 @@ export function RechercheClient() {
     );
   }, [sorted, signalFilter]);
 
+  // Sondage du dernier scan : rapide sur cet ecran, c'est lui qui alimente la
+  // barre et qui restitue les resultats au retour sur la page.
+  const { run, loaded } = useSearchRun(1_000);
+  const running = run?.status === "running";
+
+  useEffect(() => {
+    // Une seule reprise, au premier chargement : ensuite c'est la recherche en
+    // cours qui fait autorite, pas la ligne en base.
+    if (!loaded || restored.current) return;
+    restored.current = true;
+    if (!run) return;
+
+    setRunId(run.status === "running" ? run.id : null);
+    if (run.results.length) {
+      setResults(run.results as EnrichedCompany[]);
+      setWarnings(run.warnings as EnrichmentWarning[]);
+      setSearched(true);
+    }
+  }, [loaded, run]);
+
   /** Enveloppe commune aux deux modes : reset, appel, gestion d'erreur. */
-  async function run(
+  async function runSearch(
     request: () => Promise<{
       results: EnrichedCompany[];
       warnings: EnrichmentWarning[];
@@ -145,8 +172,16 @@ export function RechercheClient() {
 
   const searchAuto = (criteria: SearchCriteriaInput) => {
     setLastCriteria(criteria);
-    return run(async () => {
-      const data = await postJson<SearchResponse>("/api/prospects/search", criteria);
+    return runSearch(async () => {
+      // Le job est ouvert AVANT le travail : l'ecran a son identifiant tout de
+      // suite, donc la barre apparait des la premiere seconde.
+      const opened = await postJson<{ id: string }>("/api/search/runs", criteria);
+      setRunId(opened.id);
+      const data = await postJson<SearchResponse>("/api/prospects/search", {
+        ...criteria,
+        runId: opened.id,
+      });
+      setRunId(null);
       return {
         results: data.results,
         warnings: data.warnings,
@@ -171,7 +206,7 @@ export function RechercheClient() {
 
   const searchManual = (query: string) => {
     setLastCriteria(null);
-    return run(async () => {
+    return runSearch(async () => {
       const data = await postJson<{ result: EnrichedCompany }>("/api/prospects/enrich", { query });
       return { results: [data.result], warnings: data.result.warnings };
     });
@@ -292,6 +327,24 @@ export function RechercheClient() {
           )}
         </CardContent>
       </Card>
+
+      {runId && running && run && (
+        <ScanProgress
+          run={run}
+          stopping={stopping}
+          onStop={async () => {
+            setStopping(true);
+            try {
+              await postJson(`/api/search/runs/${runId}/stop`, {});
+              toast.toast("Arrêt demandé : le lot en cours se termine.");
+            } catch {
+              toast.error("Impossible de demander l'arrêt.");
+            } finally {
+              setStopping(false);
+            }
+          }}
+        />
+      )}
 
       {error && <ErrorBanner message={error} />}
       <WarningBanner warnings={warnings} />
