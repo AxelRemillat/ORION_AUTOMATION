@@ -8,7 +8,12 @@
  *
  * Execution : `npm run test:signals` (aucune dependance de test).
  */
-import { isRegistryHost, maskCompanyName, qualifyWebResults } from "../lib/enrichment/signals";
+import {
+  isRegistryHost,
+  maskCompanyName,
+  qualifyWebResults,
+  type QualifyTrace,
+} from "../lib/enrichment/signals";
 import type { WebResult } from "../lib/enrichment/linkup";
 import { heatScore, whyNow } from "../lib/scoring";
 import type { ProspectSignal } from "../types";
@@ -226,6 +231,86 @@ console.log("\n7. Un mot-cle present dans la RAISON SOCIALE n'est pas un signal"
     "une offre d'emploi reelle reste un signal",
     realJob.some((signal) => signal.type === "recrutement"),
     JSON.stringify(realJob.map((signal) => signal.type)),
+  );
+}
+
+console.log("\n8. Un signal faible est CONSERVE, jamais elimine");
+{
+  // Regression : 45 % des resultats Linkup etaient jetes parce que l'hote est
+  // un agregateur, AVANT meme de regarder s'ils prouvaient quelque chose. Sur
+  // 20 entreprises reelles, cela faisait passer 3 signaux a 1.
+  // Un evenement atteste, mais republie par un agregateur : la preuve tient,
+  // la source inspire moins confiance. Avant, l'hote suffisait a tout jeter.
+  const onAggregator = qualifyWebResults(
+    [
+      web({
+        title: "Theta Software - Societe.com",
+        url: "https://www.societe.com/societe/theta-software.html",
+        snippet:
+          "Theta Software annonce l'ouverture d'un nouveau site de production à Lyon cette année.",
+      }),
+    ],
+    { name: "THETA SOFTWARE" },
+  );
+  check("l'agregateur produit un signal", onAggregator.length === 1, JSON.stringify(onAggregator));
+  check("il est marque faible", onAggregator[0]?.strength === "faible", onAggregator[0]?.strength);
+
+  // Le garde-fou propre au recrutement reste entier : une fiche d'annuaire
+  // n'est pas une offre d'emploi, quelle que soit la souplesse sur l'hote.
+  const fakeJob = qualifyWebResults(
+    [
+      web({
+        title: "Zeta Technologies - Societe.com",
+        url: "https://www.societe.com/societe/zeta-technologies.html",
+        snippet: "Zeta Technologies recrute un gestionnaire ADV en CDI.",
+        date: "2026-09-12",
+      }),
+    ],
+    { name: "ZETA TECHNOLOGIES" },
+  );
+  check("une fiche d'annuaire n'est pas une offre", fakeJob.length === 0, JSON.stringify(fakeJob));
+
+  // Non datee : la preuve tient, mais on ne la presente pas comme recente.
+  const undated = qualifyWebResults(
+    [
+      web({
+        title: "Theta Software lève 12 millions d'euros",
+        url: "https://www.lesechos.fr/theta",
+        snippet: "Theta Software annonce une levée de fonds de 12 millions d'euros en série A.",
+      }),
+    ],
+    { name: "THETA SOFTWARE" },
+  );
+  check("un signal non date reste emis", undated.length === 1, JSON.stringify(undated.map((s) => s.type)));
+  check("et se declare faible", undated[0]?.strength === "faible");
+
+  // Non-regression : le nom dans la raison sociale ne prouve toujours rien,
+  // agregateur ou pas. C'est le masquage du nom qui tient, pas le blocage
+  // d'hote qu'on vient d'assouplir.
+  const nameOnly = qualifyWebResults(
+    [
+      web({
+        title: "RAS INTERIM JERECRUTE - Annuaire des Entreprises",
+        url: "https://annuaire-entreprises.data.gouv.fr/entreprise/ras-interim-jerecrute",
+        snippet: "RAS INTERIM JERECRUTE, SAS au capital de 40 000 euros, immatriculée au RCS.",
+      }),
+    ],
+    { name: "RAS INTERIM JERECRUTE" },
+  );
+  check("le nom seul ne produit toujours rien", nameOnly.length === 0, JSON.stringify(nameOnly));
+
+  // L'entonnoir sait dire OU le compte se perd.
+  const trace: QualifyTrace = { raw: 0, emitted: 0, rejected: [] };
+  qualifyWebResults(
+    [web({ title: "Page sans evenement", url: "https://exemple.fr/a", snippet: "Bonjour." })],
+    { name: "EXEMPLE" },
+    trace,
+  );
+  check("la trace compte les bruts", trace.raw === 1, String(trace.raw));
+  check(
+    "et nomme la raison du rejet",
+    trace.rejected[0]?.reason === "aucune-regle",
+    trace.rejected[0]?.reason ?? "(aucun)",
   );
 }
 
