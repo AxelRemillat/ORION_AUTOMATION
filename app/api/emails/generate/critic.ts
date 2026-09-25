@@ -67,11 +67,23 @@ export function buildCriticPrompt(
    * prospect.
    */
   commitments: readonly string[] = [],
+  /**
+   * Titre qu'Axel se donne (page /offre).
+   *
+   * Sans lui, le juge notait 0 sur 5 en « experience vecue » des qu'Axel
+   * reformulait son propre titre — « je construis des flux d'IA en
+   * production » etait lu comme la revendication d'un deploiement passe. Un
+   * positionnement n'est pas une reference client.
+   */
+  selfTitle: string | null = null,
 ): string {
   return `Tu es relecteur exigeant d'emails de prospection a froid. Tu NOTES, tu ne
 reecris pas. Sois severe : un 5 doit se meriter.
 
 ${factsBlock(facts)}
+
+${selfTitle ? `TITRE QU'AXEL SE DONNE, legitime par nature : « ${selfTitle} ». Le reformuler
+n'est PAS revendiquer une experience : ne le compte jamais comme telle.` : ""}
 
 ${commitments.length ? `ENGAGEMENTS D'AXEL — legitimes par nature, ils n'ont PAS a etre etayes par un fait sur le prospect :\n${commitments.map((line) => `- ${line}`).join("\n")}` : ""}
 
@@ -101,7 +113,9 @@ Note chaque critere de 0 a 5, avec UNE phrase d'explication.
   promesse intenable.
 - naturel : est-ce que ca sonne comme un humain qui ecrit a un humain, ou
   comme un texte genere ?
-- experienceVerifiee : le mail affirme-t-il une experience passee ("j'ai mis en
+- experienceVerifiee : ne juge QUE les affirmations sur des CLIENTS ou des
+  realisations passees. Reformuler le titre ci-dessus, ou decrire au present ce
+  qu'Axel construit, vaut 5. Le mail affirme-t-il une experience passee ("j'ai mis en
   place", "pour des clients similaires", "j'accompagne") ? Si oui, elle doit
   correspondre a une des PREUVES AUTORISEES ci-dessous. Toute autre
   affirmation d'experience vaut 0 : c'est une invention, et elle se verifie en

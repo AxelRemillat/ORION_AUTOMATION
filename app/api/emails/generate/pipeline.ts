@@ -149,7 +149,12 @@ ${signature}` } : null;
     ).then(parseEmail).then(sign);
 
   const judge = (email: GeneratedEmail, operation: string) =>
-    ask("judge", buildCriticPrompt(allowedFacts, publicProofsOf(input.offer), commitmentsOf(input.offer)), buildCriticContext(brief, email), 0, operation).then(
+    ask("judge", buildCriticPrompt(
+        allowedFacts,
+        publicProofsOf(input.offer),
+        commitmentsOf(input.offer),
+        input.offer.title,
+      ), buildCriticContext(brief, email), 0, operation).then(
       parseCritique,
     );
 
