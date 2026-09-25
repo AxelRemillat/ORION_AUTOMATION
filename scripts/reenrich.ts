@@ -42,7 +42,12 @@ async function main(): Promise<void> {
   const limit = limitIndex >= 0 ? Number(args[limitIndex + 1]) || 3 : 10;
   const names = args.filter((arg) => !arg.startsWith("--") && arg !== String(limit));
 
-  const query = supabase.from("prospects").select("*").order("created_at", { ascending: false });
+  // Corbeille exclue : on ne repaie pas l'enrichissement d'un prospect supprimé.
+  const query = supabase
+    .from("prospects")
+    .select("*")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
   const { data, error } = await query.limit(50);
   if (error) throw new Error(error.message);
 

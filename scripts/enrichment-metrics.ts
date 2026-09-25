@@ -305,6 +305,7 @@ async function main(): Promise<void> {
   const { data, error } = await supabase
     .from("prospects")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);

@@ -3,16 +3,20 @@
 import { useMemo, useState } from "react";
 import { Card, Input, ProspectStatusBadge } from "@/components/ui";
 import type { Prospect } from "@/types";
+import { TrashButton } from "@/components/trash/trash-button";
 
 /** Colonne de gauche : sélection du prospect à travailler, avec filtre texte. */
 export function ProspectPicker({
   prospects,
   selectedId,
   onSelect,
+  onTrashed,
 }: {
   prospects: Prospect[];
   selectedId: string | null;
   onSelect: (prospect: Prospect) => void;
+  /** Appelé après une mise à la corbeille, pour désélectionner la fiche. */
+  onTrashed: (prospectId: string) => void;
 }) {
   const [filter, setFilter] = useState("");
 
@@ -41,7 +45,7 @@ export function ProspectPicker({
         {visible.map((prospect) => {
           const active = prospect.id === selectedId;
           return (
-            <li key={prospect.id}>
+            <li key={prospect.id} className="group relative">
               <button
                 type="button"
                 onClick={() => onSelect(prospect)}
@@ -58,10 +62,17 @@ export function ProspectPicker({
                   </span>
                   <ProspectStatusBadge status={prospect.status} />
                 </div>
-                <p className="mt-0.5 truncate text-xs text-faint">
+                <p className="mt-0.5 truncate pr-7 text-xs text-faint">
                   {[prospect.sector, prospect.city].filter(Boolean).join(" · ") || "—"}
                 </p>
               </button>
+              {/* Frère du bouton de sélection, jamais imbriqué dedans. */}
+              <TrashButton
+                prospectId={prospect.id}
+                companyName={prospect.company_name}
+                onTrashed={() => onTrashed(prospect.id)}
+                className="absolute bottom-2 right-2 border-0 opacity-60 focus-visible:opacity-100 group-hover:opacity-100"
+              />
             </li>
           );
         })}

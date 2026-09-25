@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo, ThemeToggle } from "@/components/ui";
 import { HOME_ITEM, NAV_ITEMS, type NavItem } from "./nav-items";
@@ -14,7 +14,7 @@ import { HOME_ITEM, NAV_ITEMS, type NavItem } from "./nav-items";
  * d'onglets defile horizontalement (pas de menu burger : quatre destinations
  * tiennent a l'ecran et un burger cacherait la structure de l'app).
  */
-export function TopNav({ email }: { email: string }) {
+export function TopNav({ email, trashCount = 0 }: { email: string; trashCount?: number }) {
   const pathname = usePathname();
 
   return (
@@ -52,6 +52,20 @@ export function TopNav({ email }: { email: string }) {
         {/* Compte */}
         <div className="flex shrink-0 items-center gap-1">
           <span className="mr-1 hidden font-data text-[12px] text-muted lg:inline">{email}</span>
+          <Link
+            href="/corbeille"
+            aria-label={`Corbeille${trashCount ? ` (${trashCount})` : ""}`}
+            title="Corbeille"
+            aria-current={pathname.startsWith("/corbeille") ? "page" : undefined}
+            className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-text"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden />
+            {trashCount > 0 && (
+              <span className="font-data absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-surface-2 px-1 text-center text-[10px] leading-4 text-text ring-1 ring-line">
+                {trashCount > 99 ? "99+" : trashCount}
+              </span>
+            )}
+          </Link>
           <ThemeToggle />
           <form action="/auth/signout" method="post">
             <button

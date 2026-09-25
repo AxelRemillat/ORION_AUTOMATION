@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
+import { activeProspects } from "@/lib/trash/scope";
 import { requireUser } from "@/lib/auth";
 import { formatDate, formatEur } from "@/lib/utils";
 import type { Deal, Message, Prospect, Reminder } from "@/types";
 import { DealTimeline } from "../_components/deal-timeline";
+import { TrashButton } from "@/components/trash/trash-button";
 import { FollowUpButton } from "../_components/follow-up-button";
 import { ProspectSummary } from "../_components/prospect-summary";
 import { EstimateInput } from "../_components/estimate-input";
@@ -30,11 +32,8 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
   await requireUser();
   const supabase = createClient();
 
-  const { data: prospect } = await supabase
-    .from("prospects")
-    .select("*")
-    .eq("id", params.id)
-    .maybeSingle();
+  // Un prospect à la corbeille n'a plus de fiche : il se restaure depuis /corbeille.
+  const { data: prospect } = await activeProspects(supabase).eq("id", params.id).maybeSingle();
   if (!prospect) notFound();
 
   const [messagesResult, dealsResult, remindersResult] = await Promise.all([
@@ -87,6 +86,12 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
               {stage.label}
             </span>
             {followUp && <FollowUpButton prospectId={typed.id} type={followUp} />}
+            <TrashButton
+              prospectId={typed.id}
+              companyName={typed.company_name}
+              variant="button"
+              redirectTo="/suivi"
+            />
           </>
         }
       />

@@ -213,6 +213,7 @@ async function loadAbProspects(): Promise<Fixture[]> {
       .from("prospects")
       .select("*")
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .ilike("company_name", pattern)
       .order("updated_at", { ascending: false })
       .limit(1);
@@ -223,6 +224,7 @@ async function loadAbProspects(): Promise<Fixture[]> {
     .from("prospects")
     .select("*")
     .eq("user_id", userId)
+    .is("deleted_at", null)
     .neq("status", "perdu")
     .order("updated_at", { ascending: false })
     .limit(AB_OTHERS + picked.length);

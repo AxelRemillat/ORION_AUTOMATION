@@ -25,6 +25,7 @@ import { describesNeed, needConfidence } from "@/lib/emails/need-lead";
 import { edges, maxSimilarity } from "@/lib/similarity";
 import { coerceTone, type ToneKey } from "@/lib/tones";
 import type { Prospect } from "@/types";
+import { activeProspects } from "@/lib/trash/scope";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
 import { draftFromBrief } from "./pipeline";
 import type { Evidence } from "./prompt";
@@ -132,11 +133,8 @@ export async function POST(request: Request) {
   const body = parsedBody.data;
   const tone: ToneKey = coerceTone(body.tone);
 
-  const { data, error } = await session.supabase
-    .from("prospects")
-    .select("*")
-    .eq("id", body.prospectId)
-    .single();
+  // Corbeille exclue : aucun crédit dépensé pour un prospect supprimé.
+  const { data, error } = await activeProspects(session.supabase).eq("id", body.prospectId).single();
   const prospect = data as Prospect | null;
 
   if (error || !prospect) {

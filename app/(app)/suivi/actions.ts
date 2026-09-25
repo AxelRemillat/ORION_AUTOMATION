@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { activeProspects } from "@/lib/trash/scope";
 import { completeText } from "@/lib/openai";
 import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
 import type { MessageType, ProspectStatus } from "@/types";
@@ -21,7 +22,11 @@ export async function setProspectStatus(
   status: ProspectStatus,
 ): Promise<ActionResult> {
   const supabase = createClient();
-  const { error } = await supabase.from("prospects").update({ status }).eq("id", prospectId);
+  const { error } = await supabase
+    .from("prospects")
+    .update({ status })
+    .eq("id", prospectId)
+    .is("deleted_at", null);
   if (error) return { ok: false, error: error.message };
 
   // Un prospect sorti du cycle n'a plus de relance à faire.
@@ -149,9 +154,7 @@ export async function generateFollowUp(
 ): Promise<ActionResult> {
   const supabase = createClient();
 
-  const { data: prospect, error: prospectError } = await supabase
-    .from("prospects")
-    .select("company_name, sector, pain_point")
+  const { data: prospect, error: prospectError } = await activeProspects(supabase)
     .eq("id", prospectId)
     .maybeSingle();
   if (prospectError) return { ok: false, error: prospectError.message };

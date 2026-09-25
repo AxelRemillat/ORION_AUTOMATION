@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MousePointerClick } from "lucide-react";
 import { EmptyState, Skeleton, useToast } from "@/components/ui";
@@ -33,6 +33,9 @@ export function ProspectionClient({
   const router = useRouter();
   const toast = useToast();
   const [prospects, setProspects] = useState(initialProspects);
+  // La liste suit le serveur : une mise à la corbeille (ou son annulation)
+  // rafraîchit la page, et donc ces props.
+  useEffect(() => setProspects(initialProspects), [initialProspects]);
   const [selected, setSelected] = useState<Prospect | null>(null);
   const [tone, setTone] = useState<ToneKey>(DEFAULT_TONE);
   const [saving, setSaving] = useState(false);
@@ -83,7 +86,14 @@ export function ProspectionClient({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <ProspectPicker prospects={prospects} selectedId={selected?.id ?? null} onSelect={select} />
+      <ProspectPicker
+        prospects={prospects}
+        selectedId={selected?.id ?? null}
+        onSelect={select}
+        onTrashed={(id) => {
+          if (selected?.id === id) setSelected(null);
+        }}
+      />
 
       {!selected ? (
         <EmptyState

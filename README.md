@@ -35,6 +35,7 @@ Appliquer les fichiers de `supabase/migrations/` **dans l'ordre des noms** :
 | `20260920110000_api_usage.sql` | Table `api_usage` : consommation et coût réels des APIs tierces, RLS + GRANT |
 | `20260920120000_favorites.sql` | Table `favorites` : entreprises déjà enrichies mises en réserve, RLS + GRANT |
 | `20260925100000_prospect_brief.sql` | Colonne `prospects.brief` : dernier brief du stratège (angle, pain, preuve, ciblage) |
+| `20260925124235_trash.sql` | Corbeille : `prospects.deleted_at`, `prospects.status_before_delete`, index, table `excluded_companies` (SIREN à ne plus proposer), RLS + GRANT |
 
 Une migration oubliée se voit tout de suite : les requêtes échouent sur une
 colonne inconnue.
@@ -61,6 +62,7 @@ puis se connecter sur `/login`.
 | `LINKUP_API_KEY` | serveur | Recherche web / signaux |
 | `HUNTER_API_KEY` | serveur | Emails professionnels |
 | `N8N_WEBHOOK_SEND_URL` | serveur | Webhook d'envoi des messages |
+| `CRON_SECRET` | serveur | Secret des crons Vercel (`/api/cron/purge-trash`, purge quotidienne de la corbeille). Sans lui, la route refuse tout et la purge se fait à l'ouverture de `/corbeille` |
 | `NEXT_PUBLIC_BOOKING_URL` | client + serveur | Optionnelle — lien de RDV placé dans le CTA des emails |
 | `USD_EUR_RATE` | serveur | Optionnelle — conversion des services facturés en $ (défaut 0.92) |
 | `LINKUP_SEARCH_USD` | serveur | Optionnelle — prix d'une recherche Linkup (défaut 0.005) |

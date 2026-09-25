@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Badge, Table, TBody, TD, TH, THead, TR, TableEmpty } from "@/components/ui";
 import { formatDate, formatEur } from "@/lib/utils";
+import { TrashButton } from "@/components/trash/trash-button";
 import { STAGE_TONE_VARS, stageOf } from "../_lib/stages";
 import type { ProspectRow } from "../_lib/rows";
 
@@ -17,11 +18,14 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
           <TH>Valeur</TH>
           <TH>Prochaine action</TH>
           <TH>Dernière activité</TH>
+          <TH>
+            <span className="sr-only">Actions</span>
+          </TH>
         </TR>
       </THead>
       <TBody>
         {rows.length === 0 && (
-          <TableEmpty colSpan={5}>Aucun prospect ne correspond à ce filtre.</TableEmpty>
+          <TableEmpty colSpan={6}>Aucun prospect ne correspond à ce filtre.</TableEmpty>
         )}
         {rows.map((row) => {
           const stage = stageOf(row.status);
@@ -66,6 +70,9 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                 )}
               </TD>
               <TD className="font-data text-[13px] text-faint">{formatDate(row.lastActivity)}</TD>
+              <TD className="text-right">
+                <TrashButton prospectId={row.id} companyName={row.company_name} />
+              </TD>
             </TR>
           );
         })}
