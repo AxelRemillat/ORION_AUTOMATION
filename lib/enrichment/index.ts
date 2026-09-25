@@ -60,7 +60,8 @@ import {
 import type { CompanyBase, EnrichedCompany, EnrichmentWarning, SearchCriteria } from "./types";
 
 /** Enrichissements profonds menes en parallele (menage les quotas Pappers). */
-const CONCURRENCY = 4;
+export const ENRICH_CONCURRENCY = 4;
+const CONCURRENCY = ENRICH_CONCURRENCY;
 /**
  * Concurrence du scan.
  *
@@ -156,10 +157,26 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
  *      representant est une personne morale : c'est la qu'on retrouve le
  *      dirigeant personne physique et la taille du groupe.
  */
-async function deepEnrich(
+export interface DeepEnrichOptions {
+  /**
+   * Signaux dont le rattachement est deja prouve en amont (SIREN d'une annonce
+   * officielle). Ils contournent l'anti-homonymie, qui ne sait juger que des
+   * preuves textuelles, et sortent en premier.
+   */
+  attachedSignals?: ProspectSignal[];
+}
+
+/**
+ * Exporte parce que le mode « Signaux d'abord » (`lib/signals`) rejoue
+ * exactement cette phase 2 : une fois l'entreprise identifiée, ouvrir la fiche
+ * ne dépend plus de la façon dont on l'a trouvée. La dupliquer aurait fait
+ * diverger deux chemins qui doivent coûter et rendre la même chose.
+ */
+export async function deepEnrich(
   base: CompanyBase,
   webSignals: ProspectSignal[],
   webResults: WebResult[] = [],
+  options: DeepEnrichOptions = {},
 ): Promise<EnrichedCompany> {
   const warnings: EnrichmentWarning[] = [];
   const company = { ...base };
@@ -339,7 +356,16 @@ async function deepEnrich(
     });
   }
   if (attachment.foreignEntities.length) keyFigures.foreign_entities = attachment.foreignEntities;
-  const signals = [...attachment.kept, ...structuralSignals(company, keyFigures.headcount)].slice(0, 8);
+  // Les signaux officiels passent AVANT l'anti-homonymie et en tete de liste.
+  // Le controle leur serait nuisible : une annonce BODACC est rattachee par son
+  // SIREN, pas par la presence de la denomination dans un texte — elle etait
+  // donc systematiquement rejetee comme « homonyme probable ». Et ils passent en
+  // tete parce qu'un evenement date au registre prime sur un resultat web.
+  const signals = [
+    ...(options.attachedSignals ?? []),
+    ...attachment.kept,
+    ...structuralSignals(company, keyFigures.headcount),
+  ].slice(0, 8);
 
   return { ...company, key_figures: keyFigures, signals, warnings };
 }
