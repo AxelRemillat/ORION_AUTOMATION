@@ -1,5 +1,6 @@
 import { fetchHoldingProfile, type PappersRepresentative } from "./pappers";
 import type { ParentGroup } from "./extract";
+import { LARGE_GROUP_HEADCOUNT, LARGE_GROUP_REVENUE_EUR } from "./entity-match";
 
 /**
  * Appartenance à un groupe, et dirigeant réel derrière une holding.
@@ -29,9 +30,7 @@ const NON_OWNER_ROLE =
 const isOwner = (item: PappersRepresentative): boolean =>
   !item.role || !NON_OWNER_ROLE.test(item.role);
 
-/** Au-delà, la décision d'achat se prend au niveau du groupe, pas sur place. */
-export const LARGE_GROUP_REVENUE_EUR = 50_000_000;
-export const LARGE_GROUP_HEADCOUNT = 250;
+export { LARGE_GROUP_HEADCOUNT, LARGE_GROUP_REVENUE_EUR } from "./entity-match";
 
 export interface GroupAssessment {
   /** Société mère issue du registre (représentant personne morale). */

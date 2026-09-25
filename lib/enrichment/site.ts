@@ -29,7 +29,12 @@ export const USER_AGENT =
   "OrionProspectBot/1.0 (+https://orion.axelremillat.com/bot; prospection B2B; contact axel@axelremillat.com)";
 
 const TIMEOUT_MS = 5_000;
-const MAX_PAGES = 3;
+/**
+ * Pages lues par site : accueil + « a propos » + « services » + jusqu'a deux
+ * offres d'emploi. Le plafond a ete releve de 3 a 5 parce que les offres
+ * arrivaient toujours apres les pages de presentation et n'etaient jamais lues.
+ */
+const MAX_PAGES = 6;
 const MAX_PAGE_CHARS = 4_000;
 
 export type SiteStatus = "lu" | "trouvé" | "non trouvé";
@@ -168,6 +173,66 @@ export function internalLinks(html: string, origin: string): { href: string; lab
 /** Pages recherchées après l'accueil, par ordre de priorité. */
 const ABOUT = /\b(à propos|a propos|qui sommes|notre histoire|entreprise|société|about)\b/i;
 const SERVICES = /\b(services?|métiers?|savoir[- ]faire|nos activités|activités|prestations|solutions|produits)\b/i;
+
+/**
+ * Pages d'offre d'emploi, reconnues a l'URL.
+ *
+ * Volontairement large : un intitule de poste peut etre n'importe quoi, mais
+ * le chemin porte presque toujours « offre-demploi », « recrutement » ou
+ * « carriere ».
+ */
+export const JOB_PATH = /offre[-_]?d?[-_]?emploi|recrutement|carrier|carriere|nous[-_]rejoindre|jobs?|job[-_]offer/i;
+
+/**
+ * URLs d'offres d'emploi lues dans le sitemap.
+ *
+ * Pourquoi le sitemap et pas les liens de la page : chez BLUE ENERFREEZE, la
+ * page « nous-rejoindre » construit sa liste en JavaScript. Le HTML servi ne
+ * contient donc AUCUN lien vers l'offre « Automaticien/ne », alors que le
+ * sitemap la declare. Sans cette lecture, l'offre etait invisible pour nous —
+ * et l'entreprise tombait a 7/100 en recrutant exactement notre cible.
+ */
+export function jobUrlsFromSitemap(xml: string, origin: string, max = 3): string[] {
+  // Le sitemap est souvent servi sur « www » alors qu'on crawle le domaine nu
+  // (ou l'inverse). Comparer les origines telles quelles rejetait donc TOUTES
+  // les URLs — le bug qui rendait l'offre Automaticien invisible.
+  const host = (value: string): string => {
+    try {
+      return new URL(value).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  };
+  const base = host(origin);
+  const found: { url: string; offer: boolean }[] = [];
+
+  for (const match of xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)) {
+    const raw = match[1];
+    if (!JOB_PATH.test(raw)) continue;
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (host(raw) !== base) continue;
+    // Les traductions (/en/, /es/) disent la meme chose : on garde le FR.
+    if (/^\/(en|es|de|it)\//.test(url.pathname)) continue;
+
+    // On reecrit sur l'origine reellement crawlee, pour rester dans le meme
+    // robots.txt et le meme domaine que les autres pages.
+    const clean = `${origin}${url.pathname}`;
+    if (found.some((item) => item.url === clean)) continue;
+    found.push({ url: clean, offer: /offre|job[-_]offer/i.test(url.pathname) });
+  }
+
+  // Une offre precise vaut mieux qu'une page « nous rejoindre » qui ne liste
+  // rien : c'est elle qui porte l'intitule du poste et, parfois, sa date.
+  return found
+    .sort((a, b) => Number(b.offer) - Number(a.offer))
+    .slice(0, max)
+    .map((item) => item.url);
+}
 
 /** Choisit au plus deux pages internes : « à propos » puis « services ». */
 export function pickSecondaryPages(
@@ -333,7 +398,18 @@ async function readSite(
   const pages = [home.page];
   const secondary = homeHtml ? pickSecondaryPages(internalLinks(homeHtml, origin), origin) : [];
 
-  for (const url of secondary.slice(0, MAX_PAGES - 1)) {
+  // Le sitemap declare des pages que le HTML ne lie pas (listes construites en
+  // JavaScript). C'est la seule facon de trouver certaines offres d'emploi.
+  // Il est servi en `application/xml` : sans ce type explicite, `fetchText` le
+  // rejetait silencieusement et aucune offre n'etait jamais decouverte.
+  const sitemap = await fetchText(`${origin}/sitemap.xml`, "application/xml");
+  const jobs = sitemap ? jobUrlsFromSitemap(sitemap, origin, 3) : [];
+
+  // Les offres passent AVANT les pages de presentation : une offre datee est
+  // le signal le plus fort qu'on puisse trouver, « qui sommes-nous » le plus
+  // faible. L'inverse faisait sortir les offres du budget de pages.
+  const extra = [...jobs, ...secondary.filter((url) => !jobs.includes(url))];
+  for (const url of extra.slice(0, MAX_PAGES - 1)) {
     const read = await readPage(url, robots, prospectId, false);
     linkupCalls += read.linkupCalls;
     if (read.page) pages.push(read.page);

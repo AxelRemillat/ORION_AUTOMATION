@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { SparkField } from "./spark-field";
+import { readThemeColor, toCanvasColor } from "@/lib/canvas-color";
 
 /**
  * Braises et etincelles de la scene VERSUS.
@@ -46,9 +47,12 @@ export const Sparks = forwardRef<SparksHandle, { intensity: number }>(function S
     if (!canvas || !ctx) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-    const read = (name: string, fallback: string) =>
-      getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-    field.current = new SparkField(read("--vs-blue", "#4cd4e6"), read("--vs-red", "#ff2a2a"));
+    // `toCanvasColor` normalise : que le token soit un hex ou un triplet, le
+    // canvas recoit toujours une couleur qu'il accepte.
+    field.current = new SparkField(
+      toCanvasColor(readThemeColor("--vs-blue", "#4cd4e6")),
+      toCanvasColor(readThemeColor("--vs-red", "#ff2a2a")),
+    );
 
     let frame = 0;
     let last = 0;

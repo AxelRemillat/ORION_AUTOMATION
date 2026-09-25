@@ -8,6 +8,7 @@ import type { EnrichedCompany } from "@/lib/enrichment/types";
 import { HeatGauge } from "./heat-gauge";
 import { ExampleTag, MetaChip, SignalChip } from "./signal-chip";
 import { WhyNowCard } from "./why-now";
+import Link from "next/link";
 
 /** État d'ajout d'une carte, piloté par l'écran parent. */
 export type AddState = "idle" | "loading" | "added" | "duplicate";
@@ -24,18 +25,44 @@ interface ResultCardProps {
   /** Met l'entreprise DÉJÀ enrichie en réserve, sans nouvel appel API. */
   onFavorite: (company: EnrichedCompany) => void;
   favoriteState: FavoriteState;
+  /** Fiche existante quand l'entreprise est deja en portefeuille (409). */
+  duplicateId?: string | null;
+}
+
+/**
+ * Dirigeant affiché : une PERSONNE, toujours que ce soit possible.
+ *
+ * L'annuaire liste les représentants dans un ordre qui n'a rien de
+ * hiérarchique : pour BLUE ENERFREEZE il rend « SOCIETE IMMOSTEF » parmi les
+ * dirigeants, et c'est ce nom de holding qui s'affichait — inutilisable pour
+ * écrire à quelqu'un. On préfère donc, dans l'ordre : la personne physique
+ * retrouvée (le cas échéant derrière la holding, avec la mention « via »),
+ * puis à défaut la personne morale, explicitement étiquetée « holding ».
+ */
+function leaderLine(figures: EnrichedCompany["key_figures"]): string | null {
+  const person = typeof figures.leader_person === "string" ? figures.leader_person : null;
+  const via = typeof figures.leader_via === "string" ? figures.leader_via : null;
+  const role = typeof figures.leader_role === "string" ? figures.leader_role : null;
+  if (person) {
+    const suffix = [role, via ? `via ${via}` : null].filter(Boolean).join(", ");
+    return suffix ? `${person} (${suffix})` : person;
+  }
+
+  const legal = typeof figures.leader === "string" ? figures.leader : null;
+  return legal ? `${legal} — holding` : null;
 }
 
 /** Ligne de chiffres clés, masquée quand la donnée n'a pas été récupérée. */
 function KeyFigures({ company }: { company: EnrichedCompany }) {
-  const { revenue_eur, revenue_year, headcount, leader, head_office_city } = company.key_figures;
+  const { revenue_eur, revenue_year, headcount, head_office_city } = company.key_figures;
+  const leader = leaderLine(company.key_figures);
   const items = [
     typeof revenue_eur === "number" && {
       label: `CA${typeof revenue_year === "number" ? ` ${revenue_year}` : ""}`,
       value: formatEur(revenue_eur),
     },
     typeof headcount === "number" && { label: "Effectif", value: `${headcount}` },
-    typeof leader === "string" && { label: "Dirigeant", value: leader },
+    leader && { label: "Dirigeant", value: leader },
     typeof head_office_city === "string" && { label: "Siège", value: head_office_city },
   ].filter(Boolean) as { label: string; value: string }[];
 
@@ -58,13 +85,26 @@ function KeyFigures({ company }: { company: EnrichedCompany }) {
   );
 }
 
-export function ResultCard({ company, state, onAdd, onProspect, onFavorite, favoriteState }: ResultCardProps) {
+export function ResultCard({
+  company,
+  state,
+  onAdd,
+  onProspect,
+  onFavorite,
+  favoriteState,
+  duplicateId,
+}: ResultCardProps) {
   const done = state === "added" || state === "duplicate";
   const score = heatScore(company.signals, {
     seed: company.siren ?? company.company_name,
     context: heatContextOf(company.key_figures),
   });
   const why = whyNow(company.signals);
+  const figures = company.key_figures;
+  const parentGroup =
+    (typeof figures.parent_group === "string" && figures.parent_group) ||
+    (typeof figures.parent_company === "string" && figures.parent_company) ||
+    null;
 
   // Types de signaux distincts, pour ne pas répéter la même puce.
   const chipTypes = [...new Set((company.signals ?? []).map((signal) => signal.type ?? "presse"))];
@@ -95,6 +135,8 @@ export function ResultCard({ company, state, onAdd, onProspect, onFavorite, favo
           )}
           {/* Le filtre géographique porte sur les établissements : on le signale. */}
           {company.matched_branch && <MetaChip>Établissement local</MetaChip>}
+          {/* Appartenance a un groupe : elle change a qui on ecrit, et le score. */}
+          {parentGroup && <MetaChip>Filiale de {parentGroup}</MetaChip>}
         </div>
 
         <div className="mt-3">
@@ -168,8 +210,19 @@ export function ResultCard({ company, state, onAdd, onProspect, onFavorite, favo
             onClick={() => onAdd(company)}
           >
             {done ? <Check className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
-            {state === "duplicate" ? "Déjà suivi" : done ? "Ajouté" : "Ajouter"}
+            {state === "duplicate" ? "Déjà dans ton portefeuille" : done ? "Ajouté" : "Ajouter"}
           </Button>
+
+          {/* Un doublon n'est pas une impasse : on conduit a la fiche existante. */}
+          {state === "duplicate" && duplicateId && (
+            <Link
+              href={`/suivi/${duplicateId}`}
+              className="text-[13px] underline decoration-dotted underline-offset-2"
+              style={{ color: "var(--primary-ink)" }}
+            >
+              Voir la fiche
+            </Link>
+          )}
 
           <Button
             size="sm"

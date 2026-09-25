@@ -8,6 +8,14 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /**
+     * Corps de la reponse, tel quel.
+     *
+     * Un 409 n'est pas une panne : c'est une information (« cette entreprise
+     * est deja chez vous »), et elle s'accompagne de l'id de la fiche pour que
+     * l'ecran puisse y renvoyer au lieu d'afficher une erreur.
+     */
+    readonly payload: Record<string, unknown> | null = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -27,9 +35,11 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
     throw new ApiError("Réseau indisponible. Vérifiez votre connexion.", 0);
   }
 
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  const payload = (await response.json().catch(() => null)) as
+    | (Record<string, unknown> & { error?: string })
+    | null;
   if (!response.ok) {
-    throw new ApiError(payload?.error ?? `Erreur ${response.status}.`, response.status);
+    throw new ApiError(payload?.error ?? `Erreur ${response.status}.`, response.status, payload);
   }
   return payload as T;
 }

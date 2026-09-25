@@ -19,15 +19,17 @@
  *      modèle. Un élément indatable sort avec `postedAt: null`, affiché
  *      « non daté », et ne compte ni dans le score ni comme accroche.
  *
- * Modèle : celui du projet (`OPENAI_MODEL`, gpt-4o-mini par défaut), en mode
- * JSON, température 0, une seule tentative de reprise si la sortie est invalide.
+ * Modèle : rôle « extract » (`OPENAI_MODEL_EXTRACT`, sinon `OPENAI_MODEL`,
+ * sinon gpt-4o-mini), en mode JSON, température 0, une seule reprise si la
+ * sortie est invalide.
  */
 import { z } from "zod";
-import { getOpenAI, OPENAI_MODEL } from "@/lib/openai";
+import { getOpenAI } from "@/lib/openai";
+import { samplingParams } from "@/lib/ai/models";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { cleanText, excerpt, normalizeForMatch, quoteIsGrounded } from "./clean";
 import { parseTextDate, resolvePostedAt, type DateBasis } from "./dates";
-import { companyAliases } from "./signals";
+import { mentionsExactDenomination } from "./entity-match";
 import { toDomain } from "./http";
 
 // ---------------------------------------------------------------------------
@@ -94,6 +96,11 @@ export interface JobPosting {
   dateBasis: DateBasis | null;
   url: string;
   evidenceQuote: string;
+  /**
+   * Verdict de verification de la page de l'offre (cf. `job-posting.ts`).
+   * Absent tant que la verification n'a pas eu lieu.
+   */
+  freshness?: "datée" | "en ligne" | "périmée" | "introuvable";
 }
 
 export interface CompanyEvent {
@@ -170,20 +177,25 @@ export interface CompanyIdentity {
 }
 
 /**
- * ANCRAGE anti-homonymie : le document nomme l'entreprise ET porte un second
- * identifiant. Une page du domaine de l'entreprise est ancrée d'office — c'est
- * son propre site.
+ * ANCRAGE anti-homonymie. Un document est rattaché à l'entreprise s'il :
+ *   - est sur son domaine (c'est son propre site), ou
+ *   - porte son SIREN, ou
+ *   - porte sa dénomination EXACTE ET un second identifiant (ville, code
+ *     postal, domaine). Un nom proche — « Jacquet Metal Service » pour
+ *     JACQUET PARIS — ne compte pas (lib/enrichment/entity-match.ts).
  */
 export function isAnchored(document: SourceDocument, company: CompanyIdentity): boolean {
   const ownDomain = toDomain(company.website ?? null);
   const host = toDomain(document.url);
   if (ownDomain && host && host.endsWith(ownDomain)) return true;
 
+  const raw = `${document.title}\n${document.content}`;
+  if (company.siren && company.siren.length === 9 && raw.replace(/[\s.]/g, "").includes(company.siren)) {
+    return true;
+  }
+
   const haystack = normalizeForMatch(`${document.title} ${document.content} ${document.url}`);
-  const named = companyAliases(company.name).some(
-    (alias) => alias.length >= 4 && haystack.includes(alias),
-  );
-  if (!named) return false;
+  if (!mentionsExactDenomination(raw, company.name)) return false;
 
   const second = [company.siren, company.city, company.postalCode, ownDomain]
     .filter((value): value is string => Boolean(value && value.length >= 3))
@@ -398,10 +410,10 @@ export async function extractSignals(
 
   const user = buildUserPrompt(company, prepared);
 
+  const sampling = samplingParams("extract", 0);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const completion = await getOpenAI().chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0,
+      ...sampling,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
@@ -411,7 +423,7 @@ export async function extractSignals(
 
     if (completion.usage) {
       await recordOpenAiUsage({
-        model: OPENAI_MODEL,
+        model: sampling.model,
         promptTokens: completion.usage.prompt_tokens ?? 0,
         completionTokens: completion.usage.completion_tokens ?? 0,
         operation: "extract-signals",

@@ -12,6 +12,7 @@
  */
 import type { ProspectSignal } from "@/types";
 import { FRESH_DAYS, isFresh } from "@/lib/enrichment/dates";
+import { cleanText, excerpt } from "@/lib/enrichment/clean";
 
 // ---------------------------------------------------------------------------
 // Référentiel des signaux
@@ -101,9 +102,18 @@ const RAW_MAX = 55;
  * faite pour autre chose. Ils gardent donc leur petit poids — mais ils ne
  * lèvent jamais le plafond des 60 points, faute de preuve.
  */
+/**
+ * Poids d'une offre d'emploi non datee mais encore servie sur le domaine
+ * officiel. La moitie, pas plus : « ils cherchent quelqu'un aujourd'hui » vaut
+ * moins que « ils ont publie l'offre il y a douze jours ».
+ */
+export const LIVE_POSTING_FACTOR = 0.5;
+
 function recencyFactor(signal: ProspectSignal, now: number): number {
   if (signal.type === "structure") return 1;
-  return isFresh(typeof signal.date === "string" ? signal.date : null, new Date(now)) ? 1 : 0;
+  if (isFresh(typeof signal.date === "string" ? signal.date : null, new Date(now))) return 1;
+  // Sans date, une offre verifiee en ligne garde la moitie de ses points.
+  return signal.liveOnOfficialSite === true ? LIVE_POSTING_FACTOR : 0;
 }
 
 /** Postes dont l'ouverture signale un besoin d'automatisation immédiat. */
@@ -206,20 +216,40 @@ export function demoHeatScore(seed: string): HeatScore {
   };
 }
 
-/** Un recrutement frais sur un métier directement automatisable. */
+/**
+ * Recrutement sur un metier automatisable, et ce qu'on peut en prouver.
+ *
+ * Distinction importante, corrigee apres relecture : une offre publiee sur le
+ * site officiel mais SANS DATE ne peut pas recevoir un bonus intitule « moins
+ * de 60 jours ». On ne sait pas depuis quand elle est en ligne — elle peut
+ * dater de deux ans. Elle vaut la moitie du bonus, sous son vrai libelle.
+ */
+export type HireProof = "datee" | "en ligne";
+
+export interface AutomationHire {
+  signal: ProspectSignal;
+  proof: HireProof;
+}
+
 export function hasFreshAutomationHire(
   signals: readonly ProspectSignal[],
   now: Date,
-): ProspectSignal | null {
-  return (
-    signals.find(
-      (signal) =>
-        signal.type === "recrutement" &&
-        typeof signal.category === "string" &&
-        AUTOMATION_CATEGORIES.has(signal.category) &&
-        isFresh(typeof signal.date === "string" ? signal.date : null, now),
-    ) ?? null
+): AutomationHire | null {
+  const automatable = signals.filter(
+    (signal) =>
+      signal.type === "recrutement" &&
+      typeof signal.category === "string" &&
+      AUTOMATION_CATEGORIES.has(signal.category),
   );
+
+  // Une offre datee et fraiche prime : c'est la seule qui prouve le « maintenant ».
+  const dated = automatable.find((signal) =>
+    isFresh(typeof signal.date === "string" ? signal.date : null, now),
+  );
+  if (dated) return { signal: dated, proof: "datee" };
+
+  const live = automatable.find((signal) => signal.liveOnOfficialSite === true);
+  return live ? { signal: live, proof: "en ligne" } : null;
 }
 
 /**
@@ -309,10 +339,19 @@ export function heatScore(
 
   const hire = hasFreshAutomationHire(list, nowDate);
   if (hire) {
-    value += FRESH_AUTOMATION_HIRE_BONUS;
+    // Meme regle que pour les points de signal : sans date, on compte moitie.
+    const points =
+      hire.proof === "datee"
+        ? FRESH_AUTOMATION_HIRE_BONUS
+        : Math.round(FRESH_AUTOMATION_HIRE_BONUS * LIVE_POSTING_FACTOR);
+    const category = String(hire.signal.category);
+    value += points;
     breakdown.push({
-      label: `Recrutement ${String(hire.category)} de moins de ${FRESH_DAYS} jours`,
-      points: FRESH_AUTOMATION_HIRE_BONUS,
+      label:
+        hire.proof === "datee"
+          ? `Recrutement ${category} de moins de ${FRESH_DAYS} jours`
+          : `Recrutement ${category} en ligne, non daté (bonus de moitié)`,
+      points,
       kind: "bonus",
     });
   }
@@ -377,7 +416,7 @@ export function compareHeat(a: HeatScore, b: HeatScore): number {
  * On ne restitue desormais que ce que la source dit, avec son URL.
  */
 export interface WhyNow {
-  /** Citation de la source. Deux sources differentes ne peuvent pas coincider. */
+  /** Citation de la source, NETTOYEE (ni markdown, ni emoji, ni puce). */
   headline: string;
   /** Provenance verifiable : hote, et date quand la source la fournit. */
   evidence: string;
@@ -386,6 +425,15 @@ export interface WhyNow {
   signalType: string;
   /** Confiance de la preuve, de 0 a 1. */
   confidence: number;
+  /**
+   * Lecture structuree, pour un affichage qui ne depend plus du verbatim.
+   *
+   * `role` : l'intitule du poste quand le signal est un recrutement.
+   * `when` : la date en clair, ou « en ligne, non datee » pour une offre
+   *          verifiee mais sans date — jamais une date inventee.
+   */
+  role: string | null;
+  when: string | null;
 }
 
 /** Confiance minimale pour qu'un signal puisse porter l'argument d'urgence. */
@@ -401,6 +449,27 @@ function frenchDate(iso: string): string {
   const index = Number(month) - 1;
   if (!year || Number.isNaN(index) || !MONTHS[index]) return iso;
   return `${Number(day)} ${MONTHS[index]} ${year}`;
+}
+
+/**
+ * Bonus de pertinence d'un poste ouvert.
+ *
+ * Trois offres publiees le meme jour se valent pour le scoring, mais pas pour
+ * ecrire : « Automaticien/ne » dit qu'ils automatisent deja, « Manager energie
+ * de proximite » ne dit rien de nous. A poids egal, c'est le poste
+ * automatisable qui doit porter l'accroche.
+ */
+const CATEGORY_WEIGHT: Record<string, number> = {
+  automation: 1.6,
+  data: 1.4,
+  it: 1.3,
+  ops: 1.2,
+  sales: 0.9,
+  other: 1,
+};
+
+function categoryFactor(signal: ProspectSignal): number {
+  return typeof signal.category === "string" ? (CATEGORY_WEIGHT[signal.category] ?? 1) : 1;
 }
 
 /** Signal citable : il porte une preuve textuelle et un lien verifiable. */
@@ -431,7 +500,8 @@ export function strongestSignal(
   const weight = (signal: ProspectSignal) =>
     (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
     recencyFactor(signal, now) *
-    confidenceFactor(signal);
+    confidenceFactor(signal) *
+    categoryFactor(signal);
 
   return [...list].sort((a, b) => weight(b) - weight(a))[0];
 }
@@ -447,23 +517,48 @@ export function whyNow(
   signals: readonly ProspectSignal[] | null | undefined,
   options: { now?: Date } = {},
 ): WhyNow | null {
-  const citable = (signals ?? []).filter(isCitable);
+  // Une citation qui ne survit pas au nettoyage (uniquement du markdown, un
+  // lien, une ligne de navigation) n'est pas une preuve : elle affichait des
+  // guillemets vides dans la carte.
+  const citable = (signals ?? []).filter(
+    (signal): signal is CitableSignal =>
+      isCitable(signal) && cleanText(signal.quote ?? "", 400).trim().length > 10,
+  );
   if (!citable.length) return null;
 
   const now = (options.now ?? new Date()).getTime();
   const weight = (signal: CitableSignal) =>
     (SIGNAL_WEIGHTS[signal.type ?? ""] ?? 6) *
     recencyFactor(signal, now) *
-    confidenceFactor(signal);
+    confidenceFactor(signal) *
+    categoryFactor(signal);
 
   const best = [...citable].sort((a, b) => weight(b) - weight(a))[0];
   const date = typeof best.date === "string" ? frenchDate(best.date) : null;
+  // Une offre verifiee en ligne n'a pas de date : on le dit, on n'en fabrique pas.
+  const when = date ?? (best.liveOnOfficialSite === true ? "en ligne, non datée" : null);
 
   return {
-    headline: best.quote.trim().slice(0, 260),
-    evidence: [best.source, date].filter(Boolean).join(" · ") || "source web",
+    // Les citations arrivent brutes du web : liens markdown, puces, emojis.
+    // Les afficher telles quelles donnait « - [Voir l'offre](https://…) 🔥 ».
+    headline: excerpt(cleanText(best.quote, 400), 260),
+    evidence: [best.source, when].filter(Boolean).join(" · ") || "source web",
     url: best.url,
     signalType: best.type ?? "presse",
     confidence: best.confidence ?? MIN_WHY_NOW_CONFIDENCE,
+    role: jobTitleOf(best),
+    when,
   };
+}
+
+/**
+ * Intitule du poste porte par un signal de recrutement.
+ *
+ * Le label structure vaut « Poste ouvert : Automaticien/ne — domaine, date » :
+ * on en extrait la partie utile plutot que de la reconstruire.
+ */
+function jobTitleOf(signal: ProspectSignal): string | null {
+  if (signal.type !== "recrutement") return null;
+  const match = /^Poste ouvert\s*:\s*(.+?)\s+—/.exec(signal.label ?? "");
+  return match ? match[1].trim() : null;
 }

@@ -129,7 +129,10 @@ if (require.main === module) {
   }
   for (const item of violations) {
     // Format d'annotation GitHub : l'erreur s'affiche sur la ligne du fichier.
-    console.log(`::error file=supabase/migrations/${item.file},line=${item.line}::${item.rule} — ${item.excerpt}`);
+    // Le chemin vient du repertoire REELLEMENT analyse — l'ecrire en dur
+    // pointait sur un fichier inexistant des qu'on verifiait ailleurs.
+    const path = join(directory, item.file).split("\\").join("/");
+    console.log(`::error file=${path},line=${item.line}::${item.rule} — ${item.excerpt}`);
   }
   console.log(
     `\n${violations.length} opération(s) refusée(s). Si c'est voulu, ajoutez en tête du fichier :\n` +

@@ -21,7 +21,7 @@ import { describesNeed, needConfidence } from "../lib/emails/need-lead";
 import { buildGreeting, emailBelongsTo } from "../app/api/emails/generate/prompt";
 import { dedupeFacts } from "../app/(app)/prospection/_components/facts-grid";
 import { isOpaqueNaf, nafLabel } from "../lib/naf";
-import { stripUnknownNumbers } from "../app/api/emails/generate/analysis";
+import { stripUnknownNumbers } from "../lib/emails/derived-facts";
 import { PERSONA } from "../lib/persona";
 import type { Prospect } from "../types";
 
@@ -308,7 +308,7 @@ console.log("\n13. Indice de besoin : la confiance se calcule");
         {
           type: "recrutement",
           label: "Recrutement en cours",
-          quote: "RAS recrute un automaticien H/F",
+          quote: "RAS INTERIM recrute un automaticien H/F",
           url: "https://emploi.fr/o",
           date: new Date().toISOString().slice(0, 10),
           confidence: 0.9,

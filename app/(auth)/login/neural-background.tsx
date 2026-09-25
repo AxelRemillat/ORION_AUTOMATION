@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { NeuralField, type Palette } from "./neural-field";
+import { toRgbTriplet } from "@/lib/canvas-color";
 
 /**
  * Fond anime du formulaire de connexion : un reseau de noeuds relies, image du
@@ -20,10 +21,15 @@ const MAX_STEP = 0.05;
 
 type Triplet = [number, number, number];
 
-/** Lit un token `--rgb-*` du theme courant. Les tokens sont la source fiable. */
+/**
+ * Lit un token `--rgb-*` du theme courant.
+ *
+ * L'analyse est deleguee a `toRgbTriplet` : c'est le meme code qui sert au
+ * radar et aux etincelles, donc un token ecrit autrement (hex, virgules) ne
+ * peut plus casser un seul des trois.
+ */
 function readTriplet(styles: CSSStyleDeclaration, name: string, fallback: Triplet): Triplet {
-  const parts = styles.getPropertyValue(name).trim().split(/[\s,]+/).map(Number);
-  return parts.length === 3 && parts.every(Number.isFinite) ? (parts as Triplet) : fallback;
+  return toRgbTriplet(styles.getPropertyValue(name)) ?? fallback;
 }
 
 /**
