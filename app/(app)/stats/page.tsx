@@ -9,9 +9,10 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
+import { loadPortfolio } from "@/lib/trash/portfolio";
+import type { Deal } from "@/types";
 import { requireUser } from "@/lib/auth";
 import { formatEur } from "@/lib/utils";
-import type { Deal, Message, Prospect } from "@/types";
 import { countValued, dealValue, sumPipeline } from "../suivi/_lib/estimates";
 import { FunnelBars } from "./_charts/funnel-bars";
 import { MonthBars } from "./_charts/month-bars";
@@ -40,15 +41,8 @@ export default async function StatsPage() {
   await requireUser();
   const supabase = createClient();
 
-  const [prospectsResult, messagesResult, dealsResult] = await Promise.all([
-    supabase.from("prospects").select("*"),
-    supabase.from("messages").select("*"),
-    supabase.from("deals").select("*"),
-  ]);
-
-  const prospects = (prospectsResult.data ?? []) as Prospect[];
-  const messages = (messagesResult.data ?? []) as Message[];
-  const deals = (dealsResult.data ?? []) as Deal[];
+  // Corbeille exclue : un prospect supprimé ne compte plus dans les taux.
+  const { prospects, messages, deals } = await loadPortfolio(supabase, ["messages", "deals"]);
 
   if (prospects.length === 0) {
     return (

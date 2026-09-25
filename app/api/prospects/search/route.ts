@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { clampAnalysisLimit, clampScanWidth, searchAndEnrich } from "@/lib/enrichment";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
-import type { Database } from "@/types";
+import { knownSirens } from "@/lib/trash/exclusions";
 import { readJson, requireSession } from "../_guard";
 
 export const runtime = "nodejs";
@@ -13,9 +12,6 @@ export const dynamic = "force-dynamic";
  * est donc pousse au maximum autorise.
  */
 export const maxDuration = 300;
-
-/** Fenetre pendant laquelle une entreprise deja scannee n'est pas repassee. */
-const SCAN_MEMORY_DAYS = 30;
 
 interface SearchBody {
   q?: string;
@@ -29,33 +25,6 @@ interface SearchBody {
   limit?: number;
   /** Largeur du scan Linkup (5-25). */
   scanWidth?: number;
-}
-
-/**
- * SIREN a ne pas rescanner.
- *
- * Trois sources : le portefeuille, les favoris, et la memoire de scan des 30
- * derniers jours. Sans cette exclusion, chaque recherche repayait Linkup pour
- * les memes entreprises — c'est la cause directe du « toujours les memes
- * entreprises lyonnaises ».
- */
-async function knownSirens(supabase: SupabaseClient<Database>): Promise<Set<string>> {
-  const since = new Date(Date.now() - SCAN_MEMORY_DAYS * 86_400_000).toISOString();
-
-  const [prospects, favorites, scans] = await Promise.all([
-    supabase.from("prospects").select("siren"),
-    supabase.from("favorites").select("siren"),
-    supabase.from("scan_history").select("siren").gte("scanned_at", since),
-  ]);
-
-  const known = new Set<string>();
-  for (const rows of [prospects.data, favorites.data, scans.data]) {
-    for (const row of rows ?? []) {
-      const siren = (row as { siren: string | null }).siren;
-      if (siren) known.add(siren);
-    }
-  }
-  return known;
 }
 
 /**
@@ -73,7 +42,9 @@ export async function POST(request: Request) {
   if (!body) return NextResponse.json({ error: "Requête invalide." }, { status: 400 });
 
   // L'exclusion est lue avant le scan : une lecture ratee ne doit pas faire
-  // echouer la recherche, elle la rend seulement moins econome.
+  // echouer la recherche, elle la rend seulement moins econome. Elle couvre
+  // portefeuille (corbeille comprise), favoris, scans recents et SIREN exclus
+  // apres suppression definitive (lib/trash/exclusions.ts).
   const exclude = await knownSirens(session.supabase).catch(() => new Set<string>());
 
   const outcome = await searchAndEnrich(

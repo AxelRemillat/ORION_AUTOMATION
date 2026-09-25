@@ -1,8 +1,8 @@
 import { Users } from "lucide-react";
 import { EmptyState, PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
+import { loadPortfolio } from "@/lib/trash/portfolio";
 import { requireUser } from "@/lib/auth";
-import type { Message, Prospect, Reminder } from "@/types";
 import { DeliverabilityBanner } from "./_components/deliverability-banner";
 import { buildDeliverability } from "./_lib/deliverability";
 import { buildSequence, type SequenceStep } from "./_lib/sequence";
@@ -19,16 +19,11 @@ export default async function ProspectionPage() {
   await requireUser();
   const supabase = createClient();
 
-  const [prospectsResult, messagesResult, remindersResult] = await Promise.all([
-    supabase.from("prospects").select("*").order("created_at", { ascending: false }),
-    supabase.from("messages").select("*"),
-    supabase.from("reminders").select("*"),
-  ]);
-
-  const prospects = (prospectsResult.data ?? []) as Prospect[];
-  const messages = (messagesResult.data ?? []) as Message[];
-  const reminders = (remindersResult.data ?? []) as Reminder[];
-  const error = prospectsResult.error;
+  const { prospects, messages, reminders, error } = await loadPortfolio(
+    supabase,
+    ["messages", "reminders"],
+    { orderBy: "created_at" },
+  );
 
   // Séquence pré-calculée côté serveur : le client reçoit des états, pas des
   // corps de messages.
@@ -58,7 +53,7 @@ export default async function ProspectionPage() {
           title={error ? "Prospects indisponibles" : "Aucun prospect à travailler"}
           description={
             error
-              ? error.message
+              ? error
               : "Commencez par en ajouter depuis la Recherche : ils apparaîtront ici."
           }
         />

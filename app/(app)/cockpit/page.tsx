@@ -1,13 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import type {
-  ActionState,
-  Deal,
-  InboundMessage,
-  Message,
-  Prospect,
-  Reminder,
-} from "@/types";
+import { loadPortfolio } from "@/lib/trash/portfolio";
+import type { ActionState } from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
 import { ActionQueueCard } from "./_components/versus/action-queue-card";
 import { InboxPanel } from "./_components/inbox-panel";
@@ -47,27 +41,11 @@ export default async function CockpitPage({
   await requireUser();
   const supabase = createClient();
 
-  const [
-    prospectsResult,
-    messagesResult,
-    dealsResult,
-    remindersResult,
-    inboundResult,
-    statesResult,
-  ] = await Promise.all([
-    supabase.from("prospects").select("*"),
-    supabase.from("messages").select("*"),
-    supabase.from("deals").select("*"),
-    supabase.from("reminders").select("*"),
-    supabase.from("inbound_messages").select("*"),
+  // Corbeille exclue partout : file d'actions, boîte de réception, courbes.
+  const [{ prospects, messages, deals, reminders, inbound }, statesResult] = await Promise.all([
+    loadPortfolio(supabase, ["messages", "deals", "reminders", "inbound"]),
     supabase.from("action_states").select("*"),
   ]);
-
-  const prospects = (prospectsResult.data ?? []) as Prospect[];
-  const messages = (messagesResult.data ?? []) as Message[];
-  const deals = (dealsResult.data ?? []) as Deal[];
-  const reminders = (remindersResult.data ?? []) as Reminder[];
-  const inbound = (inboundResult.data ?? []) as InboundMessage[];
   const states = (statesResult.data ?? []) as ActionState[];
 
   const signals = topSignals(prospects);

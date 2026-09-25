@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { activeProspects } from "@/lib/trash/scope";
 import type { InboundMessage, Message, Prospect } from "@/types";
 import { ReplyComposer } from "./reply-composer";
 import { ThreadView, type ThreadEntry } from "./thread-view";
@@ -36,7 +37,7 @@ export default async function InboxThreadPage({ params }: { params: { id: string
 
   if (inbound.prospect_id) {
     const [prospectResult, messagesResult, inboundResult] = await Promise.all([
-      supabase.from("prospects").select("*").eq("id", inbound.prospect_id).maybeSingle(),
+      activeProspects(supabase).eq("id", inbound.prospect_id).maybeSingle(),
       supabase
         .from("messages")
         .select("*")
@@ -49,6 +50,8 @@ export default async function InboxThreadPage({ params }: { params: { id: string
         .order("received_at", { ascending: true }),
     ]);
     prospect = (prospectResult.data as Prospect) ?? null;
+    // Réponse d'un prospect mis à la corbeille : masquée avec lui.
+    if (!prospect) notFound();
     messages = (messagesResult.data ?? []) as Message[];
     const received = (inboundResult.data ?? []) as InboundMessage[];
     if (received.length) inbounds = received;

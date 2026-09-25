@@ -11,6 +11,7 @@ import {
   StatCard,
 } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
+import { activeProspectCount } from "@/lib/trash/scope";
 import { requireUser } from "@/lib/auth";
 import { formatEur } from "@/lib/utils";
 import { fetchBalances } from "@/lib/usage/balances";
@@ -35,7 +36,7 @@ export default async function CoutsPage() {
 
   const [usageResult, prospectsResult] = await Promise.all([
     supabase.from("api_usage").select("*").order("created_at", { ascending: false }),
-    supabase.from("prospects").select("id", { count: "exact", head: true }),
+    activeProspectCount(supabase),
   ]);
 
   const rows = (usageResult.data ?? []) as ApiUsage[];

@@ -1,8 +1,9 @@
 import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
+import { loadPortfolio } from "@/lib/trash/portfolio";
 import { requireUser } from "@/lib/auth";
 import { formatEur } from "@/lib/utils";
-import type { Deal, Message, Prospect, Reminder } from "@/types";
+import type { Prospect } from "@/types";
 import { DueReminders } from "./_components/due-reminders";
 import { PipelineBoard } from "./_components/pipeline-board";
 import { countValued, sumPipeline } from "./_lib/estimates";
@@ -22,17 +23,12 @@ export default async function SuiviPage() {
   await requireUser();
   const supabase = createClient();
 
-  const [prospectsResult, messagesResult, remindersResult, dealsResult] = await Promise.all([
-    supabase.from("prospects").select("*").order("updated_at", { ascending: false }),
-    supabase.from("messages").select("*"),
-    supabase.from("reminders").select("*").eq("done", false).order("due_at"),
-    supabase.from("deals").select("*"),
-  ]);
-
-  const prospects = (prospectsResult.data ?? []) as Prospect[];
-  const messages = (messagesResult.data ?? []) as Message[];
-  const reminders = (remindersResult.data ?? []) as Reminder[];
-  const deals = (dealsResult.data ?? []) as Deal[];
+  // Corbeille exclue : ses relances sont suspendues tant qu'elle y reste.
+  const { prospects, messages, reminders, deals } = await loadPortfolio(
+    supabase,
+    ["messages", "reminders", "deals"],
+    { orderBy: "updated_at", openRemindersOnly: true },
+  );
 
   const rows = buildRows(prospects, messages, reminders, deals);
   const byId = new Map(prospects.map((prospect) => [prospect.id, prospect]));

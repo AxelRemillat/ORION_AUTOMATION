@@ -1,8 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-/** Routes accessibles sans session. Tout le reste exige d'être connecté. */
-const PUBLIC_PATHS = ["/login", "/auth"];
+/**
+ * Routes accessibles sans session. Tout le reste exige d'être connecté.
+ * `/api/cron` est appelée par Vercel, sans cookie : elle vérifie elle-même
+ * son secret (CRON_SECRET) et refuse tout le reste.
+ */
+const PUBLIC_PATHS = ["/login", "/auth", "/api/cron"];
 
 const isPublic = (pathname: string) =>
   PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isActiveProspect, TRASHED_ERROR } from "@/lib/trash/scope";
 import { requireEnv } from "@/lib/env";
 import { advanceStatus } from "@/lib/constants";
 import type { MessageType, ProspectStatus } from "@/types";
@@ -64,6 +65,10 @@ export async function POST(request: Request) {
   if (!message) return NextResponse.json({ error: "Message introuvable." }, { status: 404 });
   if (message.status === "sent") {
     return NextResponse.json({ error: "Ce message a déjà été envoyé." }, { status: 409 });
+  }
+  // Envoi bloqué côté serveur tant que le prospect est à la corbeille.
+  if (!(await isActiveProspect(supabase, prospectId))) {
+    return NextResponse.json({ error: TRASHED_ERROR }, { status: 409 });
   }
 
   // --- Appel du webhook n8n (cf. docs/n8n.md pour le contrat) ---------------

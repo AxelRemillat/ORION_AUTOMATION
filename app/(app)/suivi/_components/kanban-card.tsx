@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Clock, PenLine } from "lucide-react";
 import { formatDate, formatEur } from "@/lib/utils";
+import { TrashButton } from "@/components/trash/trash-button";
 import type { ActionUrgency } from "../_lib/next-action";
 import type { ProspectRow } from "../_lib/rows";
 
@@ -111,6 +112,11 @@ export function KanbanCard({
           >
             <ChevronRight className="h-3.5 w-3.5" aria-hidden />
           </button>
+          <TrashButton
+            prospectId={row.id}
+            companyName={row.company_name}
+            className="border-0 p-1"
+          />
         </span>
       </footer>
     </article>

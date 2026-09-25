@@ -51,14 +51,16 @@ export async function POST(request: Request) {
       // conduire, pas se contenter d'annoncer un echec.
       const { data: existing } = await session.supabase
         .from("prospects")
-        .select("id")
+        .select("id, deleted_at")
         .eq("siren", company.siren ?? "")
         .maybeSingle();
 
       return NextResponse.json(
         {
-          error: `${company.company_name} est déjà dans ton portefeuille.`,
-          prospectId: existing?.id ?? null,
+          error: existing?.deleted_at
+            ? `${company.company_name} est dans la corbeille : restaure-le depuis /corbeille.`
+            : `${company.company_name} est déjà dans ton portefeuille.`,
+          prospectId: existing?.deleted_at ? null : existing?.id ?? null,
         },
         { status: 409 },
       );

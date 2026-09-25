@@ -152,6 +152,14 @@ export type Prospect = {
    * la migration 20260925100000 : absente tant qu'elle n'est pas appliquée.
    */
   brief?: Record<string, unknown> | null;
+  /**
+   * Mise à la corbeille : le prospect est masqué partout tant que ce champ est
+   * renseigné (lib/trash/scope.ts), puis purgé 14 jours plus tard.
+   * Colonnes ajoutées par la migration 20260925124235.
+   */
+  deleted_at?: string | null;
+  /** Statut au moment de la mise à la corbeille, rendu à la restauration. */
+  status_before_delete?: string | null;
   status: ProspectStatus;
   created_at: string;
   updated_at: string;
@@ -270,6 +278,26 @@ export type ApiUsage = {
 }
 
 /**
+ * SIREN à ne plus proposer dans la recherche (après une suppression
+ * définitive). Clé primaire (user_id, siren).
+ */
+export type ExcludedCompany = {
+  user_id: string;
+  siren: string;
+  reason: string | null;
+  created_at: string;
+};
+
+export type ExcludedCompanyInsert = {
+  user_id?: string;
+  siren: string;
+  reason?: string | null;
+  created_at?: string;
+};
+
+export type ExcludedCompanyUpdate = Partial<ExcludedCompanyInsert>;
+
+/**
  * Cache partagé des appels payants (fiches de registre).
  *
  * Pas de `user_id` : la donnée mise en cache est publique, et la mutualiser
@@ -346,6 +374,8 @@ export type ProspectInsert = Insert<
   | "key_figures"
   | "pain_point"
   | "brief"
+  | "deleted_at"
+  | "status_before_delete"
   | "status"
 >;
 export type ProspectUpdate = Update<Prospect>;
@@ -450,6 +480,12 @@ export type Database = {
         Row: EnrichmentCache;
         Insert: EnrichmentCacheInsert;
         Update: EnrichmentCacheUpdate;
+        Relationships: [];
+      };
+      excluded_companies: {
+        Row: ExcludedCompany;
+        Insert: ExcludedCompanyInsert;
+        Update: ExcludedCompanyUpdate;
         Relationships: [];
       };
       scan_history: {

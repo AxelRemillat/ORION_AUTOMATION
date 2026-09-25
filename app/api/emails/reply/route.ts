@@ -3,6 +3,7 @@ import { getOpenAI } from "@/lib/openai";
 import { samplingParams } from "@/lib/ai/models";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
+import { activeProspects, TRASHED_ERROR } from "@/lib/trash/scope";
 import type { InboundMessage, Message, Prospect } from "@/types";
 import {
   buildReplyContext,
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
 
   if (answering.prospect_id) {
     const [prospectResult, messagesResult, inboundResult] = await Promise.all([
-      session.supabase.from("prospects").select("*").eq("id", answering.prospect_id).maybeSingle(),
+      activeProspects(session.supabase).eq("id", answering.prospect_id).maybeSingle(),
       session.supabase
         .from("messages")
         .select("*")
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
         .order("received_at", { ascending: true }),
     ]);
     prospect = (prospectResult.data as Prospect) ?? null;
+    if (!prospect) return NextResponse.json({ error: TRASHED_ERROR }, { status: 409 });
     messages = (messagesResult.data ?? []) as Message[];
     inbounds = ((inboundResult.data ?? []) as InboundMessage[]) ?? [answering];
   }

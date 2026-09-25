@@ -104,7 +104,7 @@ export async function POST(request: Request) {
   // ou, à défaut de correspondance, le titulaire du portefeuille.
   const { data: prospect } = await supabase
     .from("prospects")
-    .select("id, user_id, status")
+    .select("id, user_id, status, deleted_at")
     .ilike("email", fromEmail)
     .limit(1)
     .maybeSingle();
@@ -157,7 +157,9 @@ export async function POST(request: Request) {
 
   // --- Le prospect a répondu : on fait avancer son statut ------------------
   let newStatus: ProspectStatus | null = null;
-  if (prospect) {
+  // Prospect à la corbeille : l'email reste rattaché (il réapparaît à la
+  // restauration) mais le statut ne bouge pas — il sera restauré tel quel.
+  if (prospect && !prospect.deleted_at) {
     newStatus = advanceStatus(prospect.status as ProspectStatus, "repondu");
     if (newStatus) {
       await supabase.from("prospects").update({ status: newStatus }).eq("id", prospect.id);

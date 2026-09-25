@@ -216,15 +216,17 @@ async function blockLive(): Promise<void> {
   for (const run of runs) {
     const before = await spent();
 
-    // Exclusion reelle : portefeuille, favoris, scans de moins de 30 jours.
+    // Exclusion reelle : portefeuille, favoris, scans de moins de 30 jours,
+    // SIREN exclus apres suppression definitive (meme regle que knownSirens).
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    const [prospects, favorites, scans] = await Promise.all([
+    const [prospects, favorites, scans, excluded] = await Promise.all([
       supabase.from("prospects").select("siren").eq("user_id", userId),
       supabase.from("favorites").select("siren").eq("user_id", userId),
       supabase.from("scan_history").select("siren").eq("user_id", userId).gte("scanned_at", since),
+      supabase.from("excluded_companies").select("siren").eq("user_id", userId),
     ]);
     const exclude = new Set<string>();
-    for (const rows of [prospects.data, favorites.data, scans.data]) {
+    for (const rows of [prospects.data, favorites.data, scans.data, excluded.data]) {
       for (const row of rows ?? []) if (row.siren) exclude.add(row.siren);
     }
 

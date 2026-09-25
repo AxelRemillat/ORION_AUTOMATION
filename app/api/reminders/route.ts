@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isActiveProspect, TRASHED_ERROR } from "@/lib/trash/scope";
 
 /**
  * GET  /api/reminders?scope=due|open — relances ouvertes (dues aujourd'hui par défaut).
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("reminders")
-    .select("id, prospect_id, due_at, done, created_at, prospects(company_name, status)")
+    .select("id, prospect_id, due_at, done, created_at, prospects(company_name, status, deleted_at)")
     .eq("done", false)
     .order("due_at", { ascending: true });
 
@@ -29,7 +30,12 @@ export async function GET(request: Request) {
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ reminders: data ?? [] });
+  // Relances d'un prospect à la corbeille : suspendues, n8n ne les voit pas.
+  const reminders = (data ?? []).filter((row) => {
+    const owner = (row as { prospects?: { deleted_at?: string | null } | null }).prospects;
+    return !owner?.deleted_at;
+  });
+  return NextResponse.json({ reminders });
 }
 
 export async function POST(request: Request) {
@@ -50,6 +56,9 @@ export async function POST(request: Request) {
   }
 
   const supabase = createClient();
+  if (!(await isActiveProspect(supabase, prospectId))) {
+    return NextResponse.json({ error: TRASHED_ERROR }, { status: 409 });
+  }
   const { data, error } = await supabase
     .from("reminders")
     .insert({ prospect_id: prospectId, due_at: dueAt, done: false })
