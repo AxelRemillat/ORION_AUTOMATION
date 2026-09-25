@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { INBOUND_SECRET_HEADER, secretMatches } from "@/lib/inbound/secret";
 import { createAdminClient } from "@/lib/supabase/server";
 import { advanceStatus } from "@/lib/constants";
 import { INBOUND_CATEGORIES, type InboundCategory, type ProspectStatus } from "@/types";
@@ -25,9 +25,6 @@ import { INBOUND_CATEGORIES, type InboundCategory, type ProspectStatus } from "@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** En-tête portant le secret partagé avec n8n. */
-const SECRET_HEADER = "x-orion-inbound-secret";
-
 interface InboundBody {
   from_email?: unknown;
   subject?: unknown;
@@ -35,19 +32,6 @@ interface InboundBody {
   thread_id?: unknown;
   received_at?: unknown;
   category?: unknown;
-}
-
-/**
- * Comparaison à temps constant.
- *
- * On compare des empreintes plutôt que les chaînes brutes : `timingSafeEqual`
- * exige deux tampons de même longueur, et passer par un hash évite de laisser
- * fuiter la longueur du secret.
- */
-function secretMatches(provided: string | null, expected: string): boolean {
-  if (!provided) return false;
-  const digest = (value: string) => createHash("sha256").update(value).digest();
-  return timingSafeEqual(digest(provided), digest(expected));
 }
 
 /** Extrait l'adresse d'un en-tête « Nom <adresse@ex.fr> » ou d'une adresse nue. */
@@ -82,7 +66,7 @@ export async function POST(request: Request) {
     // Sans secret configuré, l'endpoint resterait un point d'écriture ouvert.
     return NextResponse.json({ error: "Réception non configurée." }, { status: 503 });
   }
-  if (!secretMatches(request.headers.get(SECRET_HEADER), expected)) {
+  if (!secretMatches(request.headers.get(INBOUND_SECRET_HEADER), expected)) {
     return NextResponse.json({ error: "Secret invalide." }, { status: 401 });
   }
 
