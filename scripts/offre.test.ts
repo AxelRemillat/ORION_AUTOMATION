@@ -18,7 +18,7 @@ import {
   withDefaults,
 } from "../lib/offer/model";
 import { defaultOffer } from "../lib/offer/read";
-import { offerNumbers, stripSignature } from "../app/api/emails/generate/pipeline";
+import { commitmentsOf, offerNumbers, stripSignature } from "../app/api/emails/generate/pipeline";
 import { bodyParagraphs, opensOnSector, validateEmail, withoutSignature, wordCount } from "../lib/emails/validate";
 import { buildFacts } from "../lib/emails/derived-facts";
 import type { Prospect } from "../types";
@@ -242,6 +242,49 @@ console.log("\n10. Les chiffres de l'offre sont autorisés dans le corps");
       },
       { facts, contact: null, tone: "direct", companyName: "X", signature },
     ).failures.some((f) => f.includes("Nombre absent")),
+  );
+}
+
+console.log("\n11. Les engagements d'Axel sont transmis au juge");
+{
+  const commitments = commitmentsOf(offer);
+  check("le délai y est", commitments.some((c) => c.includes("2 à 3 semaines")), commitments.join(" | "));
+  check("sans changer d'outil y est", commitments.includes("sans changer d'outil"));
+  check("la demande d'entrée y est", commitments.some((c) => c.includes("une démo de 15 min")));
+  check(
+    "une promesse décochée n'y est pas",
+    !commitmentsOf({ ...offer, human_validation: false }).some((c) => c.includes("validation humaine")),
+  );
+}
+
+console.log("\n12. La source légale ne se nomme jamais dans le mail");
+{
+  const facts = buildFacts({
+    id: "p", user_id: "u", company_name: "DEVESA", siren: "1", website: null, email: null,
+    sector: "Immobilier", size_range: null, city: "Lyon", source: "auto", signals: [],
+    key_figures: {}, pain_point: null, status: "nouveau", created_at: "", updated_at: "",
+  } as Prospect).facts;
+  const signature = signatureFor(offer);
+  const mail = (accroche: string) =>
+    validateEmail(
+      {
+        subject: "dossiers et relances",
+        body:
+          `Bonjour,\n\n${accroche}\n\nJe suis Axel Remillat, je construis des flux.\n\n` +
+          `Comptez 2 à 3 semaines, sans changer d'outil.\n\nEst-ce que ça vous parlerait ?\n\n${signature}`,
+      },
+      { facts, contact: null, tone: "direct", companyName: "DEVESA", signature, offerNumbers: offerNumbers(offer) },
+    ).failures.join(" | ");
+
+  check("« BODACC » refusé", mail("Le BODACC annonce un nouvel établissement.").includes("interdites"));
+  check("« annonce légale » refusé", mail("Une annonce légale signale votre nouvelle agence.").includes("interdites"));
+  check("« Journal officiel » refusé", mail("Le Journal officiel mentionne votre création.").includes("interdites"));
+  check("« au registre » refusé", mail("Vous êtes représentée par J.DIS au registre.").includes("interdites"));
+  // Cas reellement parti en production : la preposition changeait, pas le mot.
+  check("« Le registre indique » refusé", mail("Le registre indique que J.DIS vous représente.").includes("interdites"));
+  check(
+    "le même fait, dit humainement, passe",
+    !mail("Vous avez ouvert une agence à Lavelanet au printemps.").includes("interdites"),
   );
 }
 

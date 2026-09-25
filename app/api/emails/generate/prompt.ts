@@ -303,10 +303,14 @@ STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
    c'est le contraire d'une accroche.
 2. QUI + PREUVE : « Je suis ${offer.full_name ?? "Axel Remillat"}, » suivi de ton
    titre reformule naturellement (pas recopie mot pour mot), puis la preuve
-   ci-dessous.
+   ci-dessous. Dis ce que tu CONSTRUIS, jamais qui tu aides : « j'aide les PME »
+   ou « j'accompagne des entreprises » revendique une clientele que les preuves
+   ne permettent pas d'affirmer.
 3. OFFRE POUR EUX : le flux applique a LEUR cas — ce qui declenche, ce qui est
-   lu, ce qui est ecrit, dans quel outil — plus le delai type, « sans changer
-   d'outil » et la validation humaine. Une a deux phrases.
+   lu, ce qui est ecrit, dans quel outil. Puis la promesse en UNE clause
+   courte : le delai, et au plus UN des deux autres elements (« sans changer
+   d'outil » ou la validation humaine). Les trois d'affilee alourdissent le
+   mail de quinze mots pour rien.
 4. DEMANDE FACILE : ton offre d'entree, formulee en question FERMEE a laquelle
    on repond oui ou non (« Est-ce que ca vous parlerait ? »).
 
