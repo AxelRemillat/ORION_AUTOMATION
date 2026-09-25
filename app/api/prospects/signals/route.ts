@@ -10,6 +10,15 @@ import { readJson, requireSession } from "../_guard";
 export const runtime = "nodejs";
 
 /**
+ * Meme plafond que la recherche par criteres.
+ *
+ * Sans cette ligne, la route heritait du defaut (dix secondes) alors qu'une
+ * recherche par signaux demande 35 a 45 secondes : elle aurait ete coupee en
+ * production, la ou elle passe en local.
+ */
+export const maxDuration = 300;
+
+/**
  * Mode « Signaux d'abord ».
  *
  * `GET` rend l'état des sources sans rien appeler : l'écran a besoin de savoir

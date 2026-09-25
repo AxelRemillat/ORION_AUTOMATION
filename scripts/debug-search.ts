@@ -488,6 +488,7 @@ async function blockSignaux(): Promise<void> {
   console.log(`  deja connues                               : ${outcome.skippedKnown}`);
   console.log(`  signaux non rapproches                     : ${outcome.unmatched}`);
   console.log(`  ecartees par le ciblage                    : ${outcome.excluded.length}`);
+  console.log(`  candidats tranche confirmee / inconnue     : ${outcome.confirmedCount} / ${outcome.unknownTrancheCount}`);
 
   console.log("");
   console.log("Fiches obtenues :");

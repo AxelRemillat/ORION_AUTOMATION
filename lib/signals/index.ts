@@ -64,8 +64,17 @@ export { DEFAULT_SIGNAL_DAYS } from "./shared";
  */
 export const MAX_IDENTITY_LOOKUPS = 250;
 
-/** Annonces ramenées par source. Au-delà, on scanne du vieux pour rien. */
-const MAX_NOTICES_PER_SOURCE = 600;
+/**
+ * Annonces ramenées par source.
+ *
+ * Mesuré : à Paris, 600 annonces BODACC ne couvrent que DEUX jours — le
+ * département en publie des centaines par jour. La fenêtre de 60 jours n'était
+ * donc pas exploitée, et il ne restait que deux entreprises à tranche confirmée
+ * dans tout le lot. 2 000 annonces font 20 pages, gratuites et mises en cache
+ * pour la journée : le coût est du temps, quelques secondes, contre un vivier
+ * plusieurs fois plus large.
+ */
+const MAX_NOTICES_PER_SOURCE = 2_000;
 
 /**
  * Renforts retenus en plus du signal principal.
@@ -297,8 +306,16 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
   // Le plus FORT d'abord, puis le plus frais. Ce tri décide deux choses à la
   // fois : l'ordre des fiches rendues, et où part le budget de résolutions
   // d'identité — on coupe les signaux faibles, jamais les forts.
+  //
+  // La comparaison porte sur le JOUR, pas sur l'horodatage : BODACC date à la
+  // journée (« 2026-09-25 »), France Travail à la seconde
+  // (« 2026-09-25T16:05:17Z »). Comparées comme des chaînes, les secondes
+  // passaient systématiquement devant — toutes les offres avant tout le BODACC
+  // du même jour, ce qui consommait les 250 résolutions d'identité sur la
+  // source au plus faible taux de rapprochement. Vu en production sur le 75.
+  const day = (signal: OfficialSignal) => signal.date.slice(0, 10);
   signals.sort(
-    (a, b) => STRENGTH_RANK[b.strength] - STRENGTH_RANK[a.strength] || b.date.localeCompare(a.date),
+    (a, b) => STRENGTH_RANK[b.strength] - STRENGTH_RANK[a.strength] || day(b).localeCompare(day(a)),
   );
   return { signals, sources, warnings };
 }
@@ -442,6 +459,10 @@ export interface ResolvedCandidates {
   /** Écartées sur la tranche déclarée à l'annuaire. */
   outOfBracket: string[];
   warnings: EnrichmentWarning[];
+  /** Candidats dont la tranche est confirmée par l'annuaire. */
+  confirmedCount: number;
+  /** Candidats dont la tranche n'est pas déclarée : Pappers tranchera. */
+  unknownTrancheCount: number;
 }
 
 /**
@@ -475,7 +496,10 @@ export async function resolveCandidates(
   const unknownTranche: SignalCandidate[] = [];
   const outOfBracket: string[] = [];
   const warnings: EnrichmentWarning[] = [];
+  /** Cles de signaux deja traitees : evite un appel en double. */
   const seen = new Set<string>();
+  /** SIREN deja retenus : evite deux fiches pour la meme entreprise. */
+  const resolved = new Set<string>();
   let lookups = 0;
   let skippedKnown = 0;
   // Une offre qu'on n'a pas su rattacher n'est NI une entreprise hors cible NI
@@ -487,8 +511,27 @@ export async function resolveCandidates(
   // phase 2 sur son effectif reel, et il faut de quoi la remplacer.
   const wanted = criteria.limit * 2;
 
+  /**
+   * Y a-t-il assez de matiere pour remplir l'objectif ?
+   *
+   * Un candidat a tranche CONFIRMEE aboutit presque toujours ; un candidat a
+   * tranche non declaree passe environ une fois sur deux, c'est Pappers qui
+   * tranche.
+   *
+   * Les deux conditions sont necessaires, et la seconde est celle qui compte :
+   * sans elle, seize tranches inconnues « valaient » huit confirmes et la
+   * boucle s'arretait apres vingt-six resolutions a Paris. Resultat, trois
+   * fiches sur cinq avaient un effectif inconnu — la recherche demandait
+   * « 10 a 49 salaries » et rendait des holdings. On exige donc d'avoir au
+   * moins l'objectif en candidats CONFIRMES avant de se rabattre sur les
+   * autres ; a defaut, c'est le plafond de resolutions qui arrete.
+   */
+  const enoughMaterial = () =>
+    confirmed.length >= wanted ||
+    (confirmed.length >= criteria.limit && confirmed.length + unknownTranche.length / 2 >= wanted);
+
   for (const signal of signals) {
-    if (confirmed.length >= wanted || lookups >= maxLookups) break;
+    if (enoughMaterial() || lookups >= maxLookups) break;
     if (context.shouldStop && (await context.shouldStop())) break;
 
     if (signal.siren && exclude.has(signal.siren)) {
@@ -517,6 +560,22 @@ export async function resolveCandidates(
     if (!base) {
       unmatched += 1;
       continue;
+    }
+
+    // Dedoublonnage sur le SIREN RESOLU, dans un ensemble DISTINCT de `seen`.
+    //
+    // Le premier dedoublonnage ne peut pas suffire pour une offre d'emploi :
+    // elle n'a pas de SIREN, sa cle est « nom + commune », et une meme
+    // entreprise qui recrute dans deux arrondissements produisait deux cles,
+    // donc deux fois la meme fiche (vu sur GROUPE IGF dans le 75).
+    //
+    // L'ensemble doit etre distinct, et c'est tout sauf un detail : `seen`
+    // contient DEJA le SIREN d'un signal BODACC, pose avant l'appel. Partager
+    // les deux ensembles rejetait donc la totalite des candidats BODACC, en
+    // silence — il ne restait que les offres d'emploi.
+    if (base.siren) {
+      if (resolved.has(base.siren)) continue;
+      resolved.add(base.siren);
     }
     if (base.siren && exclude.has(base.siren)) {
       skippedKnown += 1;
@@ -579,7 +638,17 @@ export async function resolveCandidates(
   confirmed.sort(byStrength);
   unknownTranche.sort(byStrength);
   const candidates = [...confirmed, ...unknownTranche].slice(0, wanted);
-  return { candidates, lookups, skippedKnown, unmatched, excluded, outOfBracket, warnings };
+  return {
+    candidates,
+    lookups,
+    skippedKnown,
+    unmatched,
+    excluded,
+    outOfBracket,
+    warnings,
+    confirmedCount: confirmed.length,
+    unknownTrancheCount: unknownTranche.length,
+  };
 }
 
 /**
@@ -640,6 +709,10 @@ export interface SignalSearchOutcome {
   skippedKnown: number;
   /** Signaux qu'on n'a pas su rattacher à une entreprise de l'annuaire. */
   unmatched: number;
+  /** Candidats dont la tranche est confirmée par l'annuaire. */
+  confirmedCount: number;
+  /** Candidats dont la tranche n'est pas déclarée : Pappers tranchera. */
+  unknownTrancheCount: number;
   /** Écartées par le ciblage : structure juridique ou secteur exclu. */
   excluded: string[];
   outOfBracket: string[];
@@ -719,6 +792,8 @@ export async function searchBySignals(
     analysed: results.length,
     skippedKnown: resolved.skippedKnown,
     unmatched: resolved.unmatched,
+    confirmedCount: resolved.confirmedCount,
+    unknownTrancheCount: resolved.unknownTrancheCount,
     excluded: resolved.excluded,
     outOfBracket,
     warnings,

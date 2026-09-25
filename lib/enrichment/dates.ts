@@ -160,7 +160,10 @@ export function isFresh(iso: string | null | undefined, now = new Date()): boole
 /** Date lisible en français, ou « non daté ». */
 export function frenchDate(iso: string | null | undefined): string {
   if (!iso) return "non daté";
-  const [year, month, day] = iso.split("-");
+  // Une date peut arriver en horodatage complet (« 2026-09-25T15:29:27.275Z ») :
+  // France Travail en renvoie. Sans cette troncature, le jour valait `NaN` et
+  // l'ecran affichait « NaN septembre 2026 ».
+  const [year, month, day] = iso.slice(0, 10).split("-");
   const index = Number(month) - 1;
   if (!year || Number.isNaN(index) || !MONTHS_FR_DISPLAY[index]) return iso;
   return `${Number(day)} ${MONTHS_FR_DISPLAY[index]} ${year}`;

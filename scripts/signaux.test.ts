@@ -51,6 +51,7 @@ import {
   tierOf,
   type OfficialSignal,
 } from "../lib/signals";
+import { frenchDate } from "../lib/enrichment/dates";
 import type { CompanyBase } from "../lib/enrichment/types";
 
 let failures = 0;
@@ -521,6 +522,20 @@ console.log("\n13. Communes comparables malgre accents et arrondissements");
   );
   check("deux communes distinctes restent distinctes", normalizeCity("Lyon") !== normalizeCity("Lille"));
   check("valeur absente -> chaine vide", normalizeCity(null) === "");
+}
+
+console.log("\n14. Une date de source peut etre un horodatage complet");
+{
+  // France Travail renvoie « 2026-09-25T15:29:27.275Z ». Sans troncature, le
+  // jour valait NaN et l'ecran affichait « NaN septembre 2026 ».
+  check(
+    "horodatage complet lisible",
+    frenchDate("2026-09-25T15:29:27.275Z") === "25 septembre 2026",
+    frenchDate("2026-09-25T15:29:27.275Z"),
+  );
+  check("date seule inchangee", frenchDate("2026-09-24") === "24 septembre 2026");
+  check("valeur absente", frenchDate(null) === "non daté");
+  check("texte non datable rendu tel quel", frenchDate("bientot") === "bientot");
 }
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
