@@ -42,6 +42,12 @@ const BLACKLIST = [
   "cote startup et cote entreprise",
   "revolutionner",
   "booster",
+  // Vus en production : des tournures qui remplissent sans rien dire.
+  "mon metier, c'est de",
+  "peut demander de",
+  "m'a interesse",
+  "j'ai ete impressionne",
+  "dans votre secteur",
 ];
 
 /** Le créneau de 30 minutes est un élément de CTA, pas une donnée chiffrée. */
@@ -61,6 +67,12 @@ export interface ValidationContext {
   proofs?: readonly string[];
   /** Plan impose au redacteur : on verifie qu'il a bien ete suivi. */
   plan?: "A" | "B" | "C";
+  /**
+   * Signature ajoutee par le code. Elle est RETIREE avant de compter les mots :
+   * c'est une carte de visite, pas du corps de mail, et l'y inclure faisait
+   * echouer des mails de bonne longueur.
+   */
+  signature?: string;
   /** Entités homonymes écartées : leur nom ne doit jamais apparaître. */
   forbiddenNames?: readonly string[];
 }
@@ -130,7 +142,7 @@ export function wordCount(body: string): number {
  * plafond a 125 — au-dela, c'est vraiment trop long pour un premier contact.
  */
 function lengthBounds(tone: ToneKey): { min: number; max: number } {
-  return tone === "bref" ? { min: 40, max: 80 } : { min: 60, max: 125 };
+  return tone === "bref" ? { min: 60, max: 95 } : { min: 80, max: 110 };
 }
 
 /** Nombres écrits dans le corps, y compris « 41 M€ » et « 40,9 M ». */
@@ -303,6 +315,28 @@ export function echoesSlogan(body: string): string[] {
   return SLOGAN_ECHO.filter((term) => haystack.includes(normalize(term)));
 }
 
+/** Corps sans la signature ajoutee par le code. */
+export function withoutSignature(body: string, signature?: string): string {
+  if (!signature) return body;
+  const index = body.lastIndexOf(signature.trim());
+  return index >= 0 ? body.slice(0, index) : body;
+}
+
+/**
+ * Accroche generique, refusee.
+ *
+ * Le mail parti en production commençait par « Dans le commerce de gros,
+ * passer une commande… » : une phrase vraie pour n'importe quel negociant de
+ * France, donc une phrase qui ne dit rien de ce prospect. Une accroche qui
+ * ouvre sur le secteur est une non-accroche.
+ */
+export function opensOnSector(body: string): boolean {
+  const first = bodyParagraphs(body)[0] ?? "";
+  if (!first) return false;
+  // « Dans le commerce de gros, » / « Dans la formation, » / « En interim, »
+  return /^(dans|au sein d)\s+(le|la|les|l'|du|de|des)\s/i.test(first.trim());
+}
+
 export function validateEmail(draft: EmailDraft, context: ValidationContext): ValidationResult {
   const failures: string[] = [];
   const body = draft.body.trim();
@@ -374,6 +408,14 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     );
   }
 
+  // --- Accroche generique ---------------------------------------------------
+  if (opensOnSector(body)) {
+    failures.push(
+      "L'accroche ouvre sur le secteur (« Dans le/la… ») : elle serait vraie pour " +
+        "n'importe quel concurrent. Pars d'un fait propre à cette entreprise.",
+    );
+  }
+
   // --- Une seule question --------------------------------------------------
   const questions = questionsIn(body);
   if (questions.length > 1) {
@@ -410,7 +452,8 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     );
   }
 
-  const words = wordCount(body);
+  // La signature ne compte pas : elle est posee par le code, identique partout.
+  const words = wordCount(withoutSignature(body, context.signature));
   const { min, max } = lengthBounds(context.tone);
   if (words < min || words > max) {
     // Le retour doit etre ACTIONNABLE : « 126 mots, cible 60-110 » laisse le
