@@ -19,11 +19,33 @@ export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? LEGACY_DEFAULT_MODEL;
 let client: OpenAI | null = null;
 
 /**
+ * Délai maximal d'un appel OpenAI, et nombre de reprises.
+ *
+ * Le SDK part sur **dix minutes** et deux reprises. Sur une route serverless
+ * bornée à 60 s, cela ne veut pas dire « on attend longtemps » : cela veut dire
+ * que la plateforme tue la fonction avant que le code n'ait la main. Le client
+ * ne reçoit alors ni notre message ni notre code — juste un `504` de passerelle
+ * avec un corps HTML, impossible à expliquer à l'utilisateur.
+ *
+ * On borne donc l'appel NOUS-MÊMES, sous le budget de la route la plus courte.
+ * Une reprise reste utile : un `429` ou un `503` d'OpenAI est souvent
+ * transitoire, et le SDK attend peu entre deux essais.
+ */
+export const OPENAI_TIMEOUT_MS = 40_000;
+export const OPENAI_MAX_RETRIES = 1;
+
+/**
  * Client OpenAI partagé (serveur uniquement).
  * Instancié à la demande pour ne pas exiger la clé au build.
  */
 export function getOpenAI(): OpenAI {
-  if (!client) client = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
+  if (!client) {
+    client = new OpenAI({
+      apiKey: requireEnv("OPENAI_API_KEY"),
+      timeout: OPENAI_TIMEOUT_MS,
+      maxRetries: OPENAI_MAX_RETRIES,
+    });
+  }
   return client;
 }
 

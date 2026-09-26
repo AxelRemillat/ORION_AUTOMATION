@@ -3,6 +3,15 @@ import { resolveAndEnrich } from "@/lib/enrichment";
 import { readJson, requireSession } from "../_guard";
 
 export const runtime = "nodejs";
+
+/**
+ * Analyse d'une entreprise nommée : Pappers, lecture du site, extraction
+ * OpenAI. Trente secondes ne sont pas rares, et sans cette ligne la route
+ * héritait du défaut de la plateforme — coupée avant d'avoir fini, avec un
+ * `504` sans corps JSON que l'écran ne pouvait pas expliquer.
+ */
+export const maxDuration = 120;
+
 export const dynamic = "force-dynamic";
 
 interface EnrichBody {

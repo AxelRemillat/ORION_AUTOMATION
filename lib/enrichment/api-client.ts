@@ -22,6 +22,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Message d'une réponse en échec.
+ *
+ * Quand la route répond, elle fournit son propre `error` et c'est celui-là qu'on
+ * montre. Mais une coupure de PASSERELLE ne passe pas par la route : Vercel
+ * renvoie un `504` (ou un `502`) avec un corps HTML, `payload` est donc `null`
+ * et l'écran affichait « Erreur 504. » — un code, aucune indication de ce qu'il
+ * faut faire. Ces trois cas méritent une phrase.
+ */
+export function gatewayMessage(status: number): string {
+  if (status === 504 || status === 408) {
+    return "Le traitement a dépassé le temps imparti. Réessayez : la deuxième tentative est souvent plus rapide.";
+  }
+  if (status === 502 || status === 503) {
+    return "Service momentanément indisponible. Réessayez dans quelques instants.";
+  }
+  return `Erreur ${status}.`;
+}
+
 /** POST JSON → JSON, avec un message d'erreur exploitable tel quel dans un toast. */
 export async function postJson<T>(url: string, body: unknown): Promise<T> {
   let response: Response;
@@ -39,7 +58,7 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
     | (Record<string, unknown> & { error?: string })
     | null;
   if (!response.ok) {
-    throw new ApiError(payload?.error ?? `Erreur ${response.status}.`, response.status, payload);
+    throw new ApiError(payload?.error ?? gatewayMessage(response.status), response.status, payload);
   }
   return payload as T;
 }
