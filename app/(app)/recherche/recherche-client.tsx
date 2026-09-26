@@ -14,6 +14,7 @@ import { ResultCard, type AddState, type FavoriteState } from "./result-card";
 import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
 import { SignalsForm, type SignalCriteriaInput } from "./signals-form";
+import { ExcludedSectors } from "./excluded-sectors";
 import type { SignalSourceState } from "@/lib/signals/shared";
 import { DEFAULT_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
 import { ScanProgress } from "./scan-progress";
@@ -54,6 +55,8 @@ interface SearchResponse {
   stopReason?: string;
   /** Entreprises ecartees apres enrichissement : effectif hors tranche. */
   outOfBracket?: string[];
+  /** Entreprises ecartees par le ciblage : structure ou secteur. */
+  excluded?: string[];
   warnings: EnrichmentWarning[];
 }
 
@@ -66,6 +69,8 @@ interface SignalsResponse {
   lookups: number;
   analysed: number;
   skippedKnown: number;
+  /** Écartées par le ciblage : structure juridique ou secteur exclu. */
+  excluded: string[];
   outOfBracket: string[];
   warnings: EnrichmentWarning[];
 }
@@ -230,7 +235,7 @@ export function RechercheClient() {
           skippedKnown: data.skippedKnown ?? 0,
           pagesRead: data.pagesRead ?? 0,
           stopReason: data.stopReason,
-          outOfBracket: data.outOfBracket ?? [],
+          outOfBracket: [...(data.excluded ?? []), ...(data.outOfBracket ?? [])],
         },
       };
     });
@@ -266,7 +271,9 @@ export function RechercheClient() {
           skippedKnown: data.skippedKnown,
           pagesRead: 0,
           stopReason: sourceSummary(data.sources),
-          outOfBracket: data.outOfBracket,
+          // Les deux listes sont montrees ensemble : un resultat maigre doit
+          // pouvoir s'expliquer par un reglage, pas seulement par le marche.
+          outOfBracket: [...data.excluded, ...data.outOfBracket],
         },
       };
     });
@@ -389,6 +396,12 @@ export function RechercheClient() {
             />
           )}
           {mode === "signaux" && <SignalsForm onSubmit={searchBySignals} loading={loading} />}
+          {/* Le reglage vaut pour les deux modes : il s'affiche avec les deux. */}
+          {(mode === "auto" || mode === "signaux") && (
+            <div className="mt-4">
+              <ExcludedSectors />
+            </div>
+          )}
           {mode === "manuel" && <ManualForm onSubmit={searchManual} loading={loading} />}
           {mode === "favoris" && <FavoritesPanel refreshKey={favoritesKey} />}
           {mode !== "favoris" && (

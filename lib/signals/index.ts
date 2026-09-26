@@ -5,7 +5,7 @@ import { ENRICH_CONCURRENCY, deepEnrich } from "@/lib/enrichment";
 import { bracketOfTranches, checkBracket } from "@/lib/enrichment/headcount";
 import { effectifLabel } from "@/lib/enrichment/naf";
 import type { CompanyBase, EnrichedCompany, EnrichmentWarning } from "@/lib/enrichment/types";
-import type { ProspectSignal } from "@/types";
+import type { ProspectKeyFigures, ProspectSignal } from "@/types";
 import {
   compareNotices,
   groupBySiren,
@@ -14,8 +14,14 @@ import {
   type BodaccNotice,
   type SignalStrength,
 } from "./bodacc";
-import { DEFAULT_SIGNAL_DAYS, type SignalSourceId, type SignalSourceState } from "./shared";
+import {
+  DEFAULT_SIGNAL_DAYS,
+  type ProducingSourceId,
+  type SignalSourceId,
+  type SignalSourceState,
+} from "./shared";
 import { STRENGTH_RANK } from "./bodacc-parse";
+import { exclusionOf } from "./targeting";
 import {
   franceTravailStatus,
   recentJobSignals,
@@ -46,7 +52,7 @@ import {
  *     `NN` (non déclarée) que seul Pappers peut trancher.
  */
 
-export type { SignalSourceId, SignalSourceState } from "./shared";
+export type { ProducingSourceId, SignalSourceId, SignalSourceState } from "./shared";
 export { DEFAULT_SIGNAL_DAYS } from "./shared";
 
 /**
@@ -58,8 +64,17 @@ export { DEFAULT_SIGNAL_DAYS } from "./shared";
  */
 export const MAX_IDENTITY_LOOKUPS = 250;
 
-/** Annonces ramenées par source. Au-delà, on scanne du vieux pour rien. */
-const MAX_NOTICES_PER_SOURCE = 600;
+/**
+ * Annonces ramenées par source.
+ *
+ * Mesuré : à Paris, 600 annonces BODACC ne couvrent que DEUX jours — le
+ * département en publie des centaines par jour. La fenêtre de 60 jours n'était
+ * donc pas exploitée, et il ne restait que deux entreprises à tranche confirmée
+ * dans tout le lot. 2 000 annonces font 20 pages, gratuites et mises en cache
+ * pour la journée : le coût est du temps, quelques secondes, contre un vivier
+ * plusieurs fois plus large.
+ */
+const MAX_NOTICES_PER_SOURCE = 2_000;
 
 /**
  * Renforts retenus en plus du signal principal.
@@ -77,7 +92,7 @@ export interface OfficialSignal {
   companyName: string;
   city: string | null;
   postalCode: string | null;
-  sourceId: SignalSourceId;
+  sourceId: ProducingSourceId;
   /** Date ISO du signal principal : c'est la raison d'être de ce mode. */
   date: string;
   /** Force du signal principal — celle qui décide de l'angle et du tri. */
@@ -88,6 +103,8 @@ export interface OfficialSignal {
   newLeaders: BodaccLeader[];
   /** Capital déclaré après l'opération, quand l'annonce le donne. */
   capitalAmount: number | null;
+  /** Intitulé publié, pour une offre d'emploi. */
+  jobTitle: string | null;
 }
 
 
@@ -150,6 +167,7 @@ export function toOfficialSignal(notices: readonly BodaccNotice[]): OfficialSign
     // de gérant et une modification de capital peuvent être deux annonces.
     newLeaders: kept.flatMap((notice) => notice.newLeaders),
     capitalAmount: kept.find((notice) => notice.capitalAmount !== null)?.capitalAmount ?? null,
+    jobTitle: null,
   };
 }
 
@@ -179,6 +197,7 @@ function jobToOfficialSignal(job: JobSignal): OfficialSignal {
     ],
     newLeaders: [],
     capitalAmount: null,
+    jobTitle: job.title,
   };
 }
 
@@ -212,6 +231,18 @@ export function sourceStates(env: EnvLike = process.env): SignalSourceState[] {
       label: "Offres France Travail",
       available: ft.available,
       ...(ft.available ? {} : { unavailableReason: ft.reason }),
+      count: 0,
+    },
+    {
+      // La Bonne Boite v2 demande une autorisation validee A LA MAIN par France
+      // Travail sur l'application : le jeton est bien delivre avec le scope
+      // `api_labonneboitev2`, mais les endpoints repondent 403. Tant que
+      // l'autorisation n'est pas accordee, la source est annoncee telle quelle
+      // plutot que tentee a chaque recherche pour echouer.
+      id: "labonneboite",
+      label: "La Bonne Boite",
+      available: false,
+      unavailableReason: "non activée",
       count: 0,
     },
   ];
@@ -275,8 +306,16 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
   // Le plus FORT d'abord, puis le plus frais. Ce tri décide deux choses à la
   // fois : l'ordre des fiches rendues, et où part le budget de résolutions
   // d'identité — on coupe les signaux faibles, jamais les forts.
+  //
+  // La comparaison porte sur le JOUR, pas sur l'horodatage : BODACC date à la
+  // journée (« 2026-09-25 »), France Travail à la seconde
+  // (« 2026-09-25T16:05:17Z »). Comparées comme des chaînes, les secondes
+  // passaient systématiquement devant — toutes les offres avant tout le BODACC
+  // du même jour, ce qui consommait les 250 résolutions d'identité sur la
+  // source au plus faible taux de rapprochement. Vu en production sur le 75.
+  const day = (signal: OfficialSignal) => signal.date.slice(0, 10);
   signals.sort(
-    (a, b) => STRENGTH_RANK[b.strength] - STRENGTH_RANK[a.strength] || b.date.localeCompare(a.date),
+    (a, b) => STRENGTH_RANK[b.strength] - STRENGTH_RANK[a.strength] || day(b).localeCompare(day(a)),
   );
   return { signals, sources, warnings };
 }
@@ -313,8 +352,9 @@ export interface SignalCandidate {
   strength: SignalStrength;
   newLeaders: BodaccLeader[];
   capitalAmount: number | null;
+  jobTitle: string | null;
   tier: CandidateTier;
-  sourceId: SignalSourceId;
+  sourceId: ProducingSourceId;
 }
 
 /**
@@ -390,6 +430,15 @@ export function simplifyName(value: string): string {
 export interface ResolveContext {
   /** SIREN déjà connus (portefeuille, corbeille) : on ne les repropose pas. */
   exclude?: Set<string>;
+  /** Préfixes NAF écartés, tels que réglés par l'utilisateur. */
+  excludedSectors?: readonly string[];
+  /**
+   * Passe outre les exclusions de ciblage, structurelles comme sectorielles.
+   *
+   * Pour une recherche ponctuelle : Axel veut parfois voir ce qu'il a écarté,
+   * sans changer son réglage pour autant.
+   */
+  includeExcluded?: boolean;
   /** Plafond de recherches annuaire. Baissé dans les tests. */
   maxLookups?: number;
   /** Avancement, appelé après chaque identité résolue. */
@@ -405,9 +454,15 @@ export interface ResolvedCandidates {
   skippedKnown: number;
   /** Signaux qu'on n'a pas su rattacher à une entreprise de l'annuaire. */
   unmatched: number;
+  /** Écartées par le ciblage : structure juridique ou secteur exclu. */
+  excluded: string[];
   /** Écartées sur la tranche déclarée à l'annuaire. */
   outOfBracket: string[];
   warnings: EnrichmentWarning[];
+  /** Candidats dont la tranche est confirmée par l'annuaire. */
+  confirmedCount: number;
+  /** Candidats dont la tranche n'est pas déclarée : Pappers tranchera. */
+  unknownTrancheCount: number;
 }
 
 /**
@@ -441,19 +496,42 @@ export async function resolveCandidates(
   const unknownTranche: SignalCandidate[] = [];
   const outOfBracket: string[] = [];
   const warnings: EnrichmentWarning[] = [];
+  /** Cles de signaux deja traitees : evite un appel en double. */
   const seen = new Set<string>();
+  /** SIREN deja retenus : evite deux fiches pour la meme entreprise. */
+  const resolved = new Set<string>();
   let lookups = 0;
   let skippedKnown = 0;
   // Une offre qu'on n'a pas su rattacher n'est NI une entreprise hors cible NI
   // une absence de signal : sans ce compteur, l'echec etait invisible.
   let unmatched = 0;
+  const excluded: string[] = [];
 
   // On visera deux fois l'objectif : une entreprise peut encore sortir en
   // phase 2 sur son effectif reel, et il faut de quoi la remplacer.
   const wanted = criteria.limit * 2;
 
+  /**
+   * Y a-t-il assez de matiere pour remplir l'objectif ?
+   *
+   * Un candidat a tranche CONFIRMEE aboutit presque toujours ; un candidat a
+   * tranche non declaree passe environ une fois sur deux, c'est Pappers qui
+   * tranche.
+   *
+   * Les deux conditions sont necessaires, et la seconde est celle qui compte :
+   * sans elle, seize tranches inconnues « valaient » huit confirmes et la
+   * boucle s'arretait apres vingt-six resolutions a Paris. Resultat, trois
+   * fiches sur cinq avaient un effectif inconnu — la recherche demandait
+   * « 10 a 49 salaries » et rendait des holdings. On exige donc d'avoir au
+   * moins l'objectif en candidats CONFIRMES avant de se rabattre sur les
+   * autres ; a defaut, c'est le plafond de resolutions qui arrete.
+   */
+  const enoughMaterial = () =>
+    confirmed.length >= wanted ||
+    (confirmed.length >= criteria.limit && confirmed.length + unknownTranche.length / 2 >= wanted);
+
   for (const signal of signals) {
-    if (confirmed.length >= wanted || lookups >= maxLookups) break;
+    if (enoughMaterial() || lookups >= maxLookups) break;
     if (context.shouldStop && (await context.shouldStop())) break;
 
     if (signal.siren && exclude.has(signal.siren)) {
@@ -483,16 +561,44 @@ export async function resolveCandidates(
       unmatched += 1;
       continue;
     }
+
+    // Dedoublonnage sur le SIREN RESOLU, dans un ensemble DISTINCT de `seen`.
+    //
+    // Le premier dedoublonnage ne peut pas suffire pour une offre d'emploi :
+    // elle n'a pas de SIREN, sa cle est « nom + commune », et une meme
+    // entreprise qui recrute dans deux arrondissements produisait deux cles,
+    // donc deux fois la meme fiche (vu sur GROUPE IGF dans le 75).
+    //
+    // L'ensemble doit etre distinct, et c'est tout sauf un detail : `seen`
+    // contient DEJA le SIREN d'un signal BODACC, pose avant l'appel. Partager
+    // les deux ensembles rejetait donc la totalite des candidats BODACC, en
+    // silence — il ne restait que les offres d'emploi.
+    if (base.siren) {
+      if (resolved.has(base.siren)) continue;
+      resolved.add(base.siren);
+    }
     if (base.siren && exclude.has(base.siren)) {
       skippedKnown += 1;
       continue;
     }
 
     // Un intermédiaire recrute pour quelqu'un d'autre : viser lui plutôt que
-    // l'employeur, c'est le faux positif « RAS INTERIM JERECRUTE ».
+    // l'employeur, c'est le faux positif « RAS INTERIM JERECRUTE ». Cette
+    // exclusion-ci n'est PAS optionnelle : ce n'est pas un choix de ciblage,
+    // c'est une erreur de rapprochement.
     if (isStaffingNaf(base.naf_code)) {
       outOfBracket.push(`${base.company_name} — agence d'emploi, elle recrute pour ses clients`);
       continue;
+    }
+
+    // Ciblage : association, organisme public, EI sans salarié, secteur exclu.
+    // Écarté AVANT l'ouverture de fiche, donc sans rien dépenser.
+    if (!context.includeExcluded) {
+      const exclusion = exclusionOf(base, context.excludedSectors ?? []);
+      if (exclusion) {
+        excluded.push(exclusion.reason);
+        continue;
+      }
     }
 
     const effectifCode = base.figures?.effectif_code ?? null;
@@ -514,6 +620,7 @@ export async function resolveCandidates(
       strength: signal.strength,
       newLeaders: signal.newLeaders,
       capitalAmount: signal.capitalAmount,
+      jobTitle: signal.jobTitle,
       tier,
       sourceId: signal.sourceId,
     };
@@ -531,7 +638,53 @@ export async function resolveCandidates(
   confirmed.sort(byStrength);
   unknownTranche.sort(byStrength);
   const candidates = [...confirmed, ...unknownTranche].slice(0, wanted);
-  return { candidates, lookups, skippedKnown, unmatched, outOfBracket, warnings };
+  return {
+    candidates,
+    lookups,
+    skippedKnown,
+    unmatched,
+    excluded,
+    outOfBracket,
+    warnings,
+    confirmedCount: confirmed.length,
+    unknownTrancheCount: unknownTranche.length,
+  };
+}
+
+/**
+ * Faits du signal, ecrits sur la fiche.
+ *
+ * Ils sont relus BIEN plus tard : une fiche vit des semaines apres la recherche
+ * qui l'a trouvee, et le signal d'origine n'est alors plus recalculable — une
+ * annonce sort de la fenetre de 60 jours, une offre d'emploi est depubliee.
+ * D'ou la copie a plat plutot qu'un renvoi vers la source.
+ *
+ * Rien ici ne formule de phrase : ce sont des faits bruts. Leur mise en mots
+ * appartient a la redaction, qui n'est pas de ce cote de l'application.
+ */
+export function signalFacts(candidate: SignalCandidate): ProspectKeyFigures {
+  const main = candidate.signals[0];
+  const leader = candidate.newLeaders[0];
+
+  return {
+    signal_source: candidate.sourceId,
+    signal_count: candidate.signals.length,
+    ...(candidate.strength ? { signal_strength: candidate.strength } : {}),
+    ...(main?.type ? { signal_type: main.type } : {}),
+    ...(main?.date ? { signal_date: main.date } : {}),
+    ...(main?.label ? { signal_label: main.label } : {}),
+    ...(leader
+      ? {
+          // Prenom puis nom : l'ordre de la source est inverse (« NARBONNET
+          // Bernard »), et c'est celui-ci qu'on relit.
+          new_leader_name: `${leader.firstName} ${leader.surname}`,
+          new_leader_role: leader.role,
+        }
+      : {}),
+    ...(candidate.jobTitle ? { job_title: candidate.jobTitle } : {}),
+    ...(candidate.jobTitle && main?.date ? { job_posted_at: main.date } : {}),
+    ...(candidate.capitalAmount !== null ? { capital_after_eur: candidate.capitalAmount } : {}),
+  };
 }
 
 /** Verdict d'effectif réel, une fois la fiche ouverte. */
@@ -556,6 +709,12 @@ export interface SignalSearchOutcome {
   skippedKnown: number;
   /** Signaux qu'on n'a pas su rattacher à une entreprise de l'annuaire. */
   unmatched: number;
+  /** Candidats dont la tranche est confirmée par l'annuaire. */
+  confirmedCount: number;
+  /** Candidats dont la tranche n'est pas déclarée : Pappers tranchera. */
+  unknownTrancheCount: number;
+  /** Écartées par le ciblage : structure juridique ou secteur exclu. */
+  excluded: string[];
   outOfBracket: string[];
   warnings: EnrichmentWarning[];
 }
@@ -593,11 +752,19 @@ export async function searchBySignals(
     if (context.shouldStop && (await context.shouldStop())) break;
 
     const batch = resolved.candidates.slice(index, index + ENRICH_CONCURRENCY);
-    const enriched = await mapWithConcurrency(batch, ENRICH_CONCURRENCY, (candidate) =>
+    const enriched = await mapWithConcurrency(batch, ENRICH_CONCURRENCY, async (candidate) => {
       // Le signal est passe en `attachedSignals` et non en signaux web : son
       // rattachement est deja prouve par le SIREN de l'annonce.
-      deepEnrich(candidate.base, [], [], { attachedSignals: candidate.signals }),
-    );
+      const company = await deepEnrich(candidate.base, [], [], {
+        attachedSignals: candidate.signals,
+      });
+      // Les faits du signal rejoignent la fiche. `deepEnrich` ne les connait
+      // pas : il ne sait pas COMMENT l'entreprise a ete trouvee.
+      return {
+        ...company,
+        key_figures: { ...company.key_figures, ...signalFacts(candidate) },
+      };
+    });
 
     for (const company of enriched) {
       if (results.length >= criteria.limit) break;
@@ -625,6 +792,9 @@ export async function searchBySignals(
     analysed: results.length,
     skippedKnown: resolved.skippedKnown,
     unmatched: resolved.unmatched,
+    confirmedCount: resolved.confirmedCount,
+    unknownTrancheCount: resolved.unknownTrancheCount,
+    excluded: resolved.excluded,
     outOfBracket,
     warnings,
   };

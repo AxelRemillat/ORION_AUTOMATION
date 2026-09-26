@@ -21,6 +21,7 @@ import { fetchWebResults } from "@/lib/enrichment/linkup";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { collectSignals, searchBySignals } from "@/lib/signals";
 import { sinceDate } from "@/lib/signals/bodacc";
+import { DEFAULT_EXCLUDED_SECTORS } from "@/lib/signals/targeting";
 import { guessOwnWebsite, qualifyWebResults, type QualifyTrace } from "@/lib/enrichment/signals";
 import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { Database } from "@/types";
@@ -442,7 +443,10 @@ Rejets par raison :`);
 async function blockSignaux(): Promise<void> {
   title("SIGNAUX D'ABORD — BODACC + France Travail, mesure reelle (PAYANT)");
 
-  const criteria = { departement: "69", tranches: tranchesForBucket("petite"), days: 60, limit: 5 };
+  // Departement pilotable : `npx tsx scripts/debug-search.ts signaux 75`.
+  const departement = /^\d{2,3}$/.test(process.argv[3] ?? "") ? process.argv[3] : "69";
+  const criteria = { departement, tranches: tranchesForBucket("petite"), days: 60, limit: 5 };
+  console.log(`Departement ${departement}, 10-49 salaries, 5 fiches visees.`);
 
   const startedAt = Date.now();
   const collected = await collectSignals(criteria);
@@ -469,7 +473,11 @@ async function blockSignaux(): Promise<void> {
   console.log(`  le plus ancien : ${collected.signals.at(-1)?.date ?? "aucun"}`);
 
   const resolveStart = Date.now();
-  const outcome = await searchBySignals(criteria);
+  // Le reglage « secteurs exclus » vit en base, par utilisateur : hors requete
+  // HTTP il n'y a pas de session, on rejoue donc les valeurs par defaut.
+  const outcome = await searchBySignals(criteria, {
+    excludedSectors: [...DEFAULT_EXCLUDED_SECTORS],
+  });
   const totalMs = Date.now() - resolveStart;
 
   console.log("");
@@ -479,6 +487,8 @@ async function blockSignaux(): Promise<void> {
   console.log(`  ecartees sur l'effectif                    : ${outcome.outOfBracket.length}`);
   console.log(`  deja connues                               : ${outcome.skippedKnown}`);
   console.log(`  signaux non rapproches                     : ${outcome.unmatched}`);
+  console.log(`  ecartees par le ciblage                    : ${outcome.excluded.length}`);
+  console.log(`  candidats tranche confirmee / inconnue     : ${outcome.confirmedCount} / ${outcome.unknownTrancheCount}`);
 
   console.log("");
   console.log("Fiches obtenues :");
@@ -490,6 +500,9 @@ async function blockSignaux(): Promise<void> {
         `${String(company.key_figures.headcount ?? "?").padStart(4)} sal.  ` +
         `${signal?.source ?? "?"} il y a ${age ?? "?"} j — ${signal?.label ?? "aucun signal"}`,
     );
+  }
+  for (const line of outcome.excluded) {
+    console.log(`  ciblage : ${line}`);
   }
   for (const line of outcome.outOfBracket) {
     console.log(`  ecartee : ${line}`);

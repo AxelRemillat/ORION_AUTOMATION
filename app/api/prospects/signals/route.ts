@@ -4,9 +4,19 @@ import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { finishRun, isStopRequested, saveProgress } from "@/lib/search/runs";
 import { DEFAULT_SIGNAL_DAYS, searchBySignals, sourceStates } from "@/lib/signals";
+import { readExcludedSectors } from "@/lib/signals/settings";
 import { readJson, requireSession } from "../_guard";
 
 export const runtime = "nodejs";
+
+/**
+ * Meme plafond que la recherche par criteres.
+ *
+ * Sans cette ligne, la route heritait du defaut (dix secondes) alors qu'une
+ * recherche par signaux demande 35 a 45 secondes : elle aurait ete coupee en
+ * production, la ou elle passe en local.
+ */
+export const maxDuration = 300;
 
 /**
  * Mode « Signaux d'abord ».
@@ -35,6 +45,8 @@ interface SignalsBody {
   days?: number;
   limit?: number;
   runId?: string;
+  /** Passe outre le ciblage pour cette recherche seulement. */
+  includeExcluded?: boolean;
 }
 
 /** Deux chiffres, ou un département corse (`2A`, `2B`). */
@@ -68,11 +80,15 @@ export async function POST(request: Request) {
   const limit = clampAnalysisLimit(body.limit);
   const runId = typeof body.runId === "string" ? body.runId : null;
   const exclude = await knownSirens(session.supabase).catch(() => new Set<string>());
+  const includeExcluded = body.includeExcluded === true;
+  const excludedSectors = includeExcluded ? [] : await readExcludedSectors(session.supabase);
 
   const outcome = await searchBySignals(
     { departement, tranches, days: clampDays(body.days), limit },
     {
       exclude,
+      excludedSectors,
+      includeExcluded,
       ...(runId
         ? {
             shouldStop: () => isStopRequested(session.supabase, runId),
