@@ -25,6 +25,8 @@ console.log("\n1. Routes machine : exemptées de la redirection");
   check("/api/inbound est une route machine", isMachinePath("/api/inbound"));
   check("/api/cron/purge-trash aussi", isMachinePath("/api/cron/purge-trash"));
   check("/api/cron seul aussi", isMachinePath("/api/cron"));
+  check("/api/jobs/tick est une route machine (pg_cron, sans cookie)", isMachinePath("/api/jobs/tick"));
+  check("/api/jobs reste protégée par la session", !isMachinePath("/api/jobs") && !isMachinePath("/api/jobs/abc/cancel"));
 
   // Elles ne doivent PAS devenir publiques au sens « session » : la distinction
   // compte, sinon on ouvrirait la porte en croyant l'exempter.
