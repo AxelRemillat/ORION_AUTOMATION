@@ -6,6 +6,9 @@ import { fetchQuota, findDecisionMaker, findEmailByName, hasHunterKey } from "@/
 import { toDomain } from "@/lib/enrichment/http";
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
 import { buildFacts } from "@/lib/emails/derived-facts";
+import { hookReadiness } from "@/lib/emails/hook-readiness";
+import { incomingLeader, leaderEmailQuery } from "@/lib/emails/incoming-leader";
+import { dateUndatedSignals } from "@/lib/signals/dating";
 import {
   BRIEF_SCHEMA,
   runStrategist,
@@ -70,6 +73,13 @@ export const EMAIL_PARAMS_SCHEMA = z.object({
    * `false` pour ne pas créer de doublon.
    */
   saveDraft: z.boolean().default(true),
+  /**
+   * « Générer quand même » : passe outre l'absence d'accroche forte.
+   *
+   * Le brouillon produit est marqué « générique » — il reste utile comme base,
+   * mais on sait pourquoi il est faible.
+   */
+  force: z.boolean().optional(),
 });
 export type EmailParams = z.infer<typeof EMAIL_PARAMS_SCHEMA>;
 
@@ -104,6 +114,19 @@ async function findContact(
   const figures = prospect.key_figures ?? {};
   const leaderPerson = typeof figures.leader_person === "string" ? figures.leader_person : null;
   const leader = typeof figures.leader === "string" ? figures.leader : null;
+
+  // 0. Un dirigeant qui vient d'arriver passe AVANT la recherche générique.
+  //
+  // C'est à lui qu'on écrit, et c'est son arrivée qui porte l'accroche : une
+  // adresse contact@ trouvée par la recherche de domaine ferait manquer la
+  // seule personne qui compte. Prénom + nom + domaine est aussi la forme qui
+  // donne les meilleurs taux chez Hunter.
+  const newLeader = incomingLeader(figures);
+  const query = newLeader ? leaderEmailQuery(newLeader, prospect.website) : null;
+  if (query) {
+    const named = await findEmailByName(query.domain, query.firstName, query.lastName, prospect.id);
+    if (named.ok && named.data) return { contact: named.data };
+  }
 
   // 1. Un décideur sur le domaine.
   const search = await findDecisionMaker(domain, leaderPerson ?? leader, prospect.id);
@@ -214,7 +237,39 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   const params = paramsOf(ctx);
   const prospect = await loadProspect(ctx, params.prospectId);
   const warnings = [...warningsOf(ctx)];
-  const factsResult = buildFacts(prospect, contactOf(ctx));
+  let factsResult = buildFacts(prospect, contactOf(ctx));
+
+  // --- DERNIÈRE CHANCE DONNÉE AUX SIGNAUX SANS DATE -----------------------
+  //
+  // Un signal fort mais non daté valait mieux qu'un mail ouvert sur le code
+  // NAF, et il suffisait parfois d'un aller-retour pour le sauver : la page
+  // porte souvent sa date en JSON-LD, et le registre date les ouvertures
+  // d'établissement. On ne paie ces allers-retours que si la fiche n'a AUCUNE
+  // accroche — donc jamais en routine.
+  if (params.mode === "full" && !hookReadiness(factsResult.facts).ready) {
+    const dated = await dateUndatedSignals(prospect.signals ?? [], {
+      siren: prospect.siren,
+      city: prospect.city,
+    }).catch(() => ({ signals: prospect.signals ?? [], changed: false }));
+
+    if (dated.changed) {
+      prospect.signals = dated.signals;
+      await ctx.db.from("prospects").update({ signals: dated.signals }).eq("id", prospect.id);
+      factsResult = buildFacts(prospect, contactOf(ctx));
+    }
+  }
+
+  // --- GATING : pas de brouillon sans accroche forte ----------------------
+  //
+  // Sans signal daté ni fait de site, le stratège retombe sur l'angle
+  // « métier » et le rédacteur sur le code NAF ou l'effectif. Le juge note
+  // alors la spécificité 1 ou 2 sur 5, à raison. Trois appels de modèle pour
+  // un mail qu'on n'enverra pas : autant le dire.
+  const readiness = hookReadiness(factsResult.facts);
+  if (!readiness.ready && !params.force) {
+    throw new JobError(readiness.reason, false, 409, { needsFeeding: true, canForce: true });
+  }
+
   for (const rejected of factsResult.rejectedSignals.filter((item) => item.reason === "homonyme probable")) {
     warnings.push({ source: "linkup", message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}` });
   }
@@ -303,6 +358,9 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       registryName: prospect.company_name,
       avoid,
       leaderPerson,
+      // Un dirigeant qui vient d'arriver est interpellé par son prénom : c'est
+      // à lui que le mail parle, et son arrivée est l'accroche.
+      addressee: incomingLeader(prospect.key_figures ?? {})?.fullName ?? null,
       forbiddenNames: factsResult.foreignEntities,
       judge: params.mode !== "rewrite",
     }),
@@ -367,6 +425,12 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     critique,
     /** Les points qui n'ont pas pu être corrigés : l'UI affiche « à revoir ». */
     needsReview: !validation.ok || failing.length > 0,
+    /**
+     * Brouillon produit malgré l'absence d'accroche forte (« Générer quand
+     * même »). Il reste utile comme base, mais il ne doit jamais partir tel
+     * quel sans qu'on sache pourquoi il est faible.
+     */
+    generic: !hookReadiness(facts).ready,
     reviewReasons: [...validation.failures, ...failing],
     needLead: describesNeed(`${leadText} ${brief.pain.task}`)
       ? {

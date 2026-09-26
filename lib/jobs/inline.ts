@@ -57,5 +57,14 @@ export async function runJobInline(
     return NextResponse.json({ error: "Tâche annulée.", jobId }, { status: 409, headers });
   }
   const status = typeof final.state.httpStatus === "number" ? final.state.httpStatus : 500;
-  return NextResponse.json({ error: final.error ?? "Échec de la tâche.", jobId }, { status, headers });
+  // Certains refus portent des champs que l'écran doit lire (gating d'accroche :
+  // `needsFeeding`, `canForce`). Ils voyagent dans l'état du job.
+  const details =
+    final.state.httpDetails && typeof final.state.httpDetails === "object"
+      ? (final.state.httpDetails as Record<string, unknown>)
+      : {};
+  return NextResponse.json(
+    { error: final.error ?? "Échec de la tâche.", jobId, ...details },
+    { status, headers },
+  );
 }

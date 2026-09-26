@@ -200,7 +200,24 @@ export function chooseProof(offer: UserOffer, painText: string): ProofChoice {
     (proof) => proof.publicOk && proof.id !== CREDIBILITY_PROOF_ID,
   );
 
-  // Cas privilégié : le pain correspond à une des démos nommées.
+  // PRIORITE 1 : commandes, devis, demandes clients → l'agent devis. Il fait
+  // exactement ce que decrit le pain, et le nommer vaut mieux qu'une demo
+  // generique de tri de documents.
+  const ORDER_TAGS = ["commande", "devis", "demande client", "negoce", "prise de rdv"];
+  if (ORDER_TAGS.some((tag) => tagMatches(tag, painText))) {
+    const agent = usable.find((proof) => proof.id === "agent-devis");
+    if (agent) {
+      return {
+        proof: agent,
+        sentence: agent.sentence,
+        demo: null,
+        reason: "le pain porte sur des commandes ou des devis : l'agent devis est le plus proche",
+      };
+    }
+  }
+
+  // PRIORITE 2 : e-mails, documents, factures, SAV, comptes rendus → la demo
+  // n8n correspondante, NOMMEE.
   const demo = matchingDemo(painText);
   if (demo) {
     const n8n = usable.find((proof) => proof.id === "n8n");

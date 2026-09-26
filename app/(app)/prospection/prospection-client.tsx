@@ -19,6 +19,7 @@ import { ProspectHeader } from "./prospect-header";
 import { ProspectPicker } from "./prospect-picker";
 import type { UserOffer } from "@/types";
 import { OfferBanner } from "./_components/offer-banner";
+import { FeedingBanner } from "./_components/feeding-banner";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -47,7 +48,19 @@ export function ProspectionClient({
   const [selected, setSelected] = useState<Prospect | null>(null);
   const [tone, setTone] = useState<ToneKey>(DEFAULT_TONE);
   const [saving, setSaving] = useState(false);
-  const { result: analysis, draft, setDraft, generating, error, reset, generate, otherAngle, rewrite } =
+  const {
+    result: analysis,
+    draft,
+    setDraft,
+    generating,
+    error,
+    needsFeeding,
+    reset,
+    generate,
+    generateAnyway,
+    otherAngle,
+    rewrite,
+  } =
     useGeneration(tone);
 
   function select(prospect: Prospect) {
@@ -127,6 +140,14 @@ export function ProspectionClient({
           <SequenceShell steps={sequences[selected.id] ?? []} />
 
           {error && <ErrorBanner message={error} />}
+          {/* Manque de matiere, pas une panne : on propose de forcer. */}
+          {needsFeeding && selected && (
+            <FeedingBanner
+              message={needsFeeding}
+              loading={generating}
+              onForce={() => generateAnyway(selected)}
+            />
+          )}
 
           {generating && !analysis && (
             <>

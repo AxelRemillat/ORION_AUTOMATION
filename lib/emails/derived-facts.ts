@@ -2,6 +2,8 @@ import type { Prospect } from "@/types";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import { isOpaqueNaf, nafLabel } from "@/lib/naf";
 import { companyAge, frenchDate, isFresh } from "@/lib/enrichment/dates";
+import { isHookFresh } from "@/lib/signals/dating";
+import { capitalIncreased, freshJobHook, incomingLeader, incomingLeaderAngle } from "./incoming-leader";
 import { resolvePlaybook } from "@/lib/sector-playbook";
 import {
   attachSignals,
@@ -48,6 +50,12 @@ export type HookTier = 1 | 2 | 3 | 4 | 5;
  */
 export type FactKey =
   | "signal"
+  /** Ouverture d'un etablissement de moins d'un an (Pappers). */
+  | "opening"
+  /** Dirigeant arrive depuis moins d'un an. */
+  | "new_leader"
+  /** Mouvement de capital dont le SENS n'est pas confirme : contexte seulement. */
+  | "capital_move"
   | "group_signal"
   | "parent_group"
   | "naf"
@@ -376,9 +384,52 @@ export function buildFacts(
       (category !== null && AUTOMATION_CATEGORIES.has(category)) ||
       (RECRUITMENT.test(text) && AUTOMATION_ROLES.test(text));
 
+    // MOUVEMENT DE CAPITAL : jamais une accroche sans confirmation du SENS.
+    //
+    // BODACC ne dit ni « augmentation » ni « reduction », et ne publie pas le
+    // capital precedent. « Votre recente augmentation de capital » sur une
+    // reduction, ou sur une simple mise a jour des statuts, est une erreur qui
+    // se voit a la premiere ligne. La confirmation existe pourtant : quand
+    // Pappers porte encore un capital INFERIEUR a celui declare par l'annonce,
+    // le mouvement est bien une hausse.
+    const capitalSignal = /capital/i.test(text);
+    const confirmedRise = capitalIncreased(
+      typeof figures.capital_after_eur === "number" ? figures.capital_after_eur : null,
+      typeof figures.capital_eur === "number" ? figures.capital_eur : null,
+    );
+    if (capitalSignal && !confirmedRise) {
+      add(
+        "capital_move",
+        "Mouvement de capital",
+        `${cleanExcerpt(quote)} (${frenchDate(date)})`,
+        "Signal web",
+        5,
+        {
+          url,
+          date,
+          fresh,
+          bodyUsable: false,
+          reading:
+            "Le SENS du mouvement n'est pas connu : ni le mot « augmentation », ni le capital " +
+            "precedent ne sont publies. Fait de contexte, jamais d'accroche.",
+        },
+      );
+      continue;
+    }
+
     // Un signal non date ou perime ne peut pas ouvrir un mail : rang 3 au mieux.
     const tier: HookTier = isAutomationHire && fresh ? 1 : fresh ? 3 : 4;
     const job = RECRUITMENT.test(text) || signal.type === "recrutement" ? interpretJob(text) : null;
+
+    // Offre de moins de 30 jours : le poste recrute dit quelle tache DEBORDE
+    // aujourd'hui. On relie le flux a cette tache — et jamais a la personne :
+    // proposer d'automatiser ce pour quoi on vient d'embaucher est le meilleur
+    // moyen de se fermer la porte.
+    const freshJob = freshJobHook(
+      { label: str(signal.label) ?? "", jobTitle: str(figures.job_title) ?? str(signal.label), date },
+      now,
+    );
+
     add(
       "signal",
       isAutomationHire ? "Recrutement lié aux process" : "Signal web",
@@ -390,6 +441,74 @@ export function buildFacts(
         date,
         fresh,
         ...(job ? { reading: `${job.label} : ${job.does}. Ouverture ⇒ ${job.consequence}` } : {}),
+        ...(freshJob
+          ? {
+              writerHint:
+                `Le poste ouvert designe la tache qui deborde : ${freshJob.task}. ` +
+                "Parle de cette tache, jamais du poste ni de la personne recrutee — " +
+                "ne suggere JAMAIS de remplacer l'embauche.",
+            }
+          : {}),
+      },
+    );
+  }
+
+  // --- Ouvertures d'etablissements ------------------------------------------
+  //
+  // L'accroche la plus sous-exploitee qu'on avait. Pappers rend la liste
+  // COMPLETE des etablissements avec une date de creation par site ; les
+  // ouvertures de moins d'un an sont stockees a l'enrichissement. C'est un
+  // fait date, verifiable, specifique — et il se raconte sans nommer aucune
+  // source : « vous avez ouvert une agence a Perigueux en mars ».
+  const openings = (Array.isArray(figures.recent_openings) ? figures.recent_openings : [])
+    .filter((entry): entry is { city: string; date: string } =>
+      Boolean(entry && typeof entry === "object" && typeof (entry as { city?: unknown }).city === "string"
+        && typeof (entry as { date?: unknown }).date === "string"))
+    .filter((entry) => isHookFresh(entry.date, now))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  if (openings.length) {
+    const cities = openings.map((entry) => entry.city);
+    add(
+      "opening",
+      openings.length > 1 ? "Ouvertures d'etablissements" : "Ouverture d'un etablissement",
+      openings.map((entry) => `${entry.city} (${frenchDate(entry.date)})`).join(", "),
+      "Pappers",
+      1,
+      {
+        date: openings[0].date,
+        fresh: true,
+        reading:
+          `Implantation${openings.length > 1 ? "s" : ""} recente${openings.length > 1 ? "s" : ""} : ` +
+          `${cities.join(", ")}. Ouvrir une agence multiplie les allers-retours entre le siege et le terrain.`,
+        writerHint:
+          "Dis-le comme un fait qu'ils connaissent : « vous avez ouvert une agence a " +
+          `${cities[0]} ». Jamais « selon le registre », jamais le mot etablissement.`,
+      },
+    );
+  }
+
+  // --- Dirigeant entrant ----------------------------------------------------
+  //
+  // Les premiers mois d'un dirigeant sont ceux ou l'on remet a plat les outils
+  // et les process : personne ne lui reprochera de changer ce qu'il n'a pas mis
+  // en place. Passe douze mois, ce n'est plus une arrivee.
+  const newLeader = incomingLeader(figures, now);
+  if (newLeader) {
+    add(
+      "new_leader",
+      "Dirigeant arrive recemment",
+      `${newLeader.fullName}${newLeader.role ? `, ${newLeader.role}` : ""}, depuis ${frenchDate(newLeader.since)}`,
+      "Pappers",
+      1,
+      {
+        date: newLeader.since,
+        fresh: true,
+        bodyUsable: false,
+        reading: incomingLeaderAngle(newLeader, prospect.company_name),
+        writerHint:
+          "Ecris-lui A LUI : « vous avez pris la direction de… ». Ne donne ni la date " +
+          "exacte, ni la fonction telle qu'elle est ecrite au registre.",
       },
     );
   }

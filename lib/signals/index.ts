@@ -126,6 +126,46 @@ const OFFICIAL_CONFIDENCE = 0.98;
  */
 const MATCHED_CONFIDENCE = 0.9;
 
+/*
+ * Tuyauterie juridique des annonces de vente et de cession.
+ *
+ * Le texte officiel d'une cession de fonds ne contient pas que l'evenement :
+ * il porte l'adresse de l'ANCIEN proprietaire, le numero de dossier, la
+ * reference d'enregistrement et le delai d'opposition. Sur SIAM (75) le
+ * 26/09/2026, la citation retenue etait :
+ *
+ *   « Adresse de l'ancien proprietaire : 28 avenue Matignon 75008 Paris
+ *     Date de l'acte : 21/07/26 Enregistre le : 24/07/26 a Paris Saint-Lazare
+ *     Dossier 2026 00018436 Reference 7564P61 2026 A 02186 Les oppositions
+ *     seront recues »
+ *
+ * Ce texte partait dans les faits autorises du redacteur. Rien la-dedans ne
+ * doit approcher un mail : ni l'adresse d'un tiers, ni un numero de dossier.
+ */
+const LEGAL_PLUMBING = [
+  /adresse de l['’]ancien propri[eé]taire.*/is,
+  /date de l['’]acte\s*:.*/is,
+  /enregistr[eé]\s+le\s*:.*/is,
+  /dossier\s+\d[\d\s]*.*/is,
+  /r[eé]f[eé]rence\s+\w+.*/is,
+  /les oppositions.*/is,
+  /\bsiret\b.*/is,
+];
+
+/**
+ * Citation d'une annonce officielle, debarrassee de sa tuyauterie.
+ *
+ * On coupe a la premiere mention administrative : ce qui precede raconte
+ * l'evenement, ce qui suit sert au greffe. Quand il ne reste rien de lisible,
+ * on retombe sur le libelle normalise — court, vrai, et deja affichable.
+ */
+export function officialQuote(notice: BodaccNotice): string {
+  let text = (notice.nature ?? "").replace(/\s+/g, " ").trim();
+  for (const pattern of LEGAL_PLUMBING) text = text.replace(pattern, "").trim();
+  text = text.replace(/[\s;:,-]+$/, "").trim();
+  return text.length >= 12 ? text : notice.label;
+}
+
 /** Une annonce BODACC, au format consommé par le scoring et la fiche. */
 export function noticeToSignal(notice: BodaccNotice): ProspectSignal {
   return {
@@ -138,8 +178,9 @@ export function noticeToSignal(notice: BodaccNotice): ProspectSignal {
     confidence: OFFICIAL_CONFIDENCE,
     strength: notice.strength,
     // La citation est le libellé officiel : il n'y a pas de phrase à extraire
-    // d'une page web, l'annonce est déjà normalisée par le greffe.
-    quote: notice.nature ?? notice.family,
+    // d'une page web, l'annonce est déjà normalisée par le greffe. Reste à
+    // enlever la tuyauterie juridique (cf. `officialQuote`).
+    quote: officialQuote(notice),
   };
 }
 
@@ -212,6 +253,14 @@ export interface SignalSearchCriteria {
   limit: number;
   today?: Date;
   env?: EnvLike;
+  /**
+   * Restreint la collecte a UNE source.
+   *
+   * Sert a verifier une source isolement : le tri par force met les annonces
+   * BODACC devant, et une offre d'emploi n'atteignait jamais l'ouverture de
+   * fiche sur un departement dense. Non expose dans l'ecran de recherche.
+   */
+  only?: "bodacc" | "france-travail";
 }
 
 export interface CollectedSignals {
@@ -262,12 +311,15 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
   const sources = sourceStates(env);
   const signals: OfficialSignal[] = [];
 
-  const bodacc = await recentNotices({
-    departement: criteria.departement,
-    days,
-    max: MAX_NOTICES_PER_SOURCE,
-    today: criteria.today,
-  });
+  const bodacc =
+    criteria.only === "france-travail"
+      ? ({ ok: true, data: [] } as const)
+      : await recentNotices({
+          departement: criteria.departement,
+          days,
+          max: MAX_NOTICES_PER_SOURCE,
+          today: criteria.today,
+        });
 
   const bodaccState = sources.find((source) => source.id === "bodacc");
   if (bodacc.ok) {
@@ -285,7 +337,7 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
   }
 
   const ftState = sources.find((source) => source.id === "france-travail");
-  if (ftState?.available) {
+  if (ftState?.available && criteria.only !== "bodacc") {
     const jobs = await recentJobSignals({
       departement: criteria.departement,
       days: Math.min(days, 30),
