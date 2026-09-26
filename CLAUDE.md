@@ -45,37 +45,60 @@ faire à sa place.
 
 ## Merge automatique
 
-Axel a autorisé les agents à merger eux-mêmes sur `main` à la fin de chaque
-itération. Cette autonomie tient à une condition : les cinq portes.
+Axel a autorisé le merge automatique sur `main`. Le dépôt est privé en GitHub
+Free (ni auto-merge natif ni protection de branche) : c'est le workflow
+`.github/workflows/automerge.yml` qui s'en charge.
 
-Chaque tâche = une branche + une PR. L'agent merge lui-même
-(`gh pr merge <n> --squash --delete-branch`) **si et seulement si** les cinq
-portes sont vertes :
+**Sessions cloud : ne mergez plus vous-mêmes.** Il suffit d'ouvrir la PR vers
+`main` avec une CI verte. Quand la CI (`ci.yml`) se termine en succès, le
+workflow merge la PR (`--squash --delete-branch`) si **toutes** ces conditions
+sont réunies :
+
+- PR ouverte vers `main`, non brouillon ;
+- branche de tête en `claude/`, `fix/`, `feat/` ou `chore/` ;
+- aucun label **`no-automerge`** — c'est le moyen de bloquer une PR ;
+- tous les checks du commit de tête terminés et verts (il attend jusqu'à
+  5 min un check encore en cours, par exemple le déploiement Vercel).
+
+Si la PR touche `supabase/migrations/**`, il relance ensuite `migrate.yml` sur
+`main` (un merge fait par `GITHUB_TOKEN` ne déclenche pas les workflows
+`on: push`). En cas de conflit avec `main`, il commente la PR « Conflit avec
+main : rebase nécessaire » et s'arrête : intégrez `main` dans la branche
+(merge, jamais de réécriture d'historique) et poussez, la CI relancera tout.
+Merge manuel d'une PR déjà verte : Actions → « Auto-merge » → Run workflow,
+avec son numéro.
+
+**Avant d'ouvrir la PR**, l'agent fait passer les portes en local :
 
 1. `npx tsc --noEmit`
 2. `npm run lint`
 3. `npm test` — toutes les suites
 4. `npm run build`
-5. la CI GitHub sur la PR : attendre la **fin** des checks, pas leur démarrage.
 
-**Avant le merge** : `git fetch`, merger `origin/main` dans la branche, résoudre
-les conflits, puis **rejouer les cinq portes**. Une porte verte avant
-l'intégration de `main` ne prouve rien.
+Et il part de `main` à jour : `git fetch`, merger `origin/main` dans la branche,
+résoudre les conflits, **rejouer les portes**. Une porte verte avant
+l'intégration de `main` ne prouve rien. La cinquième porte, la CI GitHub, est
+vérifiée par le workflow lui-même.
 
-**Après le merge** : attendre que le déploiement Vercel de production soit
-« Ready », puis faire un smoke test en prod — au minimum `/login` en 200, plus
-le parcours que la PR a touché. Si la prod casse : `git revert` du commit de
-merge, via une PR de revert mergée immédiatement, puis rapport.
+**Agent LOCAL** : la PR est mergée de la même façon. Il peut toujours merger
+lui-même (`gh pr merge <n> --squash --delete-branch`) une PR aux cinq portes
+vertes, après la fin des checks et non leur démarrage.
+
+**Après le merge** (qui que soit le merger) : attendre que le déploiement
+Vercel de production soit « Ready », puis faire un smoke test en prod — au
+minimum `/login` en 200, plus le parcours que la PR a touché. Si la prod
+casse : `git revert` du commit de merge, via une PR de revert, puis rapport.
 
 **Interdits, qui ne bougent pas.** Push direct ou force push sur `main`. Merge
 avec une porte rouge. Migration destructive (`check:migrations`). Suppression
-de données. Affichage d'un secret. Dans ces cas : on s'arrête et on demande.
+de données. Affichage d'un secret. Dans ces cas : on s'arrête et on demande
+(et on pose le label `no-automerge` sur la PR).
 
-**Parallélisme** : une seule PR mergée à la fois. Si deux agents travaillent,
-celui qui merge en second intègre `main` dans sa branche avant de merger.
+**Parallélisme** : une seule PR mergée à la fois (le workflow sérialise ses
+merges). Une PR dépassée par `main` doit intégrer `main` avant de repasser.
 
-**Rapport final**, court, à chaque itération : ce qui a changé, le hash du
-merge, le résultat du smoke test.
+**Rapport final**, court, à chaque itération : ce qui a changé, le lien de la
+PR, et, une fois mergée, le hash du merge et le résultat du smoke test.
 
 ## Parallélisme : 1 agent = 1 dossier ou 1 session cloud = 1 branche
 
