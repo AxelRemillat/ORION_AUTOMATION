@@ -40,6 +40,8 @@ export interface DraftInput {
   /** Ouvertures et fins déjà servies. */
   avoid: string[];
   leaderPerson?: string | null;
+  /** Dirigeant entrant a qui le mail s'adresse nominativement. */
+  addressee?: string | null;
   forbiddenNames?: readonly string[];
   /** `false` pour « Réécrire depuis le brief » : rédacteur seul, pas de juge. */
   judge?: boolean;
@@ -114,6 +116,7 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     prospectId: input.prospectId,
     avoid: input.avoid,
     leaderPerson: input.leaderPerson,
+    addressee: input.addressee,
     offer: input.offer,
   };
   const plan = planFor(writingInput);
@@ -172,7 +175,20 @@ ${signature}` } : null;
   if (validation.ok && failing.length === 0) return first;
 
   // UNE seule réécriture : au-delà, on rend la main plutôt que de boucler.
-  const feedback = [...validation.failures, ...failing].map((line) => `- ${line}`).join("\n");
+  // La longueur est mise EN TETE : c'est le point le plus souvent rate, et
+  // celui qui empeche l'envoi.
+  const feedback = [
+    ...validation.failures.map((line) => `- ${line}`),
+    ...failing.map((line) => `- ${line}`),
+    ...(validation.failures.some((line) => /mots/.test(line))
+      ? [
+          "",
+          "Pour raccourcir : garde les quatre blocs et le fond, coupe les mots qui ne",
+          "portent rien — adverbes, redites, seconde clause du bloc 3. Ne supprime ni",
+          "l'accroche, ni la preuve, ni la demande.",
+        ]
+      : []),
+  ].join("\n");
   const rewritten = await write(feedback);
   if (!rewritten) return first;
 
@@ -180,9 +196,20 @@ ${signature}` } : null;
   const secondCritique = await judge(rewritten, "critique:rewrite");
   const secondFailing = secondCritique ? failingCriteria(secondCritique) : [];
 
-  // On ne garde la réécriture que si elle est réellement meilleure.
+  /*
+   * Ce qui fait qu'une reecriture est MEILLEURE.
+   *
+   * Les deux familles d'echec ne se valent pas. Un echec de validateur est une
+   * regle dure : un mail de 138 mots depasse le plafond de 125, il ne part pas.
+   * Un critere du juge sous le seuil est un avis — utile, mais qui n'empeche
+   * pas l'envoi. La somme des deux mettait « trop long » et « ton un peu
+   * promotionnel » a egalite, et gardait le mail trop long. D'ou la comparaison
+   * lexicographique : d'abord les validateurs, ensuite le juge.
+   */
   const improved =
-    secondValidation.failures.length + secondFailing.length < validation.failures.length + failing.length;
+    secondValidation.failures.length < validation.failures.length ||
+    (secondValidation.failures.length === validation.failures.length &&
+      secondFailing.length < failing.length);
   return improved
     ? { email: rewritten, validation: secondValidation, critique: secondCritique, failing: secondFailing, plan, rewritten: true }
     : first;

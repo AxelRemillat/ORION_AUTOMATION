@@ -31,6 +31,9 @@ import { draftFromBrief } from "./pipeline";
 import type { Evidence } from "./prompt";
 import { AiCallError } from "@/lib/ai/chat";
 import { loadOffer } from "@/lib/offer/read";
+import { hookReadiness } from "@/lib/emails/hook-readiness";
+import { dateUndatedSignals } from "@/lib/signals/dating";
+import { incomingLeader, leaderEmailQuery } from "@/lib/emails/incoming-leader";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,6 +67,13 @@ const BODY_SCHEMA = z.object({
   excludeAngles: z.array(ANGLE_SCHEMA).max(10).optional(),
   /** Brief édité à la main, pour le mode `rewrite`. Revalidé ici. */
   brief: z.unknown().optional(),
+  /**
+   * « Générer quand même » : passe outre l'absence d'accroche forte.
+   *
+   * Le brouillon produit est marqué « générique » — il reste utile comme base,
+   * mais on sait pourquoi il est faible.
+   */
+  force: z.boolean().optional(),
 });
 
 /**
@@ -87,6 +97,19 @@ async function findContact(
   const leaderPerson =
     typeof figures.leader_person === "string" ? figures.leader_person : null;
   const leader = typeof figures.leader === "string" ? figures.leader : null;
+
+  // 0. Un dirigeant qui vient d'arriver passe AVANT la recherche generique.
+  //
+  // C'est a lui qu'on ecrit, et c'est son arrivee qui porte l'accroche : une
+  // adresse contact@ trouvee par la recherche de domaine ferait manquer la
+  // seule personne qui compte. Prenom + nom + domaine est aussi la forme qui
+  // donne les meilleurs taux chez Hunter.
+  const newLeader = incomingLeader(figures);
+  const query = newLeader ? leaderEmailQuery(newLeader, prospect.website) : null;
+  if (query) {
+    const named = await findEmailByName(query.domain, query.firstName, query.lastName, prospect.id);
+    if (named.ok && named.data) return { contact: named.data };
+  }
 
   // 1. Un decideur sur le domaine.
   const search = await findDecisionMaker(domain, leaderPerson ?? leader, prospect.id);
@@ -199,8 +222,47 @@ async function generate(request: Request) {
 
   // Les faits sont TOUJOURS recalcules cote serveur : le client n'est pas une
   // source de verite, meme pour des donnees qu'il a recues de nous.
-  const factsResult = buildFacts(prospect, contact);
+  let factsResult = buildFacts(prospect, contact);
+
+  // --- DERNIERE CHANCE DONNEE AUX SIGNAUX SANS DATE -----------------------
+  //
+  // Un signal fort mais non date valait mieux qu'un mail ouvert sur le code
+  // NAF, et il suffisait parfois d'un aller-retour pour le sauver : la page
+  // porte souvent sa date en JSON-LD, et le registre date les ouvertures
+  // d'etablissement. On ne paie ces allers-retours que si la fiche n'a AUCUNE
+  // accroche — donc jamais en routine.
+  if (body.mode === "full" && !hookReadiness(factsResult.facts).ready) {
+    const dated = await dateUndatedSignals(prospect.signals ?? [], {
+      siren: prospect.siren,
+      city: prospect.city,
+    }).catch(() => ({ signals: prospect.signals ?? [], changed: false }));
+
+    if (dated.changed) {
+      prospect.signals = dated.signals;
+      await session.supabase.from("prospects").update({ signals: dated.signals }).eq("id", prospect.id);
+      factsResult = buildFacts(prospect, contact);
+    }
+  }
+
   const { facts, leaderPerson } = factsResult;
+
+  // --- GATING : pas de brouillon sans accroche forte ----------------------
+  //
+  // Sans signal daté ni fait de site, le stratège retombe sur l'angle
+  // « métier » et le rédacteur sur le code NAF ou l'effectif. Le juge note
+  // alors la spécificité 1 ou 2 sur 5, à raison. Trois appels de modèle pour
+  // un mail qu'on n'enverra pas : autant le dire.
+  const readiness = hookReadiness(facts);
+  if (!readiness.ready && !body.force) {
+    return NextResponse.json(
+      {
+        error: readiness.reason,
+        needsFeeding: true,
+        canForce: true,
+      },
+      { status: 409 },
+    );
+  }
   for (const rejected of factsResult.rejectedSignals.filter((item) => item.reason === "homonyme probable")) {
     warnings.push({ source: "linkup", message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}` });
   }
@@ -300,6 +362,9 @@ async function generate(request: Request) {
     registryName: prospect.company_name,
     avoid,
     leaderPerson,
+    // Un dirigeant qui vient d'arriver est interpelle par son prenom : c'est a
+    // lui que le mail parle, et son arrivee est l'accroche.
+    addressee: incomingLeader(prospect.key_figures ?? {})?.fullName ?? null,
     forbiddenNames: factsResult.foreignEntities,
     judge: body.mode !== "rewrite",
   });
@@ -347,6 +412,9 @@ async function generate(request: Request) {
     critique,
     /** Les points qui n'ont pas pu être corrigés : l'UI affiche « à revoir ». */
     needsReview: !validation.ok || failing.length > 0,
+    // Brouillon produit sans accroche forte : il reste editable, mais on
+    // n'oublie pas d'ou il vient.
+    generic: !readiness.ready,
     reviewReasons: [...validation.failures, ...failing],
     needLead: describesNeed(`${leadText} ${brief.pain.task}`)
       ? {

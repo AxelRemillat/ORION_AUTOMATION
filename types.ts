@@ -160,6 +160,23 @@ export interface ProspectKeyFigures {
    * seule, et rien ici ne doit laisser croire à une augmentation.
    */
   capital_after_eur?: number;
+  /**
+   * Date de nomination du dirigeant en poste, telle que Pappers la publie.
+   *
+   * C'est elle qui distingue un dirigeant ENTRANT d'un dirigeant installé. Une
+   * nomination de moins de douze mois est le meilleur moment de prospection
+   * qui existe : les outils et les process se remettent à plat pendant les
+   * premiers mois, pas trois ans après.
+   */
+  leader_since?: string;
+  /**
+   * Ouvertures d'établissements de moins d'un an : ville et date.
+   *
+   * Vient de la liste complète des établissements Pappers, qui porte une
+   * `date_de_creation` par site. Un fait daté, vérifiable, et qui se raconte
+   * sans citer aucun registre : « vous avez ouvert une agence à Périgueux ».
+   */
+  recent_openings?: { city: string; date: string; sign?: string | null }[];
   [key: string]: unknown;
 }
 

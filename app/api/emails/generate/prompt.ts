@@ -170,13 +170,22 @@ export function buildGreeting(
   tone: ToneKey,
   contact?: DecisionMakerContact | null,
   leaderPerson?: string | null,
+  /**
+   * Dirigeant a qui le mail est explicitement adresse — une arrivee recente.
+   *
+   * Il passe devant, et SANS exiger que l'adresse soit la sienne : quand
+   * l'accroche est « vous avez pris la direction de… », le mail ne peut pas
+   * commencer par « Bonjour, ». Une adresse generique le fera suivre ; un mail
+   * anonyme sur une nomination, lui, se contredit des la premiere ligne.
+   */
+  addressee?: string | null,
 ): string {
   const fromHunter = greetingName(contact) ? contact?.full_name ?? null : null;
   // Le dirigeant du registre ne vaut que si le mail part bien chez lui.
   const fromRegistry =
     leaderPerson && emailBelongsTo(contact?.email, leaderPerson) ? leaderPerson : null;
 
-  const person = splitPerson(fromHunter ?? fromRegistry ?? "");
+  const person = splitPerson(addressee ?? fromHunter ?? fromRegistry ?? "");
   if (!person) return "Bonjour,";
 
   return tone === "factuel" ? `Bonjour Monsieur ${person.last},` : `Bonjour ${person.first},`;
@@ -209,6 +218,8 @@ export interface WritingInput {
   avoid: string[];
   /** Dirigeant personne physique issu du registre, quand il est connu. */
   leaderPerson?: string | null;
+  /** Dirigeant entrant a qui le mail s'adresse nominativement. */
+  addressee?: string | null;
   /** Ce qu'Axel vend et comment il signe (page /offre). */
   offer: UserOffer;
   /** Retour du juge, lors de l'unique réécriture. */
@@ -245,7 +256,7 @@ const factLines = (facts: DerivedFact[]): string =>
 export function buildWritingPrompt(input: WritingInput): string {
   const { brief, tone, avoid, offer } = input;
   const facts = briefFacts(brief, input.facts);
-  const greeting = buildGreeting(tone, input.contact, input.leaderPerson);
+  const greeting = buildGreeting(tone, input.contact, input.leaderPerson, input.addressee);
   const hookFacts = facts.filter((fact) => brief.angle.hookFactIds.includes(fact.id));
   const whyFacts = facts.filter((fact) => brief.pain.whyThem.includes(fact.id));
 
@@ -254,7 +265,11 @@ export function buildWritingPrompt(input: WritingInput): string {
   // sert, et il n'a aucun moyen de juger la pertinence d'une reference.
   const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`);
   const proofLine = choice.sentence
-    ? `PREUVE A MOBILISER, reprise FIDELEMENT : « ${choice.sentence} ». Une seule, jamais deux.` +
+    ? `PREUVE A MOBILISER — une seule, jamais deux. Son contenu : ${choice.sentence}
+  Dis-la avec TES mots, en une clause courte. NE LA RECOPIE PAS mot pour mot et
+  ne la mets pas entre guillemets : une phrase citee au milieu d'un mail sonne
+  comme une plaquette. Ce qui ne doit pas changer : ce que tu as construit, et ce
+  que ca fait.` +
       (choice.demo ? "\n  C'est une demo NOMMEE : dis laquelle, c'est ce qui la rend verifiable." : "")
     : "AUCUNE PREUVE ne recoupe ce pain : n'en cite aucune. Decris ce que tu construis, au present.";
 
@@ -296,6 +311,8 @@ FAITS AUTORISES — les seuls sur lesquels tu peux t'appuyer :
 ${factLines(facts) || "aucun"}
 
 STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
+BUDGET DE MOTS PAR BLOC, a respecter : 30 / 25 / 40 / 20. Un budget par bloc
+tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
 1. ACCROCHE : UN fait propre a CETTE entreprise (signal date, page de son site,
    etablissement, recrutement...). Elle doit echouer au TEST DE SUBSTITUTION :
    si la phrase reste vraie en remplaçant le nom par un concurrent du meme code
@@ -307,7 +324,8 @@ STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
    ou « j'accompagne des entreprises » revendique une clientele que les preuves
    ne permettent pas d'affirmer.
 3. OFFRE POUR EUX : le flux applique a LEUR cas — ce qui declenche, ce qui est
-   lu, ce qui est ecrit, dans quel outil. Puis la promesse en UNE clause
+   lu, ce qui est ecrit, dans quel outil. Nomme TROIS etapes au plus : la
+   quatrieme n'apprend rien et coute dix mots. Puis la promesse en UNE clause
    courte : le delai, et au plus UN des deux autres elements (« sans changer
    d'outil » ou la validation humaine). Les trois d'affilee alourdissent le
    mail de quinze mots pour rien.
@@ -316,10 +334,11 @@ STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
 
 REGLES DURES — chacune est verifiee par du code apres generation
 1. SALUTATION, exactement : « ${greeting} » Rien d'autre.
-2. EXACTEMENT QUATRE paragraphes, separes par une ligne vide — un par bloc.
-   80 a 110 mots au TOTAL, signature non comprise. UNE seule phrase par
-   paragraphe, sauf le bloc 3 qui peut en avoir deux. C'est cette contrainte
-   qui tient la longueur : un mail de 131 mots est refuse.
+2. LONGUEUR — la contrainte la plus souvent ratee. EXACTEMENT QUATRE
+   paragraphes, separes par une ligne vide, un par bloc. Vise 100 mots,
+   signature non comprise ; 125 est un PLAFOND, pas un objectif. UNE seule
+   phrase par paragraphe, sauf le bloc 3 qui peut en avoir deux. Compte tes
+   mots avant de repondre : au-dela de 125, le mail est refuse par du code.
 3. UNE SEULE question dans tout le mail : celle du bloc 4.
 4. Aucun chiffre absent des faits autorises. Les arrondis sont permis.
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans

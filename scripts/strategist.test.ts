@@ -169,7 +169,7 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
       rawBrief({ angle: { type: "signal", hookFactIds: [undated.id], insight: "Un nouveau site logistique change les flux de froid." } }),
       input(),
     );
-    check("angle sur signal non daté : rejet", !undatedHook.brief && /60 jours/.test(undatedHook.error ?? ""), undatedHook.error);
+    check("angle sur signal non daté : rejet", !undatedHook.brief && /non daté|périmé/.test(undatedHook.error ?? ""), undatedHook.error);
 
     const old = prospect({
       signals: [
@@ -214,7 +214,7 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     }, input());
     check("deux angles non datés : aucun brief", stubborn.brief === null);
     check("une seule reprise", asked.length === 2, String(asked.length));
-    check("la reprise reçoit l'erreur exacte", /REJETEE.*60 jours/s.test(asked[1] ?? ""));
+    check("la reprise reçoit l'erreur exacte", /REJETEE.*(non daté|périmé)/s.test(asked[1] ?? ""));
   }
 
   // -------------------------------------------------------------------------
@@ -376,6 +376,18 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     );
 
     check("enseigne confirmée reprise telle quelle", displayCompanyName("BLUE ENERFREEZE", ["Blue EnerFreeze recrute"]) === "Blue EnerFreeze");
+    // Vu dans un mail reel : « L Arbre A Souhaits ». Le tokeniseur ignore
+    // l'apostrophe, la casse naturelle doit la rendre.
+    check(
+      "apostrophe conservée",
+      displayCompanyName("L'ARBRE A SOUHAITS") === "L'Arbre A Souhaits",
+      displayCompanyName("L'ARBRE A SOUHAITS"),
+    );
+    check(
+      "trait d'union conservé",
+      displayCompanyName("SAINT-JEAN LOGISTIQUE") === "Saint-Jean Logistique",
+      displayCompanyName("SAINT-JEAN LOGISTIQUE"),
+    );
   }
 
   // -------------------------------------------------------------------------
