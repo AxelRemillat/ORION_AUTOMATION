@@ -6,6 +6,7 @@ import { activeProspects } from "@/lib/trash/scope";
 import { completeText } from "@/lib/openai";
 import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
 import type { MessageType, ProspectStatus } from "@/types";
+import { writeProspectStatus } from "./_lib/write-status";
 
 /** Résultat uniforme : les composants clients en font un toast. */
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -16,27 +17,17 @@ function refresh(prospectId?: string) {
   revalidatePath("/stats");
 }
 
-/** Change le statut d'un prospect (répondu, en discussion, gagné, perdu…). */
+/**
+ * Change le statut d'un prospect (répondu, en discussion, gagné, perdu…).
+ * Utilisée par la fiche, qui veut un rafraîchissement complet. Le Kanban passe
+ * par `PATCH /api/suivi/status`, sans revalidation : voir use-optimistic-status.
+ */
 export async function setProspectStatus(
   prospectId: string,
   status: ProspectStatus,
 ): Promise<ActionResult> {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("prospects")
-    .update({ status })
-    .eq("id", prospectId)
-    .is("deleted_at", null);
-  if (error) return { ok: false, error: error.message };
-
-  // Un prospect sorti du cycle n'a plus de relance à faire.
-  if (status === "gagne" || status === "perdu" || status === "en_discussion") {
-    await supabase
-      .from("reminders")
-      .update({ done: true })
-      .eq("prospect_id", prospectId)
-      .eq("done", false);
-  }
+  const result = await writeProspectStatus(createClient(), prospectId, status);
+  if (!result.ok) return { ok: false, error: result.error };
 
   refresh(prospectId);
   return { ok: true };

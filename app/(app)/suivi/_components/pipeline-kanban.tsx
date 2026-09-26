@@ -1,42 +1,30 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { useToast } from "@/components/ui";
+import { useState } from "react";
+import type { ProspectStatus } from "@/types";
 import { STAGES, STAGE_TONE_VARS, stageOf, statusForDrop, type Stage } from "../_lib/stages";
-import { setProspectStatus } from "../actions";
 import { KanbanCard } from "./kanban-card";
 import type { ProspectRow } from "../_lib/rows";
 
 /**
- * Kanban du pipeline. Le déplacement écrit le statut réel du prospect via la
- * même action serveur que la fiche : aucun état parallèle, donc rien à
- * resynchroniser. Pendant l'écriture, la colonne reste en attente plutôt que
- * de faire sauter la carte puis de la faire revenir en cas d'échec.
+ * Kanban du pipeline. Le dépôt est optimiste (use-optimistic-status) : la
+ * carte change de colonne immédiatement, l'écriture part en arrière-plan et
+ * n'est annulée à l'écran qu'en cas d'échec. Aucun verrou global : on peut
+ * enchaîner les déplacements sans attendre le serveur.
  */
-export function PipelineKanban({ rows }: { rows: ProspectRow[] }) {
+export function PipelineKanban({
+  rows,
+  onMove,
+}: {
+  rows: ProspectRow[];
+  onMove: (row: ProspectRow, status: ProspectStatus, label: string) => void;
+}) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const router = useRouter();
-  const toast = useToast();
 
   const move = (row: ProspectRow, stage: Stage) => {
     const status = statusForDrop(stage, row.status);
-    if (!status || pending) return;
-
-    setPendingId(row.id);
-    startTransition(async () => {
-      const result = await setProspectStatus(row.id, status);
-      if (result.ok) {
-        toast.success(`${row.company_name} → ${stage.label}`);
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
-      setPendingId(null);
-    });
+    if (status) onMove(row, status, stage.label);
   };
 
   /** Déplacement clavier : d'une colonne vers la précédente ou la suivante. */
@@ -88,20 +76,19 @@ export function PipelineKanban({ rows }: { rows: ProspectRow[] }) {
               }}
             >
               {columnRows.map((row) => (
-                <div key={row.id} className={pendingId === row.id ? "animate-pulse" : undefined}>
-                  <KanbanCard
-                    row={row}
-                    dragging={dragId === row.id}
-                    canMoveLeft={stageIndex > 0}
-                    canMoveRight={stageIndex < STAGES.length - 1}
-                    onDragStart={() => setDragId(row.id)}
-                    onDragEnd={() => {
-                      setDragId(null);
-                      setOverStage(null);
-                    }}
-                    onMove={(direction) => shift(row, direction)}
-                  />
-                </div>
+                <KanbanCard
+                  key={row.id}
+                  row={row}
+                  dragging={dragId === row.id}
+                  canMoveLeft={stageIndex > 0}
+                  canMoveRight={stageIndex < STAGES.length - 1}
+                  onDragStart={() => setDragId(row.id)}
+                  onDragEnd={() => {
+                    setDragId(null);
+                    setOverStage(null);
+                  }}
+                  onMove={(direction) => shift(row, direction)}
+                />
               ))}
 
               {columnRows.length === 0 && (
