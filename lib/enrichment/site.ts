@@ -18,6 +18,7 @@
  * user-agent explicite, pas de navigateur headless. Linkup /v1/fetch ne sert
  * que de repli quand le site refuse le fetch direct : il coûte 0,001 $.
  */
+import { decodeBody } from "./charset";
 import { cleanText } from "./clean";
 import { toDomain } from "./http";
 import { fetchPage, fetchWebResults, hasLinkupKey } from "./linkup";
@@ -121,7 +122,8 @@ async function fetchText(url: string, accept = "text/html"): Promise<string | nu
     if (!response.ok) return null;
     const type = response.headers.get("content-type") ?? "";
     if (accept === "text/html" && !type.includes("html") && !type.includes("text")) return null;
-    return (await response.text()).slice(0, 400_000);
+    // `response.text()` forcerait l'UTF-8 : on respecte le charset annonce.
+    return decodeBody(await response.arrayBuffer(), type).slice(0, 400_000);
   } catch {
     return null;
   } finally {

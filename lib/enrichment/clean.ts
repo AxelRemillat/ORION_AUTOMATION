@@ -11,6 +11,7 @@
  * Règle : on nettoie à l'ENTRÉE du pipeline. Tout ce qui est stocké, affiché
  * ou envoyé au modèle est déjà propre.
  */
+import { repairMojibake } from "./charset";
 
 /** Lignes de menu : beaucoup de séparateurs, peu de mots, aucune ponctuation. */
 const NAV_SEPARATORS = /[|•·»→>]/g;
@@ -25,7 +26,9 @@ const NAV_WORDS =
  * devient « Automaticien/ne », qui est précisément l'information utile.
  */
 export function stripMarkdown(raw: string): string {
-  return raw
+  // Le mojibake d'abord : « © » et « ® » sont des pictogrammes, retirés plus
+  // bas. Laissés là, ils emportaient le 2e octet de « é » (« FondÃ »).
+  return repairMojibake(raw)
     // Images d'abord : leur alt n'apporte rien et le `!` traînerait.
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
