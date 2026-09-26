@@ -56,6 +56,13 @@ export interface BaseFigures {
   founded_on: string | null;
   /** Code INSEE brut de tranche d'effectif : sert aux estimations. */
   effectif_code: string | null;
+  /**
+   * Catégorie juridique INSEE à quatre chiffres (`5710` SAS, `9220`
+   * association, `7210` commune). Le libellé lisible est dans `legal_form` ;
+   * c'est le CODE qui permet d'exclure une association d'un ciblage
+   * commercial, le libellé étant trop variable pour être filtré.
+   */
+  legal_code: string | null;
   revenue_eur: number | null;
   revenue_year: number | null;
   net_income_eur: number | null;

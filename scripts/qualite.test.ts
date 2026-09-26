@@ -211,7 +211,8 @@ console.log("\n6. La confiance structurelle varie avec la taille");
     legal_form: null, leader: null, leader_person: null, parent_company: null,
     matched_branch: false,
     figures: {
-      founded_on: null, effectif_code: null, revenue_eur: null, revenue_year: null,
+      founded_on: null, effectif_code: null,
+    legal_code: null, revenue_eur: null, revenue_year: null,
       net_income_eur: null, company_category: null, head_office_city: null,
     },
   });

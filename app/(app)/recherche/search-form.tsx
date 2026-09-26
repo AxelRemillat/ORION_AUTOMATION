@@ -29,6 +29,8 @@ export interface SearchCriteriaInput {
    * demande, quitte a rendre moins de fiches.
    */
   goFurther?: boolean;
+  /** Passe outre le ciblage, le temps d'une recherche. */
+  includeExcluded?: boolean;
 }
 
 const EMPTY: SearchCriteriaInput = {
@@ -40,6 +42,7 @@ const EMPTY: SearchCriteriaInput = {
   limit: DEFAULT_ANALYSIS_LIMIT,
   scanWidth: DEFAULT_SCAN_WIDTH,
   goFurther: true,
+  includeExcluded: false,
 };
 
 /** Mode A — critères envoyés à l'annuaire public des entreprises. */
@@ -151,6 +154,14 @@ export function SearchForm({
               onChange={(event) => update("goFurther", event.target.checked)}
             />
             Aller plus loin si besoin
+          </label>
+          <label className="mt-1.5 flex items-center gap-2 text-[12px] text-muted">
+            <input
+              type="checkbox"
+              checked={criteria.includeExcluded === true}
+              onChange={(event) => update("includeExcluded", event.target.checked)}
+            />
+            Inclure les exclus
           </label>
         </div>
 

@@ -54,17 +54,49 @@ export function failingCriteria(critique: Critique): string[] {
     .map((key) => `${CRITERIA_LABELS[key]} (${critique[key].score}/5) : ${critique[key].note}`);
 }
 
-export function buildCriticPrompt(facts: DerivedFact[], proofs: readonly string[] = []): string {
+export function buildCriticPrompt(
+  facts: DerivedFact[],
+  proofs: readonly string[] = [],
+  /**
+   * Ce qu'Axel s'engage a faire (page /offre) : delai de mise en place, « sans
+   * changer d'outil », validation humaine, demande d'entree.
+   *
+   * Sans cette liste, le juge notait la verifiabilite a 1 ou 2 sur 5 en
+   * reprochant un « delai non etaye par les faits ». C'etait une erreur de
+   * grille : un engagement du vendeur n'a pas a etre prouve par un fait sur le
+   * prospect.
+   */
+  commitments: readonly string[] = [],
+  /**
+   * Titre qu'Axel se donne (page /offre).
+   *
+   * Sans lui, le juge notait 0 sur 5 en « experience vecue » des qu'Axel
+   * reformulait son propre titre — « je construis des flux d'IA en
+   * production » etait lu comme la revendication d'un deploiement passe. Un
+   * positionnement n'est pas une reference client.
+   */
+  selfTitle: string | null = null,
+): string {
   return `Tu es relecteur exigeant d'emails de prospection a froid. Tu NOTES, tu ne
 reecris pas. Sois severe : un 5 doit se meriter.
 
 ${factsBlock(facts)}
 
+${selfTitle ? `TITRE QU'AXEL SE DONNE, legitime par nature : « ${selfTitle} ». Le reformuler
+n'est PAS revendiquer une experience : ne le compte jamais comme telle.` : ""}
+
+${commitments.length ? `ENGAGEMENTS D'AXEL — legitimes par nature, ils n'ont PAS a etre etayes par un fait sur le prospect :\n${commitments.map((line) => `- ${line}`).join("\n")}` : ""}
+
 ${proofs.length ? "PREUVES AUTORISEES — seules experiences qu'Axel peut revendiquer :\n" + proofs.map((proof) => "- " + proof).join("\n") : "PREUVES AUTORISEES : aucune. Toute affirmation d'experience passee vaut 0."}
 
 Note chaque critere de 0 a 5, avec UNE phrase d'explication.
 
-- specificite : applique le TEST DE SUBSTITUTION. Remplace mentalement le nom
+- specificite : applique le TEST DE SUBSTITUTION a la PREMIERE PHRASE apres la
+  salutation. Remplace mentalement le nom de l'entreprise par celui d'un
+  concurrent du meme code NAF. Si la phrase reste VRAIE, l'accroche est
+  generique : 0 ou 1, et cela declenche une reecriture. Une ouverture sur le
+  secteur (« Dans le commerce de gros... ») vaut 0 d'office.
+  Puis, pour le reste du mail : remplace mentalement le nom
   de l'entreprise par une autre du meme secteur. Si le mail tient encore tel
   quel, c'est 0 ou 1.
 - valeurAccroche : la premiere phrase apprend-elle quelque chose au lecteur, ou
@@ -72,13 +104,18 @@ Note chaque critere de 0 a 5, avec UNE phrase d'explication.
   d'un fait public ("fondee en 1969") vaut 1. Un compliment vaut 0.
 - pertinenceMetier : le process cite appartient-il vraiment au quotidien de CE
   metier, avec son vocabulaire ? "Gestion administrative" vaut 1.
-- verifiabilite : chaque affirmation est-elle adossee a un fait ci-dessus ?
-  Toute affirmation invente-e fait tomber la note.
+- verifiabilite : chaque affirmation SUR LE PROSPECT est-elle adossee a un fait
+  ci-dessus ? Les ENGAGEMENTS d'Axel (delai de mise en place, « sans changer
+  d'outil », validation humaine, duree de la demande d'entree) ne sont PAS des
+  affirmations sur le prospect : ils ne demandent aucun fait. Ne les compte pas
+  comme non verifiables.
 - voix : premiere personne, ton humain, pas de jargon corporate, pas de
   promesse intenable.
 - naturel : est-ce que ca sonne comme un humain qui ecrit a un humain, ou
   comme un texte genere ?
-- experienceVerifiee : le mail affirme-t-il une experience passee ("j'ai mis en
+- experienceVerifiee : ne juge QUE les affirmations sur des CLIENTS ou des
+  realisations passees. Reformuler le titre ci-dessus, ou decrire au present ce
+  qu'Axel construit, vaut 5. Le mail affirme-t-il une experience passee ("j'ai mis en
   place", "pour des clients similaires", "j'accompagne") ? Si oui, elle doit
   correspondre a une des PREUVES AUTORISEES ci-dessous. Toute autre
   affirmation d'experience vaut 0 : c'est une invention, et elle se verifie en

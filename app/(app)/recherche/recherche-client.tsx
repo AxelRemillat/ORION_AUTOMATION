@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, SearchX } from "lucide-react";
 import { Card, CardContent, EmptyState, Skeleton, useToast } from "@/components/ui";
@@ -13,14 +13,20 @@ import { FavoritesPanel } from "./favorites-panel";
 import { ResultCard, type AddState, type FavoriteState } from "./result-card";
 import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
+import { SignalsForm, type SignalCriteriaInput } from "./signals-form";
+import { ExcludedSectors } from "./excluded-sectors";
+import type { SignalSourceState } from "@/lib/signals/shared";
 import { DEFAULT_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
+import { ScanProgress } from "./scan-progress";
 import { ScanSummary, type ScanStats } from "./scan-summary";
+import { useSearchRun } from "./use-search-run";
 import { SignalFilters } from "./signal-filters";
 
-type Mode = "auto" | "manuel" | "favoris";
+type Mode = "auto" | "signaux" | "manuel" | "favoris";
 
 const TAB_LABELS: Record<Mode, string> = {
   auto: "Recherche par critères",
+  signaux: "Signaux d'abord",
   manuel: "Ajout manuel",
   favoris: "Favoris",
 };
@@ -35,6 +41,8 @@ interface SearchResponse {
   withSignal: number;
   /** Fiches Pappers reellement ouvertes (phase 2). */
   analysed: number;
+  /** Appels Linkup perdus, comptes a part. */
+  unverified?: number;
   /** `true` quand le total de l'annuaire est plafonne. */
   totalCapped?: boolean;
   /** Zone reellement appliquee, telle que resolue. */
@@ -47,7 +55,40 @@ interface SearchResponse {
   stopReason?: string;
   /** Entreprises ecartees apres enrichissement : effectif hors tranche. */
   outOfBracket?: string[];
+  /** Entreprises ecartees par le ciblage : structure ou secteur. */
+  excluded?: string[];
   warnings: EnrichmentWarning[];
+}
+
+interface SignalsResponse {
+  results: EnrichedCompany[];
+  sources: SignalSourceState[];
+  /** Signaux datés lus dans les sources, avant tout rapprochement. */
+  signalsFound: number;
+  /** Identités demandées à l'annuaire — gratuites. */
+  lookups: number;
+  analysed: number;
+  skippedKnown: number;
+  /** Écartées par le ciblage : structure juridique ou secteur exclu. */
+  excluded: string[];
+  outOfBracket: string[];
+  warnings: EnrichmentWarning[];
+}
+
+/**
+ * Résumé des sources, affiché là où le mode par critères dit pourquoi le scan
+ * s'est arrêté. Une source indisponible doit se voir dans le bilan, pas
+ * seulement dans le formulaire : sinon un résultat maigre passe pour un marché
+ * vide alors qu'il manque une source.
+ */
+function sourceSummary(sources: SignalSourceState[]): string {
+  return sources
+    .map((source) =>
+      source.available
+        ? `${source.label} : ${source.count} signaux`
+        : `${source.label} : ${source.unavailableReason}`,
+    )
+    .join(" · ");
 }
 
 /** Identifie une carte de façon stable entre deux rendus. */
@@ -58,6 +99,11 @@ export function RechercheClient() {
   const toast = useToast();
   const [mode, setMode] = useState<Mode>("auto");
   const [loading, setLoading] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  /** Identifiant du scan suivi : tant qu'il vit, la barre s'affiche. */
+  const [runId, setRunId] = useState<string | null>(null);
+  /** Vrai une fois le dernier scan relu : evite d'ecraser sa reprise. */
+  const restored = useRef(false);
   const [searched, setSearched] = useState(false);
   const [results, setResults] = useState<EnrichedCompany[]>([]);
   const [warnings, setWarnings] = useState<EnrichmentWarning[]>([]);
@@ -112,8 +158,28 @@ export function RechercheClient() {
     );
   }, [sorted, signalFilter]);
 
+  // Sondage du dernier scan : rapide sur cet ecran, c'est lui qui alimente la
+  // barre et qui restitue les resultats au retour sur la page.
+  const { run, loaded } = useSearchRun(1_000);
+  const running = run?.status === "running";
+
+  useEffect(() => {
+    // Une seule reprise, au premier chargement : ensuite c'est la recherche en
+    // cours qui fait autorite, pas la ligne en base.
+    if (!loaded || restored.current) return;
+    restored.current = true;
+    if (!run) return;
+
+    setRunId(run.status === "running" ? run.id : null);
+    if (run.results.length) {
+      setResults(run.results as EnrichedCompany[]);
+      setWarnings(run.warnings as EnrichmentWarning[]);
+      setSearched(true);
+    }
+  }, [loaded, run]);
+
   /** Enveloppe commune aux deux modes : reset, appel, gestion d'erreur. */
-  async function run(
+  async function runSearch(
     request: () => Promise<{
       results: EnrichedCompany[];
       warnings: EnrichmentWarning[];
@@ -143,14 +209,23 @@ export function RechercheClient() {
 
   const searchAuto = (criteria: SearchCriteriaInput) => {
     setLastCriteria(criteria);
-    return run(async () => {
-      const data = await postJson<SearchResponse>("/api/prospects/search", criteria);
+    return runSearch(async () => {
+      // Le job est ouvert AVANT le travail : l'ecran a son identifiant tout de
+      // suite, donc la barre apparait des la premiere seconde.
+      const opened = await postJson<{ id: string }>("/api/search/runs", criteria);
+      setRunId(opened.id);
+      const data = await postJson<SearchResponse>("/api/prospects/search", {
+        ...criteria,
+        runId: opened.id,
+      });
+      setRunId(null);
       return {
         results: data.results,
         warnings: data.warnings,
         scan: {
           total: data.total,
           scanned: data.scanned ?? 0,
+          unverified: data.unverified ?? 0,
           withSignal: data.withSignal ?? data.results.length,
           analysed: data.analysed ?? data.results.length,
           // Une recherche sauvegardee avant la refonte n'a pas de plafond.
@@ -160,7 +235,45 @@ export function RechercheClient() {
           skippedKnown: data.skippedKnown ?? 0,
           pagesRead: data.pagesRead ?? 0,
           stopReason: data.stopReason,
-          outOfBracket: data.outOfBracket ?? [],
+          outOfBracket: [...(data.excluded ?? []), ...(data.outOfBracket ?? [])],
+        },
+      };
+    });
+  };
+
+  const searchBySignals = (criteria: SignalCriteriaInput) => {
+    // Pas de `setLastCriteria` : les recherches sauvegardees sont au format du
+    // mode par criteres, et melanger les deux rendrait leur relecture fausse.
+    setLastCriteria(null);
+    return runSearch(async () => {
+      const opened = await postJson<{ id: string }>("/api/search/runs", criteria);
+      setRunId(opened.id);
+      const data = await postJson<SignalsResponse>("/api/prospects/signals", {
+        ...criteria,
+        runId: opened.id,
+      });
+      setRunId(null);
+      return {
+        results: data.results,
+        warnings: data.warnings,
+        scan: {
+          // Ce mode ne lit pas l'annuaire par pages : « total » est le nombre de
+          // signaux lus, et « scannees » celui des identites resolues. Les deux
+          // sont gratuits, contrairement au scan Linkup du mode par criteres.
+          total: data.signalsFound,
+          scanned: data.lookups,
+          unverified: 0,
+          withSignal: data.results.length,
+          analysed: data.analysed,
+          requested: criteria.limit,
+          totalCapped: false,
+          zoneLabel: `département ${criteria.departement}`,
+          skippedKnown: data.skippedKnown,
+          pagesRead: 0,
+          stopReason: sourceSummary(data.sources),
+          // Les deux listes sont montrees ensemble : un resultat maigre doit
+          // pouvoir s'expliquer par un reglage, pas seulement par le marche.
+          outOfBracket: [...data.excluded, ...data.outOfBracket],
         },
       };
     });
@@ -168,7 +281,7 @@ export function RechercheClient() {
 
   const searchManual = (query: string) => {
     setLastCriteria(null);
-    return run(async () => {
+    return runSearch(async () => {
       const data = await postJson<{ result: EnrichedCompany }>("/api/prospects/enrich", { query });
       return { results: [data.result], warnings: data.result.warnings };
     });
@@ -282,6 +395,13 @@ export function RechercheClient() {
               loading={loading}
             />
           )}
+          {mode === "signaux" && <SignalsForm onSubmit={searchBySignals} loading={loading} />}
+          {/* Le reglage vaut pour les deux modes : il s'affiche avec les deux. */}
+          {(mode === "auto" || mode === "signaux") && (
+            <div className="mt-4">
+              <ExcludedSectors />
+            </div>
+          )}
           {mode === "manuel" && <ManualForm onSubmit={searchManual} loading={loading} />}
           {mode === "favoris" && <FavoritesPanel refreshKey={favoritesKey} />}
           {mode !== "favoris" && (
@@ -289,6 +409,24 @@ export function RechercheClient() {
           )}
         </CardContent>
       </Card>
+
+      {runId && running && run && (
+        <ScanProgress
+          run={run}
+          stopping={stopping}
+          onStop={async () => {
+            setStopping(true);
+            try {
+              await postJson(`/api/search/runs/${runId}/stop`, {});
+              toast.toast("Arrêt demandé : le lot en cours se termine.");
+            } catch {
+              toast.error("Impossible de demander l'arrêt.");
+            } finally {
+              setStopping(false);
+            }
+          }}
+        />
+      )}
 
       {error && <ErrorBanner message={error} />}
       <WarningBanner warnings={warnings} />

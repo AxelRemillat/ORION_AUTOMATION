@@ -29,6 +29,7 @@ import { mapWithConcurrency, toDomain } from "./http";
 import { resolveCompany, searchCompanies } from "./gouv";
 import { resolveZone, type ResolvedZone } from "./geo";
 import { bracketOfTranches, checkBracket, outOfBracketReason } from "./headcount";
+import { exclusionOf } from "@/lib/signals/targeting";
 import {
   filterCandidates,
   pagePlan,
@@ -40,7 +41,7 @@ import {
   type ScanStop,
 } from "./scan-plan";
 import { fetchPappers, hasPappersKey } from "./pappers";
-import { fetchWebResults, hasLinkupKey } from "./linkup";
+import { fetchWebResults, LINKUP_CONCURRENCY, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
 import { extractSignals, type Extraction } from "./extract";
@@ -60,7 +61,8 @@ import {
 import type { CompanyBase, EnrichedCompany, EnrichmentWarning, SearchCriteria } from "./types";
 
 /** Enrichissements profonds menes en parallele (menage les quotas Pappers). */
-const CONCURRENCY = 4;
+export const ENRICH_CONCURRENCY = 4;
+const CONCURRENCY = ENRICH_CONCURRENCY;
 /**
  * Concurrence du scan.
  *
@@ -69,7 +71,9 @@ const CONCURRENCY = 4;
  * repondait 429 (« page 463/41/57 illisible »). Le limiteur de debit protege
  * deja l'annuaire ; borner la concurrence protege les autres sources.
  */
-const SCAN_CONCURRENCY = 3;
+// Concurrence du scan = celle de Linkup, mesuree, et distincte du limiteur de
+// l'annuaire (qui ne vaut que pour recherche-entreprises.api.gouv.fr).
+const SCAN_CONCURRENCY = LINKUP_CONCURRENCY;
 
 /** Colonnes chiffrees deja fournies gratuitement par l'annuaire public. */
 function baseKeyFigures(base: CompanyBase): ProspectKeyFigures {
@@ -154,10 +158,26 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
  *      representant est une personne morale : c'est la qu'on retrouve le
  *      dirigeant personne physique et la taille du groupe.
  */
-async function deepEnrich(
+export interface DeepEnrichOptions {
+  /**
+   * Signaux dont le rattachement est deja prouve en amont (SIREN d'une annonce
+   * officielle). Ils contournent l'anti-homonymie, qui ne sait juger que des
+   * preuves textuelles, et sortent en premier.
+   */
+  attachedSignals?: ProspectSignal[];
+}
+
+/**
+ * Exporte parce que le mode « Signaux d'abord » (`lib/signals`) rejoue
+ * exactement cette phase 2 : une fois l'entreprise identifiée, ouvrir la fiche
+ * ne dépend plus de la façon dont on l'a trouvée. La dupliquer aurait fait
+ * diverger deux chemins qui doivent coûter et rendre la même chose.
+ */
+export async function deepEnrich(
   base: CompanyBase,
   webSignals: ProspectSignal[],
   webResults: WebResult[] = [],
+  options: DeepEnrichOptions = {},
 ): Promise<EnrichedCompany> {
   const warnings: EnrichmentWarning[] = [];
   const company = { ...base };
@@ -337,7 +357,16 @@ async function deepEnrich(
     });
   }
   if (attachment.foreignEntities.length) keyFigures.foreign_entities = attachment.foreignEntities;
-  const signals = [...attachment.kept, ...structuralSignals(company, keyFigures.headcount)].slice(0, 8);
+  // Les signaux officiels passent AVANT l'anti-homonymie et en tete de liste.
+  // Le controle leur serait nuisible : une annonce BODACC est rattachee par son
+  // SIREN, pas par la presence de la denomination dans un texte — elle etait
+  // donc systematiquement rejetee comme « homonyme probable ». Et ils passent en
+  // tete parce qu'un evenement date au registre prime sur un resultat web.
+  const signals = [
+    ...(options.attachedSignals ?? []),
+    ...attachment.kept,
+    ...structuralSignals(company, keyFigures.headcount),
+  ].slice(0, 8);
 
   return { ...company, key_figures: keyFigures, signals, warnings };
 }
@@ -389,6 +418,12 @@ export interface SearchOutcome {
   withSignal: number;
   /** Enrichissements profonds (Pappers) reellement effectues. */
   analysed: number;
+  /**
+   * Entreprises dont l'appel Linkup a echoue : elles ne sont NI chaudes NI
+   * froides, on ne sait rien d'elles. Les confondre avec « sans signal »
+   * faisait passer une panne reseau pour un marche vide.
+   */
+  unverified: number;
   /** Entreprises ecartees parce que deja vues (prospects, favoris, scan < 30 j). */
   skippedKnown: number;
   /**
@@ -396,6 +431,13 @@ export interface SearchOutcome {
    * la tranche demandee. Une ligne par entreprise, affichee dans le detail.
    */
   outOfBracket: string[];
+  /**
+   * Entreprises ecartees par le CIBLAGE, pas par la tranche : association,
+   * organisme public, entreprise individuelle sans salarie, secteur exclu.
+   * Comptees a part pour qu'un resultat maigre ne passe pas pour un marche
+   * vide alors que c'est un reglage qui filtre.
+   */
+  excluded: string[];
   /** Pages d'annuaire lues pour y arriver. */
   pagesRead: number;
   /** Pourquoi la boucle s'est arretee, en clair. */
@@ -411,7 +453,47 @@ export interface SearchContext {
   onScanned?: (rows: { siren: string; company_name: string; had_signal: boolean }[]) => Promise<void>;
   /** Date du jour, injectee pour rendre la graine testable. */
   today?: string;
+  /** Prefixes NAF ecartes, tels que regles par l'utilisateur. */
+  excludedSectors?: readonly string[];
+  /** Passe outre le ciblage, pour une recherche ponctuelle. */
+  includeExcluded?: boolean;
+  /**
+   * Avancement, appele apres chaque lot.
+   *
+   * Le scan n'a pas a savoir ou va cette information : la route l'ecrit dans
+   * `search_runs`, les tests la collectent en memoire.
+   */
+  onProgress?: (progress: ScanProgress) => Promise<void>;
+  /**
+   * Demande d'arret, relue entre deux lots. On ne coupe jamais au milieu d'un
+   * lot : les appels sont deja payes, autant en garder le resultat.
+   */
+  shouldStop?: () => Promise<boolean>;
 }
+
+/** Ce que l'ecran affiche pendant qu'un scan tourne. */
+export interface ScanProgress {
+  /** jsonb en base : la forme doit rester assignable a un objet libre. */
+  [key: string]: unknown;
+  /**
+   * Laquelle des deux phases tourne. L'ecran en a besoin pour choisir sur quoi
+   * appuyer la barre : les pages ne bougent plus une fois le scan fini, et une
+   * barre immobile pendant que les fiches s'ouvrent se lit comme un gel.
+   */
+  phase: ScanPhase;
+  /** Pages d'annuaire lues et prevues. */
+  pagesRead: number;
+  pagesPlanned: number;
+  scanned: number;
+  withSignal: number;
+  analysed: number;
+  /** Fiches visees : le plafond demande, borne par les entreprises a signal. */
+  analysedPlanned: number;
+  /** Etape en clair, deja redigee pour l'ecran. */
+  step: string;
+}
+
+export type ScanPhase = "annuaire" | "fiches";
 
 /**
  * Mode A — recherche par criteres, en deux phases.
@@ -449,8 +531,10 @@ export async function searchAndEnrich(
     scanned: 0,
     withSignal: 0,
     analysed: 0,
+    unverified: 0,
     skippedKnown: 0,
     outOfBracket: [],
+    excluded: [],
     pagesRead: 1,
     stopReason: STOP_LABELS[stop],
     warnings,
@@ -487,8 +571,15 @@ export async function searchAndEnrich(
   type Scanned = Awaited<ReturnType<typeof scanSignals>>;
   const hot: Scanned[] = [];
   let scannedCount = 0;
+  /** Entreprises dont l'appel Linkup a echoue : ni chaudes, ni froides. */
+  let unverified = 0;
 
   for (const page of plan) {
+    if (context.shouldStop && (await context.shouldStop())) {
+      stop = "arrete";
+      break;
+    }
+
     const check = shouldContinue(
       { scanned: scannedCount, withSignal: hot.length, pagesRead },
       limit,
@@ -522,12 +613,29 @@ export async function searchAndEnrich(
     }
 
     const scanned = await mapWithConcurrency(batch, SCAN_CONCURRENCY, scanSignals);
-    scannedCount += batch.length;
 
     for (const item of scanned) {
-      if (item.warning) warnings.push(item.warning);
+      if (item.warning) {
+        // Un appel perdu n'est PAS une entreprise sans signal : on ne sait
+        // simplement rien d'elle. La compter comme froide serait un mensonge.
+        unverified += 1;
+        warnings.push(item.warning);
+        continue;
+      }
+      scannedCount += 1;
       if (hasProvenSignal(item.signals)) hot.push(item);
     }
+
+    await context.onProgress?.({
+      phase: "annuaire",
+      pagesRead,
+      pagesPlanned: plan.length,
+      scanned: scannedCount,
+      withSignal: hot.length,
+      analysed: 0,
+      analysedPlanned: limit,
+      step: `Lecture de l'annuaire ${pagesRead}/${plan.length}`,
+    });
 
     // Memoire du scan : ecrite lot par lot, pour qu'un abandon en cours de
     // route ne fasse pas rescanner ce qu'on vient de payer.
@@ -572,11 +680,41 @@ export async function searchAndEnrich(
   // « 10 a 49 salaries » rendait des entreprises de 99 et 199 personnes.
   const bracket = bracketOfTranches(criteria.tranches);
   const outOfBracket: string[] = [];
+  const excluded: string[] = [];
   const results: EnrichedCompany[] = [];
+
+  // Ciblage applique AVANT la phase 2 : une association ou une auto-ecole ne
+  // doit pas consommer un appel Pappers. Le meme module sert aux deux modes,
+  // pour qu'un reglage ne puisse pas valoir dans l'un et pas dans l'autre.
+  const targeted = context.includeExcluded
+    ? hot
+    : hot.filter((item) => {
+        const exclusion = exclusionOf(item.base, context.excludedSectors ?? []);
+        if (exclusion) excluded.push(exclusion.reason);
+        return !exclusion;
+      });
 
   // On pioche au-dela du plafond pour pouvoir remplacer les ecartees : une
   // entreprise hors tranche ne doit pas consommer une place de fiche.
-  const queue = hot.slice(0, Math.min(hot.length, limit * 2));
+  const queue = targeted.slice(0, Math.min(targeted.length, limit * 2));
+
+  // Cible affichee : on ne promet pas cinq fiches si le scan n'a trouve que
+  // deux entreprises a signal.
+  const analysedPlanned = Math.min(limit, queue.length);
+  const reportEnrich = (step: string) =>
+    context.onProgress?.({
+      phase: "fiches",
+      pagesRead,
+      pagesPlanned: plan.length,
+      scanned: scannedCount,
+      withSignal: hot.length,
+      analysed: results.length,
+      analysedPlanned,
+      step,
+    });
+
+  if (queue.length) await reportEnrich("Ouverture des fiches");
+
   for (let index = 0; index < queue.length && results.length < limit; index += CONCURRENCY) {
     const batch = queue.slice(index, index + CONCURRENCY);
     const enriched = await mapWithConcurrency(batch, CONCURRENCY, (item) =>
@@ -597,6 +735,8 @@ export async function searchAndEnrich(
       }
       results.push(company);
     }
+
+    await reportEnrich(`Ouverture des fiches ${results.length}/${analysedPlanned}`);
   }
 
   return {
@@ -607,8 +747,10 @@ export async function searchAndEnrich(
     scanned: scannedCount,
     withSignal: hot.length,
     analysed: results.length,
+    unverified,
     skippedKnown,
     outOfBracket,
+    excluded,
     pagesRead,
     stopReason: STOP_LABELS[stop],
     warnings: dedupeWarnings(results, warnings),

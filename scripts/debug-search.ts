@@ -9,12 +9,20 @@
  *   npx tsx scripts/debug-search.ts
  *   npx tsx scripts/debug-search.ts zone        (un seul bloc)
  *   npx tsx scripts/debug-search.ts live        (relance reelle, PAYANTE)
+ *   npx tsx scripts/debug-search.ts signaux     (mode « signaux d'abord », PAYANT)
  *
  * Seul le bloc `live` ecrit en base et consomme des credits.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { resolveAndEnrich, searchAndEnrich } from "@/lib/enrichment";
+import { searchCompanies } from "@/lib/enrichment/gouv";
+import { fetchWebResults } from "@/lib/enrichment/linkup";
+import { tranchesForBucket } from "@/lib/enrichment/naf";
+import { collectSignals, searchBySignals } from "@/lib/signals";
+import { sinceDate } from "@/lib/signals/bodacc";
+import { DEFAULT_EXCLUDED_SECTORS } from "@/lib/signals/targeting";
+import { guessOwnWebsite, qualifyWebResults, type QualifyTrace } from "@/lib/enrichment/signals";
 import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { Database } from "@/types";
 
@@ -355,6 +363,172 @@ async function blockBlueFull(): Promise<void> {
   );
 }
 
+/**
+ * Entonnoir du scan, sur de vrais appels — PAYANT (une recherche Linkup par
+ * entreprise). Repond a une seule question : entre 20 entreprises et 0 signal,
+ * ou exactement le compte se perd-il ?
+ */
+async function blockFunnel(): Promise<void> {
+  title("ENTONNOIR — la recherche du rapport, etape par etape (PAYANT)");
+
+  const criteria = { tranches: tranchesForBucket("petite") };
+  const search = await searchCompanies(criteria, 20, { page: 1 });
+  if (!search.ok) return console.log(`annuaire illisible : ${search.error}`);
+
+  const companies = search.data.companies.slice(0, 20);
+  console.log(`Annuaire : ${companies.length} candidats sur ${search.data.total} annonces
+`);
+
+  const totals = { ok: 0, timeout: 0, error: 0, raw: 0, emitted: 0, withSignal: 0 };
+  const durations: number[] = [];
+  const reasons = new Map<string, number>();
+
+  for (const base of companies) {
+    const started = Date.now();
+    const web = await fetchWebResults({
+      name: base.company_name,
+      city: base.city,
+      website: base.website,
+    });
+    const ms = Date.now() - started;
+    durations.push(ms);
+    const label = base.company_name.slice(0, 32).padEnd(32);
+
+    if (!web.ok) {
+      const timedOut = web.error.includes("délai dépassé");
+      if (timedOut) totals.timeout += 1;
+      else totals.error += 1;
+      console.log(`  ${String(ms).padStart(5)}ms  ${timedOut ? "DELAI  " : "ERREUR "} ${label} ${web.error}`);
+      continue;
+    }
+
+    totals.ok += 1;
+    const website = base.website ?? guessOwnWebsite(base.company_name, web.data);
+    const trace: QualifyTrace = { raw: 0, emitted: 0, rejected: [] };
+    const signals = qualifyWebResults(web.data, { name: base.company_name, website }, trace);
+    totals.raw += trace.raw;
+    totals.emitted += trace.emitted;
+    if (signals.length) totals.withSignal += 1;
+    for (const item of trace.rejected) {
+      reasons.set(item.reason, (reasons.get(item.reason) ?? 0) + 1);
+    }
+    console.log(
+      `  ${String(ms).padStart(5)}ms  ok      ${label} ${String(trace.raw).padStart(3)} bruts -> ${signals.length} signal(aux)`,
+    );
+  }
+
+  const sorted = durations.sort((a, b) => a - b);
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0;
+
+  console.log(`
+--- TOTAUX -------------------------------------------------`);
+  console.log(`Linkup     : ${totals.ok} ok · ${totals.timeout} délai dépassé · ${totals.error} erreur`);
+  console.log(`Latence    : médiane ${at(0.5)} ms · p95 ${at(0.95)} ms · max ${at(1)} ms`);
+  console.log(`Résultats  : ${totals.raw} bruts`);
+  console.log(`Signaux    : ${totals.emitted} émis · ${totals.withSignal} entreprise(s) avec signal`);
+  console.log(`
+Rejets par raison :`);
+  for (const [reason, count] of [...reasons.entries()].sort((a, b) => b[1] - a[1])) {
+    const share = totals.raw ? ((100 * count) / totals.raw).toFixed(1) : "0.0";
+    console.log(`  ${reason.padEnd(24)} ${String(count).padStart(5)}  (${share} %)`);
+  }
+}
+
+/**
+ * Mode « Signaux d'abord », de bout en bout — PAYANT (une fiche Pappers par
+ * resultat). Repond a la question du critere d'acceptation : « departement 69,
+ * 10-49 salaries, 5 fiches » rend-il 5 fiches portant un signal date de moins
+ * de 60 jours, et a quel cout ?
+ */
+async function blockSignaux(): Promise<void> {
+  title("SIGNAUX D'ABORD — BODACC + France Travail, mesure reelle (PAYANT)");
+
+  // Departement pilotable : `npx tsx scripts/debug-search.ts signaux 75`.
+  const departement = /^\d{2,3}$/.test(process.argv[3] ?? "") ? process.argv[3] : "69";
+  const criteria = { departement, tranches: tranchesForBucket("petite"), days: 60, limit: 5 };
+  console.log(`Departement ${departement}, 10-49 salaries, 5 fiches visees.`);
+
+  const startedAt = Date.now();
+  const collected = await collectSignals(criteria);
+  const collectMs = Date.now() - startedAt;
+
+  console.log(`Sources (${collectMs} ms) :`);
+  for (const source of collected.sources) {
+    const state = source.available
+      ? `${source.count} signaux retenus`
+      : `INDISPONIBLE — ${source.unavailableReason}`;
+    console.log(`  ${source.label.padEnd(24)} ${state}`);
+  }
+  for (const warning of collected.warnings) {
+    console.log(`  avertissement : ${warning.message}`);
+  }
+
+  const window = sinceDate(criteria.days);
+  const dated = collected.signals.filter((signal) => signal.date >= window);
+  console.log("");
+  console.log(
+    `Signaux dates : ${collected.signals.length} au total, ${dated.length} dans la fenetre de ${criteria.days} jours`,
+  );
+  console.log(`  le plus recent : ${collected.signals[0]?.date ?? "aucun"}`);
+  console.log(`  le plus ancien : ${collected.signals.at(-1)?.date ?? "aucun"}`);
+
+  const resolveStart = Date.now();
+  // Le reglage « secteurs exclus » vit en base, par utilisateur : hors requete
+  // HTTP il n'y a pas de session, on rejoue donc les valeurs par defaut.
+  const outcome = await searchBySignals(criteria, {
+    excludedSectors: [...DEFAULT_EXCLUDED_SECTORS],
+  });
+  const totalMs = Date.now() - resolveStart;
+
+  console.log("");
+  console.log(`Resolution + fiches (${totalMs} ms) :`);
+  console.log(`  identites demandees a l'annuaire (gratuit) : ${outcome.lookups}`);
+  console.log(`  fiches ouvertes chez Pappers (PAYANT)      : ${outcome.analysed}`);
+  console.log(`  ecartees sur l'effectif                    : ${outcome.outOfBracket.length}`);
+  console.log(`  deja connues                               : ${outcome.skippedKnown}`);
+  console.log(`  signaux non rapproches                     : ${outcome.unmatched}`);
+  console.log(`  ecartees par le ciblage                    : ${outcome.excluded.length}`);
+  console.log(`  candidats tranche confirmee / inconnue     : ${outcome.confirmedCount} / ${outcome.unknownTrancheCount}`);
+
+  console.log("");
+  console.log("Fiches obtenues :");
+  for (const company of outcome.results) {
+    const signal = company.signals[0];
+    const age = signal?.date ? Math.round((Date.now() - Date.parse(signal.date)) / 86_400_000) : null;
+    console.log(
+      `  ${company.company_name.slice(0, 32).padEnd(32)} ` +
+        `${String(company.key_figures.headcount ?? "?").padStart(4)} sal.  ` +
+        `${signal?.source ?? "?"} il y a ${age ?? "?"} j — ${signal?.label ?? "aucun signal"}`,
+    );
+  }
+  for (const line of outcome.excluded) {
+    console.log(`  ciblage : ${line}`);
+  }
+  for (const line of outcome.outOfBracket) {
+    console.log(`  ecartee : ${line}`);
+  }
+
+  // Le cout par fiche est le seul chiffre comparable entre les deux modes : le
+  // mode par criteres paie un appel Linkup par entreprise SCANNEE, celui-ci ne
+  // paie qu'une fiche Pappers par entreprise RETENUE.
+  const perFiche = outcome.analysed ? (outcome.lookups / outcome.analysed).toFixed(1) : "—";
+  console.log("");
+  console.log(
+    `Rendement : ${outcome.analysed} fiches pour ${outcome.signalsFound} signaux lus et ` +
+      `${outcome.lookups} identites resolues (${perFiche} identites gratuites par fiche, ` +
+      `1 appel Pappers par fiche, 0 appel Linkup, 0 appel OpenAI).`,
+  );
+
+  const met = outcome.results.filter((company) => {
+    const date = company.signals[0]?.date;
+    return Boolean(date && date >= window);
+  }).length;
+  console.log(
+    `Critere d'acceptation : ${met} fiche(s) avec un signal date de moins de ${criteria.days} jours ` +
+      `(attendu : au moins 5) — ${met >= 5 ? "ATTEINT" : "NON ATTEINT"}`,
+  );
+}
+
 async function main(): Promise<void> {
   const only = process.argv[2];
   const blocks: Record<string, () => Promise<void>> = {
@@ -365,10 +539,13 @@ async function main(): Promise<void> {
     job: blockJobPosting,
     bluefull: blockBlueFull,
     live: blockLive,
+    funnel: blockFunnel,
+    signaux: blockSignaux,
   };
   for (const [name, run] of Object.entries(blocks)) {
     // `live` est payant : il ne part jamais dans une execution complete.
-    if (only ? only !== name : name === "live" || name === "bluefull") continue;
+    const payants = ["live", "bluefull", "funnel", "signaux"];
+    if (only ? only !== name : payants.includes(name)) continue;
     await run();
   }
   console.log("");

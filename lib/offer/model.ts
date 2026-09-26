@@ -1,0 +1,275 @@
+/**
+ * Ce qu'Axel vend — et ce que le mail en dit.
+ *
+ * Constat en production : le tri des données et le brief étaient bons, mais le
+ * mail final restait impersonnel. On y lisait « Dans le commerce de gros,
+ * passer une commande… » — vrai pour n'importe quel négociant — sans jamais
+ * savoir qui écrivait, ce qu'il avait déjà construit, ni ce qu'il proposait.
+ *
+ * La cause était structurelle : la signature, les preuves et la façon de se
+ * présenter vivaient en dur dans `lib/persona.ts`. Elles vivent maintenant
+ * dans `user_offer`, éditables depuis /offre, et ce module les met en forme
+ * pour le rédacteur.
+ *
+ * Sans dépendance serveur : importable par une page client comme par une route.
+ */
+import type { EntryOfferType, OfferProof, UserOffer } from "@/types";
+
+/**
+ * Préremplissage, tiré du portfolio public.
+ *
+ * Rien d'inventé : chaque preuve renvoie à une démo réellement en ligne. Les
+ * valeurs sont éditables — c'est un point de départ, pas une vérité figée.
+ */
+export const OFFER_DEFAULTS: Omit<UserOffer, "user_id" | "created_at" | "updated_at"> = {
+  full_name: "Axel Remillat",
+  title: "Automatisation & IA en production pour PME",
+  portfolio_url: "https://axelremillat.com",
+  // Saisi à la main : on ne devine pas un numéro de téléphone.
+  phone: null,
+  show_phone: false,
+
+  entry_type: "demo",
+  entry_duration: "15 min",
+  entry_pitch: "Je peux vous montrer à quoi ça ressemblerait chez vous en 15 minutes.",
+  entry_url: "https://axelremillat.com/contact",
+
+  lead_time: "2 à 3 semaines",
+  no_tool_change: true,
+  human_validation: true,
+
+  proofs: [
+    {
+      id: "n8n",
+      title: "5 automatisations métier testables",
+      sentence:
+        "5 automatisations métier testables en direct sur mon site : tri d'e-mails, " +
+        "factures, SAV, comptes rendus, nettoyage de données.",
+      tags: ["e-mails", "factures", "SAV", "comptes rendus", "dossiers", "documents", "administratif", "données"],
+      url: "https://axelremillat.com/automatisations",
+      publicOk: true,
+    },
+    {
+      id: "agent-devis",
+      title: "Agent demande → devis",
+      sentence:
+        "Un agent qui transforme une demande client en devis, réponse et créneau, " +
+        "testable sur mon site.",
+      tags: ["commandes", "devis", "négoce", "demandes clients", "prise de rdv"],
+      url: "https://axelremillat.com/agent",
+      publicOk: true,
+    },
+    {
+      id: "vega",
+      title: "Assistant IA sourcé",
+      sentence: "Un assistant IA qui répond avec ses sources, en ligne sur mon site.",
+      tags: ["documentation", "recherche", "support", "base de connaissances"],
+      url: "https://axelremillat.com/demos",
+      publicOk: true,
+    },
+    {
+      id: "scoring",
+      title: "Scoring de leads",
+      sentence: "Un scoring de leads qui prédit la probabilité de conversion.",
+      tags: ["commercial", "prospection", "CRM"],
+      url: "https://axelremillat.com/pipeline",
+      publicOk: true,
+    },
+    {
+      id: "ionis",
+      title: "1er prix IONIS 2025",
+      sentence: "1er prix du concours IONIS 2025, sur plus de 400 projets.",
+      tags: ["crédibilité"],
+      url: null,
+      publicOk: true,
+    },
+  ],
+};
+
+/** Preuve de crédibilité : un bonus, jamais un remplacement d'une preuve métier. */
+export const CREDIBILITY_PROOF_ID = "ionis";
+
+/** Au-delà, on n'ajoute plus le bonus de crédibilité : le mail est déjà plein. */
+export const CREDIBILITY_WORD_BUDGET = 110;
+
+/**
+ * Les cinq démos n8n, nommées.
+ *
+ * Quand le pain tombe sur l'une d'elles, le mail la nomme précisément — « vous
+ * pouvez tester le tri d'e-mails en direct sur mon site » — plutôt que de
+ * citer la preuve générique. C'est ce qui rend l'offre vérifiable en un clic,
+ * et c'est le cas le plus fréquent chez une PME.
+ */
+export const N8N_DEMOS: { key: string; label: string; tags: string[] }[] = [
+  { key: "emails", label: "le tri d'e-mails", tags: ["e-mail", "mail", "boîte", "message", "courrier"] },
+  { key: "factures", label: "le traitement des factures", tags: ["facture", "facturation", "comptab", "règlement", "impayé"] },
+  { key: "sav", label: "le SAV", tags: ["sav", "réclamation", "support", "litige", "après-vente", "service client"] },
+  { key: "comptes-rendus", label: "les comptes rendus", tags: ["compte rendu", "compte-rendu", "réunion", "visite", "rapport"] },
+  { key: "donnees", label: "le nettoyage de données", tags: ["donnée", "doublon", "fichier", "base", "saisie", "ressaisie"] },
+];
+
+export interface OfferView {
+  /** `true` quand la page /offre n'a pas encore été remplie. */
+  complete: boolean;
+  offer: UserOffer;
+}
+
+const isFilled = (value: string | null | undefined): boolean => Boolean(value && value.trim());
+
+/**
+ * L'offre est-elle exploitable pour écrire un mail ?
+ *
+ * On exige le minimum qui change le mail : un nom, un titre, une offre
+ * d'entrée et au moins une preuve publique. Le reste est du confort.
+ */
+export function isOfferComplete(offer: Partial<UserOffer> | null | undefined): boolean {
+  if (!offer) return false;
+  return (
+    isFilled(offer.full_name) &&
+    isFilled(offer.title) &&
+    isFilled(offer.entry_pitch) &&
+    (offer.proofs ?? []).some((proof) => proof.publicOk)
+  );
+}
+
+/** Complète une ligne partielle avec les valeurs par défaut. */
+export function withDefaults(row: Partial<UserOffer> | null | undefined, userId = ""): UserOffer {
+  return {
+    user_id: row?.user_id ?? userId,
+    created_at: row?.created_at ?? "",
+    updated_at: row?.updated_at ?? "",
+    ...OFFER_DEFAULTS,
+    ...Object.fromEntries(Object.entries(row ?? {}).filter(([, value]) => value !== null && value !== undefined)),
+  } as UserOffer;
+}
+
+const normalize = (value: string): string =>
+  value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/**
+ * Le tag apparait-il dans le texte, au singulier comme au pluriel ?
+ *
+ * Le tag « commandes » ne trouvait pas « une commande client » : un `includes`
+ * brut rate le singulier, et le recoupement echouait donc sur le cas le plus
+ * courant. On compare des formes reduites — chaque mot prive de son « s » ou
+ * « x » final.
+ */
+export function tagMatches(tag: string, text: string): boolean {
+  const singular = (value: string) =>
+    normalize(value)
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .map((word) => (word.length > 3 ? word.replace(/[sx]$/, "") : word))
+      .join(" ");
+
+  const needle = singular(tag);
+  return needle.length > 2 && singular(text).includes(needle);
+}
+
+/**
+ * Démo n8n qui correspond au pain, s'il y en a une.
+ *
+ * On cherche dans le texte du pain, pas dans les tags de la preuve : c'est le
+ * besoin du prospect qui décide, pas notre catalogue.
+ */
+export function matchingDemo(painText: string): { key: string; label: string } | null {
+  const found = N8N_DEMOS.find((demo) => demo.tags.some((tag) => tagMatches(tag, painText)));
+  return found ? { key: found.key, label: found.label } : null;
+}
+
+export interface ProofChoice {
+  proof: OfferProof | null;
+  /** Phrase à écrire, déjà adaptée si une démo précise a été reconnue. */
+  sentence: string | null;
+  /** Démo n8n nommée, quand le pain tombe dessus. */
+  demo: { key: string; label: string } | null;
+  /** Pourquoi cette preuve — affiché dans le brief. */
+  reason: string;
+}
+
+/**
+ * Preuve à mobiliser pour ce pain.
+ *
+ * Une seule preuve métier par mail. Le recoupement se fait sur les tags ; sans
+ * recoupement, on ne cite RIEN — une preuve hors sujet dessert plus qu'elle ne
+ * sert, et c'est exactement ce qui est arrivé en production quand un flux
+ * d'alertes frigorifiques était cité pour un organisme de formation.
+ */
+export function chooseProof(offer: UserOffer, painText: string): ProofChoice {
+  const usable = (offer.proofs ?? []).filter(
+    (proof) => proof.publicOk && proof.id !== CREDIBILITY_PROOF_ID,
+  );
+
+  // Cas privilégié : le pain correspond à une des démos nommées.
+  const demo = matchingDemo(painText);
+  if (demo) {
+    const n8n = usable.find((proof) => proof.id === "n8n");
+    if (n8n) {
+      return {
+        proof: n8n,
+        sentence: `vous pouvez tester ${demo.label} en direct sur mon site`,
+        demo,
+        reason: `le pain correspond à la démo « ${demo.label} » : on la nomme précisément`,
+      };
+    }
+  }
+
+  const matched = usable.find((proof) => proof.tags.some((tag) => tagMatches(tag, painText)));
+  if (matched) {
+    return {
+      proof: matched,
+      sentence: matched.sentence,
+      demo: null,
+      reason: `tags recoupés : ${matched.tags.filter((tag) => tagMatches(tag, painText)).join(", ")}`,
+    };
+  }
+
+  return {
+    proof: null,
+    sentence: null,
+    demo: null,
+    reason: "aucune preuve ne recoupe le pain : mieux vaut n'en citer aucune",
+  };
+}
+
+/** La preuve de crédibilité tient-elle encore dans le mail ? */
+export function credibilityFits(offer: UserOffer, wordCount: number): OfferProof | null {
+  if (wordCount > CREDIBILITY_WORD_BUDGET) return null;
+  return (offer.proofs ?? []).find((proof) => proof.id === CREDIBILITY_PROOF_ID && proof.publicOk) ?? null;
+}
+
+/**
+ * Signature, telle qu'elle est ajoutée sous le mail.
+ *
+ * Elle n'est PAS comptée dans les mots : c'est une carte de visite, pas du
+ * corps. Elle remplace le « Axel » seul qui partait jusqu'ici.
+ */
+export function signatureFor(offer: UserOffer): string {
+  const line = [offer.title, offer.portfolio_url, offer.show_phone ? offer.phone : null]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" · ");
+  return [offer.full_name?.trim() || "Axel Remillat", line].filter(Boolean).join("\n");
+}
+
+/** Libellé lisible de l'offre d'entrée : « une démo de 15 min ». */
+export function entryOfferLabel(offer: UserOffer): string | null {
+  const labels: Record<EntryOfferType, string> = {
+    demo: "une démo",
+    appel: "un appel découverte",
+    audit: "un audit",
+    pilote: "un pilote",
+  };
+  if (!offer.entry_type) return null;
+  const base = labels[offer.entry_type];
+  return offer.entry_duration ? `${base} de ${offer.entry_duration}` : base;
+}
+
+/** Ce que le mail peut promettre, en clair. */
+export function promiseLines(offer: UserOffer): string[] {
+  return [
+    offer.lead_time ? `mise en place type : ${offer.lead_time}` : null,
+    offer.no_tool_change ? "sans changer d'outil" : null,
+    offer.human_validation ? "validation humaine avant chaque action" : null,
+  ].filter((line): line is string => Boolean(line));
+}

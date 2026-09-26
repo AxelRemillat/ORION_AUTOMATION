@@ -61,6 +61,18 @@ export interface ProspectSignal {
   type?: string;
   label: string;
   url?: string;
+  /**
+   * Force commerciale de la preuve.
+   *
+   * « faible » quand la preuve tient mais que sa source est un agrégateur, ou
+   * qu'elle n'est pas datée, ou que le fait n'engage personne (un changement de
+   * dénomination). Un signal faible reste AFFICHÉ, classé plus bas : l'écarter
+   * faisait perdre 45 % des résultats du scan.
+   *
+   * « fort » est réservé à un fait engageant et daté — nouveau dirigeant,
+   * mouvement de capital, reprise de fonds, offre d'emploi publiée.
+   */
+  strength?: "fort" | "moyen" | "faible";
   /** Date ISO du signal, telle que fournie par la source. */
   date?: string;
   source?: string;
@@ -118,6 +130,36 @@ export interface ProspectKeyFigures {
   site_status?: "lu" | "trouvé" | "non trouvé";
   /** Entités homonymes écartées : leur nom ne doit jamais sortir dans un mail. */
   foreign_entities?: string[];
+  /**
+   * FAITS DU SIGNAL qui a fait remonter la fiche.
+   *
+   * Stockés à plat et en clair, parce qu'ils sont relus bien plus tard —
+   * la fiche vit des semaines après la recherche qui l'a trouvée, et le signal
+   * d'origine n'est alors plus recalculable : une annonce BODACC sort de la
+   * fenêtre de 60 jours, une offre d'emploi est dépubliée.
+   */
+  signal_source?: "bodacc" | "france-travail";
+  signal_type?: string;
+  signal_strength?: "fort" | "moyen" | "faible";
+  /** Date ISO du signal principal. */
+  signal_date?: string;
+  /** Formulation lisible du fait, telle qu'affichée sur la carte. */
+  signal_label?: string;
+  /** Nombre d'annonces retenues pour cette entreprise sur la fenêtre. */
+  signal_count?: number;
+  /** Dirigeant entrant nommé par l'annonce : prénom puis nom. */
+  new_leader_name?: string;
+  /** Fonction prise (« gérant », « président », « directeur général »). */
+  new_leader_role?: string;
+  /** Offre d'emploi : intitulé publié et date de publication. */
+  job_title?: string;
+  job_posted_at?: string;
+  /**
+   * Capital déclaré APRÈS l'opération. Le précédent n'est pas publié par
+   * BODACC : le sens du mouvement n'est donc pas connu depuis cette valeur
+   * seule, et rien ici ne doit laisser croire à une augmentation.
+   */
+  capital_after_eur?: number;
   [key: string]: unknown;
 }
 
@@ -307,6 +349,59 @@ export type ExcludedCompanyUpdate = Partial<ExcludedCompanyInsert>;
  * Memoire des entreprises deja scannees : evite de rescanner (et de repayer)
  * les memes SIREN d'une recherche a l'autre.
  */
+/** Type d'offre d'entree : la demande la plus legere qu'on puisse faire. */
+export type EntryOfferType = "demo" | "appel" | "audit" | "pilote";
+
+export const ENTRY_OFFER_LABELS: Record<EntryOfferType, string> = {
+  demo: "Démo",
+  appel: "Appel découverte",
+  audit: "Audit",
+  pilote: "Pilote",
+};
+
+/**
+ * Une preuve publique : ce qu'Axel peut citer dans un mail.
+ *
+ * `publicOk` a false = la preuve existe mais ne sort jamais. Elle remplace
+ * `PERSONA.proofs`, qui vivait en dur dans le code.
+ */
+export type OfferProof = {
+  id: string;
+  title: string;
+  /** Phrase d'UNE ligne, reprise telle quelle dans le mail. */
+  sentence: string;
+  tags: string[];
+  url?: string | null;
+  publicOk: boolean;
+};
+
+/** Ce qu'Axel vend, et comment il signe. Une ligne par utilisateur. */
+export type UserOffer = {
+  user_id: string;
+  full_name: string | null;
+  title: string | null;
+  portfolio_url: string | null;
+  phone: string | null;
+  show_phone: boolean;
+  entry_type: EntryOfferType | null;
+  entry_duration: string | null;
+  entry_pitch: string | null;
+  entry_url: string | null;
+  lead_time: string | null;
+  no_tool_change: boolean;
+  human_validation: boolean;
+  proofs: OfferProof[];
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * `updated_at` reste ecrivable : la route le pose a chaque sauvegarde pour que
+ * l'ordre des modifications soit lisible sans trigger.
+ */
+export type UserOfferInsert = Partial<UserOffer>;
+export type UserOfferUpdate = UserOfferInsert;
+
 export type ScanHistory = {
   id: string;
   user_id: string;
@@ -401,6 +496,53 @@ export type InboundMessageInsert = Insert<
 > & { user_id: string };
 export type InboundMessageUpdate = Update<InboundMessage>;
 
+/** Etat d'un scan suivi en direct. */
+export const SEARCH_RUN_STATUSES = ["running", "done", "stopped", "error"] as const;
+export type SearchRunStatus = (typeof SEARCH_RUN_STATUSES)[number];
+
+/**
+ * Un lancement de recherche, observable pendant qu'il tourne.
+ *
+ * `results` reste en jsonb : ce sont des entreprises enrichies, pas encore des
+ * prospects. Les normaliser obligerait à les détruire au scan suivant.
+ */
+export type SearchRun = {
+  id: string;
+  user_id: string;
+  criteria: Record<string, unknown>;
+  status: SearchRunStatus;
+  progress: Record<string, unknown>;
+  results: unknown[];
+  warnings: unknown[];
+  error: string | null;
+  /** Passe à vrai quand l'utilisateur clique « Arrêter » ; le scan le relit. */
+  stop_requested: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Réglages de recherche d'un utilisateur.
+ *
+ * `excluded_sectors` contient des PRÉFIXES NAF, pas des codes complets :
+ * « 8553Z » vise les auto-écoles, « 85 » viserait tout l'enseignement.
+ */
+export type SearchSettings = {
+  user_id: string;
+  excluded_sectors: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type SearchSettingsInsert = Insert<SearchSettings, "excluded_sectors">;
+export type SearchSettingsUpdate = Update<SearchSettings>;
+
+export type SearchRunInsert = Insert<
+  SearchRun,
+  "criteria" | "status" | "progress" | "results" | "warnings" | "error" | "stop_requested"
+>;
+export type SearchRunUpdate = Update<SearchRun>;
+
 export type ApiUsageInsert = Insert<ApiUsage, "units" | "unit_cost" | "cost" | "prospect_id">;
 export type ApiUsageUpdate = Update<ApiUsage>;
 
@@ -470,6 +612,18 @@ export type Database = {
         Update: InboundMessageUpdate;
         Relationships: [];
       };
+      search_settings: {
+        Row: SearchSettings;
+        Insert: SearchSettingsInsert;
+        Update: SearchSettingsUpdate;
+        Relationships: [];
+      };
+      search_runs: {
+        Row: SearchRun;
+        Insert: SearchRunInsert;
+        Update: SearchRunUpdate;
+        Relationships: [];
+      };
       api_usage: {
         Row: ApiUsage;
         Insert: ApiUsageInsert;
@@ -492,6 +646,12 @@ export type Database = {
         Row: ScanHistory;
         Insert: ScanHistoryInsert;
         Update: ScanHistoryUpdate;
+        Relationships: [];
+      };
+      user_offer: {
+        Row: UserOffer;
+        Insert: UserOfferInsert;
+        Update: UserOfferUpdate;
         Relationships: [];
       };
     };

@@ -205,6 +205,7 @@ function mapResult(raw: GouvResult, geoFiltered: boolean): CompanyBase | null {
       // Date complete : elle seule permet un age exact (cf. companyAge).
       founded_on: raw.date_creation ?? null,
       effectif_code: raw.tranche_effectif_salarie ?? null,
+      legal_code: raw.nature_juridique ?? null,
       company_category: raw.categorie_entreprise ?? null,
       head_office_city: headOffice !== city ? headOffice : null,
       ...latestFinance(raw.finances),
