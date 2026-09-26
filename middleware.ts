@@ -16,10 +16,12 @@ const PUBLIC_PATHS = ["/login", "/auth"];
  *
  * Elles ne sont pas pour autant ouvertes : chacune vérifie son propre secret
  * partagé, par comparaison à TEMPS CONSTANT (`x-orion-inbound-secret` pour
- * l'inbound, `Authorization: Bearer <CRON_SECRET>` pour le cron). Le
- * middleware n'a rien à ajouter ; il ne ferait que gêner.
+ * l'inbound, `Authorization: Bearer <CRON_SECRET>` pour le cron,
+ * `Bearer <JOBS_TICK_SECRET>` pour le tick des jobs, appelé par pg_cron et par
+ * la chaîne de ticks elle-même). Le middleware n'a rien à ajouter ; il ne
+ * ferait que gêner.
  */
-const MACHINE_PATHS = ["/api/inbound", "/api/cron"];
+const MACHINE_PATHS = ["/api/inbound", "/api/cron", "/api/jobs/tick"];
 
 const matches = (pathname: string, paths: readonly string[]): boolean =>
   paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
