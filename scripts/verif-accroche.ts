@@ -24,6 +24,7 @@ import { incomingLeader } from "@/lib/emails/incoming-leader";
 import { runStrategist } from "@/lib/emails/strategist";
 import { dateUndatedSignals, isHookFresh } from "@/lib/signals/dating";
 import { fetchPappers } from "@/lib/enrichment/pappers";
+import { findContact } from "@/lib/jobs/handlers/email";
 import { searchBySignals } from "@/lib/signals";
 import { defaultOffer } from "@/lib/offer/read";
 import { wordCount } from "@/lib/emails/validate";
@@ -183,6 +184,15 @@ async function run(prospect: Prospect, ask: AskFn): Promise<void> {
   }
   if (factsOnly) return;
 
+  const hunter = await findContact(fresh);
+  console.log(
+    `Contact Hunter       : ${
+      hunter.contact
+        ? `${hunter.contact.full_name ?? "(sans nom)"} <${hunter.contact.email}> ${hunter.contact.position ?? ""} conf=${hunter.contact.confidence ?? "?"}`
+        : "aucun"
+    }${hunter.warning ? ` — ${hunter.warning.message}` : ""}`,
+  );
+
   const outcome = await runStrategist(
     (system, user, operation) => ask("strategist", system, user, 0.2, operation),
     {
@@ -213,12 +223,13 @@ async function run(prospect: Prospect, ask: AskFn): Promise<void> {
     brief,
     facts: facts.facts,
     tone: "direct",
-    contact: null,
+    contact: hunter.contact,
     prospectId: fresh.id,
     registryName: fresh.company_name,
     avoid: [],
     leaderPerson: facts.leaderPerson,
     addressee: leader?.fullName ?? null,
+    sector: fresh.sector,
     forbiddenNames: facts.foreignEntities,
   });
   if ("error" in draft) {
@@ -231,7 +242,7 @@ async function run(prospect: Prospect, ask: AskFn): Promise<void> {
   console.log(`\nObjet : ${draft.email.subject}\n\n${draft.email.body}\n`);
   console.log(
     `Mots hors signature : ${wordCount(draft.email.body) - wordCount(signature)} ` +
-      `(cible 100, plafond 125)`,
+      `(cible 100, plafond 120)`,
   );
   console.log(
     `Validateurs : ${draft.validation.failures.length ? draft.validation.failures.join(" | ") : "aucun échec"}`,

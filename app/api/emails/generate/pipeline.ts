@@ -42,6 +42,8 @@ export interface DraftInput {
   leaderPerson?: string | null;
   /** Dirigeant entrant a qui le mail s'adresse nominativement. */
   addressee?: string | null;
+  /** Secteur du prospect : oriente le choix de la preuve. */
+  sector?: string | null;
   forbiddenNames?: readonly string[];
   /** `false` pour « Réécrire depuis le brief » : rédacteur seul, pas de juge. */
   judge?: boolean;
@@ -122,6 +124,7 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     avoid: input.avoid,
     leaderPerson: input.leaderPerson,
     addressee: input.addressee,
+    sector: input.sector,
     offer: input.offer,
   };
   const plan = planFor(writingInput);
@@ -132,6 +135,9 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
   const allowedFacts = briefFacts(brief, input.facts);
   const context = {
     facts: allowedFacts,
+    // Le « a ne pas dire » du brief devient une regle verifiee, plus une
+    // simple consigne transmise au redacteur.
+    avoid: brief.avoid,
     contact: input.contact,
     tone,
     companyName: input.registryName,

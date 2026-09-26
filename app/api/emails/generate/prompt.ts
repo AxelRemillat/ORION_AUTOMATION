@@ -220,6 +220,8 @@ export interface WritingInput {
   leaderPerson?: string | null;
   /** Dirigeant entrant a qui le mail s'adresse nominativement. */
   addressee?: string | null;
+  /** Secteur du prospect : oriente le choix de la preuve. */
+  sector?: string | null;
   /** Ce qu'Axel vend et comment il signe (page /offre). */
   offer: UserOffer;
   /** Retour du juge, lors de l'unique réécriture. */
@@ -263,7 +265,9 @@ export function buildWritingPrompt(input: WritingInput): string {
   // La preuve vient de /offre et se choisit par recoupement avec le pain. Le
   // modele ne la choisit pas : une preuve hors sujet dessert plus qu'elle ne
   // sert, et il n'a aucun moyen de juger la pertinence d'une reference.
-  const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`);
+  const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`, {
+    sector: input.sector,
+  });
   const proofLine = choice.sentence
     ? `PREUVE A MOBILISER — une seule, jamais deux. Son contenu : ${choice.sentence}
   Dis-la avec TES mots, en une clause courte. NE LA RECOPIE PAS mot pour mot et
@@ -276,8 +280,13 @@ export function buildWritingPrompt(input: WritingInput): string {
   const promise = promiseLines(offer);
   const entry = entryOfferLabel(offer);
 
+  // Les consignes du brief sont desormais VERIFIEES par du code apres
+  // generation : autant le dire au redacteur, il les traite mieux quand il
+  // sait qu'elles ne sont pas de simples recommandations.
   const avoidBlock = [...brief.avoid, ...avoid].length
-    ? `A NE PAS DIRE / NE PAS REPRENDRE :
+    ? `A NE PAS DIRE / NE PAS REPRENDRE — chaque ligne est verifiee, une phrase
+qui la contredit fait refuser le mail. Si tu n'es pas sur d'un fait, pose-le en
+hypothese (« si… ») ou n'en parle pas :
 ${[...brief.avoid.map((line) => `- ${line}`), ...avoid.map((line) => `- ouverture ou fin deja servie : ${line}`)].join("\n")}`
     : "";
 
@@ -311,13 +320,21 @@ FAITS AUTORISES — les seuls sur lesquels tu peux t'appuyer :
 ${factLines(facts) || "aucun"}
 
 STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
-BUDGET DE MOTS PAR BLOC, a respecter : 30 / 25 / 40 / 20. Un budget par bloc
+BUDGET DE MOTS PAR BLOC, a respecter : 30 / 25 / 35 / 20. Un budget par bloc
 tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
 1. ACCROCHE : UN fait propre a CETTE entreprise (signal date, page de son site,
    etablissement, recrutement...). Elle doit echouer au TEST DE SUBSTITUTION :
    si la phrase reste vraie en remplaçant le nom par un concurrent du meme code
-   NAF, elle est refusee. Interdit de commencer par « Dans le/la <secteur> » :
-   c'est le contraire d'une accroche.
+   NAF, elle est refusee.
+   QUATRE OUVERTURES INTERDITES, verifiees par du code :
+   - « Dans le/la <secteur> » : c'est le contraire d'une accroche ;
+   - « Sur votre site, on lit que… », « d'apres votre site » : citer le site
+     comme source prouve qu'on les a lus, ca ne leur apprend rien. Dis le FAIT,
+     pas l'endroit ou tu l'as trouve ;
+   - un evenement affirme SANS DATE (« votre agence a ouvert », « vous venez
+     d'inaugurer ») : donne le mois ou l'annee, sinon ne l'affirme pas ;
+   - la paraphrase de leur propre page : ils la connaissent. Le fait de site
+     sert a dire ce qu'il IMPLIQUE, jamais a le leur relire.
 2. QUI + PREUVE : « Je suis ${offer.full_name ?? "Axel Remillat"}, » suivi de ton
    titre reformule naturellement (pas recopie mot pour mot), puis la preuve
    ci-dessous. Dis ce que tu CONSTRUIS, jamais qui tu aides : « j'aide les PME »
@@ -325,10 +342,10 @@ tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
    ne permettent pas d'affirmer.
 3. OFFRE POUR EUX : le flux applique a LEUR cas — ce qui declenche, ce qui est
    lu, ce qui est ecrit, dans quel outil. Nomme TROIS etapes au plus : la
-   quatrieme n'apprend rien et coute dix mots. Puis la promesse en UNE clause
-   courte : le delai, et au plus UN des deux autres elements (« sans changer
-   d'outil » ou la validation humaine). Les trois d'affilee alourdissent le
-   mail de quinze mots pour rien.
+   quatrieme n'apprend rien et coute dix mots. UNE seule phrase, puis la
+   promesse en UNE clause courte : le delai SEUL. « Sans changer d'outil » et
+   la validation humaine sont vraies mais couteuses ; elles se disent a l'oral.
+   Ce bloc est celui qui fait deborder le mail : 35 mots, pas un de plus.
 4. DEMANDE FACILE : ton offre d'entree, formulee en question FERMEE a laquelle
    on repond oui ou non (« Est-ce que ca vous parlerait ? »).
 
@@ -336,9 +353,9 @@ REGLES DURES — chacune est verifiee par du code apres generation
 1. SALUTATION, exactement : « ${greeting} » Rien d'autre.
 2. LONGUEUR — la contrainte la plus souvent ratee. EXACTEMENT QUATRE
    paragraphes, separes par une ligne vide, un par bloc. Vise 100 mots,
-   signature non comprise ; 125 est un PLAFOND, pas un objectif. UNE seule
-   phrase par paragraphe, sauf le bloc 3 qui peut en avoir deux. Compte tes
-   mots avant de repondre : au-dela de 125, le mail est refuse par du code.
+   signature non comprise ; 120 est un PLAFOND STRICT. UNE seule phrase par
+   paragraphe. Compte tes mots avant de repondre : au-dela de 120, le mail est
+   refuse par du code, sans discussion.
 3. UNE SEULE question dans tout le mail : celle du bloc 4.
 4. Aucun chiffre absent des faits autorises. Les arrondis sont permis.
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
