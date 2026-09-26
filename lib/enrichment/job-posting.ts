@@ -21,6 +21,7 @@
  * seulement que l'entreprise cherche quelqu'un aujourd'hui, ce qui est déjà
  * plus qu'un silence.
  */
+import { decodeBody } from "./charset";
 import { toDomain } from "./http";
 
 export type PostingFreshness = "datée" | "en ligne" | "périmée" | "introuvable";
@@ -150,7 +151,7 @@ export async function checkJobPosting(
       return { freshness: "introuvable", datePosted: null, validThrough: null };
     }
 
-    const html = await response.text();
+    const html = decodeBody(await response.arrayBuffer(), response.headers.get("content-type"));
     const [facts] = parseJobPostings(html);
     return {
       freshness: postingFreshness({ reachable: true, onOfficialDomain, facts: facts ?? null, now: options.now }),

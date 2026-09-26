@@ -8,6 +8,7 @@
  * demande donc simplement l'actualite de l'entreprise, et c'est `signals.ts`
  * qui decide, preuve en main, s'il y a un evenement.
  */
+import { repairMojibake } from "./charset";
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
 import { linkupFetchCost } from "@/lib/usage/pricing";
@@ -130,9 +131,11 @@ export async function fetchWebResults(company: {
     .filter((item) => item.url && (item.name || item.content))
     .slice(0, 12)
     .map((item) => ({
-      title: (item.name ?? "").trim(),
+      // Linkup relaie parfois une page deja mal decodee : on repare ici, a
+      // l'entree, pour que ni la citation stockee ni le prompt n'en heritent.
+      title: repairMojibake((item.name ?? "").trim()),
       url: item.url as string,
-      snippet: (item.content ?? "").replace(/\s+/g, " ").trim().slice(0, 600),
+      snippet: repairMojibake((item.content ?? "").replace(/\s+/g, " ").trim()).slice(0, 600),
       date: item.publishedDate ?? item.date,
     }));
 
@@ -184,7 +187,7 @@ export async function fetchPage(url: string, prospectId?: string | null): Promis
   }
   if (!response.ok) return response;
 
-  const markdown = (response.data.markdown ?? "").replace(/\n{3,}/g, "\n\n").trim();
+  const markdown = repairMojibake(response.data.markdown ?? "").replace(/\n{3,}/g, "\n\n").trim();
   if (!markdown) return { ok: false, error: "page vide" };
 
   return { ok: true, data: { url, markdown: markdown.slice(0, PAGE_CHARS) } };

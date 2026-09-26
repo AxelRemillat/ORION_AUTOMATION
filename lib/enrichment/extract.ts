@@ -241,6 +241,7 @@ Ce que tu cherches :
 - parentGroup : l'entreprise est présentée comme filiale/membre d'un groupe ou détenue par une société mère. Sinon null.
 - jobPostings : postes ouverts. category = automation (automaticien, robotique, process), data, it, ops (logistique, ADV, planification, back-office), sales, other.
 - events : levée (levée de fonds), ouverture_site (nouveau site, agence, usine), acquisition (rachat), nouveau_client (contrat remporté), nouvelle_offre (nouveau produit ou service), autre.
+  Un event est un ÉVÉNEMENT DATABLE (il a eu ou aura lieu à un moment précis). La présentation de l'entreprise — date de fondation, historique, valeurs, savoir-faire, page « À propos », « Qui sommes-nous », « Notre histoire » ou page « Recrutement » sans poste précis — n'est PAS un event : n'en émets pas.
 - siteSummary : ce que l'entreprise vend (offer), pour qui (customers), et le vocabulaire métier qu'elle emploie (vocabulary). Uniquement depuis son propre site. Sinon null.
 
 Réponds en JSON strict conforme au schéma demandé, sans commentaire.`;

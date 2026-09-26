@@ -46,6 +46,7 @@ import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals 
 import { effectifFloor } from "./naf";
 import { extractSignals, type Extraction } from "./extract";
 import { extractionToSignals, mergeSignals } from "./structured-signals";
+import { dedupeFacts, separateSiteFacts, type SiteFact } from "./site-facts";
 import { checkJobPosting } from "./job-posting";
 import { assessGroup } from "./group";
 import { attachSignals } from "./entity-match";
@@ -109,6 +110,8 @@ interface ScanResult {
    * seconde recherche Linkup par entreprise.
    */
   web: WebResult[];
+  /** Pages institutionnelles lues au scan : faits « site », pas des signaux. */
+  siteFacts: SiteFact[];
   warning?: EnrichmentWarning;
 }
 
@@ -130,6 +133,7 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
       website: null,
       signals: [],
       web: [],
+      siteFacts: [],
       warning: { source: "linkup", message: web.error },
     };
   }
@@ -138,9 +142,14 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
   // (sans lui on perd la moitie de la confiance d'un signal), et il evite plus
   // tard a Hunter de chercher le domaine.
   const website = base.website ?? guessOwnWebsite(base.company_name, web.data);
-  const signals = qualifyWebResults(web.data, { name: base.company_name, website });
+  // Une page « Qui sommes-nous » ne rend pas une entreprise chaude : elle est
+  // retiree des signaux AVANT le classement, et gardee comme fait « site ».
+  const { signals, siteFacts } = separateSiteFacts(
+    qualifyWebResults(web.data, { name: base.company_name, website }),
+    web.data,
+  );
 
-  return { base, website, signals, web: web.data };
+  return { base, website, signals, web: web.data, siteFacts };
 }
 
 /**
@@ -165,6 +174,8 @@ export interface DeepEnrichOptions {
    * preuves textuelles, et sortent en premier.
    */
   attachedSignals?: ProspectSignal[];
+  /** Faits « site » deja isoles au scan, rejoints a ceux de l'extraction. */
+  siteFacts?: SiteFact[];
 }
 
 /**
@@ -337,8 +348,13 @@ export async function deepEnrich(
   // verifie, ni la denomination exacte n'est pas celui du prospect. S'il
   // nomme une entite voisine liee par un lien capitalistique prouve, il
   // devient un signal de groupe ; sinon il est ecarte.
+  // Seuls les evenements datables restent des signaux ; une presentation de
+  // soi (« Fondee en 1969 », page Recrutement generique) devient un fait site.
+  const separated = separateSiteFacts(mergeSignals(structured, webSignals), webResults);
+  const siteFacts = dedupeFacts([...(options.siteFacts ?? []), ...separated.siteFacts]);
+  if (siteFacts.length) keyFigures.site_facts = siteFacts;
   const attachment = attachSignals(
-    mergeSignals(structured, webSignals),
+    separated.signals,
     {
       name: base.company_name,
       siren: base.siren,
@@ -386,11 +402,13 @@ export async function enrichCompany(
   let identity = base;
 
   let webResults: WebResult[] = [];
+  let siteFacts: SiteFact[] = [];
   if (options.withSignals !== false) {
     if (hasLinkupKey()) {
       const scan = await scanSignals(base);
       webSignals = scan.signals;
       webResults = scan.web;
+      siteFacts = scan.siteFacts;
       if (scan.warning) warnings.push(scan.warning);
       if (scan.website) identity = { ...base, website: base.website ?? scan.website };
     } else {
@@ -398,7 +416,7 @@ export async function enrichCompany(
     }
   }
 
-  const enriched = await deepEnrich(identity, webSignals, webResults);
+  const enriched = await deepEnrich(identity, webSignals, webResults, { siteFacts });
   return { ...enriched, warnings: [...warnings, ...enriched.warnings] };
 }
 
@@ -722,6 +740,7 @@ export async function searchAndEnrich(
         { ...item.base, website: item.base.website ?? item.website },
         item.signals,
         item.web,
+        { siteFacts: item.siteFacts },
       ),
     );
 
