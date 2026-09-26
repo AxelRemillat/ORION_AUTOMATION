@@ -195,10 +195,49 @@ export interface ProofChoice {
  * sert, et c'est exactement ce qui est arrivé en production quand un flux
  * d'alertes frigorifiques était cité pour un organisme de formation.
  */
-export function chooseProof(offer: UserOffer, painText: string): ProofChoice {
+/**
+ * Metiers ou « devis » et « commande » ne veulent pas dire ce qu'on croit.
+ *
+ * Une agence d'interim, un cabinet RH, un organisme de formation ne passent pas
+ * de commandes : ils traitent des DOSSIERS — contrats, attestations, releves
+ * d'heures, conventions, dossiers de candidature. Leur proposer un agent qui
+ * transforme une demande client en devis tombe a cote, et ca se voit. Constate
+ * sur ARVE INTERIM le 27/09/2026.
+ */
+const DOCUMENT_TRADES =
+  /int[eé]rim|travail temporaire|mise a disposition|placement|recrutement|ressources humaines|\brh\b|paie|formation|apprentissage|organisme de formation|cabinet de conseil en recrutement/i;
+
+/** Demo n8n a mobiliser pour ces metiers : des documents, pas des devis. */
+const DOCUMENT_DEMO_KEY = "comptes-rendus";
+
+export function chooseProof(
+  offer: UserOffer,
+  painText: string,
+  options: { sector?: string | null } = {},
+): ProofChoice {
   const usable = (offer.proofs ?? []).filter(
     (proof) => proof.publicOk && proof.id !== CREDIBILITY_PROOF_ID,
   );
+
+  // PRIORITE 0 : interim, RH, formation → une demo de DOCUMENTS, jamais l'agent
+  // devis. Le metier tourne autour de dossiers a constituer et a relancer.
+  const trade = `${options.sector ?? ""} ${painText}`;
+  if (DOCUMENT_TRADES.test(trade)) {
+    const n8n = usable.find((proof) => proof.id === "n8n");
+    if (n8n) {
+      // Une demo plus proche du pain l'emporte, tant qu'elle reste une demo de
+      // documents : tri d'e-mails, factures, comptes rendus, donnees.
+      const closest = matchingDemo(painText);
+      const demo =
+        closest ?? N8N_DEMOS.find((item) => item.key === DOCUMENT_DEMO_KEY) ?? N8N_DEMOS[0];
+      return {
+        proof: n8n,
+        sentence: `vous pouvez tester ${demo.label} en direct sur mon site`,
+        demo: { key: demo.key, label: demo.label },
+        reason: "metier de dossiers (interim, RH, formation) : une demo de documents, pas l'agent devis",
+      };
+    }
+  }
 
   // PRIORITE 1 : commandes, devis, demandes clients → l'agent devis. Il fait
   // exactement ce que decrit le pain, et le nommer vaut mieux qu'une demo

@@ -31,7 +31,15 @@ import { attachSignals } from "../lib/enrichment/entity-match";
 import { officialQuote } from "../lib/signals";
 import { chooseProof, signatureFor } from "../lib/offer/model";
 import { defaultOffer } from "../lib/offer/read";
-import { opensOnStructure, validateEmail, wordCount } from "../lib/emails/validate";
+import {
+  contradictsAvoid,
+  opensOnSiteMention,
+  opensOnStructure,
+  paraphrasesSite,
+  undatedEventHook,
+  validateEmail,
+  wordCount,
+} from "../lib/emails/validate";
 import type { Prospect, ProspectSignal } from "../types";
 
 let failures = 0;
@@ -167,7 +175,7 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log("\n4. Longueur : cible 100, plafond 125");
+  console.log("\n4. Longueur : cible 100, plafond 120 STRICT");
   {
     const facts = buildFacts(prospect(), null, NOW).facts;
     const signature = signatureFor(offer);
@@ -181,8 +189,10 @@ async function main(): Promise<void> {
         { facts, contact: null, tone: "direct", companyName: "X", signature },
       ).failures.filter((f) => f.includes("mots")).join(" | ");
 
-    check("110 mots ne sont plus un échec", mail(95) === "", mail(95));
-    check("au-delà de 125, échec", mail(130).includes("125"), mail(130));
+    check("un mail dans la cible passe", mail(95) === "", mail(95));
+    // Le plafond est passe de 125 a 120, strict : c'est le bloc offre qui paie
+    // la difference (budget 35 mots au lieu de 40).
+    check("au-delà de 120, échec", mail(130).includes("120"), mail(130));
     check("la signature reste hors comptage", wordCount(signature) > 5);
   }
 
@@ -588,6 +598,146 @@ async function main(): Promise<void> {
     // Rien d'exploitable : on retombe sur le libellé normalisé.
     const bare = officialQuote({ nature: "Les oppositions seront reçues", label: "Reprise d'un fonds" } as never);
     check("repli sur le libellé", bare === "Reprise d'un fonds", bare);
+  }
+
+
+  console.log("\n18. Le « à ne pas dire » du brief est vérifié");
+  {
+    const avoid = [
+      "Ne pas présenter l'inauguration de la nouvelle agence comme déjà faite : la date n'est pas connue.",
+    ];
+    const signature = "Axel Remillat\nAutomatisation & IA en production pour PME";
+
+    // Le cas réel : le mail affirme ce que le brief vient d'interdire.
+    const guilty =
+      "Bonjour,\n\nVous venez d'inaugurer votre nouvelle agence : les dossiers circulent " +
+      "maintenant entre deux sites.\n\nJe suis Axel Remillat.\n\nOn en parle ?\n\n" + signature;
+    const breach = contradictsAvoid(guilty, avoid, { signature });
+    check("l'affirmation interdite est vue", Boolean(breach), JSON.stringify(breach));
+    check("la consigne fautive est nommée", breach?.line === avoid[0]);
+
+    // Posé en hypothèse, c'est la bonne façon d'en parler.
+    const hedged =
+      "Bonjour,\n\nSi l'inauguration de votre nouvelle agence approche, les dossiers vont " +
+      "circuler entre deux sites.\n\nJe suis Axel Remillat.\n\nOn en parle ?\n\n" + signature;
+    check("l'hypothèse ne contredit rien", contradictsAvoid(hedged, avoid, { signature }) === null);
+
+    // Un fait autorisé rend le propos légitime : le registre l'atteste.
+    const facts = buildFacts(
+      prospect({ key_figures: { naf_code: "68.31Z", recent_openings: [{ city: "Périgueux", date: "2026-03-01" }] } }),
+      null,
+      NOW,
+    ).facts;
+    const dated =
+      "Bonjour,\n\nVous avez ouvert une agence à Périgueux en mars : les dossiers circulent " +
+      "maintenant entre deux sites.\n\nJe suis Axel Remillat.\n\nOn en parle ?\n\n" + signature;
+    check(
+      "un fait daté et attesté passe",
+      contradictsAvoid(dated, ["Ne pas parler de l'ouverture de Périgueux sans la dater."], {
+        facts,
+        signature,
+      }) === null,
+    );
+    check("aucune consigne, aucun refus", contradictsAvoid(guilty, [], { signature }) === null);
+  }
+
+  console.log("\n19. Accroches interdites : le site cité, l'événement non daté");
+  {
+    const signature = "Axel Remillat\nAutomatisation & IA en production pour PME";
+    const mail = (first: string) =>
+      `Bonjour,\n\n${first}\n\nJe suis Axel Remillat.\n\nUn flux lirait vos dossiers.\n\nOn en parle ?\n\n${signature}`;
+
+    check(
+      "« sur votre site » est refusé",
+      opensOnSiteMention(mail("Sur votre site, on lit que vous couvrez huit départements."), signature),
+    );
+    check(
+      "« d'après votre site » aussi",
+      opensOnSiteMention(mail("D'après votre site, vos agences travaillent en réseau."), signature),
+    );
+    check(
+      "« votre site indique » aussi",
+      opensOnSiteMention(mail("Votre site indique une présence sur huit départements."), signature),
+    );
+    check(
+      "un fait dit sans citer la source passe",
+      !opensOnSiteMention(mail("Vous couvrez huit départements depuis Rodez."), signature),
+    );
+
+    check(
+      "« votre agence a ouvert » sans date est refusé",
+      undatedEventHook(mail("Votre nouvelle agence a ouvert, et les dossiers circulent entre deux sites."), signature),
+    );
+    check(
+      "la même phrase datée passe",
+      !undatedEventHook(mail("Votre nouvelle agence a ouvert en mars, et les dossiers circulent entre deux sites."), signature),
+    );
+    check(
+      "une année suffit à dater",
+      !undatedEventHook(mail("Vos agences ont ouvert en 2026, les dossiers circulent entre deux sites."), signature),
+    );
+    check(
+      "une phrase sans événement n'est pas concernée",
+      !undatedEventHook(mail("Vos agences travaillent avec les mêmes dossiers papier."), signature),
+    );
+  }
+
+  console.log("\n20. Paraphrase du site : refusée, implication acceptée");
+  {
+    const signature = "Axel Remillat\nAutomatisation & IA en production pour PME";
+    const facts = buildFacts(
+      prospect({
+        key_figures: {
+          naf_code: "68.31Z",
+          site_offer: "Vente de biens immobiliers de caractère, estimation de biens et accompagnement personnalisé.",
+          site_status: "lu",
+        },
+      }),
+      null,
+      NOW,
+    ).facts;
+
+    const copy =
+      "Bonjour,\n\nVous vendez des biens immobiliers de caractère, avec estimation de biens et " +
+      "accompagnement personnalisé.\n\nJe suis Axel Remillat.\n\nUn flux lirait vos dossiers.\n\nOn en parle ?\n\n" +
+      signature;
+    check("la quasi-copie est refusée", paraphrasesSite(copy, facts, signature));
+
+    const implication =
+      "Bonjour,\n\nUne estimation tient rarement dans un seul échange : les pièces arrivent " +
+      "par bouts, et quelqu'un les rassemble.\n\nJe suis Axel Remillat.\n\nUn flux lirait vos dossiers.\n\nOn en parle ?\n\n" +
+      signature;
+    check("l'implication passe", !paraphrasesSite(implication, facts, signature));
+    check("sans fait de site, rien à comparer", !paraphrasesSite(copy, [], signature));
+  }
+
+  console.log("\n21. Intérim, RH, formation : une preuve de dossiers");
+  {
+    // ARVE INTERIM : « devis » et « commande » ne veulent rien dire ici, et
+    // proposer l'agent devis à une agence d'intérim tombe à côté.
+    const interim = chooseProof(offer, "préparer les contrats de mission et relancer les pièces manquantes", {
+      sector: "Activités des agences de travail temporaire",
+    });
+    check("intérim → démo n8n", interim.proof?.id === "n8n", String(interim.proof?.id));
+    check("jamais l'agent devis", interim.proof?.id !== "agent-devis");
+
+    // Même quand le pain parle de commandes : le métier décide.
+    const tricky = chooseProof(offer, "suivre les commandes de personnel et les devis clients", {
+      sector: "Activités des agences de travail temporaire",
+    });
+    check("le métier prime sur le mot « commande »", tricky.proof?.id === "n8n", String(tricky.proof?.id));
+
+    const rh = chooseProof(offer, "constituer les dossiers du personnel", { sector: "Conseil en ressources humaines" });
+    check("RH → démo n8n", rh.proof?.id === "n8n", String(rh.proof?.id));
+
+    const formation = chooseProof(offer, "préparer les conventions de stage", { sector: "Formation continue d'adultes" });
+    check("formation → démo n8n", formation.proof?.id === "n8n", String(formation.proof?.id));
+
+    // Hors de ces métiers, l'agent devis reste le bon choix.
+    const negoce = chooseProof(offer, "saisir les références d'une commande client", {
+      sector: "Commerce de gros de matériaux",
+    });
+    check("un négoce garde l'agent devis", negoce.proof?.id === "agent-devis", String(negoce.proof?.id));
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

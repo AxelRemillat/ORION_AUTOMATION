@@ -114,6 +114,13 @@ export interface ValidationContext {
   offerNumbers?: readonly number[];
   /** Entités homonymes écartées : leur nom ne doit jamais apparaître. */
   forbiddenNames?: readonly string[];
+  /**
+   * « À ne pas dire » du brief, vérifié et non plus seulement transmis.
+   *
+   * Le stratège écrit une consigne propre au prospect ; personne ne contrôlait
+   * qu'elle était suivie, et le mail affirmait justement ce qu'elle interdisait.
+   */
+  avoid?: readonly string[];
 }
 
 export interface ValidationResult {
@@ -180,18 +187,16 @@ export function wordCount(body: string): number {
  * Bornes de longueur par registre.
  *
  * Le plafond de 110 mots avait ete calibre sur gpt-4o-mini. Les modeles gpt-6
- * n'acceptent pas `temperature: 0` et ecrivent une prose plus riche : mesure
- * sur deux series, ils atterrissent a 118-119 mots avec des notes de 4,4 et
- * 4,5 sur 5. Traiter huit mots d'ecart comme un defaut faisait echouer des
- * mails corrects et declenchait une reecriture inutile. On remonte donc le
- * plafond a 125 — au-dela, c'est vraiment trop long pour un premier contact.
+ * n'acceptent pas `temperature: 0` et ecrivent une prose plus riche : ils
+ * atterrissaient a 118-122 mots avec des notes de 4,4 a 4,8 sur 5. Le plafond
+ * est fixe a 120, et c'est le bloc offre qui paie la difference : son budget
+ * passe de 40 a 35 mots et il se limite a trois etapes de flux.
  */
 function lengthBounds(tone: ToneKey): { min: number; max: number } {
-  // Cible 100 mots, plafond 125 hors signature. Le plafond de 110 faisait
-  // echouer des mails notes 4 ou 5 sur 5 par le juge : quatre blocs porteurs
-  // plus un delai ne tiennent pas en 110 mots. Au-dela de 125, c'est vraiment
-  // trop long pour un premier contact.
-  return tone === "bref" ? { min: 60, max: 100 } : { min: 80, max: 125 };
+  // Cible 100 mots, plafond 120 hors signature — STRICT. Les mails mesures a
+  // 115-122 tenaient tous en 120 apres avoir resserre le bloc offre : c'est ce
+  // bloc qui deborde, et un flux se decrit en trois etapes, pas en cinq.
+  return tone === "bref" ? { min: 60, max: 95 } : { min: 80, max: 120 };
 }
 
 /** Nombres écrits dans le corps, y compris « 41 M€ » et « 40,9 M ». */
@@ -386,6 +391,224 @@ export function opensOnSector(body: string, signature?: string): boolean {
   return /^(dans|au sein d)\s+(le|la|les|l'|du|de|des)\s/i.test(first.trim());
 }
 
+/**
+ * Le mail dit-il ce que le brief lui INTERDIT de dire ?
+ *
+ * Le stratège écrit un « à ne pas dire » propre au prospect — « ne pas
+ * présenter l'inauguration comme faite, la date n'est pas connue ». Cette
+ * consigne partait dans le prompt et personne ne vérifiait qu'elle était
+ * suivie. Le mail sortait avec « vous venez d'inaugurer votre agence », qui est
+ * exactement ce qu'on venait d'interdire.
+ *
+ * On ne peut pas juger une contradiction en toute généralité. On peut en
+ * revanche repérer le cas qui se produit : le mail AFFIRME, au passé ou au
+ * présent, ce dont la consigne dit qu'on n'est pas sûr. D'où la mécanique :
+ *
+ *   - on réduit la consigne à ses mots de FOND (les mots d'instruction —
+ *     « présenter », « éviter », « jamais » — sont retirés) ;
+ *   - une phrase du mail qui reprend au moins deux de ces mots est candidate ;
+ *   - elle n'échoue que si elle AFFIRME : une hypothèse (« si », « pourrait »)
+ *     ne contredit rien, c'est même la bonne façon d'en parler ;
+ *   - et seulement si aucun fait autorisé ne porte déjà ces mots : quand le
+ *     registre atteste le fait, le dire n'est pas une faute.
+ */
+const INSTRUCTION_WORDS = new Set([
+  "affirmer",
+  "annoncer",
+  "comme",
+  "connue",
+  "connu",
+  "dire",
+  "eviter",
+  "faite",
+  "faits",
+  "inconnue",
+  "inconnu",
+  "jamais",
+  "mention",
+  "mentionner",
+  "parler",
+  "presenter",
+  "presente",
+  "preciser",
+  "sujet",
+  "surtout",
+  "aucune",
+  "aucun",
+  "encore",
+  "puisque",
+  "parce",
+  "leur",
+  "cette",
+  "votre",
+  "notre",
+  "quand",
+  "alors",
+  "donc",
+  "pas",
+  "sans",
+]);
+
+/** Racine grossière : assez pour rapprocher « inauguration » et « inauguré ». */
+const stem = (word: string): string => normalize(word).replace(/[^a-z]/g, "").slice(0, 6);
+
+const contentStems = (line: string): Set<string> =>
+  new Set(
+    line
+      .split(/[\s,.;:!?()«»"'’]+/)
+      .filter((word) => word.length >= 5)
+      .filter((word) => !INSTRUCTION_WORDS.has(normalize(word)))
+      .map(stem)
+      .filter((word) => word.length >= 4),
+  );
+
+/** Une phrase qui suppose ne contredit rien : c'est la bonne façon d'en parler. */
+const HEDGED = /\b(si|s'il|si les|pourrait|peut|semble|souvent|imagine|suppose|hypoth|probable|sans doute|le cas|généralement|en général)\b/i;
+
+export interface AvoidBreach {
+  line: string;
+  sentence: string;
+}
+
+export function contradictsAvoid(
+  body: string,
+  avoid: readonly string[],
+  context: { facts?: readonly DerivedFact[]; signature?: string } = {},
+): AvoidBreach | null {
+  if (!avoid.length) return null;
+
+  const factStems = new Set<string>();
+  for (const fact of context.facts ?? []) {
+    for (const item of contentStems(`${fact.label} ${fact.value}`)) factStems.add(item);
+  }
+
+  const sentences = bodyParagraphs(body, context.signature)
+    .flatMap((block) => block.split(/(?<=[.!?])\s+/))
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  for (const line of avoid) {
+    const wanted = [...contentStems(line)].filter((item) => !factStems.has(item));
+    if (wanted.length < 2) continue;
+
+    for (const sentence of sentences) {
+      if (HEDGED.test(sentence)) continue;
+      const stems = contentStems(sentence);
+      const shared = wanted.filter((item) => stems.has(item));
+      if (shared.length >= 2) return { line, sentence };
+    }
+  }
+  return null;
+}
+
+/**
+ * Accroches interdites qui restaient possibles.
+ *
+ * Trois formes, toutes vues en production :
+ *
+ *   - « Sur votre site, on lit que… » : citer le site comme une SOURCE le
+ *     transforme en preuve qu'on les a lus, pas en fait qui les concerne ;
+ *   - « Votre agence a ouvert… » sans date : un événement affirmé sans date se
+ *     retourne dès que le lecteur se demande de quand on parle ;
+ *   - la paraphrase de leur propre page : ils la connaissent, la leur relire ne
+ *     leur apprend rien.
+ */
+const SITE_MENTION =
+  /(sur|d'apr[eè]s|selon|d'ap[rè]es)\s+(votre|leur|le)\s+(site|page|plaquette)|votre site (indique|dit|pr[eé]cise|annonce|mentionne)|on (lit|voit|peut lire) sur/i;
+
+export function opensOnSiteMention(body: string, signature?: string): boolean {
+  const first = bodyParagraphs(body, signature)[0] ?? "";
+  return Boolean(first) && SITE_MENTION.test(first);
+}
+
+/** Marqueurs qui DATENT un événement, sans exiger une date au jour près. */
+const DATE_MARKER =
+  /\b(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre|20\d\d|cette ann[eé]e|ce mois|ce trimestre|au printemps|[àa] l'automne|cet [eé]t[eé]|cet hiver|depuis|il y a)\b/i;
+
+/** Événement affirmé sur un établissement : « votre agence a ouvert… ». */
+const EVENT_ON_SITE =
+  /\b(votre|vos)\s+(nouvelles?\s+)?(agences?|[eé]tablissements?|sites?|bureaux|locaux|antennes?|succursales?)\b/i;
+const DONE = /\b(a|avez|ont|est|sont)\s+(ouvert|inaugur|install|d[eé]m[eé]nag|repris|lanc|cr[eé][eé])/i;
+
+export function undatedEventHook(body: string, signature?: string): boolean {
+  const first = bodyParagraphs(body, signature)[0] ?? "";
+  if (!first) return false;
+  const asserts = EVENT_ON_SITE.test(first) && DONE.test(first);
+  return asserts && !DATE_MARKER.test(first);
+}
+
+/**
+ * L'accroche n'est-elle qu'une paraphrase de leur site ?
+ *
+ * Le fait de site reste une accroche LÉGITIME — c'est ce que l'entreprise dit
+ * d'elle-même — mais il doit servir à dire quelque chose, pas être recopié.
+ *
+ * On mesure le RECOUVREMENT des mots de fond, pas des trigrammes : une
+ * paraphrase réordonne (« Vente de biens de caractère, estimation » devient
+ * « vous vendez des biens de caractère, avec estimation »), ce qui casse les
+ * trigrammes tout en gardant tous les mots. Le recouvrement, lui, passe de
+ * 0,15 à 1,00 entre une implication et une quasi-copie : la séparation est
+ * nette, d'où un seuil au milieu.
+ */
+const PARAPHRASE_LIMIT = 0.6;
+
+const SITE_STOPWORDS = new Set([
+  "avec",
+  "dans",
+  "pour",
+  "leur",
+  "leurs",
+  "vous",
+  "nous",
+  "votre",
+  "vos",
+  "notre",
+  "nos",
+  "des",
+  "les",
+  "une",
+  "aux",
+  "sur",
+  "chez",
+  "plus",
+  "tout",
+  "tous",
+  "toute",
+  "toutes",
+  "ainsi",
+  "entre",
+]);
+
+const siteWords = (text: string): string[] =>
+  [
+    ...new Set(
+      text
+        .split(/[\s,.;:!?()«»"'’/-]+/)
+        .map((word) => normalize(word).replace(/[^a-z]/g, ""))
+        .filter((word) => word.length >= 4 && !SITE_STOPWORDS.has(word))
+        .map((word) => word.slice(0, 6)),
+    ),
+  ];
+
+export function paraphrasesSite(
+  body: string,
+  facts: readonly DerivedFact[],
+  signature?: string,
+): boolean {
+  const first = bodyParagraphs(body, signature)[0] ?? "";
+  if (!first) return false;
+  const opening = new Set(siteWords(first));
+
+  return facts
+    .filter((fact) => fact.key === "site_offer")
+    .some((fact) => {
+      const words = siteWords(fact.value);
+      if (words.length < 4) return false;
+      const shared = words.filter((word) => opening.has(word)).length;
+      return shared / words.length > PARAPHRASE_LIMIT;
+    });
+}
+
 export function validateEmail(draft: EmailDraft, context: ValidationContext): ValidationResult {
   const failures: string[] = [];
   const body = draft.body.trim();
@@ -466,6 +689,42 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     failures.push(
       "L'accroche ouvre sur le secteur (« Dans le/la… ») : elle serait vraie pour " +
         "n'importe quel concurrent. Pars d'un fait propre à cette entreprise.",
+    );
+  }
+
+  // --- Consigne « a ne pas dire » du brief ----------------------------------
+  const breach = contradictsAvoid(body, context.avoid ?? [], {
+    facts: context.facts,
+    signature: context.signature,
+  });
+  if (breach) {
+    failures.push(
+      `Le brief interdit ceci : « ${breach.line} ». La phrase « ${breach.sentence} » le dit quand ` +
+        "meme. Soit tu n'en parles pas, soit tu le poses en hypothese.",
+    );
+  }
+
+  // --- Le site cite comme une source ---------------------------------------
+  if (opensOnSiteMention(body, context.signature)) {
+    failures.push(
+      "L'accroche cite leur site comme source (« sur votre site… ») : ca prouve qu'on les a lus, " +
+        "ca ne leur apprend rien. Pars du fait, pas de l'endroit ou tu l'as lu.",
+    );
+  }
+
+  // --- Evenement affirme sans date -----------------------------------------
+  if (undatedEventHook(body, context.signature)) {
+    failures.push(
+      "L'accroche affirme un evenement (ouverture, inauguration, demenagement) sans le dater : " +
+        "donne le mois ou l'annee, ou n'affirme pas qu'il a eu lieu.",
+    );
+  }
+
+  // --- Paraphrase de leur propre page --------------------------------------
+  if (paraphrasesSite(body, context.facts, context.signature)) {
+    failures.push(
+      "L'accroche reprend presque mot pour mot ce que dit leur site : ils le connaissent. " +
+        "Sers-t'en pour dire ce que ca implique, pas pour le leur relire.",
     );
   }
 

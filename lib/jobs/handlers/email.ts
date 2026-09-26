@@ -102,7 +102,7 @@ async function loadProspect(ctx: StepContext, id: string): Promise<Prospect> {
  * Recherche du contact nominatif — au moment du brouillon, jamais avant.
  * L'absence de contact est un résultat acceptable (« Bonjour, »).
  */
-async function findContact(
+export async function findContact(
   prospect: Prospect,
 ): Promise<{ contact: DecisionMakerContact | null; warning?: EnrichmentWarning }> {
   const domain = toDomain(prospect.website);
@@ -114,13 +114,27 @@ async function findContact(
   const figures = prospect.key_figures ?? {};
   const leaderPerson = typeof figures.leader_person === "string" ? figures.leader_person : null;
   const leader = typeof figures.leader === "string" ? figures.leader : null;
+  const known = leaderPerson ?? leader;
 
-  // 0. Un dirigeant qui vient d'arriver passe AVANT la recherche générique.
-  //
-  // C'est à lui qu'on écrit, et c'est son arrivée qui porte l'accroche : une
-  // adresse contact@ trouvée par la recherche de domaine ferait manquer la
-  // seule personne qui compte. Prénom + nom + domaine est aussi la forme qui
-  // donne les meilleurs taux chez Hunter.
+  /*
+   * L'ordre, et POURQUOI cet ordre.
+   *
+   * Constate le 27/09/2026 sur SELECTION HABITAT : Hunter rend dix contacts
+   * nominatifs sur le domaine — dont « Business Development Director » a 97 % —
+   * et l'ecran affichait « aucun decideur trouve ». Deux raisons, cumulees :
+   * la liste blanche des postes ne reconnaissait aucun de ces intitules, et
+   * l'`email-finder` etait appele avec « Louis Alain Vilain » comme nom de
+   * famille (tout sauf le premier mot), donc ne trouvait rien.
+   *
+   * Desormais : le dirigeant du registre est TOUJOURS cherche — recherche de
+   * domaine, puis email-finder sur prenom + nom, meme si la premiere a echoue —
+   * et faute de decideur on se rabat sur le meilleur contact nominatif reel.
+   * Ecrire a une personne dont on connait le nom, quitte a ce qu'elle
+   * transmette, vaut mieux que « Bonjour, » a personne.
+   */
+
+  // 0. Un dirigeant qui vient d'arriver passe devant tout le reste : c'est a
+  // lui qu'on ecrit, et c'est son arrivee qui porte l'accroche.
   const newLeader = incomingLeader(figures);
   const query = newLeader ? leaderEmailQuery(newLeader, prospect.website) : null;
   if (query) {
@@ -128,9 +142,9 @@ async function findContact(
     if (named.ok && named.data) return { contact: named.data };
   }
 
-  // 1. Un décideur sur le domaine.
-  const search = await findDecisionMaker(domain, leaderPerson ?? leader, prospect.id);
-  if (search.ok && search.data) return { contact: search.data };
+  // 1. Recherche de domaine : un decideur, et la liste des personnes trouvees.
+  const search = await findDecisionMaker(domain, known, prospect.id);
+  if (search.ok && search.data.contact) return { contact: search.data.contact };
 
   if (!search.ok && search.quotaExceeded) {
     const quota = await fetchQuota();
@@ -139,20 +153,36 @@ async function findContact(
       : "quota de recherches atteint pour ce mois";
     return { contact: null, warning: { source: "hunter", message: detail } };
   }
-  if (!search.ok) return { contact: null, warning: { source: "hunter", message: search.error } };
 
-  // 2. L'adresse du dirigeant personne physique, reconstruite par Hunter.
-  const parts = (leaderPerson ?? "").trim().split(/\s+/);
+  // 2. Le dirigeant connu, par son PRENOM et son NOM — jamais « tout sauf le
+  // premier mot » : « Jean-Stephane Louis Alain Vilain » se cherche a
+  // « Jean-Stephane » + « Vilain ». Tente meme quand l'etape 1 a echoue.
+  const parts = (known ?? "").trim().split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
-    const finder = await findEmailByName(domain, parts[0], parts.slice(1).join(" "), prospect.id);
+    const finder = await findEmailByName(domain, parts[0], parts[parts.length - 1], prospect.id);
     if (finder.ok && finder.data) return { contact: finder.data };
     if (!finder.ok && finder.quotaExceeded) {
       return { contact: null, warning: { source: "hunter", message: "quota de recherches atteint pour ce mois" } };
     }
   }
 
-  // 3. Rien : on le dit, et on écrit « Bonjour, ».
-  return { contact: null, warning: { source: "hunter", message: "aucun contact nominatif trouve sur ce domaine" } };
+  // 3. Repli : le meilleur contact nominatif du domaine, sans second appel.
+  const fallback = search.ok ? search.data.candidates[0] : null;
+  if (fallback) {
+    return {
+      contact: fallback,
+      warning: {
+        source: "hunter",
+        message:
+          `aucun dirigeant sur ce domaine : contact retenu ${fallback.full_name ?? fallback.email}` +
+          `${fallback.position ? ` (${fallback.position})` : ""}`,
+      },
+    };
+  }
+
+  // 4. Rien : on le dit, et on ecrit « Bonjour, ».
+  const reason = search.ok ? "aucun contact nominatif trouve sur ce domaine" : search.error;
+  return { contact: null, warning: { source: "hunter", message: reason } };
 }
 
 function storedAngle(prospect: Prospect): BriefAngle | null {
@@ -361,6 +391,9 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       // Un dirigeant qui vient d'arriver est interpellé par son prénom : c'est
       // à lui que le mail parle, et son arrivée est l'accroche.
       addressee: incomingLeader(prospect.key_figures ?? {})?.fullName ?? null,
+      // Le secteur oriente la preuve : interim, RH et formation ne passent pas
+      // de commandes, ils traitent des dossiers.
+      sector: prospect.sector,
       forbiddenNames: factsResult.foreignEntities,
       judge: params.mode !== "rewrite",
     }),
