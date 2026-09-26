@@ -1,0 +1,129 @@
+# Auto-merge des PR d'agents.
+#
+# Le dépôt est privé en GitHub Free : ni l'auto-merge natif ni la protection
+# de branche ne sont disponibles. Ce workflow les remplace : quand la CI d'une
+# PR se termine en succès, il la merge (squash) si elle remplit TOUTES les
+# conditions ci-dessous, puis relance les migrations si la PR en contenait.
+#
+#   - PR ouverte vers main, non brouillon ;
+#   - branche de tête en claude/, fix/, feat/ ou chore/ ;
+#   - pas de label « no-automerge » ;
+#   - CI verte sur le commit de tête ACTUEL (un vieux run vert ne suffit pas).
+#
+# Un merge fait avec GITHUB_TOKEN ne déclenche pas les workflows `on: push` :
+# les migrations sont donc relancées explicitement (workflow_dispatch).
+#
+# Prérequis : Settings → Actions → General → Workflow permissions en
+# « Read and write », sinon le jeton ne peut pas merger.
+name: Auto-merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Numéro de la PR à merger (mêmes conditions, CI verte comprise)"
+        required: true
+        type: number
+
+# Une seule PR mergée à la fois.
+concurrency:
+  group: automerge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  merge:
+    name: Merger la PR si tout est vert
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      # Variables issues de la PR : passées par l'environnement, jamais
+      # interpolées dans le script (un nom de branche n'est pas du code).
+      PR_INPUT: ${{ inputs.pr }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Vérifier les conditions et merger
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice::Pas de merge : $1"; exit 0; }
+
+          # --- Quelle PR ? ----------------------------------------------------
+          if [ -n "${PR_INPUT:-}" ]; then
+            number="$PR_INPUT"
+          else
+            number=$(gh pr list --state open --base main --head "$RUN_BRANCH" \
+              --json number,headRefOid \
+              --jq "map(select(.headRefOid == \"$RUN_SHA\")) | .[0].number // empty")
+            [ -n "$number" ] || skip "aucune PR ouverte vers main pour $RUN_BRANCH@$RUN_SHA (commit dépassé ?)"
+          fi
+
+          pr=$(gh pr view "$number" --json state,isDraft,baseRefName,headRefName,headRefOid,labels,mergeable,statusCheckRollup)
+          field() { jq -r "$1" <<<"$pr"; }
+
+          # --- Conditions -----------------------------------------------------
+          [ "$(field .state)" = "OPEN" ] || skip "PR #$number non ouverte"
+          [ "$(field .baseRefName)" = "main" ] || skip "PR #$number ne vise pas main"
+          [ "$(field .isDraft)" = "false" ] || skip "PR #$number en brouillon"
+          head_branch=$(field .headRefName)
+          [[ "$head_branch" =~ ^(claude|fix|feat|chore)/ ]] || skip "branche $head_branch hors préfixes autorisés"
+          if field '.labels[].name' | grep -qx "no-automerge"; then skip "label no-automerge sur la PR #$number"; fi
+
+          head_sha=$(field .headRefOid)
+          if [ -z "${PR_INPUT:-}" ] && [ "$head_sha" != "$RUN_SHA" ]; then
+            skip "la PR #$number a avancé depuis ce run de CI"
+          fi
+          # Tous les checks du commit de tête doivent être verts. La CI vient
+          # de finir, mais un autre check (déploiement Vercel…) peut encore
+          # tourner : on l'attend jusqu'à 5 min plutôt que d'abandonner la PR.
+          checks='[.statusCheckRollup[]
+            | select((.workflowName // "") != "Auto-merge")
+            | {name: (.name // .context),
+               done: ((.status // "COMPLETED") == "COMPLETED" and ((.state // "") | IN("PENDING","EXPECTED") | not)),
+               ok: ((.conclusion // .state) | IN("SUCCESS","NEUTRAL","SKIPPED"))}]'
+          for attempt in $(seq 1 10); do
+            failed=$(field "$checks | map(select(.done and (.ok | not)) | .name) | join(\", \")")
+            [ -z "$failed" ] || skip "checks en échec sur $head_sha : $failed"
+            running=$(field "$checks | map(select(.done | not) | .name) | join(\", \")")
+            [ -n "$running" ] || break
+            [ "$attempt" -lt 10 ] || skip "checks encore en cours après 5 min : $running"
+            echo "En attente de : $running"
+            sleep 30
+            pr=$(gh pr view "$number" --json state,isDraft,baseRefName,headRefName,headRefOid,labels,mergeable,statusCheckRollup)
+            [ "$(field .headRefOid)" = "$head_sha" ] || skip "la PR #$number a avancé pendant l'attente"
+          done
+
+          # --- Merge ----------------------------------------------------------
+          if [ "$(field .mergeable)" = "CONFLICTING" ]; then
+            gh pr comment "$number" --body "Conflit avec main : rebase nécessaire"
+            skip "conflit avec main sur la PR #$number"
+          fi
+          files=$(gh pr view "$number" --json files --jq '.files[].path')
+          if ! gh pr merge "$number" --squash --delete-branch --match-head-commit "$head_sha"; then
+            if [ "$(gh pr view "$number" --json mergeable --jq .mergeable)" = "CONFLICTING" ]; then
+              gh pr comment "$number" --body "Conflit avec main : rebase nécessaire"
+              skip "conflit avec main sur la PR #$number"
+            fi
+            echo "::error::Merge de la PR #$number impossible (voir le log ci-dessus)."
+            exit 1
+          fi
+          echo "PR #$number mergée (squash) sur $head_sha." >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Migrations -----------------------------------------------------
+          if grep -q '^supabase/migrations/' <<<"$files"; then
+            gh workflow run migrate.yml --ref main
+            echo "Migrations Supabase relancées (workflow_dispatch sur main)." >> "$GITHUB_STEP_SUMMARY"
+          fi
