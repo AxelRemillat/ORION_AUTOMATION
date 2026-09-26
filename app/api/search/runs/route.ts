@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { latestRun, effectiveStatus, startRun } from "@/lib/search/runs";
+import { latestRun, effectiveStatus, isStale, startRun } from "@/lib/search/runs";
+import { hasLiveJobForRun } from "@/lib/jobs/store";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
 
 export const runtime = "nodejs";
@@ -40,6 +41,11 @@ export async function GET() {
   if (!run) return NextResponse.json({ run: null });
 
   // Un scan dont la fonction a ete coupee resterait « running » a vie : on le
-  // presente comme interrompu plutot que d'afficher une barre figee.
+  // presente comme interrompu plutot que d'afficher une barre figee. SAUF si
+  // un job le porte encore (en file derriere trois autres, ou repris apres une
+  // coupure) : il n'est pas mort, il attend son tour.
+  if (isStale(run) && (await hasLiveJobForRun(session.supabase, run.id))) {
+    return NextResponse.json({ run });
+  }
   return NextResponse.json({ run: { ...run, status: effectiveStatus(run) } });
 }

@@ -65,3 +65,46 @@ export async function closeRunOnFailure(ctx: StepContext, message: string): Prom
   const runId = ctx.job.state.runId;
   if (typeof runId === "string") await finishRun(ctx.db, runId, { status: "error", error: message });
 }
+
+/** Cadence du battement de cœur, bien sous le seuil « périmé » de l'écran (90 s). */
+export const HEARTBEAT_MS = 20_000;
+
+/**
+ * Battement de cœur du scan.
+ *
+ * L'écran juge un scan « interrompu » après 90 s sans écriture sur sa ligne
+ * `search_runs`. Or un lot Linkup ou une vague de fiches Pappers peut durer
+ * plus longtemps que ça : le bandeau de la navbar disparaissait alors qu'il
+ * tournait encore. On réécrit donc le dernier avancement connu toutes les
+ * 20 s, ce qui fait avancer `updated_at` sans rien changer d'autre.
+ */
+export function startHeartbeat(ctx: StepContext, runId: string, last: () => RunProgress) {
+  const timer = setInterval(() => {
+    void ctx.db
+      .from("search_runs")
+      .update({ progress: last() })
+      .eq("id", runId)
+      .eq("status", "running")
+      .then(() => undefined, () => undefined);
+  }, HEARTBEAT_MS);
+  return () => clearInterval(timer);
+}
+
+/**
+ * Bilan d'un scan terminé, rangé dans `search_runs.progress.summary`.
+ * Même forme que `ScanStats` de l'écran Recherche.
+ */
+export interface ScanSummary {
+  total: number;
+  scanned: number;
+  unverified: number;
+  withSignal: number;
+  analysed: number;
+  requested: number;
+  totalCapped: boolean;
+  zoneLabel: string | null;
+  skippedKnown: number;
+  pagesRead: number;
+  stopReason: string;
+  outOfBracket: string[];
+}

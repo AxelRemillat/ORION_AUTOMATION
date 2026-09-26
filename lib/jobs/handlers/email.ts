@@ -74,6 +74,11 @@ export const EMAIL_PARAMS_SCHEMA = z.object({
    */
   saveDraft: z.boolean().default(true),
   /**
+   * Brouillon déjà en base pour ce prospect (génération précédente) : il est
+   * RÉÉCRIT au lieu d'en créer un second, tant qu'il n'est pas parti.
+   */
+  replaceMessageId: z.string().min(1).nullish(),
+  /**
    * « Générer quand même » : passe outre l'absence d'accroche forte.
    *
    * Le brouillon produit est marqué « générique » — il reste utile comme base,
@@ -195,6 +200,19 @@ const contactOf = (ctx: StepContext) => (ctx.job.state.contact as DecisionMakerC
 
 const progress = (step: string, pct: number) => ({ step, pct, counts: { scanned: 0, signals: 0, sheets: 0 } });
 
+/**
+ * Jalons de la barre de /prospection : analyse → stratège → rédaction → juge.
+ * L'écran lit le pourcentage ; le libellé est déjà rédigé pour lui.
+ */
+export const EMAIL_STAGES = {
+  analyse: progress("Analyse de la fiche", 5),
+  strategist: progress("Stratège : choix de l'angle", 25),
+  writer: progress("Rédaction du mail", 50),
+  judge: progress("Juge : relecture critique", 75),
+  rewrite: progress("Réécriture après le juge", 85),
+  done: progress("Brouillon prêt", 100),
+} as const;
+
 /** Vérifications partagées par la route et le job. Rend l'erreur, ou null. */
 export function emailBlocker(prospect: Prospect): { message: string; status: number } | null {
   // Un prospect perdu est clos : générer, c'est relancer quelqu'un qui a dit non.
@@ -215,6 +233,7 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
   const prospect = await loadProspect(ctx, params.prospectId);
   const blocker = emailBlocker(prospect);
   if (blocker) throw new JobError(blocker.message, false, blocker.status);
+  await ctx.progress(EMAIL_STAGES.analyse).catch(() => undefined);
 
   const warnings: EnrichmentWarning[] = [];
   let contact: DecisionMakerContact | null;
@@ -229,7 +248,7 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
   return {
     state: { contact, warnings },
     result: { prospectIds: [prospect.id] },
-    progress: progress(params.mode === "rewrite" ? "Relecture du brief" : "Stratégie de l'angle", 20),
+    progress: params.mode === "rewrite" ? { ...EMAIL_STAGES.strategist, step: "Relecture du brief" } : EMAIL_STAGES.strategist,
   };
 }
 
@@ -318,7 +337,25 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   if (saved.error) {
     warnings.push({ source: "openai", message: "brief non enregistré : appliquez la migration 20260925100000_prospect_brief.sql" });
   }
-  return { state: { brief: outcome.brief, warnings }, progress: progress("Rédaction du mail", 50) };
+  return { state: { brief: outcome.brief, warnings }, progress: EMAIL_STAGES.writer };
+}
+
+/** Le brouillon précédent n'est réécrit que s'il est à nous, à ce prospect, et pas parti. */
+async function replaceableDraft(
+  ctx: StepContext,
+  prospectId: string,
+  id: string | null | undefined,
+): Promise<string | null> {
+  if (!id) return null;
+  const { data } = await ctx.db
+    .from("messages")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", ctx.userId)
+    .eq("prospect_id", prospectId)
+    .eq("status", "draft")
+    .maybeSingle();
+  return (data as { id: string } | null)?.id ?? null;
 }
 
 async function draftStep(ctx: StepContext): Promise<StepOutcome> {
@@ -363,6 +400,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       addressee: incomingLeader(prospect.key_figures ?? {})?.fullName ?? null,
       forbiddenNames: factsResult.foreignEntities,
       judge: params.mode !== "rewrite",
+      onStage: (stage) => ctx.progress(EMAIL_STAGES[stage]),
     }),
   );
   if ("error" in draft) throw new JobError(draft.error, true, 502);
@@ -394,9 +432,16 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   if (params.saveDraft) {
     // Écrit en dernier, juste avant le commit de l'étape : seule une coupure
     // entre les deux laisserait un brouillon en double (jamais un mail envoyé).
-    const existing = ctx.job.result.messageId;
-    if (existing) messageId = existing;
-    else {
+    const existing = ctx.job.result.messageId ?? (await replaceableDraft(ctx, prospect.id, params.replaceMessageId));
+    if (existing) {
+      const { error } = await ctx.db
+        .from("messages")
+        .update({ subject: email.subject.trim() || null, body: email.body.trim() })
+        .eq("id", existing)
+        .eq("status", "draft");
+      if (error) throw new Error(`brouillon non enregistré : ${error.message}`);
+      messageId = existing;
+    } else {
       const { data, error } = await ctx.db
         .from("messages")
         .insert({
@@ -445,7 +490,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   return {
     state: { response },
     result: { prospectIds: [prospect.id], ...(messageId ? { messageId } : {}) },
-    progress: progress("Brouillon prêt", 100),
+    progress: EMAIL_STAGES.done,
   };
 }
 

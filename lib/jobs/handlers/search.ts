@@ -1,10 +1,18 @@
 import { clampAnalysisLimit, clampScanWidth, searchAndEnrich } from "@/lib/enrichment";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { knownSirens } from "@/lib/trash/exclusions";
-import { finishRun, saveProgress } from "@/lib/search/runs";
+import { EMPTY_PROGRESS, finishRun, saveProgress, type RunProgress } from "@/lib/search/runs";
 import { readExcludedSectors } from "@/lib/signals/settings";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
-import { closeRunOnFailure, fromScan, prepareRun, runIdOf, stopCheck } from "./search-shared";
+import {
+  closeRunOnFailure,
+  fromScan,
+  prepareRun,
+  runIdOf,
+  startHeartbeat,
+  stopCheck,
+  type ScanSummary,
+} from "./search-shared";
 
 /** Critères d'une recherche par critères, tels qu'envoyés par l'écran. */
 export interface SearchParams {
@@ -47,6 +55,8 @@ async function scan(ctx: StepContext): Promise<StepOutcome> {
   const exclude = await knownSirens(ctx.db).catch(() => new Set<string>());
   const excludedSectors = includeExcluded ? [] : await readExcludedSectors(ctx.db);
 
+  let last: RunProgress = EMPTY_PROGRESS;
+  const stopHeartbeat = startHeartbeat(ctx, runId, () => last);
   const outcome = await searchAndEnrich(
     {
       q: params.q,
@@ -63,6 +73,7 @@ async function scan(ctx: StepContext): Promise<StepOutcome> {
       excludedSectors,
       includeExcluded,
       onProgress: async (progress) => {
+        last = progress;
         await saveProgress(ctx.db, runId, progress);
         await ctx.progress(fromScan(progress));
       },
@@ -76,7 +87,7 @@ async function scan(ctx: StepContext): Promise<StepOutcome> {
         );
       },
     },
-  );
+  ).finally(stopHeartbeat);
 
   // Zone inconnue, annuaire injoignable : relancer ne changerait rien.
   if ("error" in outcome) throw new JobError(outcome.error, false, 422);
@@ -93,11 +104,27 @@ async function scan(ctx: StepContext): Promise<StepOutcome> {
     analysedPlanned: outcome.analysed,
     step: stopped ? "Scan arrêté" : "Scan terminé",
   };
+  // Le bilan voyage avec la ligne : l'écran le relit au retour sur la page,
+  // sans dépendre de la requête qui a lancé le scan.
+  const summary: ScanSummary = {
+    total: outcome.total,
+    scanned: outcome.scanned,
+    unverified: outcome.unverified,
+    withSignal: outcome.withSignal,
+    analysed: outcome.analysed,
+    requested: clampAnalysisLimit(params.limit),
+    totalCapped: outcome.totalCapped,
+    zoneLabel: outcome.zoneLabel,
+    skippedKnown: outcome.skippedKnown,
+    pagesRead: outcome.pagesRead,
+    stopReason: outcome.stopReason,
+    outOfBracket: [...outcome.excluded, ...outcome.outOfBracket],
+  };
   await finishRun(ctx.db, runId, {
     status: stopped ? "stopped" : "done",
     results: outcome.results,
     warnings: outcome.warnings,
-    progress: final,
+    progress: { ...final, summary },
   });
 
   return {

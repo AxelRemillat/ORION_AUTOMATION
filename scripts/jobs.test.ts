@@ -20,6 +20,9 @@ import { FakeDb } from "./fake-supabase";
 import { checkMigration } from "./check-migrations";
 import { JobError, driveJob, failureDecision, runClaimedStep, type Db, type JobHandler } from "../lib/jobs/runner";
 import { clampFanout } from "../lib/jobs/dispatch";
+import { drainJobs, missingSettings } from "../lib/jobs/background";
+import { HEARTBEAT_MS } from "../lib/jobs/handlers/search-shared";
+import { EMAIL_STAGES } from "../lib/jobs/handlers/email";
 import { fromScan } from "../lib/jobs/handlers/search-shared";
 import { clampDays, signalsParamsError } from "../lib/jobs/handlers/signals";
 import { authorizeCron } from "../lib/trash/cron-auth";
@@ -203,6 +206,50 @@ async function main() {
     check("un job au bail expiré est repris en priorité", retaken?.id === stale.id, String(retaken?.id));
     check("la reprise compte une tentative", retaken?.attempts === 2);
   }
+
+  console.log("exécution en arrière-plan (sans secret ni tick HTTP)");
+  {
+    const db = new JobsDb();
+    const order: string[] = [];
+    const twoSteps: JobHandler = {
+      steps: [
+        async (ctx) => { order.push(`${ctx.job.id}:0`); return {}; },
+        async (ctx) => { order.push(`${ctx.job.id}:1`); return {}; },
+      ],
+    };
+    const first = job(db);
+    const second = job(db);
+    const pending = await drainJobs(asDb(db), { jobId: second.id, handlers: handlersWith(twoSteps) });
+    check("le job créé passe en premier", order[0] === `${second.id}:0`, order.join(" "));
+    check("toutes ses étapes s'enchaînent dans la même invocation", order[1] === `${second.id}:1`, order.join(" "));
+    check("puis le reste de la file", row(db, first.id).status === "done" && row(db, second.id).status === "done");
+    check("plus rien en attente", pending === false);
+
+    const busy = new JobsDb();
+    const future = new Date(Date.now() + 60_000).toISOString();
+    for (let i = 0; i < 3; i += 1) job(busy, { status: "running", locked_until: future });
+    const waiting = job(busy);
+    await drainJobs(asDb(busy), { jobId: waiting.id, handlers: handlersWith(twoSteps) });
+    check("au-delà de 3 jobs, le nouveau reste en file", row(busy, waiting.id).status === "queued");
+
+    const late = new JobsDb();
+    const idle = job(late);
+    await drainJobs(asDb(late), { jobId: idle.id, budgetMs: 60_000, handlers: handlersWith(twoSteps) });
+    check("pas d'étape ouverte sans fenêtre suffisante (relève par le tick)", row(late, idle.id).status === "queued");
+  }
+
+  check(
+    "file pleine : pas de relève (sinon les ticks bouclent)",
+    (await drainJobs(asDb(new JobsDb()), { handlers: handlersWith({ steps: [] }) })) === false,
+  );
+  check("diagnostic : variables manquantes nommées", missingSettings({}).join(",") === "SUPABASE_SERVICE_ROLE,JOBS_TICK_SECRET");
+  check("diagnostic : rien ne manque", missingSettings({ SUPABASE_SERVICE_ROLE: "x", JOBS_TICK_SECRET: "y" }).length === 0);
+
+  console.log("écrans");
+  check("battement de cœur bien sous le seuil « périmé » de 90 s", HEARTBEAT_MS * 3 < 90_000);
+  const stages = [EMAIL_STAGES.analyse, EMAIL_STAGES.strategist, EMAIL_STAGES.writer, EMAIL_STAGES.judge, EMAIL_STAGES.done];
+  check("jalons du mail croissants", stages.every((stage, i) => i === 0 || stage.pct > stages[i - 1].pct));
+  check("jalons alignés sur la barre (25 / 50 / 75)", EMAIL_STAGES.strategist.pct === 25 && EMAIL_STAGES.writer.pct === 50 && EMAIL_STAGES.judge.pct === 75);
 
   console.log("utilitaires");
   check("fanout absent → 0", clampFanout(undefined) === 0);

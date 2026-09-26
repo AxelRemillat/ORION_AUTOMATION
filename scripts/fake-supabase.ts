@@ -63,6 +63,28 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
     return this.where((row) => (operator === "is" ? (row[column] ?? null) !== value : true));
   }
   in(column: string, values: unknown[]) { return this.where((row) => values.includes(row[column])); }
+  /**
+   * Filtre PostgREST `or` : « a.is.null,b.lt.X,c.in.(x,y),d->>k.eq.v ».
+   * Juste ce que lib/jobs emploie ; un opérateur inconnu ne retient rien.
+   */
+  or(expression: string) {
+    const read = (row: Row, column: string) => {
+      const [base, key] = column.split("->>");
+      const value = row[base];
+      return key ? (value as Row | null | undefined)?.[key] : value;
+    };
+    const tests = [...expression.matchAll(/([\w>-]+)\.(is|eq|lt|in)\.(\([^)]*\)|[^,]+)/g)].map(
+      ([, column, op, raw]) =>
+        (row: Row) => {
+          const value = read(row, column);
+          if (op === "is") return (value ?? null) === null;
+          if (op === "eq") return String(value) === raw;
+          if (op === "lt") return value != null && String(value) < raw;
+          return raw.slice(1, -1).split(",").includes(String(value));
+        },
+    );
+    return this.where((row) => tests.some((test) => test(row)));
+  }
   lt(column: string, value: string) { return this.where((row) => String(row[column]) < value); }
   lte(column: string, value: string) { return this.where((row) => String(row[column]) <= value); }
   gt(column: string, value: string) { return this.where((row) => String(row[column]) > value); }
