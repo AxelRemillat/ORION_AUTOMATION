@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getOpenAI } from "@/lib/openai";
 import { modelFor, reasoningEffortFor } from "@/lib/ai/models";
-import { buildParams } from "@/lib/ai/params";
+import { buildParams, isTimeoutError } from "@/lib/ai/params";
 import { withParamFallback } from "@/lib/ai/chat";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { readJson, requireSession } from "@/app/api/prospects/_guard";
@@ -26,6 +26,19 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/**
+ * Budget de l'appel au modèle, volontairement SOUS `maxDuration`.
+ *
+ * L'enjeu n'est pas la patience : c'est de garder la main. Si la plateforme
+ * coupe la fonction, l'écran reçoit un `504` de passerelle sans corps JSON et
+ * n'a rien à afficher. En s'arrêtant à 45 s, la route revient avec son propre
+ * message, que le composeur montre tel quel.
+ *
+ * `maxRetries: 0` : une reprise du SDK pourrait doubler l'attente et repasser
+ * au-dessus des 60 s. Ici on préfère échouer vite et le dire.
+ */
+const MODEL_BUDGET_MS = 45_000;
 
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -85,14 +98,17 @@ export async function POST(request: Request) {
       model,
       () => buildParams({ model, temperature: 0.6, reasoningEffort: reasoningEffortFor("writer") }),
       (params) =>
-        getOpenAI().chat.completions.create({
-          ...(params as { model: string }),
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: buildReplySystemPrompt(answering.category) },
-            { role: "user", content: buildReplyContext(prospect, thread, answering) },
-          ],
-        }),
+        getOpenAI().chat.completions.create(
+          {
+            ...(params as { model: string }),
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: buildReplySystemPrompt(answering.category) },
+              { role: "user", content: buildReplyContext(prospect, thread, answering) },
+            ],
+          },
+          { timeout: MODEL_BUDGET_MS, maxRetries: 0 },
+        ),
     );
 
     if (completion.usage) {
@@ -119,6 +135,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...draft, threadLength: thread.length });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "inconnue";
-    return NextResponse.json({ error: `Génération impossible : ${reason}` }, { status: 502 });
+    // Un dépassement de délai se dit autrement qu'une panne : l'utilisateur
+    // peut réessayer tout de suite, et c'est l'information utile.
+    const timedOut = isTimeoutError(error);
+    return NextResponse.json(
+      {
+        error: timedOut
+          ? `Le modèle ${modelFor("writer")} n'a pas répondu en ${MODEL_BUDGET_MS / 1000} s. Réessayez.`
+          : `Génération impossible : ${reason}`,
+      },
+      { status: timedOut ? 504 : 502 },
+    );
   }
 }

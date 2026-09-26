@@ -170,6 +170,24 @@ export function readOpenAiError(error: unknown): OpenAiErrorInfo {
   };
 }
 
+/**
+ * L'appel a-t-il dépassé son délai ?
+ *
+ * Mesuré contre le SDK (v4.104) : un dépassement lève un `Error` **nu**, de nom
+ * « Error » et de message « Request timed out. » — pas la classe
+ * `APIConnectionTimeoutError` qu'on attendrait. C'est donc le MESSAGE qui porte
+ * l'information, et le nom n'est gardé qu'en filet au cas où une version
+ * ultérieure le renseignerait.
+ *
+ * L'enjeu : un dépassement se dit autrement qu'une panne. L'utilisateur peut
+ * réessayer immédiatement, et c'est la seule chose utile à lui écrire.
+ */
+export function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "APIConnectionTimeoutError" || error.name === "AbortError") return true;
+  return /timed? ?out|aborted/i.test(error.message);
+}
+
 /** Codes qui désignent un paramètre refusé — et non une panne. */
 const UNSUPPORTED = new Set(["unsupported_value", "unsupported_parameter"]);
 
