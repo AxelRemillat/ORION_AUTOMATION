@@ -20,6 +20,7 @@ import { ProspectPicker } from "./prospect-picker";
 import type { UserOffer } from "@/types";
 import { OfferBanner } from "./_components/offer-banner";
 import { FeedingBanner } from "./_components/feeding-banner";
+import { GenerationProgress } from "./_components/generation-progress";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -53,9 +54,11 @@ export function ProspectionClient({
     draft,
     setDraft,
     generating,
+    progress,
     error,
     needsFeeding,
-    reset,
+    messageId,
+    load,
     generate,
     generateAnyway,
     otherAngle,
@@ -63,10 +66,20 @@ export function ProspectionClient({
   } =
     useGeneration(tone);
 
+  /** Choisir un prospect recharge son dernier brouillon, ou reprend sa génération. */
   function select(prospect: Prospect) {
     setSelected(prospect);
-    reset();
+    void load(prospect);
   }
+
+  // Lien de la navbar (« /prospection?prospect=… ») : on rouvre ce prospect.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("prospect");
+    const target = id ? initialProspects.find((item) => item.id === id) : null;
+    if (target) select(target);
+    // Au premier rendu seulement : ensuite, c'est la liste qui décide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Enregistre le brouillon relu et avance le prospect dans le pipeline. */
   async function validate() {
@@ -74,13 +87,12 @@ export function ProspectionClient({
     setSaving(true);
     try {
       const supabase = createClient();
-      const { error: messageError } = await supabase.from("messages").insert({
-        prospect_id: selected.id,
-        type: "intro",
-        subject: draft.subject.trim() || null,
-        body: draft.body.trim(),
-        status: "draft",
-      });
+      const content = { subject: draft.subject.trim() || null, body: draft.body.trim() };
+      // Le job a déjà posé le brouillon en base : on le met à jour plutôt que
+      // d'en créer un second.
+      const { error: messageError } = messageId
+        ? await supabase.from("messages").update(content).eq("id", messageId)
+        : await supabase.from("messages").insert({ prospect_id: selected.id, type: "intro", status: "draft", ...content });
       if (messageError) throw new Error(messageError.message);
 
       const { error: prospectError } = await supabase
@@ -149,12 +161,8 @@ export function ProspectionClient({
             />
           )}
 
-          {generating && !analysis && (
-            <>
-              <Skeleton className="h-24" />
-              <Skeleton className="h-72" />
-            </>
-          )}
+          {generating && <GenerationProgress progress={progress} />}
+          {generating && !analysis && <Skeleton className="h-72" />}
 
           {analysis && (
             <>

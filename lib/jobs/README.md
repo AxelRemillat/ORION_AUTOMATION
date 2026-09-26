@@ -7,11 +7,21 @@ utilisateur ; les suivants attendent en file.
 ## Principe
 
 ```
-POST /api/jobs ─┐                      ┌─> étape 0 ─> étape 1 ─> … ─> done
-route historique ┼─> ligne `jobs` ─────┤    (chaque étape : claim_job → exécute → commit)
-                 │   (queued)          └─ chaîne : chaque étape déclenche /api/jobs/tick
-pg_cron (1 min) ─┘                        filet : pg_cron relance tout job prenable
+écran ── POST /api/jobs ──> ligne `jobs` (queued) ──> réponse immédiate {id}
+                                  │
+                                  └─ waitUntil, MÊME invocation (≤ 300 s) :
+                                     claim_job → étape 0 → claim → étape 1 → … → done
+                                     puis les autres jobs en file
+
+relèves, si l'invocation n'a pas fini (budget, coupure) :
+  1. POST /api/jobs/tick (JOBS_TICK_SECRET)   ← fin de budget
+  2. pg_cron chaque minute → /api/jobs/tick   ← navigateur fermé
+  3. GET /api/jobs?active=1 (navbar, 3 s)     ← app ouverte, sans secret
 ```
+
+L'écran ne pilote plus rien : il crée le job puis SUIT la base (la ligne
+`search_runs` pour un scan, `GET /api/jobs/:id` pour un mail). Quitter la page
+ou fermer l'app n'arrête pas le travail.
 
 - **Étapes idempotentes** : chaque étape lit son point de reprise dans
   `jobs.state`, écrit ses résultats en base, puis rend ce qui doit être fusionné.
@@ -38,6 +48,12 @@ pg_cron (1 min) ─┘                        filet : pg_cron relance tout job p
   tant que l'app est mono-utilisateur.
 - **Middleware** : `/api/jobs/tick` est une route machine (pas de redirection
   vers `/login`), protégée par son propre secret.
+
+- **Heartbeat du scan** : pendant un scan, la ligne `search_runs` est réécrite
+  toutes les 20 s. L'écran juge un scan « interrompu » après 90 s de silence ;
+  un long lot Linkup ou une vague de fiches Pappers suffisait à faire
+  disparaître l'indicateur alors que le scan tournait encore. Un scan porté
+  par un job en file n'est pas non plus déclaré mort.
 
 ## Types et étapes
 
@@ -79,16 +95,27 @@ routes qui exécutent des étapes déclarent `maxDuration = 300`.
 
 ## À poser à la main (une fois)
 
+Sans aucun de ces réglages, une recherche ou un mail va déjà au bout côté
+serveur (exécution en `waitUntil` dès la création). Ils servent aux relèves :
+un job coupé par la plateforme, ou plus long que 300 s, alors que l'app est
+fermée.
+
 1. **Vercel → Settings → Environment Variables** (Production) :
-   - `JOBS_TICK_SECRET` : `openssl rand -hex 32`. Sans lui, la chaîne de ticks
-     est coupée (les routes historiques marchent quand même).
-   - `SUPABASE_SERVICE_ROLE` : déjà requis par la purge de la corbeille.
+   - `SUPABASE_SERVICE_ROLE` : **indispensable** — sans lui, aucun job ne
+     tourne (le client service_role exécute les étapes). Déjà requis par la
+     purge de la corbeille.
+   - `JOBS_TICK_SECRET` : `openssl rand -hex 32`. Sans lui, pas de relève
+     par /api/jobs/tick (ni chaîne, ni pg_cron).
    - `JOBS_BASE_URL` (optionnel) : URL publique de l'app, si l'origine de la
      requête ne convient pas.
-2. **Supabase → Database → Extensions** : activer `pg_cron` et `pg_net`, puis
-   relancer le workflow « Migrations Supabase » (ou attendre la prochaine
-   migration : la programmation du cron est idempotente).
-3. **Supabase → Project Settings → Vault** (Integrations → Vault) : deux secrets,
+   - Redéployer après avoir ajouté une variable (Deployments → Redeploy).
+2. **Supabase → Database → Extensions** : activer `pg_cron` et `pg_net`. Les
+   migrations `…_jobs.sql` et `…_jobs_cron_retry.sql` programment le cron si
+   les extensions sont là ; si elles ont été activées APRÈS, il faudra une
+   nouvelle migration du même bloc (une migration appliquée n'est jamais
+   rejouée). Vérifier dans **Integrations → Cron** : tâche `orion-jobs-tick`,
+   `* * * * *`.
+3. **Supabase → Integrations → Vault** : deux secrets,
    - `orion_app_url` = l'URL de prod (ex. `https://orion.vercel.app`),
    - `jobs_tick_secret` = la même valeur que `JOBS_TICK_SECRET` sur Vercel.
 

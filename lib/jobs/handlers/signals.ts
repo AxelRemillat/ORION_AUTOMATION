@@ -1,11 +1,19 @@
 import { clampAnalysisLimit } from "@/lib/enrichment/limits";
 import { tranchesForBucket } from "@/lib/enrichment/naf";
 import { knownSirens } from "@/lib/trash/exclusions";
-import { finishRun, saveProgress } from "@/lib/search/runs";
+import { EMPTY_PROGRESS, finishRun, saveProgress, type RunProgress } from "@/lib/search/runs";
 import { DEFAULT_SIGNAL_DAYS, searchBySignals } from "@/lib/signals";
 import { readExcludedSectors } from "@/lib/signals/settings";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
-import { closeRunOnFailure, fromScan, prepareRun, runIdOf, stopCheck } from "./search-shared";
+import {
+  closeRunOnFailure,
+  fromScan,
+  prepareRun,
+  runIdOf,
+  startHeartbeat,
+  stopCheck,
+  type ScanSummary,
+} from "./search-shared";
 
 export interface SignalsParams {
   /** Numéro de département, seul filtre géographique des deux sources. */
@@ -60,7 +68,10 @@ async function search(ctx: StepContext): Promise<StepOutcome> {
   const exclude = await knownSirens(ctx.db).catch(() => new Set<string>());
   const excludedSectors = includeExcluded ? [] : await readExcludedSectors(ctx.db);
 
-  const report = async (progress: Parameters<typeof saveProgress>[2]) => {
+  let last: RunProgress = EMPTY_PROGRESS;
+  const stopHeartbeat = startHeartbeat(ctx, runId, () => last);
+  const report = async (progress: RunProgress) => {
+    last = progress;
     await saveProgress(ctx.db, runId, progress);
     await ctx.progress(fromScan(progress));
   };
@@ -96,7 +107,7 @@ async function search(ctx: StepContext): Promise<StepOutcome> {
           step: `Ouverture des fiches ${analysed}/${planned}`,
         }),
     },
-  );
+  ).finally(stopHeartbeat);
 
   const stopped = await stopCheck(ctx, runId)();
   const final = {
@@ -109,11 +120,31 @@ async function search(ctx: StepContext): Promise<StepOutcome> {
     analysedPlanned: outcome.analysed,
     step: stopped ? "Recherche arrêtée" : "Recherche terminée",
   };
+  const summary: ScanSummary = {
+    // Ce mode ne lit pas l'annuaire par pages : « total » est le nombre de
+    // signaux lus, « scannées » celui des identités résolues.
+    total: outcome.signalsFound,
+    scanned: outcome.lookups,
+    unverified: 0,
+    withSignal: outcome.results.length,
+    analysed: outcome.analysed,
+    requested: limit,
+    totalCapped: false,
+    zoneLabel: `département ${departement}`,
+    skippedKnown: outcome.skippedKnown,
+    pagesRead: 0,
+    stopReason: outcome.sources
+      .map((source) =>
+        source.available ? `${source.label} : ${source.count} signaux` : `${source.label} : ${source.unavailableReason}`,
+      )
+      .join(" · "),
+    outOfBracket: [...outcome.excluded, ...outcome.outOfBracket],
+  };
   await finishRun(ctx.db, runId, {
     status: stopped ? "stopped" : "done",
     results: outcome.results,
     warnings: outcome.warnings,
-    progress: final,
+    progress: { ...final, summary },
   });
 
   return {

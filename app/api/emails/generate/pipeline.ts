@@ -45,6 +45,11 @@ export interface DraftInput {
   forbiddenNames?: readonly string[];
   /** `false` pour « Réécrire depuis le brief » : rédacteur seul, pas de juge. */
   judge?: boolean;
+  /**
+   * Étape qui commence, pour la barre de progression d'un job de fond.
+   * Une erreur d'écriture de l'avancement ne doit jamais casser la rédaction.
+   */
+  onStage?: (stage: "judge" | "rewrite") => Promise<void> | void;
 }
 
 export interface DraftOutcome {
@@ -169,6 +174,7 @@ ${signature}` } : null;
     return { email, validation, critique: null, failing: [], plan, rewritten: false };
   }
 
+  await Promise.resolve(input.onStage?.("judge")).catch(() => undefined);
   const critique = await judge(email, "critique");
   const failing = critique ? failingCriteria(critique) : [];
   const first: DraftOutcome = { email, validation, critique, failing, plan, rewritten: false };
@@ -189,6 +195,7 @@ ${signature}` } : null;
         ]
       : []),
   ].join("\n");
+  await Promise.resolve(input.onStage?.("rewrite")).catch(() => undefined);
   const rewritten = await write(feedback);
   if (!rewritten) return first;
 

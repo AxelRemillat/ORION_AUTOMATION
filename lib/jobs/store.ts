@@ -61,6 +61,36 @@ export async function listActiveJobs(db: unknown): Promise<Job[]> {
   return (data as Job[] | null) ?? [];
 }
 
+/**
+ * Derniers jobs de mail d'un prospect : l'écran Prospection s'en sert pour
+ * reprendre une génération en cours, ou réafficher la dernière terminée.
+ */
+export async function listProspectJobs(db: unknown, prospectId: string, limit = 5): Promise<Job[]> {
+  const { data } = await jobs(db)
+    .select(PUBLIC_COLUMNS)
+    .in("type", ["email_generate", "email_rewrite"])
+    .eq("target->>prospectId", prospectId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return (data as Job[] | null) ?? [];
+}
+
+/**
+ * Ce qu'un job terminé a produit, pour l'écran qui l'a lancé : la réponse
+ * complète d'un mail (brief, faits, brouillon) ou les détails d'un refus
+ * (`needsFeeding`, `canForce`). Jamais le reste de `state`.
+ */
+export async function getJobOutput(
+  db: unknown,
+  id: string,
+): Promise<{ output: unknown; details: Record<string, unknown> | null } | null> {
+  const { data } = await jobs(db).select("state").eq("id", id).maybeSingle();
+  if (!data) return null;
+  const state = ((data as { state: Record<string, unknown> | null }).state ?? {}) as Record<string, unknown>;
+  const details = state.httpDetails && typeof state.httpDetails === "object" ? (state.httpDetails as Record<string, unknown>) : null;
+  return { output: state.response ?? null, details };
+}
+
 export async function listRecentJobs(db: unknown, limit = 20): Promise<Job[]> {
   const { data } = await jobs(db)
     .select(PUBLIC_COLUMNS)
@@ -87,6 +117,16 @@ export async function cancelJob(db: unknown, id: string): Promise<JobRow | null>
 
 export async function markSeen(db: unknown, id: string): Promise<void> {
   await jobs(db).update({ seen_at: new Date().toISOString() }).eq("id", id);
+}
+
+/** Un job encore vivant (en file ou en cours) pilote-t-il ce scan ? */
+export async function hasLiveJobForRun(db: unknown, runId: string): Promise<boolean> {
+  const { data } = await jobs(db)
+    .select("id")
+    .in("status", ["queued", "running"])
+    .or(`params->>runId.eq.${runId},result->>runId.eq.${runId}`)
+    .limit(1);
+  return Boolean(data?.length);
 }
 
 /** Existe-t-il un job qu'un tick pourrait prendre maintenant ? */

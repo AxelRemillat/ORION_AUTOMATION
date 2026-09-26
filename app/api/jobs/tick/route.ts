@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { authorizeCron } from "@/lib/trash/cron-auth";
 import { baseUrl, clampFanout, dispatchTick, waitUntil, type TickBody } from "@/lib/jobs/dispatch";
-import { HANDLERS } from "@/lib/jobs/handlers";
-import { runClaimedStep } from "@/lib/jobs/runner";
-import { claimJob } from "@/lib/jobs/store";
+import { drainJobs } from "@/lib/jobs/background";
+import { hasClaimableJob } from "@/lib/jobs/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +11,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * POST /api/jobs/tick — fait avancer UN job d'UNE étape.
+ * POST /api/jobs/tick — fait avancer les jobs prenables, étape par étape.
  *
- * Appelé par la chaîne de ticks (chaque étape déclenche la suivante), par
- * POST /api/jobs, et chaque minute par pg_cron (`{"fanout":3}`). Protégé par
+ * Le chemin normal n'en a pas besoin : POST /api/jobs exécute déjà les étapes
+ * en `waitUntil`. Le tick sert de relève — quand une invocation arrive au bout
+ * de ses 300 s, et chaque minute via pg_cron (`{"fanout":3}`) pour reprendre
+ * un job coupé alors que plus aucun navigateur n'est ouvert. Protégé par
  * `Authorization: Bearer <JOBS_TICK_SECRET>`, comparé à temps constant.
  *
  * Réponse immédiate (202) : l'étape tourne en `waitUntil`, l'appelant n'attend
@@ -42,16 +43,16 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
-  const job = await claimJob(admin, typeof body.jobId === "string" ? body.jobId : null);
-  if (!job) return NextResponse.json({ idle: true });
+  // Rien de prenable : on répond sans rien lancer.
+  if (!(await hasClaimableJob(admin))) return NextResponse.json({ idle: true });
 
+  const jobId = typeof body.jobId === "string" ? body.jobId : null;
   waitUntil(
     (async () => {
-      const verdict = await runClaimedStep(admin, job, HANDLERS);
-      // Étape suivante du même job, ou, s'il est clos, le prochain de la file.
-      const next = verdict === "continue" || verdict === "retry" ? { jobId: job.id } : {};
-      await dispatchTick(base, next);
+      // Étapes du job désigné, puis du reste de la file, dans cette invocation.
+      const pending = await drainJobs(admin, { jobId });
+      if (pending) await dispatchTick(base, {});
     })(),
   );
-  return NextResponse.json({ jobId: job.id, step: job.step }, { status: 202 });
+  return NextResponse.json({ accepted: true, jobId }, { status: 202 });
 }
