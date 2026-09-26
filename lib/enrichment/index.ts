@@ -41,6 +41,7 @@ import {
   type ScanStop,
 } from "./scan-plan";
 import { fetchPappers, hasPappersKey } from "./pappers";
+import { isHookFresh } from "@/lib/signals/dating";
 import { fetchWebResults, LINKUP_CONCURRENCY, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
@@ -215,6 +216,15 @@ export async function deepEnrich(
       if (data.capital_eur != null) keyFigures.capital_eur = data.capital_eur;
       if (data.leader) keyFigures.leader = data.leader;
       if (data.leader_role) keyFigures.leader_role = data.leader_role;
+      if (data.leader_since) keyFigures.leader_since = data.leader_since;
+      // Ouvertures de moins d'un an, les trois plus recentes : au-dela, le
+      // fait ne dit plus rien du moment present, et la liste devient un
+      // annuaire d'agences que personne ne lira.
+      const openings = data.openings
+        .filter((opening) => isHookFresh(opening.date))
+        .slice(0, 3)
+        .map((opening) => ({ city: opening.city, date: opening.date, sign: opening.sign }));
+      if (openings.length) keyFigures.recent_openings = openings;
     } else {
       warnings.push({ source: "pappers", message: pappers.error });
     }
@@ -700,6 +710,16 @@ export async function searchAndEnrich(
   const outOfBracket: string[] = [];
   const excluded: string[] = [];
   const results: EnrichedCompany[] = [];
+  /**
+   * Fiches gardees dont l'effectif reste inconnu.
+   *
+   * Tenues a part pour etre ajoutees APRES les effectifs confirmes : une
+   * recherche « 10 a 49 salaries » doit montrer d'abord ce qu'elle a pu
+   * verifier. Elles ne sont pas jetees pour autant — l'INSEE ne publie pas la
+   * tranche des entreprises jeunes, et les rejeter viderait la moitie des
+   * resultats.
+   */
+  const unknownHeadcount: EnrichedCompany[] = [];
 
   // Ciblage applique AVANT la phase 2 : une association ou une auto-ecole ne
   // doit pas consommer un appel Pappers. Le meme module sert aux deux modes,
@@ -726,14 +746,16 @@ export async function searchAndEnrich(
       pagesPlanned: plan.length,
       scanned: scannedCount,
       withSignal: hot.length,
-      analysed: results.length,
+      analysed: results.length + unknownHeadcount.length,
       analysedPlanned,
       step,
     });
 
   if (queue.length) await reportEnrich("Ouverture des fiches");
 
-  for (let index = 0; index < queue.length && results.length < limit; index += CONCURRENCY) {
+  const kept = () => results.length + unknownHeadcount.length;
+
+  for (let index = 0; index < queue.length && kept() < limit; index += CONCURRENCY) {
     const batch = queue.slice(index, index + CONCURRENCY);
     const enriched = await mapWithConcurrency(batch, CONCURRENCY, (item) =>
       deepEnrich(
@@ -745,18 +767,26 @@ export async function searchAndEnrich(
     );
 
     for (const company of enriched) {
-      if (results.length >= limit) break;
+      if (kept() >= limit) break;
       const headcount =
         typeof company.key_figures.headcount === "number" ? company.key_figures.headcount : null;
       if (bracket && checkBracket(headcount, bracket) === "hors tranche") {
         outOfBracket.push(outOfBracketReason(company.company_name, headcount, bracket));
         continue;
       }
-      results.push(company);
+      // Effectif inconnu : la fiche est CONSERVEE — la rejeter faute
+      // d'information reviendrait a jeter les jeunes entreprises, dont l'INSEE
+      // ne publie pas encore la tranche — mais elle passe apres celles dont
+      // l'effectif est confirme. La carte porte un badge « effectif inconnu ».
+      if (headcount === null) unknownHeadcount.push(company);
+      else results.push(company);
     }
 
-    await reportEnrich(`Ouverture des fiches ${results.length}/${analysedPlanned}`);
+    await reportEnrich(`Ouverture des fiches ${results.length + unknownHeadcount.length}/${analysedPlanned}`);
   }
+
+  // Les effectifs confirmes d'abord, les inconnus ensuite.
+  results.push(...unknownHeadcount.slice(0, Math.max(0, limit - results.length)));
 
   return {
     results,

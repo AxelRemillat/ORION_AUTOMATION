@@ -48,6 +48,15 @@ export class JobError extends Error {
     message: string,
     readonly retry = true,
     readonly httpStatus = 500,
+    /**
+     * Champs rendus TELS QUELS avec l'erreur, à côté de `error`.
+     *
+     * Sert aux refus que l'écran doit savoir interpréter : le gating d'accroche
+     * rend `needsFeeding` et `canForce`, sur lesquels la bannière « à nourrir »
+     * et le bouton « Générer quand même » se branchent. Un message d'erreur ne
+     * se lit pas au motif régulier côté client.
+     */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "JobError";
@@ -60,16 +69,18 @@ export type StepVerdict = "continue" | "retry" | "done" | "failed" | "cancelled"
 export function failureDecision(
   attempts: number,
   error: unknown,
-): { verdict: "retry" | "failed"; message: string; httpStatus: number } {
+): { verdict: "retry" | "failed"; message: string; httpStatus: number; details?: Record<string, unknown> } {
   const message = error instanceof Error ? error.message : String(error ?? "erreur inconnue");
   const job = error instanceof JobError ? error : null;
   const httpStatus = job?.httpStatus ?? 500;
-  if (job && !job.retry) return { verdict: "failed", message, httpStatus };
-  if (attempts < MAX_ATTEMPTS) return { verdict: "retry", message, httpStatus };
+  const details = job?.details;
+  if (job && !job.retry) return { verdict: "failed", message, httpStatus, details };
+  if (attempts < MAX_ATTEMPTS) return { verdict: "retry", message, httpStatus, details };
   return {
     verdict: "failed",
     message: `Échec après ${MAX_ATTEMPTS} tentatives : ${message}`,
     httpStatus,
+    details,
   };
 }
 
@@ -136,7 +147,11 @@ export async function runClaimedStep(
     const written = await commitStep(db, job.id, {
       status: "failed",
       error: decision.message,
-      state: { ...job.state, httpStatus: decision.httpStatus },
+      state: {
+        ...job.state,
+        httpStatus: decision.httpStatus,
+        ...(decision.details ? { httpDetails: decision.details } : {}),
+      },
       progress: { ...job.progress, step: "Échec" },
     });
     if (written) await handler.onFailed?.(ctx, decision.message).catch(() => undefined);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useToast } from "@/components/ui";
-import { postJson } from "@/lib/enrichment/api-client";
+import { ApiError, postJson } from "@/lib/enrichment/api-client";
 import type { BriefAngle, StrategyBrief } from "@/lib/emails/strategist";
 import type { Prospect } from "@/types";
 import type { ToneKey } from "./tones";
@@ -26,6 +26,12 @@ export function useGeneration(tone: ToneKey) {
   const [draft, setDraft] = useState<Draft>({ subject: "", body: "" });
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Fiche sans accroche forte : la génération est refusée (409) et on propose
+   * « Générer quand même ». Distinct de `error` — ce n'est pas une panne, c'est
+   * un manque de matière, et le message doit être actionnable.
+   */
+  const [needsFeeding, setNeedsFeeding] = useState<string | null>(null);
   /** Angles déjà proposés pour ce prospect : « Autre angle » les fait tourner. */
   const [seenAngles, setSeenAngles] = useState<BriefAngle[]>([]);
 
@@ -33,12 +39,14 @@ export function useGeneration(tone: ToneKey) {
     setResult(null);
     setDraft({ subject: "", body: "" });
     setError(null);
+    setNeedsFeeding(null);
     setSeenAngles([]);
   }
 
   async function run(prospect: Prospect, payload: Record<string, unknown>) {
     setGenerating(true);
     setError(null);
+    setNeedsFeeding(null);
     try {
       const data = await postJson<GenerateResponse>("/api/emails/generate", {
         prospectId: prospect.id,
@@ -49,7 +57,12 @@ export function useGeneration(tone: ToneKey) {
       setDraft(data.email);
       data.warnings.forEach((warning) => toast.toast(`${warning.source} : ${warning.message}`));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Génération impossible.");
+      // 409 + `canForce` : la fiche manque de matière, ce n'est pas une panne.
+      if (cause instanceof ApiError && cause.status === 409 && cause.payload?.canForce) {
+        setNeedsFeeding(cause.message);
+      } else {
+        setError(cause instanceof Error ? cause.message : "Génération impossible.");
+      }
     } finally {
       setGenerating(false);
     }
@@ -58,6 +71,12 @@ export function useGeneration(tone: ToneKey) {
   const generate = (prospect: Prospect) => {
     setSeenAngles([]);
     return run(prospect, { mode: "full" });
+  };
+
+  /** « Générer quand même » : le brouillon sortira marqué « générique ». */
+  const generateAnyway = (prospect: Prospect) => {
+    setSeenAngles([]);
+    return run(prospect, { mode: "full", force: true });
   };
 
   const otherAngle = (prospect: Prospect) => {
@@ -75,5 +94,17 @@ export function useGeneration(tone: ToneKey) {
       excludeAngles: seenAngles,
     });
 
-  return { result, draft, setDraft, generating, error, reset, generate, otherAngle, rewrite };
+  return {
+    result,
+    draft,
+    setDraft,
+    generating,
+    error,
+    needsFeeding,
+    reset,
+    generate,
+    generateAnyway,
+    otherAngle,
+    rewrite,
+  };
 }

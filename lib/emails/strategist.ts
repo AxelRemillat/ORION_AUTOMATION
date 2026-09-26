@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PERSONA, type PersonaProof } from "@/lib/persona";
 import { factsBlock, knownNumbers, stripUnknownNumbers, type DerivedFact } from "./derived-facts";
 import { jobRolesBlock } from "./job-roles";
+import { DATED_EVENT_KEYS } from "./hook-readiness";
 
 /**
  * ÉTAPE 2 — le STRATÈGE : il trie, il ne rédige pas.
@@ -166,10 +167,21 @@ REGLES
 2. angle.type parmi : recrutement | groupe | signal | modèle_éco | métier.
    hookFactIds : le(s) fait(s) qui portent l'accroche, le principal en premier.
    insight : UNE phrase, ce que le lecteur apprend ou reconnait de son quotidien.
-3. SIGNAL NON DATE OU DE PLUS DE 60 JOURS : INTERDIT comme angle principal.
-   Les faits marques « NON DATE OU > 60 J » ne vont jamais dans hookFactIds.
-   Sans signal frais, l'angle est groupe, modèle_éco ou métier.
+3. SIGNAL NON DATE OU PERIME : INTERDIT comme angle principal.
+   Les faits marques « NON DATE OU PERIME » ne vont jamais dans hookFactIds.
+   Sans evenement date, l'angle est groupe, modèle_éco ou métier.
+   Trois familles portent une accroche datee : un signal web frais, une
+   OUVERTURE d'etablissement de moins d'un an, un DIRIGEANT arrive depuis moins
+   d'un an. Une ouverture ou une arrivee prime sur le metier, toujours.
+3 bis. DIRIGEANT ENTRANT : l'angle est sa SITUATION, pas son secteur. Ses
+   premiers mois sont ceux ou l'on remet a plat les outils.
+3 ter. STRUCTURE JURIDIQUE INTERDITE EN ACCROCHE : capital, forme juridique,
+   representant personne morale, appartenance a un groupe comme fait d'ouverture.
+   Ce sont des faits de ciblage. Ne parle d'augmentation de capital que si un
+   fait le dit explicitement — un capital eleve n'est pas une augmentation.
 4. OFFRE D'EMPLOI : interprete-la par ce que le poste FAIT reellement.
+   Ne propose JAMAIS de remplacer le poste recrute : on allege la tache qui
+   debordait AVANT l'embauche, et le pain se dit ainsi.
    Un automaticien programme des automates et supervise des installations ; ce
    n'est PAS « alleger des taches repetitives ». Lecture des postes frequents :
 ${jobRolesBlock()}
@@ -371,16 +383,19 @@ export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcom
     .filter((fact): fact is DerivedFact => Boolean(fact && fact.date !== undefined && !fact.fresh));
   if (stale.length) {
     errors.push(
-      `angle.hookFactIds : ${stale.map((fact) => fact.id).join(", ")} non daté(s) ou de plus de 60 jours, interdit(s) comme angle principal`,
+      `angle.hookFactIds : ${stale.map((fact) => fact.id).join(", ")} non daté(s) ou périmé(s), interdit(s) comme angle principal`,
     );
   }
   if (data.angle.type === "recrutement" || data.angle.type === "signal") {
+    // Trois familles datent un evenement : le signal web, l'ouverture
+    // d'etablissement et l'arrivee d'un dirigeant. Les deux dernieres sont
+    // aussi solides que la premiere — elles viennent du registre, pas du web.
     const freshHook = data.angle.hookFactIds.some((id) => {
       const fact = byId.get(id);
-      return Boolean(fact && fact.key === "signal" && fact.fresh);
+      return Boolean(fact && DATED_EVENT_KEYS.has(fact.key) && fact.fresh);
     });
     if (!freshHook) {
-      errors.push(`angle.type « ${data.angle.type} » exige un signal daté de moins de 60 jours dans hookFactIds`);
+      errors.push(`angle.type « ${data.angle.type} » exige un événement daté et récent dans hookFactIds`);
     }
   }
 

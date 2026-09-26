@@ -28,6 +28,24 @@ interface PappersRepresentant {
   nom?: string;
   prenom?: string;
   prenoms?: string;
+  /** Date de nomination. C'est elle qui fait d'un dirigeant un dirigeant ENTRANT. */
+  date_prise_de_poste?: string | null;
+}
+
+/**
+ * Etablissement, tel que Pappers le rend.
+ *
+ * `date_de_creation` est la date administrative d'ouverture : c'est le
+ * plancher le plus fiable qu'on ait pour « vous avez ouvert une agence a X ».
+ */
+interface PappersEtablissement {
+  siret?: string;
+  ville?: string | null;
+  enseigne?: string | null;
+  nom_commercial?: string | null;
+  date_de_creation?: string | null;
+  etablissement_cesse?: boolean;
+  siege?: boolean;
 }
 
 interface PappersResponse {
@@ -46,6 +64,7 @@ interface PappersResponse {
   date_creation?: string;
   finances?: PappersFinance[];
   representants?: PappersRepresentant[];
+  etablissements?: PappersEtablissement[];
 }
 
 /**
@@ -65,6 +84,27 @@ export interface PappersRepresentative {
   /** Prénom et nom séparés, quand c'est une personne physique. */
   firstName: string | null;
   lastName: string | null;
+  /** Date de nomination (AAAA-MM-JJ), quand Pappers la connaît. */
+  since: string | null;
+}
+
+/**
+ * Ouverture d'etablissement : une ville, une date.
+ *
+ * C'est le signal le plus sous-exploite de Pappers. L'appel fiche entreprise
+ * rend la liste COMPLETE des etablissements avec leur date de creation, alors
+ * que l'annuaire public ne rend que ceux qui collent a la requete. Sur
+ * SELECTION HABITAT, l'annuaire ne montrait aucune agence a Lavelanet ;
+ * Pappers en montre 44, dont Lavelanet (01/02/2022) et quatre ouvertures de
+ * moins d'un an. Une ouverture recente est une accroche datee, verifiable, et
+ * qui ne cite aucun registre.
+ */
+export interface Opening {
+  city: string;
+  date: string;
+  siret: string | null;
+  /** Enseigne locale, quand elle differe de la raison sociale. */
+  sign: string | null;
 }
 
 /** Ce que la couche d'enrichissement retient de Pappers. */
@@ -83,6 +123,10 @@ export interface PappersData {
   leader_role: string | null;
   /** Tous les représentants légaux, personnes physiques ET morales. */
   representatives: PappersRepresentative[];
+  /** Date de nomination du premier représentant. */
+  leader_since: string | null;
+  /** Ouvertures d'établissements, de la plus récente à la plus ancienne. */
+  openings: Opening[];
 }
 
 export function hasPappersKey(): boolean {
@@ -117,9 +161,31 @@ function mapRepresentatives(raw: PappersRepresentant[] | undefined): PappersRepr
         siren: item.siren?.replace(/\s/g, "") || null,
         firstName: isCompany || !firstName ? null : properCase(firstName),
         lastName: isCompany || !lastName ? null : properCase(lastName),
+        since: item.date_prise_de_poste?.slice(0, 10) || null,
       };
     })
     .filter((item): item is PappersRepresentative => item !== null);
+}
+
+/**
+ * Ouvertures d'etablissements, la plus recente d'abord.
+ *
+ * Le siege est ecarte : sa creation est celle de l'entreprise, pas une
+ * nouvelle. Les etablissements fermes aussi — annoncer une ouverture qui a
+ * depuis ferme est le genre d'erreur qui coute la reponse.
+ */
+function mapOpenings(raw: PappersEtablissement[] | undefined): Opening[] {
+  return (raw ?? [])
+    .filter((item) => item.siege !== true && item.etablissement_cesse !== true)
+    .map((item) => {
+      const date = item.date_de_creation?.slice(0, 10);
+      const city = item.ville?.trim();
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !city) return null;
+      const sign = (item.enseigne ?? item.nom_commercial ?? "")?.trim() || null;
+      return { city: properCase(city), date, siret: item.siret?.trim() || null, sign };
+    })
+    .filter((item): item is Opening => item !== null)
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /** Retient le bilan le plus récent qui porte un chiffre d'affaires. */
@@ -168,6 +234,8 @@ export async function fetchPappers(siren: string): Promise<Result<PappersData>> 
       leader: leader?.nom_complet ?? null,
       leader_role: leader?.qualite ?? null,
       representatives: mapRepresentatives(raw.representants),
+      leader_since: leader?.date_prise_de_poste?.slice(0, 10) ?? null,
+      openings: mapOpenings(raw.etablissements),
     },
   };
 }

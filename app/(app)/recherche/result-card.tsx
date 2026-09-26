@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight, Check, ExternalLink, MapPin, Plus, Star, Users } from "lucide-react";
-import { Button, Card, CardContent, CardFooter, CardHeader } from "@/components/ui";
+import { Badge, Button, Card, CardContent, CardFooter, CardHeader } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
 import { heatContextOf, heatScore, whyNow } from "@/lib/scoring";
 import type { EnrichedCompany } from "@/lib/enrichment/types";
@@ -128,6 +128,16 @@ export function ResultCard({
           </h3>
           <span className="flex shrink-0 items-center gap-1.5">
             <StrengthBadge strength={bestStrength} />
+            {/*
+              La fiche est conservee quand l'effectif est inconnu — la rejeter
+              faute d'information reviendrait a jeter les jeunes entreprises,
+              dont l'INSEE ne publie pas encore la tranche. Mais le lecteur doit
+              savoir que le filtre de taille n'a pas pu etre verifie sur elle :
+              ces fiches sont classees apres les effectifs confirmes.
+            */}
+            {typeof company.key_figures.headcount !== "number" && (
+              <Badge tone="neutral">effectif inconnu</Badge>
+            )}
             {!score.real && <ExampleTag label="score exemple" />}
           </span>
         </div>

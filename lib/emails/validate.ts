@@ -61,6 +61,32 @@ const BLACKLIST = [
   "registre",
 ];
 
+/**
+ * Tournures de STRUCTURE JURIDIQUE, interdites en ACCROCHE.
+ *
+ * « Terdici Vegetal est representee par J.DIS » ouvrait un mail en production.
+ * L'actionnariat et la forme juridique servent a decider si on ecrit et a qui ;
+ * ils ne disent rien du moment de l'entreprise. Ailleurs dans le mail, la
+ * mention reste possible — c'est l'ouverture qui est en cause.
+ */
+const STRUCTURE_HOOK = [
+  "representee par",
+  "represente par",
+  "filiale de",
+  "filiale du",
+  "appartient au groupe",
+  "societe mere",
+  "detenue par",
+  "actionnaire",
+];
+
+export function opensOnStructure(body: string, signature?: string): string | null {
+  const first = bodyParagraphs(body, signature)[0] ?? "";
+  if (!first) return null;
+  const haystack = normalize(first);
+  return STRUCTURE_HOOK.find((term) => haystack.includes(normalize(term))) ?? null;
+}
+
 /** Le créneau de 30 minutes est un élément de CTA, pas une donnée chiffrée. */
 const CTA_NUMBERS = new Set([30]);
 
@@ -161,7 +187,11 @@ export function wordCount(body: string): number {
  * plafond a 125 — au-dela, c'est vraiment trop long pour un premier contact.
  */
 function lengthBounds(tone: ToneKey): { min: number; max: number } {
-  return tone === "bref" ? { min: 60, max: 95 } : { min: 80, max: 110 };
+  // Cible 100 mots, plafond 125 hors signature. Le plafond de 110 faisait
+  // echouer des mails notes 4 ou 5 sur 5 par le juge : quatre blocs porteurs
+  // plus un delai ne tiennent pas en 110 mots. Au-dela de 125, c'est vraiment
+  // trop long pour un premier contact.
+  return tone === "bref" ? { min: 60, max: 100 } : { min: 80, max: 125 };
 }
 
 /** Nombres écrits dans le corps, y compris « 41 M€ » et « 40,9 M ». */
@@ -436,6 +466,15 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     failures.push(
       "L'accroche ouvre sur le secteur (« Dans le/la… ») : elle serait vraie pour " +
         "n'importe quel concurrent. Pars d'un fait propre à cette entreprise.",
+    );
+  }
+
+  // --- Accroche fondee sur la structure -------------------------------------
+  const structure = opensOnStructure(body, context.signature);
+  if (structure) {
+    failures.push(
+      `L'accroche s'appuie sur la structure juridique (« ${structure} ») : c'est un fait de ` +
+        "ciblage, pas une accroche. Pars d'un signal daté ou de ce que dit leur site.",
     );
   }
 

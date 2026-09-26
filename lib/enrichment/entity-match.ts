@@ -232,6 +232,15 @@ export interface SignalAttachment {
  * Les signaux déduits (sans citation ni URL) ne décrivent aucune entité web :
  * ils passent tels quels.
  */
+/**
+ * Sources dont le rattachement est etabli par le SIREN, pas par le texte.
+ *
+ * Le greffe et France Travail publient une annonce POUR un SIREN : il n'y a
+ * pas d'homonymie possible, et leur libelle n'a aucune raison de nommer
+ * l'entreprise.
+ */
+const OFFICIAL_SOURCES = new Set(["BODACC", "France Travail", "La Bonne Boite"]);
+
 export function attachSignals(
   signals: readonly ProspectSignal[],
   target: EntityTarget,
@@ -244,6 +253,18 @@ export function attachSignals(
   for (const signal of signals) {
     const quote = typeof signal.quote === "string" ? signal.quote : "";
     if (!quote && !signal.url) {
+      kept.push(signal);
+      continue;
+    }
+    // Une annonce officielle est rattachee par le SIREN de l'annonce : c'est le
+    // rattachement le plus fort qui existe, plus fort qu'une citation nominative.
+    //
+    // Sans cette exception, la regle d'ancrage — ecrite pour les resultats web —
+    // ecartait TOUS les signaux BODACC : leur citation est le libelle du greffe
+    // (« Modification du capital »), qui ne nomme pas l'entreprise. Constate sur
+    // SUN'R GROUPE et L'ARBRE A SOUHAITS le 26/09/2026 : signal trouve, date,
+    // vrai, et jete a la redaction.
+    if (signal.dateBasis === "source" && typeof signal.source === "string" && OFFICIAL_SOURCES.has(signal.source)) {
       kept.push(signal);
       continue;
     }
@@ -300,13 +321,23 @@ export function naturalCase(name: string): string {
   const raw = tokens.map((token) => token.raw).join(" ");
   if (raw !== raw.toUpperCase()) return name.replace(/\s+(SAS|SASU|SARL|EURL|SA|SNC)\s*$/, "").trim();
 
-  return tokens
-    .map((token, index) => {
-      const lower = token.raw.toLowerCase();
-      if (index > 0 && LOWER_WORDS.has(lower)) return lower;
-      // Sigle court sans voyelle (« SNCF » exclu, trop long) : on le garde.
-      if (token.raw.length <= 3 && !/[AEIOUY]/.test(token.raw)) return token.raw;
-      return lower.charAt(0).toUpperCase() + lower.slice(1);
-    })
-    .join(" ");
+  const cased = tokens.map((token, index) => {
+    const lower = token.raw.toLowerCase();
+    if (index > 0 && LOWER_WORDS.has(lower)) return lower;
+    // Sigle court sans voyelle (« SNCF » exclu, trop long) : on le garde.
+    if (token.raw.length <= 3 && !/[AEIOUY]/.test(token.raw)) return token.raw;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  });
+
+  // Les separateurs d'origine sont CONSERVES : le tokeniseur ignore
+  // l'apostrophe, et joindre par des espaces ecrivait « L ARBRE A SOUHAITS »
+  // en « L Arbre A Souhaits » — vu dans un mail reel le 26/09/2026. Une
+  // apostrophe ou un trait d'union se recolle sans espace.
+  let out = cased[0];
+  for (let index = 1; index < tokens.length; index += 1) {
+    const between = name.slice(tokens[index - 1].end, tokens[index].start);
+    const glue = /['’-]/.test(between) ? between.replace(/\s+/g, "") : " ";
+    out += glue + cased[index];
+  }
+  return out;
 }
