@@ -304,6 +304,40 @@ async function main() {
     check("une fiche vide ne casse rien", mergedFigures(null, fromEnrichment).headcount === 35);
   }
 
+  console.log("\nreanalyse : une lecture ratee n'efface pas ce qu'on savait");
+  {
+    // Cas reel du 27/09/2026 : la lecture de site a echoue, et la fiche a
+    // perdu son domaine — donc toute recherche Hunter, donc tout contact.
+    const onCard = {
+      website: "https://selectionhabitat.com",
+      sector: "Agences immobilieres",
+      size_range: "10 a 19 salaries",
+      signals: [{ label: "ancien signal" }],
+      key_figures: { site_status: "lu" as const, site_offer: "Vente de biens de caractere.", headcount: 15 },
+    };
+    const enriched = { website: null, sector: null, size_range: null, signals: [], key_figures: { headcount: 18 } };
+
+    const lostTheSite = !enriched.website && Boolean(onCard.website);
+    const kept = {
+      website: enriched.website ?? onCard.website,
+      sector: enriched.sector ?? onCard.sector,
+      size_range: enriched.size_range ?? onCard.size_range,
+      signals: enriched.signals.length ? enriched.signals : onCard.signals,
+      key_figures: {
+        ...mergedFigures(onCard.key_figures, enriched.key_figures),
+        ...(lostTheSite ? { site_status: onCard.key_figures.site_status, site_offer: onCard.key_figures.site_offer } : {}),
+      },
+    };
+
+    check("le domaine survit", kept.website === "https://selectionhabitat.com");
+    check("le secteur survit", kept.sector === "Agences immobilieres");
+    check("la tranche survit", kept.size_range === "10 a 19 salaries");
+    check("les anciens signaux survivent", kept.signals.length === 1);
+    check("le site reste « lu »", kept.key_figures.site_status === "lu");
+    check("ce qu'on savait du site survit", kept.key_figures.site_offer === "Vente de biens de caractere.");
+    check("l'effectif recalcule gagne", kept.key_figures.headcount === 18);
+  }
+
   if (failures) {
     console.log(`\n${failures} échec(s).`);
     process.exit(1);
