@@ -450,6 +450,8 @@ async function replaceableDraft(
     .eq("user_id", ctx.userId)
     .eq("prospect_id", prospectId)
     .eq("status", "draft")
+    // Un brouillon à la corbeille ne se réécrit pas : la génération en crée un neuf.
+    .is("deleted_at", null)
     .maybeSingle();
   return (data as { id: string } | null)?.id ?? null;
 }

@@ -12,12 +12,17 @@ import { UndoHost } from "@/components/trash/undo-host";
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  // Compteur de la corbeille, affiché dans le menu du compte.
-  const { count } = await trashCount(createClient());
+  // Compteur de la corbeille (prospects + mails), affiché dans le menu du compte.
+  const supabase = createClient();
+  const [prospects, mails] = await Promise.all([
+    trashCount(supabase),
+    supabase.from("messages").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
+  ]);
+  const count = (prospects.count ?? 0) + (mails.count ?? 0);
 
   return (
     <ToastProvider>
-      <AppShell email={user.email ?? "compte"} trashCount={count ?? 0}>
+      <AppShell email={user.email ?? "compte"} trashCount={count}>
         {children}
       </AppShell>
       <UndoHost />

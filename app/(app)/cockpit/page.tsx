@@ -5,6 +5,8 @@ import type { ActionState } from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
 import { ActionQueueCard } from "./_components/versus/action-queue-card";
 import { InboxPanel } from "./_components/inbox-panel";
+import { ScheduledSendsCard } from "./_components/scheduled-sends-card";
+import { upcomingSends } from "@/lib/outbox/feed";
 import { ActivityCard } from "./_components/activity/activity-card";
 import { SignalsCard } from "./_components/signals-card";
 import { EXAMPLE_SIGNALS } from "./_lib/example";
@@ -42,9 +44,10 @@ export default async function CockpitPage({
   const supabase = createClient();
 
   // Corbeille exclue partout : file d'actions, boîte de réception, courbes.
-  const [{ prospects, messages, deals, reminders, inbound }, statesResult] = await Promise.all([
+  const [{ prospects, messages, deals, reminders, inbound }, statesResult, scheduled] = await Promise.all([
     loadPortfolio(supabase, ["messages", "deals", "reminders", "inbound"]),
     supabase.from("action_states").select("*"),
+    upcomingSends(supabase).catch(() => []),
   ]);
   const states = (statesResult.data ?? []) as ActionState[];
 
@@ -80,6 +83,8 @@ export default async function CockpitPage({
       />
 
       <ActionQueueCard visible={queue.visible} total={queue.total} />
+
+      <ScheduledSendsCard items={scheduled} />
 
       <InboxPanel entries={mailbox} />
 

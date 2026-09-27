@@ -21,6 +21,7 @@ import type { UserOffer } from "@/types";
 import { OfferBanner } from "./_components/offer-banner";
 import { FeedingBanner } from "./_components/feeding-banner";
 import { GenerationProgress } from "./_components/generation-progress";
+import { DraftSendBar } from "./_components/draft-send-bar";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -63,6 +64,7 @@ export function ProspectionClient({
     generateAnyway,
     otherAngle,
     rewrite,
+    reset,
   } =
     useGeneration(tone);
 
@@ -189,6 +191,18 @@ export function ProspectionClient({
                   to={analysis.contact?.email ?? selected.email}
                 />
               </div>
+
+              {messageId && (
+                <DraftSendBar
+                  key={messageId}
+                  messageId={messageId}
+                  defaultTo={analysis.contact?.email ?? selected.email ?? ""}
+                  // `validate` fait passer un prospect « nouveau » à « à contacter ».
+                  validated={selected.status !== "nouveau"}
+                  companyName={selected.company_name}
+                  onTrashed={reset}
+                />
+              )}
 
               {/* Sous le brouillon : l'angle retenu, et de quoi en changer. */}
               <ChosenAngle

@@ -77,6 +77,7 @@ export async function POST(request: Request) {
         .from("messages")
         .select("*")
         .eq("prospect_id", answering.prospect_id)
+        .is("deleted_at", null)
         .order("created_at", { ascending: true }),
       session.supabase
         .from("inbound_messages")

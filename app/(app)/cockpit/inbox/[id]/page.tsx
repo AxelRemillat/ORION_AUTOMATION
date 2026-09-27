@@ -42,6 +42,7 @@ export default async function InboxThreadPage({ params }: { params: { id: string
         .from("messages")
         .select("*")
         .eq("prospect_id", inbound.prospect_id)
+        .is("deleted_at", null)
         .order("created_at", { ascending: true }),
       supabase
         .from("inbound_messages")

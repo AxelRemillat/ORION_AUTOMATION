@@ -39,7 +39,8 @@ export async function loadPortfolio(
 
   const [prospectResult, messages, deals, reminderResult, inbound] = await Promise.all([
     prospects,
-    want("messages") ? db.from("messages").select("*") : empty,
+    // Un mail à la corbeille disparaît avec la même portée qu'un prospect.
+    want("messages") ? db.from("messages").select("*").is("deleted_at", null) : empty,
     want("deals") ? db.from("deals").select("*") : empty,
     want("reminders") ? reminders : empty,
     want("inbound") ? db.from("inbound_messages").select("*") : empty,

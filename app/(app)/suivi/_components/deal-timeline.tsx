@@ -2,6 +2,7 @@ import { AlarmClock, Check, FileSignature, MailCheck, PenLine } from "lucide-rea
 import { EmptyState } from "@/components/ui";
 import { formatDateTime } from "@/lib/utils";
 import type { EventKind, TimelineEvent } from "../_lib/timeline";
+import { MailActions } from "@/components/outbox/mail-actions";
 import { SendMessageDialog } from "./send-message-dialog";
 
 const ICONS: Record<EventKind, typeof MailCheck> = {
@@ -21,7 +22,8 @@ const TONE_TOKEN: Record<TimelineEvent["tone"], string> = {
 
 /**
  * Fil chronologique de l'affaire : rail dégradé à gauche, un jalon par
- * événement. Les brouillons portent directement leur bouton d'envoi.
+ * événement. Les brouillons portent leur bouton d'envoi, et leurs actions :
+ * programmer, annuler la programmation, corbeille.
  */
 export function DealTimeline({
   events,
@@ -68,18 +70,34 @@ export function DealTimeline({
                 <span className="text-[13px] font-medium text-text">{event.title}</span>
                 <span className="font-data text-[11px] text-faint">{formatDateTime(event.at)}</span>
 
-                {event.kind === "draft" && event.messageId && (
+                {event.kind === "draft" && event.messageId && event.sendStatus !== "sending" && (
                   <div className="ml-auto">
                     <SendMessageDialog
                       prospectId={prospectId}
                       messageId={event.messageId}
                       subject={event.subject ?? null}
                       body={event.body ?? ""}
-                      defaultTo={defaultTo}
+                      defaultTo={event.scheduledTo ?? defaultTo}
                     />
                   </div>
                 )}
               </div>
+
+              {event.kind === "draft" && event.messageId && (
+                <div className="mt-2.5">
+                  <MailActions
+                    state={{
+                      messageId: event.messageId,
+                      sendStatus: event.sendStatus,
+                      scheduledAt: event.scheduledAt,
+                      scheduledTo: event.scheduledTo,
+                      sendError: event.sendError,
+                    }}
+                    defaultTo={defaultTo}
+                    label="ce brouillon"
+                  />
+                </div>
+              )}
 
               {event.subject && (
                 <p className="mt-2.5 text-sm font-medium text-text">{event.subject}</p>

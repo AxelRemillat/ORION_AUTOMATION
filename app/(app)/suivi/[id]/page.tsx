@@ -9,12 +9,14 @@ import { formatDate, formatEur } from "@/lib/utils";
 import type { Deal, Message, Prospect, Reminder } from "@/types";
 import { DealTimeline } from "../_components/deal-timeline";
 import { TrashButton } from "@/components/trash/trash-button";
+import { SendStateBadge } from "@/components/outbox/send-state-badge";
 import { FollowUpButton } from "../_components/follow-up-button";
 import { ProspectSummary } from "../_components/prospect-summary";
 import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
 import { guessEmail } from "../_lib/contact";
 import { dealValue } from "../_lib/estimates";
+import { prospectSendState } from "../_lib/rows";
 import { nextAction } from "../_lib/next-action";
 import { STAGE_TONE_VARS, stageOf } from "../_lib/stages";
 import { buildTimeline } from "../_lib/timeline";
@@ -41,6 +43,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
       .from("messages")
       .select("*")
       .eq("prospect_id", params.id)
+      .is("deleted_at", null)
       .order("created_at", { ascending: true }),
     supabase.from("deals").select("*").eq("prospect_id", params.id),
     supabase.from("reminders").select("*").eq("prospect_id", params.id).order("due_at"),
@@ -62,6 +65,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
   });
   const events = buildTimeline(messages, reminders, deals);
   const followUp = nextFollowUp(messages);
+  const sendState = prospectSendState(messages);
 
   return (
     <>
@@ -85,6 +89,13 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: tone.accent }} aria-hidden />
               {stage.label}
             </span>
+            {sendState && (
+              <SendStateBadge
+                sendStatus={sendState.sendStatus}
+                scheduledAt={sendState.scheduledAt}
+                sendError={sendState.sendError}
+              />
+            )}
             {followUp && <FollowUpButton prospectId={typed.id} type={followUp} />}
             <TrashButton
               prospectId={typed.id}

@@ -12,7 +12,11 @@ type Draft = { subject: string; body: string };
 
 /** Brouillon actuel en base, ou null s'il a disparu. */
 export async function loadDraft(id: string): Promise<Draft | null> {
-  const { data } = await createClient().from("messages").select("subject, body").eq("id", id).maybeSingle();
+  const { data } = await createClient().from("messages")
+    .select("subject, body")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
   if (!data) return null;
   return { subject: data.subject ?? "", body: data.body };
 }
@@ -32,6 +36,7 @@ export function saveDraftSoon(id: string, draft: Draft): void {
         .update({ subject: draft.subject.trim() || null, body: draft.body.trim() })
         .eq("id", id)
         .eq("status", "draft")
+        .is("deleted_at", null)
         .then(() => undefined, () => undefined);
     }, 800),
   );

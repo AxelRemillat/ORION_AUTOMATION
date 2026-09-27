@@ -1,5 +1,5 @@
 import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
-import type { Deal, Message, Reminder } from "@/types";
+import type { Deal, Message, Reminder, SendStatus } from "@/types";
 
 /**
  * Timeline d'une affaire : messages, relances et signature réunis sur une même
@@ -19,6 +19,11 @@ export interface TimelineEvent {
   body?: string;
   /** Identifiant du message : nécessaire au bouton d'envoi. */
   messageId?: string;
+  /** État d'envoi d'un brouillon (programmé, échec…). */
+  sendStatus?: SendStatus;
+  scheduledAt?: string | null;
+  scheduledTo?: string | null;
+  sendError?: string | null;
   tone: "brand" | "warn" | "good" | "neutral";
 }
 
@@ -32,14 +37,19 @@ export function buildTimeline(
   for (const message of messages) {
     const label = MESSAGE_TYPE_LABELS[message.type];
     const sent = message.status === "sent";
+    const scheduled = !sent && message.send_status === "scheduled";
     events.push({
       id: `message-${message.id}`,
       at: sent ? (message.sent_at ?? message.created_at) : message.created_at,
       kind: sent ? "sent" : "draft",
-      title: sent ? `${label} envoyée` : `${label} en brouillon`,
+      title: sent ? `${label} envoyée` : scheduled ? `${label} programmée` : `${label} en brouillon`,
       subject: message.subject,
       body: message.body,
       messageId: message.id,
+      sendStatus: message.send_status ?? (sent ? "sent" : "draft"),
+      scheduledAt: message.scheduled_at ?? null,
+      scheduledTo: message.scheduled_to ?? null,
+      sendError: message.send_error ?? null,
       tone: sent ? "brand" : "warn",
     });
   }
