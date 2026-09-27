@@ -4,6 +4,7 @@ import { authorizeCron } from "@/lib/trash/cron-auth";
 import { baseUrl, clampFanout, dispatchTick, waitUntil, type TickBody } from "@/lib/jobs/dispatch";
 import { drainJobs } from "@/lib/jobs/background";
 import { hasClaimableJob } from "@/lib/jobs/store";
+import { runDueSends } from "@/lib/outbox/scheduler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,8 @@ export const maxDuration = 300;
  * Le chemin normal n'en a pas besoin : POST /api/jobs exécute déjà les étapes
  * en `waitUntil`. Le tick sert de relève — quand une invocation arrive au bout
  * de ses 300 s, et chaque minute via pg_cron (`{"fanout":3}`) pour reprendre
- * un job coupé alors que plus aucun navigateur n'est ouvert. Protégé par
+ * un job coupé alors que plus aucun navigateur n'est ouvert — et pour faire
+ * partir les mails programmés échus (lib/outbox/scheduler.ts). Protégé par
  * `Authorization: Bearer <JOBS_TICK_SECRET>`, comparé à temps constant.
  *
  * Réponse immédiate (202) : l'étape tourne en `waitUntil`, l'appelant n'attend
@@ -38,6 +40,19 @@ export async function POST(request: Request) {
   // Réveil par le cron : autant de ticks que de jobs pouvant avancer en parallèle.
   const fanout = clampFanout(body.fanout);
   if (fanout) {
+    // Mails programmés échus : une fois par minute, dans CETTE invocation.
+    // Le verrou par ligne (lib/outbox/scheduler.ts) rend un doublon de tick
+    // inoffensif.
+    waitUntil(
+      runDueSends(createAdminClient()).then(
+        (report) => {
+          if (report.sent || report.failed || report.retried || report.stuck) {
+            console.log(`[outbox] ${JSON.stringify(report)}`);
+          }
+        },
+        (error) => console.error(`[outbox] tick en échec : ${error instanceof Error ? error.message : error}`),
+      ),
+    );
     waitUntil(Promise.all(Array.from({ length: fanout }, () => dispatchTick(base, {}))));
     return NextResponse.json({ dispatched: fanout }, { status: 202 });
   }

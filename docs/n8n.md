@@ -49,6 +49,9 @@ Credential : OAuth2 Gmail sur `axel@axelremillat.com`.
 
 **Réponse attendue**
 
+- Le corps renvoyé par le nœud Gmail (`{ id, threadId, … }`) est lu : `threadId`
+  est enregistré dans `messages.thread_id` s'il manquait, `id` dans
+  `messages.gmail_message_id`. Facultatif : sans eux, l'envoi est le même.
 - `200` (n'importe quel corps JSON) ⇒ l'app considère le mail parti et
   enchaîne : `messages.status = 'sent'`, `messages.sent_at = now()`, statut du
   prospect avancé, relance planifiée.

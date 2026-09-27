@@ -59,9 +59,11 @@ export function useGeneration(tone: ToneKey) {
     if (job.status === "done" && output) {
       const id = job.result?.messageId ?? null;
       setResult(output);
-      setMessageId(id);
       // Le brouillon en base fait foi : il porte les retouches déjà faites.
-      setDraftState((id && (await loadDraft(id))) || output.email);
+      // Disparu (mis à la corbeille) : on repart du texte du job, sans lien.
+      const stored = id ? await loadDraft(id) : null;
+      setMessageId(stored ? id : null);
+      setDraftState(stored || output.email);
       if (announce) output.warnings.forEach((w) => toast.toast(`${w.source} : ${w.message}`));
     } else if (job.status === "failed") {
       if (details?.canForce) setNeedsFeeding(job.error ?? "Accroche insuffisante.");

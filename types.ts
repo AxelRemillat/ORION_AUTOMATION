@@ -33,6 +33,10 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 export const MESSAGE_STATUSES = ["draft", "sent"] as const;
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
+/** Cycle d'envoi d'un message, à côté de `status` (draft | sent). */
+export const SEND_STATUSES = ["draft", "scheduled", "sending", "sent", "failed", "cancelled"] as const;
+export type SendStatus = (typeof SEND_STATUSES)[number];
+
 export const DEAL_STATUSES = ["ouvert", "gagne", "perdu"] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
 
@@ -219,6 +223,8 @@ export type Prospect = {
   deleted_at?: string | null;
   /** Statut au moment de la mise à la corbeille, rendu à la restauration. */
   status_before_delete?: string | null;
+  /** Ne plus jamais écrire à ce prospect : tout envoi est refusé côté serveur. */
+  do_not_contact?: boolean;
   status: ProspectStatus;
   created_at: string;
   updated_at: string;
@@ -236,6 +242,22 @@ export type Message = {
   /** Fil Gmail : permet de répondre dans la conversation d'origine. */
   thread_id: string | null;
   created_at: string;
+  /**
+   * Corbeille et envoi programmé (migration 20260927124154). Optionnels : une
+   * base pas encore migrée ne les renvoie pas.
+   */
+  deleted_at?: string | null;
+  scheduled_at?: string | null;
+  /** Destinataire confirmé à la programmation. */
+  scheduled_to?: string | null;
+  send_status?: SendStatus;
+  /** Raison lisible du dernier échec d'envoi. */
+  send_error?: string | null;
+  send_attempts?: number;
+  send_started_at?: string | null;
+  /** Notification « parti / échoué » déjà vue. */
+  send_seen_at?: string | null;
+  gmail_message_id?: string | null;
 }
 
 /**

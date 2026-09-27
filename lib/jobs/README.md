@@ -72,6 +72,19 @@ des 40 s visées. Une reprise reste économe : chaque lot scanné est journalis�
 dans `scan_history`, qu'une nouvelle tentative exclut. Découper le scan page par
 page demande d'exposer sa boucle dans `lib/enrichment` (chantier séparé).
 
+## Envois programmés (`lib/outbox`)
+
+Un brouillon programmé n'est pas un job : c'est une ligne `messages` en
+`send_status = scheduled` avec `scheduled_at` et `scheduled_to`. Le tick du
+cron (`{"fanout":3}`) appelle `runDueSends` : chaque mail échu passe
+`scheduled → sending` par une mise à jour conditionnelle (deux ticks ne
+prennent jamais la même ligne), puis part par `lib/outbox/send.ts` — le même
+chemin que `/api/emails/send` (corbeille, « ne plus contacter », plafond du
+jour, webhook n8n, statut, relance). Échec passager : reprise à +5 puis +15 min,
+puis `failed`. Un `sending` de plus de 15 min est déclaré échoué, jamais
+renvoyé. La migration `20260927124154_messages_outbox.sql` élargit la condition
+du cron aux mails échus.
+
 ## Routes
 
 | Route | Rôle |

@@ -168,6 +168,8 @@ export function buildQueue(input: QueueInput): QueueResult {
   const drafts = new Map<string, Message>();
   for (const message of input.messages) {
     if (message.status !== "draft") continue;
+    // Programmé ou en cours d'envoi : il partira seul (bloc « Envois programmés »).
+    if (message.send_status === "scheduled" || message.send_status === "sending") continue;
     const current = drafts.get(message.prospect_id);
     if (!current || message.created_at > current.created_at) {
       drafts.set(message.prospect_id, message);

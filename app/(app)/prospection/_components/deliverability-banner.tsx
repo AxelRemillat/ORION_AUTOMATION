@@ -63,7 +63,7 @@ export function DeliverabilityBanner({ data }: { data: Deliverability }) {
 
       <p className="mt-2 text-[11px] text-faint">
         Volumes réels comptés sur les messages envoyés. Les plafonds sont une règle interne
-        (montée en charge sur 14 jours), ajustable dans `_lib/deliverability.ts`.
+        (montée en charge sur 14 jours), ajustable dans `lib/outbox/deliverability.ts`.
       </p>
     </Card>
   );
