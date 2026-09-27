@@ -10,8 +10,11 @@ import { knownSirens } from "@/lib/trash/exclusions";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
 
+/** Variante de `search_signals` qui porte l'entonnoir (voir handlers/index.ts). */
+export const FUNNEL_KIND = "funnel";
+
 /**
- * Job `signal_funnel` — l'entonnoir « signaux d'abord » en 4 étages.
+ * Job `search_signals` + `params.kind = "funnel"` — l'entonnoir « signaux d'abord » en 4 étages.
  *
  *   préparation → moisson → filtre → tri LLM → creusage ×5 → bilan
  *

@@ -11,7 +11,6 @@ import { z } from "zod";
 export const JOB_TYPES = [
   "search_criteria",
   "search_signals",
-  "signal_funnel",
   "email_generate",
   "email_rewrite",
   "reanalyze",

@@ -15,6 +15,9 @@ import { contactBadge, type DigDeps } from "../lib/funnel/dig";
 import { DEFAULT_PREFS } from "../lib/funnel/settings";
 import { runDigStage, runFilterStage, runTriageStage } from "../lib/funnel/stages";
 import { countFunnel, insertHarvest } from "../lib/funnel/store";
+import { newLeaderLabel, revenueLabel } from "../lib/funnel/view";
+import { byKind } from "../lib/jobs/handlers";
+import type { JobHandler, StepContext } from "../lib/jobs/runner";
 import type { SignalCandidateRow } from "../types";
 
 let failures = 0;
@@ -181,6 +184,38 @@ const verdictOf = (key: keyof typeof CASES) => {
     const limited = new FakeDb({ signal_candidates: rows().map((row) => ({ ...row, statut: row.statut === "creusé" ? "retenu" : row.statut, publication: null, prospect_id: null })) });
     const capped = await runDigStage(limited as never, "u1", "run1", { deps, limit: 1, perStep: 4 });
     check("plafond N respecté", capped.dug === 1);
+  }
+
+  console.log("\n6. Affichage des cartes");
+  {
+    const now = new Date("2026-09-27");
+    check("CA à 0 : « non publié »", revenueLabel(0, 2024, now) === "CA non publié");
+    check("CA absent : « non publié »", revenueLabel(null, null, now) === "CA non publié");
+    check("CA récent : année affichée", revenueLabel(3_200_000, 2024, now) === "CA 2024 : 3,2 M€", String(revenueLabel(3_200_000, 2024, now)));
+    check("CA de plus de 3 ans : masqué", revenueLabel(3_200_000, 2021, now) === null);
+    check("nouvelle direction : le NOUVEAU dirigeant", newLeaderLabel(CASES.dbp.signal.facts) === "Claire MARTIN, présidente");
+    check("sans changement de dirigeant : rien", newLeaderLabel(CASES.artflex.signal.facts) === null);
+  }
+
+  console.log("\n7. Aiguillage du job search_signals");
+  {
+    const calls: string[] = [];
+    const handler = (name: string, steps: number): JobHandler => ({
+      steps: Array.from({ length: steps }, (_, index) => async () => {
+        calls.push(`${name}${index}`);
+        return {};
+      }),
+    });
+    const routed = byKind(handler("scan", 3), { funnel: handler("entonnoir", 5) });
+    const ctx = (kind?: string) => ({ job: { params: kind ? { kind } : {} } }) as unknown as StepContext;
+    const run = async (kind?: string) => {
+      for (const step of routed.steps) if ((await step(ctx(kind))).done) break;
+    };
+    await run();
+    check("sans kind : l'ancien scan, 3 étapes puis fin", calls.join(",") === "scan0,scan1,scan2", calls.join(","));
+    calls.length = 0;
+    await run("funnel");
+    check("kind funnel : les 5 étapes de l'entonnoir", calls.join(",") === "entonnoir0,entonnoir1,entonnoir2,entonnoir3,entonnoir4", calls.join(","));
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

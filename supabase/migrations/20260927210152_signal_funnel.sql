@@ -111,7 +111,7 @@ grant select, insert, update, delete on public.funnel_settings to authenticated,
 --
 -- pg_cron compte en UTC : on planifie à 4h et 5h UTC, et la requête ne crée
 -- le job que s'il est 6h à Paris (heure d'été ou d'hiver). Le cron n'appelle
--- AUCUNE route : il insère un job `signal_funnel` en file, que le filet
+-- AUCUNE route : il insère un job `search_signals` (params.kind = funnel) en file, que le filet
 -- minute existant (`orion-jobs-tick`) fait tourner. Un seul job par jour et
 -- par utilisateur.
 -- ---------------------------------------------------------------------------
@@ -131,9 +131,9 @@ begin
       $cron$
         insert into public.jobs (user_id, type, target, params)
         select f.user_id,
-               'signal_funnel',
+               'search_signals',
                jsonb_build_object('label', 'Signaux du jour'),
-               jsonb_build_object('auto', true)
+               jsonb_build_object('auto', true, 'kind', 'funnel')
         from public.funnel_settings f
         where f.daily
           and cardinality(f.departements) > 0
@@ -141,7 +141,8 @@ begin
           and not exists (
             select 1 from public.jobs j
             where j.user_id = f.user_id
-              and j.type = 'signal_funnel'
+              and j.type = 'search_signals'
+              and j.params ->> 'kind' = 'funnel'
               and j.params ->> 'auto' = 'true'
               and j.created_at > now() - interval '20 hours'
           );
