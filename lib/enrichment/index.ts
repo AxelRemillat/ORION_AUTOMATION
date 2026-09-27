@@ -223,7 +223,12 @@ export async function deepEnrich(
       const openings = data.openings
         .filter((opening) => isHookFresh(opening.date))
         .slice(0, 3)
-        .map((opening) => ({ city: opening.city, date: opening.date, sign: opening.sign }));
+        .map((opening) => ({
+          city: opening.city,
+          date: opening.date,
+          siret: opening.siret,
+          sign: opening.sign,
+        }));
       if (openings.length) keyFigures.recent_openings = openings;
     } else {
       warnings.push({ source: "pappers", message: pappers.error });
