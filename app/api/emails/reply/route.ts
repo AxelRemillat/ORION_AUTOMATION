@@ -60,6 +60,7 @@ export async function POST(request: Request) {
     .from("inbound_messages")
     .select("*")
     .eq("id", body.inboundId)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!inbound) return NextResponse.json({ error: "Message introuvable." }, { status: 404 });
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
         .from("inbound_messages")
         .select("*")
         .eq("prospect_id", answering.prospect_id)
+        .is("deleted_at", null)
         .order("received_at", { ascending: true }),
     ]);
     prospect = (prospectResult.data as Prospect) ?? null;

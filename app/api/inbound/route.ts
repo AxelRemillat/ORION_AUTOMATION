@@ -30,6 +30,9 @@ interface InboundBody {
   subject?: unknown;
   body?: unknown;
   thread_id?: unknown;
+  /** Identifiant Gmail du mail reçu : une réponse programmée s'y rattache. */
+  gmail_message_id?: unknown;
+  message_id?: unknown;
   received_at?: unknown;
   category?: unknown;
 }
@@ -124,6 +127,7 @@ export async function POST(request: Request) {
       body,
       category: parseCategory(payload?.category),
       thread_id: asText(payload?.thread_id, 200),
+      gmail_message_id: asText(payload?.gmail_message_id ?? payload?.message_id, 200),
       received_at: receivedAt,
     })
     .select("id")

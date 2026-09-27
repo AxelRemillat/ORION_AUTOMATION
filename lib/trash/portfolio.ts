@@ -43,7 +43,7 @@ export async function loadPortfolio(
     want("messages") ? db.from("messages").select("*").is("deleted_at", null) : empty,
     want("deals") ? db.from("deals").select("*") : empty,
     want("reminders") ? reminders : empty,
-    want("inbound") ? db.from("inbound_messages").select("*") : empty,
+    want("inbound") ? db.from("inbound_messages").select("*").is("deleted_at", null) : empty,
   ]);
 
   const alive = (prospectResult.data ?? []) as Prospect[];

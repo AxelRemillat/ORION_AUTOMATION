@@ -91,3 +91,11 @@ export function scheduleError(at: Date | null, now = new Date()): string | null 
   }
   return null;
 }
+
+/** « 27 sept. 2026, 14:30 », toujours à l'heure de Paris (serveur en UTC compris). */
+export function formatParisDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: PARIS }).format(
+    new Date(iso),
+  );
+}

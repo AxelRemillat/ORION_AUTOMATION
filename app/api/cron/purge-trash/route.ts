@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { authorizeCron } from "@/lib/trash/cron-auth";
 import { purgeExpired } from "@/lib/trash/operations";
 import { purgeExpiredMessages } from "@/lib/outbox/trash";
+import { purgeExpiredInbound } from "@/lib/outbox/inbound-trash";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,13 +27,23 @@ export async function GET(request: Request) {
   // Les mails d'abord purgés avec leur prospect (cascade) ; ceux-ci sont les
   // mails mis seuls à la corbeille.
   const mails = await purgeExpiredMessages(admin);
-  const failure = !result.ok ? result.error : !mails.ok ? `mails : ${mails.error}` : null;
+  const received = await purgeExpiredInbound(admin);
+  const failure = !result.ok
+    ? result.error
+    : !mails.ok
+      ? `mails : ${mails.error}`
+      : !received.ok
+        ? `mails reçus : ${received.error}`
+        : null;
   if (failure) {
     console.error(`[purge-trash] échec : ${failure}`);
     return NextResponse.json({ ok: false, error: failure }, { status: 500 });
   }
   const purged = result.ok ? result.count : 0;
   const purgedMessages = mails.ok ? mails.count : 0;
-  console.log(`[purge-trash] ${purged} prospect(s) et ${purgedMessages} mail(s) supprimé(s) définitivement`);
-  return NextResponse.json({ ok: true, purged, purgedMessages });
+  const purgedInbound = received.ok ? received.count : 0;
+  console.log(
+    `[purge-trash] ${purged} prospect(s), ${purgedMessages} mail(s) envoyé(s)/brouillon(s) et ${purgedInbound} mail(s) reçu(s) supprimé(s) définitivement`,
+  );
+  return NextResponse.json({ ok: true, purged, purgedMessages, purgedInbound });
 }

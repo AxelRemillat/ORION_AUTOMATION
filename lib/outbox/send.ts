@@ -64,7 +64,7 @@ export type OutboxMessage = Pick<
   Message,
   "id" | "user_id" | "prospect_id" | "type" | "subject" | "body" | "status" | "thread_id"
 > &
-  Pick<Message, "deleted_at" | "send_status">;
+  Pick<Message, "deleted_at" | "send_status" | "reply_to_inbound_id" | "reply_to_gmail_message_id">;
 
 const fail = (kind: SendFailureKind, error: string, status: number): SendResult => ({ ok: false, kind, error, status });
 
@@ -139,6 +139,8 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
         prospect_id: message.prospect_id,
         message_id: message.id,
         thread_id: message.thread_id ?? null,
+        // Réponse à un mail reçu : n8n la poste dans le même fil (In-Reply-To).
+        reply_to_gmail_message_id: message.reply_to_gmail_message_id ?? null,
       }),
       cache: "no-store",
     });
@@ -161,6 +163,7 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
       status: "sent",
       sent_at: sentAt,
       send_status: "sent",
+      sent_to: to,
       send_error: null,
       send_started_at: null,
       ...(message.thread_id ? {} : ids.threadId ? { thread_id: ids.threadId } : {}),
@@ -170,6 +173,15 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
     .eq("user_id", message.user_id);
   if (messageError) {
     return fail("unrecorded", `Mail envoyé mais statut non enregistré : ${messageError.message}`, 500);
+  }
+
+  // Une réponse partie solde le mail reçu auquel elle répond.
+  if (message.reply_to_inbound_id) {
+    await db
+      .from("inbound_messages")
+      .update({ handled: true })
+      .eq("id", message.reply_to_inbound_id)
+      .eq("user_id", message.user_id);
   }
 
   const nextStatus = STATUS_AFTER_SEND[message.type];
@@ -206,7 +218,7 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
 }
 
 export const MESSAGE_COLUMNS =
-  "id, user_id, prospect_id, type, subject, body, status, thread_id, deleted_at, send_status, send_attempts, scheduled_to";
+  "id, user_id, prospect_id, type, subject, body, status, thread_id, deleted_at, send_status, send_attempts, scheduled_to, reply_to_inbound_id, reply_to_gmail_message_id";
 
 /**
  * Envoi MANUEL (bouton « Envoyer »). Verrouille le message (`sending`) pour

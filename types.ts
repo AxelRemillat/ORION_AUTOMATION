@@ -231,6 +231,8 @@ export type Prospect = {
   status_before_delete?: string | null;
   /** Ne plus jamais écrire à ce prospect : tout envoi est refusé côté serveur. */
   do_not_contact?: boolean;
+  /** Statut avant « ne plus contacter », rendu quand on lève le blocage. */
+  status_before_dnc?: string | null;
   status: ProspectStatus;
   created_at: string;
   updated_at: string;
@@ -264,6 +266,11 @@ export type Message = {
   /** Notification « parti / échoué » déjà vue. */
   send_seen_at?: string | null;
   gmail_message_id?: string | null;
+  /** Réponse à un mail reçu (migration 20260927131230) : même fil Gmail. */
+  reply_to_inbound_id?: string | null;
+  reply_to_gmail_message_id?: string | null;
+  /** Destinataire réel d'un mail parti. */
+  sent_to?: string | null;
 }
 
 /**
@@ -285,6 +292,10 @@ export type InboundMessage = {
   /** Vrai dès qu'une réponse est partie depuis le Cockpit. */
   handled: boolean;
   created_at: string;
+  /** Corbeille (migration 20260927131230) : masqué partout, purgé à J+14. */
+  deleted_at?: string | null;
+  /** Identifiant Gmail du mail reçu, transmis par n8n. */
+  gmail_message_id?: string | null;
 }
 
 export type Deal = {

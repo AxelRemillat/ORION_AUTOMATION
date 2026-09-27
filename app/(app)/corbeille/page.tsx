@@ -11,6 +11,8 @@ import { ExcludedList } from "./_components/excluded-list";
 import { TrashList } from "./_components/trash-list";
 import { MailTrashList } from "./_components/mail-trash-list";
 import { purgeExpiredMessages, trashedMessages } from "@/lib/outbox/trash";
+import { purgeExpiredInbound, trashedInbound } from "@/lib/outbox/inbound-trash";
+import { ReceivedTrashList } from "./_components/received-trash-list";
 
 export const metadata = { title: "Corbeille · ORION" };
 export const dynamic = "force-dynamic";
@@ -31,12 +33,18 @@ export default async function CorbeillePage({ searchParams }: { searchParams: { 
   // page. Un échec (migration absente, panne) n'empêche pas l'affichage.
   await purgeExpired(supabase).catch(() => null);
   await purgeExpiredMessages(supabase).catch(() => null);
+  await purgeExpiredInbound(supabase).catch(() => null);
 
-  const [trashed, excluded, mails] = await Promise.all([
+  const [trashed, excluded, mails, received, companies] = await Promise.all([
     trashedProspects(supabase),
     supabase.from("excluded_companies").select("*").order("created_at", { ascending: false }),
     trashedMessages(supabase).catch(() => []),
+    trashedInbound(supabase).catch(() => []),
+    supabase.from("prospects").select("id, company_name"),
   ]);
+  const names = Object.fromEntries(
+    ((companies.data ?? []) as { id: string; company_name: string }[]).map((row) => [row.id, row.company_name]),
+  );
   const prospects = (trashed.data ?? []) as Prospect[];
   const exclusions = (excluded.data ?? []) as ExcludedCompany[];
 
@@ -49,12 +57,23 @@ export default async function CorbeillePage({ searchParams }: { searchParams: { 
 
       <nav aria-label="Onglets de la corbeille" className="mb-5 flex gap-1 border-b border-line">
         <TabLink href="/corbeille" active={tab === "corbeille"} label="Prospects" count={prospects.length} />
-        <TabLink href="/corbeille?onglet=mails" active={tab === "mails"} label="Mails" count={mails.length} />
+        <TabLink href="/corbeille?onglet=mails" active={tab === "mails"} label="Mails" count={mails.length + received.length} />
         <TabLink href="/corbeille?onglet=exclus" active={tab === "exclus"} label="Exclus" count={exclusions.length} />
       </nav>
 
       {tab === "corbeille" && <TrashList prospects={prospects} />}
-      {tab === "mails" && <MailTrashList items={mails} />}
+      {tab === "mails" && (
+        <div className="space-y-6">
+          <section>
+            <h2 className="mb-2 text-[13px] font-semibold text-text">Envoyés et brouillons</h2>
+            <MailTrashList items={mails} />
+          </section>
+          <section>
+            <h2 className="mb-2 text-[13px] font-semibold text-text">Reçus</h2>
+            <ReceivedTrashList items={received} names={names} />
+          </section>
+        </div>
+      )}
       {tab === "exclus" && <ExcludedList exclusions={exclusions} />}
     </>
   );

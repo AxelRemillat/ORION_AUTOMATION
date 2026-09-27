@@ -14,11 +14,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   // Compteur de la corbeille (prospects + mails), affiché dans le menu du compte.
   const supabase = createClient();
-  const [prospects, mails] = await Promise.all([
+  const [prospects, mails, received] = await Promise.all([
     trashCount(supabase),
     supabase.from("messages").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
+    supabase.from("inbound_messages").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
   ]);
-  const count = (prospects.count ?? 0) + (mails.count ?? 0);
+  const count = (prospects.count ?? 0) + (mails.count ?? 0) + (received.count ?? 0);
 
   return (
     <ToastProvider>

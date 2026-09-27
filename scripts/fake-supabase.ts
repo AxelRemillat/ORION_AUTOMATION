@@ -10,6 +10,8 @@
  */
 
 type Row = Record<string, unknown>;
+
+let generated = 0;
 type Filter = (row: Row) => boolean;
 
 const CASCADE: Record<string, { delete: string[]; nullify: string[] }> = {
@@ -133,7 +135,11 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
     }
 
     if (this.op === "insert") {
-      result = (Array.isArray(this.payload) ? this.payload : [this.payload]).map((row) => ({ ...row }));
+      // Comme en base : un `id` est attribué s'il n'est pas fourni.
+      result = (Array.isArray(this.payload) ? this.payload : [this.payload]).map((row) => ({
+        id: `gen-${++generated}`,
+        ...row,
+      }));
       all.push(...result);
     } else if (this.op === "upsert") {
       for (const row of Array.isArray(this.payload) ? this.payload : [this.payload]) {
