@@ -24,7 +24,19 @@ export const MAX_ANALYSIS_LIMIT = 10;
  */
 export const DEFAULT_SCAN_WIDTH = 18;
 export const MIN_SCAN_WIDTH = 5;
-export const MAX_SCAN_WIDTH = 25;
+/**
+ * 60 entreprises examinees au maximum, soit 180 recherches Linkup avec le
+ * facteur de budget de 3.
+ *
+ * Le plafond etait a 25, ce qui bornait le scan a 75 recherches : sur une zone
+ * pauvre en signaux, la boucle s'arretait « plafond atteint » sans avoir de quoi
+ * remplir l'objectif. Monter le plafond ne change rien au cout d'une recherche
+ * ordinaire — c'est un maximum que l'utilisateur choisit, pas une valeur par
+ * defaut — mais il fallait borner le TEMPS : une etape de job coupee a 300 s
+ * serait rejouee depuis le debut, et les recherches deja payees le seraient deux
+ * fois. Voir SCAN_TIME_BUDGET_MS.
+ */
+export const MAX_SCAN_WIDTH = 60;
 
 /** Ramene une saisie utilisateur dans les bornes autorisees. */
 export function clampAnalysisLimit(value: unknown): number {

@@ -385,8 +385,13 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
     throw new JobError(readiness.reason, false, 409, { needsFeeding: true, canForce: true });
   }
 
-  for (const rejected of factsResult.rejectedSignals.filter((item) => item.reason === "homonyme probable")) {
-    warnings.push({ source: "linkup", message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}` });
+  for (const rejected of factsResult.rejectedSignals.filter(
+    (item) => item.reason === "homonyme probable" || item.reason === "autre entreprise",
+  )) {
+    warnings.push({
+      source: "linkup",
+      message: `signal écarté, ${rejected.reason} : ${rejected.entity ?? rejected.label}`,
+    });
   }
 
   const { data: sent } = await ctx.db

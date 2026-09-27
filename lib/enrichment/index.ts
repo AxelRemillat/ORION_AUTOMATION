@@ -381,10 +381,12 @@ export async function deepEnrich(
       parentGroupQuote: group.parentGroupQuote,
     },
   );
-  for (const rejected of attachment.rejected.filter((item) => item.reason === "homonyme probable")) {
+  for (const rejected of attachment.rejected.filter(
+    (item) => item.reason === "homonyme probable" || item.reason === "autre entreprise",
+  )) {
     warnings.push({
       source: "linkup",
-      message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}`,
+      message: `signal écarté, ${rejected.reason} : ${rejected.entity ?? rejected.label}`,
     });
   }
   if (attachment.foreignEntities.length) keyFigures.foreign_entities = attachment.foreignEntities;
@@ -595,6 +597,8 @@ export async function searchAndEnrich(
   const maxPages = plannedPages(first.data.pages);
   const plan = pagePlan(seed, first.data.pages, maxPages);
 
+  // Depart de la boucle : borne le temps d'UNE invocation (cf. SCAN_TIME_BUDGET_MS).
+  const startedAt = Date.now();
   const exclude = context.exclude ?? new Set<string>();
   const seen = new Set<string>();
   let skippedKnown = 0;
@@ -618,6 +622,7 @@ export async function searchAndEnrich(
       limit,
       budget,
       plan.length,
+      Date.now() - startedAt,
     );
     if (!check.go) {
       stop = check.stop;

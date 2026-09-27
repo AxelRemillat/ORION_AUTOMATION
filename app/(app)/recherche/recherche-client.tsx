@@ -293,7 +293,13 @@ export function RechercheClient() {
           style={{ borderColor: "var(--line-soft)" }}
           role="tablist"
         >
-          {(["auto", "manuel", "favoris"] as const).map((value) => (
+          {/*
+            « Signaux d'abord » manquait ICI, et nulle part ailleurs : le mode
+            existait entierement — formulaire, appel serveur, filtres, etat vide —
+            mais son onglet n'a jamais figure dans cette liste. La fonction etait
+            donc injoignable depuis l'ecran depuis le jour de sa livraison.
+          */}
+          {(["auto", "signaux", "manuel", "favoris"] as const).map((value) => (
             <button
               key={value}
               type="button"
