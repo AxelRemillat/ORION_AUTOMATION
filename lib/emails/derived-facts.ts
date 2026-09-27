@@ -460,10 +460,32 @@ export function buildFacts(
   // ouvertures de moins d'un an sont stockees a l'enrichissement. C'est un
   // fait date, verifiable, specifique — et il se raconte sans nommer aucune
   // source : « vous avez ouvert une agence a Perigueux en mars ».
+  /*
+   * RATTACHEMENT VERIFIE, et non plus suppose.
+   *
+   * Une ouverture d'etablissement est ecrite depuis la fiche Pappers du SIREN du
+   * prospect : elle lui appartient par construction. « Par construction » n'est
+   * pas une verification — et une accroche sur une ville a 400 km du siege se
+   * lit comme une confusion d'entreprise meme quand elle est exacte.
+   *
+   * Controle sur SELECTION HABITAT (SIREN 453450256) le 27/09/2026 : Montmoreau
+   * porte le SIRET 45345025600418, que l'annuaire public rattache lui aussi a
+   * SELECTION HABITAT. Aucun homonyme, donc — mais la regle est desormais dans
+   * le code : un SIRET qui ne commence pas par le SIREN du prospect est ECARTE.
+   */
+  const belongsToProspect = (entry: { siret?: string | null }): boolean => {
+    const siret = typeof entry.siret === "string" ? entry.siret.replace(/\s/g, "") : null;
+    // Fiche enrichie avant que le SIRET ne soit conserve : on ne peut pas
+    // verifier, et la source restait la fiche Pappers du prospect.
+    if (!siret) return true;
+    return Boolean(siren) && siret.startsWith(siren as string);
+  };
+
   const openings = (Array.isArray(figures.recent_openings) ? figures.recent_openings : [])
-    .filter((entry): entry is { city: string; date: string } =>
+    .filter((entry): entry is { city: string; date: string; siret?: string | null; sign?: string | null } =>
       Boolean(entry && typeof entry === "object" && typeof (entry as { city?: unknown }).city === "string"
         && typeof (entry as { date?: unknown }).date === "string"))
+    .filter(belongsToProspect)
     .filter((entry) => isHookFresh(entry.date, now))
     .sort((a, b) => b.date.localeCompare(a.date));
 
@@ -483,7 +505,13 @@ export function buildFacts(
           `${cities.join(", ")}. Ouvrir une agence multiplie les allers-retours entre le siege et le terrain.`,
         writerHint:
           "Dis-le comme un fait qu'ils connaissent : « vous avez ouvert une agence a " +
-          `${cities[0]} ». Jamais « selon le registre », jamais le mot etablissement.`,
+          `${cities[0]} ». Jamais « selon le registre », jamais le mot etablissement.` +
+          // Une agence peut porter une AUTRE enseigne que la raison sociale
+          // (Soorts-Hossegor s'appelle « Agence Hamilton »). La nommer par la
+          // raison sociale serait faux ; on donne donc l'enseigne au redacteur.
+          (openings[0].sign && openings[0].sign !== prospect.company_name
+            ? ` Cette agence porte l'enseigne « ${openings[0].sign} » : c'est ce nom-la qu'ils emploient.`
+            : ""),
       },
     );
   }
