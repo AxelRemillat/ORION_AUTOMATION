@@ -100,6 +100,16 @@ export interface ProspectSignal {
   scope?: "groupe";
   /** Entité réellement nommée par un signal de groupe. */
   entity?: string;
+  /**
+   * Contact nominatif retenu par la derniere generation.
+   *
+   * Note sur la fiche pour qu'elle en garde la trace : l'ecran l'affichait
+   * depuis la reponse de generation, et il disparaissait au rechargement.
+   */
+  contact_email?: string;
+  contact_name?: string;
+  contact_position?: string;
+  contact_confidence?: number;
   [key: string]: unknown;
 }
 
