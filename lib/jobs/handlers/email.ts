@@ -2,7 +2,14 @@ import { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
 import { AiCallError, chatJson, type AskFn } from "@/lib/ai/chat";
 import { recordOpenAiUsage } from "@/lib/usage/record";
-import { fetchQuota, findDecisionMaker, findEmailByName, hasHunterKey } from "@/lib/enrichment/hunter";
+import {
+  fetchQuota,
+  findDecisionMaker,
+  findEmailByName,
+  hasHunterKey,
+  isCommercialPosition,
+  isDecisionMakerPosition,
+} from "@/lib/enrichment/hunter";
 import { toDomain } from "@/lib/enrichment/http";
 import type { DecisionMakerContact, EnrichmentWarning } from "@/lib/enrichment/types";
 import { buildFacts } from "@/lib/emails/derived-facts";
@@ -107,9 +114,20 @@ async function loadProspect(ctx: StepContext, id: string): Promise<Prospect> {
  * Recherche du contact nominatif — au moment du brouillon, jamais avant.
  * L'absence de contact est un résultat acceptable (« Bonjour, »).
  */
-export async function findContact(
-  prospect: Prospect,
-): Promise<{ contact: DecisionMakerContact | null; warning?: EnrichmentWarning }> {
+export interface ContactOutcome {
+  contact: DecisionMakerContact | null;
+  warning?: EnrichmentWarning;
+  /**
+   * Autres personnes trouvees sur le domaine.
+   *
+   * Conservees pour l'arbitrage d'apres le PAIN, qui n'est connu qu'a l'etape
+   * suivante : un commercial devient le bon destinataire quand le besoin porte
+   * sur la vente, et reste le mauvais quand il porte sur les operations.
+   */
+  candidates?: DecisionMakerContact[];
+}
+
+export async function findContact(prospect: Prospect): Promise<ContactOutcome> {
   const domain = toDomain(prospect.website);
   if (!domain) return { contact: null, warning: { source: "hunter", message: "aucun site connu" } };
   if (!hasHunterKey()) {
@@ -143,11 +161,27 @@ export async function findContact(
   const newLeader = incomingLeader(figures);
   const query = newLeader ? leaderEmailQuery(newLeader, prospect.website) : null;
   if (query) {
-    const named = await findEmailByName(query.domain, query.firstName, query.lastName, prospect.id);
-    if (named.ok && named.data) return { contact: named.data };
+    const incoming = await findEmailByName(query.domain, query.firstName, query.lastName, prospect.id);
+    if (incoming.ok && incoming.data) return { contact: incoming.data };
   }
 
-  // 1. Recherche de domaine : un decideur, et la liste des personnes trouvees.
+  // 1. LE DIRIGEANT D'ABORD, quand le registre en nomme un.
+  //
+  // C'est lui qui arbitre la facon dont le travail circule chez lui. Chercher
+  // son adresse coute un appel et la donne dans la majorite des cas ; passer
+  // par la recherche de domaine d'abord faisait sortir un commercial et on
+  // s'arretait la. Constate sur MAISONS TERRE D'OC : l'adresse du president
+  // etait meme deja sur la fiche.
+  const named = (known ?? "").trim().split(/\s+/).filter(Boolean);
+  if (named.length >= 2) {
+    const direct = await findEmailByName(domain, named[0], named[named.length - 1], prospect.id);
+    if (direct.ok && direct.data) return { contact: direct.data };
+    if (!direct.ok && direct.quotaExceeded) {
+      return { contact: null, warning: { source: "hunter", message: "quota de recherches atteint pour ce mois" } };
+    }
+  }
+
+  // 2. Recherche de domaine : un decideur, et la liste des personnes trouvees.
   const search = await findDecisionMaker(domain, known, prospect.id);
   if (search.ok && search.data.contact) return { contact: search.data.contact };
 
@@ -159,23 +193,13 @@ export async function findContact(
     return { contact: null, warning: { source: "hunter", message: detail } };
   }
 
-  // 2. Le dirigeant connu, par son PRENOM et son NOM — jamais « tout sauf le
-  // premier mot » : « Jean-Stephane Louis Alain Vilain » se cherche a
-  // « Jean-Stephane » + « Vilain ». Tente meme quand l'etape 1 a echoue.
-  const parts = (known ?? "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const finder = await findEmailByName(domain, parts[0], parts[parts.length - 1], prospect.id);
-    if (finder.ok && finder.data) return { contact: finder.data };
-    if (!finder.ok && finder.quotaExceeded) {
-      return { contact: null, warning: { source: "hunter", message: "quota de recherches atteint pour ce mois" } };
-    }
-  }
-
   // 3. Repli : le meilleur contact nominatif du domaine, sans second appel.
   const fallback = search.ok ? search.data.candidates[0] : null;
+  const candidates = search.ok ? search.data.candidates : [];
   if (fallback) {
     return {
       contact: fallback,
+      candidates,
       warning: {
         source: "hunter",
         message:
@@ -187,7 +211,7 @@ export async function findContact(
 
   // 4. Rien : on le dit, et on ecrit « Bonjour, ».
   const reason = search.ok ? "aucun contact nominatif trouve sur ce domaine" : search.error;
-  return { contact: null, warning: { source: "hunter", message: reason } };
+  return { contact: null, candidates, warning: { source: "hunter", message: reason } };
 }
 
 function storedAngle(prospect: Prospect): BriefAngle | null {
@@ -227,6 +251,45 @@ async function guardAi<T>(run: () => Promise<T>): Promise<T> {
 
 const warningsOf = (ctx: StepContext) => (ctx.job.state.warnings as EnrichmentWarning[] | undefined) ?? [];
 const contactOf = (ctx: StepContext) => (ctx.job.state.contact as DecisionMakerContact | null | undefined) ?? null;
+const candidatesOf = (ctx: StepContext) =>
+  (ctx.job.state.candidates as DecisionMakerContact[] | undefined) ?? [];
+
+/**
+ * Le besoin porte-t-il sur la VENTE ?
+ *
+ * C'est la seule question qui rend un commercial preferable au dirigeant. Un
+ * devis a produire, un rendez-vous a caler, un prospect a relancer : il est
+ * concerne. Un dossier a constituer, une facture a rapprocher, un planning a
+ * tenir : c'est le dirigeant qui arbitre, et ecrire au commercial fait perdre
+ * le mail.
+ */
+const COMMERCIAL_PAIN =
+  /devis|prospect|prospection|relance commerciale|rendez-vous|rdv|vente|vendeur|client entrant|demande entrante|lead/i;
+
+export function painIsCommercial(pain: string): boolean {
+  return COMMERCIAL_PAIN.test(pain);
+}
+
+/**
+ * Destinataire final, une fois le besoin connu.
+ *
+ * `findContact` a pu retenir un commercial faute de mieux. Si le besoin n'est
+ * PAS commercial et qu'un decideur figure parmi les autres personnes trouvees,
+ * c'est lui qu'on prend. Sinon on garde le commercial : il transmettra.
+ */
+export function chooseRecipient(
+  contact: DecisionMakerContact | null,
+  candidates: readonly DecisionMakerContact[],
+  pain: string,
+): DecisionMakerContact | null {
+  if (!contact || painIsCommercial(pain)) return contact;
+  if (!isCommercialPosition(contact.position)) return contact;
+
+  // On ne se rabat que sur un DECIDEUR. Prendre « n'importe qui de non
+  // commercial » ferait descendre d'un directeur du developpement a un agent :
+  // moins commercial, mais moins bien place encore.
+  return candidates.find((item) => isDecisionMakerPosition(item.position)) ?? contact;
+}
 
 const progress = (step: string, pct: number) => ({ step, pct, counts: { scanned: 0, signals: 0, sheets: 0 } });
 
@@ -267,16 +330,19 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
 
   const warnings: EnrichmentWarning[] = [];
   let contact: DecisionMakerContact | null;
+  // Gardes pour l'arbitrage d'apres le pain, a l'etape de redaction.
+  let candidates: DecisionMakerContact[] = [];
   if (params.mode === "full") {
-    const outcome = await findContact(prospect).catch(() => ({ contact: null, warning: undefined }));
+    const outcome = await findContact(prospect).catch(() => ({ contact: null, warning: undefined, candidates: [] }));
     contact = outcome.contact;
+    candidates = outcome.candidates ?? [];
     if (outcome.warning) warnings.push(outcome.warning);
   } else {
     // Hors génération complète, AUCUN appel Hunter : le contact revient du client.
     contact = (params.cachedContact as DecisionMakerContact | null | undefined) ?? null;
   }
   return {
-    state: { contact, warnings },
+    state: { contact, candidates, warnings },
     result: { prospectIds: [prospect.id] },
     progress: params.mode === "rewrite" ? { ...EMAIL_STAGES.strategist, step: "Relecture du brief" } : EMAIL_STAGES.strategist,
   };
@@ -395,7 +461,11 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   const prospect = await loadProspect(ctx, params.prospectId);
   const brief = ctx.job.state.brief as StrategyBrief | undefined;
   if (!brief) throw new JobError("brief manquant : l'étape précédente n'a pas abouti", false, 500);
-  const contact = contactOf(ctx);
+  const contact = chooseRecipient(
+    contactOf(ctx),
+    candidatesOf(ctx),
+    `${brief.pain.task} ${brief.pain.automationIdea}`,
+  );
   const warnings = [...warningsOf(ctx)];
   const loaded = await loadOffer(ctx.db, ctx.userId);
   const factsResult = buildFacts(prospect, contact);
