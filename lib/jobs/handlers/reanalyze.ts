@@ -53,15 +53,39 @@ async function reanalyze(ctx: StepContext): Promise<StepOutcome> {
     website: resolved.data.website ?? prospect.website,
   });
 
+  /*
+   * UNE LECTURE RATEE N'EFFACE PAS CE QU'ON SAVAIT.
+   *
+   * Premiere reanalyse reelle de SELECTION HABITAT, le 27/09/2026 : la lecture
+   * de site a echoue ce jour-la (site_status « non trouve »), et la fiche a
+   * perdu son domaine — `selectionhabitat.com`, pourtant verifie. Consequence
+   * immediate : plus de domaine, donc plus de recherche Hunter possible, donc
+   * plus de contact nominatif. Une reanalyse ne doit jamais appauvrir une fiche.
+   *
+   * Regle : chaque champ n'est ecrase que si le nouvel enrichissement a
+   * quelque chose a mettre a la place. Et quand le site n'a pas ete retrouve,
+   * on garde AUSSI ce qu'on en savait — son statut et son contenu — plutot que
+   * de declarer « non trouve » un site lu la semaine derniere.
+   */
+  const lostTheSite = !enriched.website && Boolean(prospect.website);
+  const previousSiteFacts = lostTheSite
+    ? {
+        ...(prospect.key_figures?.site_status ? { site_status: prospect.key_figures.site_status } : {}),
+        ...(prospect.key_figures?.site_offer ? { site_offer: prospect.key_figures.site_offer } : {}),
+        ...(prospect.key_figures?.site_customers ? { site_customers: prospect.key_figures.site_customers } : {}),
+        ...(prospect.key_figures?.site_vocabulary ? { site_vocabulary: prospect.key_figures.site_vocabulary } : {}),
+      }
+    : {};
+
   const { error } = await ctx.db
     .from("prospects")
     .update({
-      website: enriched.website,
+      website: enriched.website ?? prospect.website,
       email: enriched.email ?? prospect.email,
-      sector: enriched.sector,
-      size_range: enriched.size_range,
-      signals: enriched.signals,
-      key_figures: mergedFigures(prospect.key_figures, enriched.key_figures),
+      sector: enriched.sector ?? prospect.sector,
+      size_range: enriched.size_range ?? prospect.size_range,
+      signals: enriched.signals.length ? enriched.signals : prospect.signals,
+      key_figures: { ...mergedFigures(prospect.key_figures, enriched.key_figures), ...previousSiteFacts },
     })
     .eq("id", prospect.id);
   if (error) throw new Error(`fiche non mise à jour : ${error.message}`);
