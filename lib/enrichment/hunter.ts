@@ -141,6 +141,23 @@ export async function fetchQuota(): Promise<HunterQuota | null> {
 const DECISION_MAKER =
   /\b(pr[ée]sident|p-?dg|pdg|directeur? g[ée]n[ée]ral|directrice g[ée]n[ée]rale|g[ée]rant|co-?fondat|fondat|ceo|coo|cto|cfo|owner|dirigeant|directeur des op[ée]rations|directrice des op[ée]rations|directeur administratif|directrice administrative|daf|directeur financier|directrice financi[èe]re|responsable administratif|chief)\b/i;
 
+/**
+ * Postes COMMERCIAUX.
+ *
+ * Ils valent mieux que rien, mais pas mieux que le dirigeant : un directeur
+ * commercial n'arbitre pas la facon dont les dossiers circulent en interne. On
+ * ne lui ecrit que si le besoin porte sur la vente — devis, prise de rendez-
+ * vous, relance de prospects. Constate sur MAISONS TERRE D'OC, ou le mail
+ * partait a un commercial alors que le pain etait operationnel et que
+ * l'adresse du president etait connue.
+ */
+const COMMERCIAL_POSITION =
+  /commercial|business development|ventes?|sales|account|charg[eé]e? d'affaires|d[eé]veloppement/i;
+
+export function isCommercialPosition(position: string | null | undefined): boolean {
+  return Boolean(position && COMMERCIAL_POSITION.test(position) && !DECISION_MAKER.test(position));
+}
+
 /** `true` si l'intitulé de poste désigne un décideur. */
 export function isDecisionMakerPosition(position: string | null | undefined): boolean {
   return Boolean(position && DECISION_MAKER.test(position));
@@ -169,39 +186,81 @@ function toContact(email: HunterEmail): DecisionMakerContact {
 }
 
 /**
- * Étape 1 — `domain-search`, puis filtrage sur un poste décisionnaire.
- * Renvoie `null` (et non une erreur) quand le domaine est connu mais ne
- * contient aucun décideur : l'étape 2 prendra le relais.
+ * Trace d'un appel Hunter, quel qu'en soit le resultat.
+ *
+ * Avant, seul un appel REUSSI laissait une ligne dans `api_usage` : un appel
+ * qui ne trouvait personne, ou qui echouait, ne laissait aucune trace. On
+ * constatait alors « 4 credits sur 50 » sans pouvoir dire si l'API avait ete
+ * appelee. Desormais chaque appel s'ecrit, avec son issue dans l'operation, et
+ * `units` ne compte que ce que Hunter facture reellement.
  */
+async function trace(
+  operation: string,
+  outcome: "trouve" | "vide" | "erreur",
+  prospectId: string | null | undefined,
+  billed: boolean,
+): Promise<void> {
+  await recordUnitUsage({
+    service: "hunter",
+    operation: `${operation}:${outcome}`,
+    units: billed ? 1 : 0,
+    ...(billed ? {} : { unitCost: 0 }),
+    prospectId,
+  });
+}
+
+/**
+ * Étape 1 — `domain-search`, et ce qu'on en retient.
+ *
+ * `contact` porte le meilleur DECIDEUR ; `candidates` porte tous les contacts
+ * nominatifs, tries. La distinction compte : sur SELECTION HABITAT, Hunter rend
+ * dix personnes reelles — dont un « Business Development Director » a 97 % —
+ * dont aucune ne passe la liste blanche des postes. Les jeter toutes pour
+ * ecrire « Bonjour, » etait un gachis ; l'appelant peut maintenant se rabattre
+ * sur elles sans depenser une seconde recherche.
+ */
+export interface DomainSearchOutcome {
+  contact: DecisionMakerContact | null;
+  candidates: DecisionMakerContact[];
+}
+
 export async function findDecisionMaker(
   domain: string,
   leaderName?: string | null,
   prospectId?: string | null,
-): Promise<Result<DecisionMakerContact | null> & { quotaExceeded?: boolean }> {
+): Promise<Result<DomainSearchOutcome> & { quotaExceeded?: boolean }> {
   const response = await hunterGet<{ emails?: HunterEmail[] }>(
     "domain-search",
     new URLSearchParams({ domain, limit: "10" }),
   );
 
-  // Hunter decompte une recherche de domaine, qu'elle trouve un email ou non.
-  if (response.ok) {
-    await recordUnitUsage({ service: "hunter", operation: "domain-search", units: 1, prospectId });
+  if (!response.ok) {
+    await trace("domain-search", "erreur", prospectId, false);
+    return { ok: false, error: response.error, quotaExceeded: response.quotaExceeded };
   }
-  if (!response.ok) return { ok: false, error: response.error, quotaExceeded: response.quotaExceeded };
 
   const emails = (response.data.emails ?? []).filter((email) => email.value);
-  if (!emails.length) return { ok: true, data: null };
+  // Hunter decompte une recherche de domaine, qu'elle trouve un email ou non.
+  await trace("domain-search", emails.length ? "trouve" : "vide", prospectId, true);
+  if (!emails.length) return { ok: true, data: { contact: null, candidates: [] } };
 
   const leaderLastName = leaderName?.trim().split(/\s+/).pop()?.toLowerCase() ?? null;
   const sorted = [...emails].sort((a, b) => score(b, leaderLastName) - score(a, leaderLastName));
 
-  // Un décideur, ou le dirigeant connu. Sinon rien : on passe à l'étape 2.
   const best = sorted.find(
     (email) =>
       isDecisionMakerPosition(email.position) ||
       (leaderLastName && email.last_name?.toLowerCase() === leaderLastName),
   );
-  return { ok: true, data: best ? toContact(best) : null };
+
+  // Candidats de repli : des PERSONNES, avec un prenom. Une adresse de service
+  // (contact@, info@) n'est pas un interlocuteur et ne doit pas se faire passer
+  // pour un decideur.
+  const candidates = sorted
+    .filter((email) => email.type === "personal" && email.first_name)
+    .map(toContact);
+
+  return { ok: true, data: { contact: best ? toContact(best) : null, candidates } };
 }
 
 /**
@@ -223,10 +282,11 @@ export async function findEmailByName(
     last_name?: string | null;
   }>("email-finder", new URLSearchParams({ domain, first_name: firstName, last_name: lastName }));
 
-  if (response.ok) {
-    await recordUnitUsage({ service: "hunter", operation: "email-finder", units: 1, prospectId });
+  if (!response.ok) {
+    await trace("email-finder", "erreur", prospectId, false);
+    return { ok: false, error: response.error, quotaExceeded: response.quotaExceeded };
   }
-  if (!response.ok) return { ok: false, error: response.error, quotaExceeded: response.quotaExceeded };
+  await trace("email-finder", response.data.email ? "trouve" : "vide", prospectId, true);
   if (!response.data.email) return { ok: true, data: null };
 
   return {

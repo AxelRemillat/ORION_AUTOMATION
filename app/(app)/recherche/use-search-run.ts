@@ -15,7 +15,7 @@ import type { SearchRun } from "@/types";
  * pendant que l'onglet est cache : inutile d'interroger la base pour un ecran
  * que personne ne regarde.
  */
-export function useSearchRun(pollMs: number, enabled = true) {
+export function useSearchRun(pollMs: number, enabled = true, wakeKey: unknown = null) {
   const [run, setRun] = useState<SearchRun | null>(null);
   const [loaded, setLoaded] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,7 +60,9 @@ export function useSearchRun(pollMs: number, enabled = true) {
       if (timer.current) clearTimeout(timer.current);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [enabled, pollMs, read]);
+    // `wakeKey` change au lancement d'un scan : le sondage repart aussitôt à
+    // la cadence rapide, au lieu d'attendre la fin d'un long intervalle.
+  }, [enabled, pollMs, read, wakeKey]);
 
   return { run, loaded, refresh: read };
 }

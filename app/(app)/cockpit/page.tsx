@@ -4,13 +4,14 @@ import { loadPortfolio } from "@/lib/trash/portfolio";
 import type { ActionState } from "@/types";
 import { CockpitHeader } from "./_components/cockpit-header";
 import { ActionQueueCard } from "./_components/versus/action-queue-card";
-import { InboxPanel } from "./_components/inbox-panel";
+import { MailboxPanel } from "./_components/mailbox/mailbox-panel";
+import { buildMailbox, threadsFor } from "./_lib/mailbox-data";
 import { ActivityCard } from "./_components/activity/activity-card";
 import { SignalsCard } from "./_components/signals-card";
 import { EXAMPLE_SIGNALS } from "./_lib/example";
 import { buildQueue } from "./_lib/queue";
 import { buildAllPeriods, parseSeriesParam } from "./_lib/series";
-import { inboxEntries, topSignals } from "./_lib/compute";
+import { topSignals } from "./_lib/compute";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -49,8 +50,16 @@ export default async function CockpitPage({
   const states = (statesResult.data ?? []) as ActionState[];
 
   const signals = topSignals(prospects);
-  const mailbox = inboxEntries(inbound, prospects);
-  const unread = mailbox.filter((entry) => entry.unread).length;
+  // Aperçu de la boîte mail : les plus récents ; « Tout voir » → /cockpit/mails.
+  const mailbox = buildMailbox({ prospects, messages, inbound });
+  const recentSent = mailbox.sent.slice(0, 10);
+  const unread = mailbox.counts.nonLus;
+  // Une réponse déjà programmée n'est plus une action à faire.
+  const answered = new Set(
+    messages
+      .filter((message) => message.reply_to_inbound_id && message.send_status === "scheduled")
+      .map((message) => message.reply_to_inbound_id as string),
+  );
 
   // Une seule file, triee par urgence : on n'en montre que la tete. Les
   // relances dues y remontent deja, d'ou le retrait de leur ancien bloc.
@@ -59,7 +68,7 @@ export default async function CockpitPage({
     messages,
     reminders,
     inbound: inbound
-      .filter((message) => !message.handled)
+      .filter((message) => !message.handled && !answered.has(message.id))
       .map((message) => ({ id: message.id, prospect_id: message.prospect_id })),
     states,
   });
@@ -81,7 +90,13 @@ export default async function CockpitPage({
 
       <ActionQueueCard visible={queue.visible} total={queue.total} />
 
-      <InboxPanel entries={mailbox} />
+      <MailboxPanel
+        received={mailbox.received.slice(0, 30)}
+        sent={recentSent}
+        scheduled={mailbox.scheduled}
+        threads={threadsFor(recentSent, messages, inbound)}
+        counts={mailbox.counts}
+      />
 
       <SignalsCard
         signals={signals.length ? signals : EXAMPLE_SIGNALS}

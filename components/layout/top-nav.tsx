@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { BadgeCheck, LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo, ThemeToggle } from "@/components/ui";
-import { ScanBanner } from "./scan-banner";
+import { JobsIndicator } from "./jobs-indicator";
+import { OutboxIndicator } from "./outbox-indicator";
 import { HOME_ITEM, NAV_ITEMS, type NavItem } from "./nav-items";
 
 /**
@@ -52,8 +53,10 @@ export function TopNav({ email, trashCount = 0 }: { email: string; trashCount?: 
 
         {/* Compte */}
         <div className="flex shrink-0 items-center gap-1">
-          {/* Ne s'affiche qu'en dehors de /recherche, ou la carte fait deja foi. */}
-          <ScanBanner />
+          {/* Visible sur toutes les pages tant qu'une recherche ou un mail tourne. */}
+          <JobsIndicator />
+          {/* Envois programmés : à venir, partis, échoués. */}
+          <OutboxIndicator />
           <span className="mr-1 hidden font-data text-[12px] text-muted lg:inline">{email}</span>
           <Link
             href="/corbeille"

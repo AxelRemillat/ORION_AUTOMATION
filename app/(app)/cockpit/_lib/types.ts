@@ -34,6 +34,8 @@ export interface InboxEntry {
   receivedAt: string;
   /** Non lu = pas encore traité depuis le Cockpit. */
   unread: boolean;
+  /** Prospect marqué « ne plus contacter ». */
+  doNotContact: boolean;
 }
 
 /** Une action proposée en tête de Cockpit. */

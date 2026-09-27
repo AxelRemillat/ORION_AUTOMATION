@@ -33,6 +33,10 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 export const MESSAGE_STATUSES = ["draft", "sent"] as const;
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
+/** Cycle d'envoi d'un message, à côté de `status` (draft | sent). */
+export const SEND_STATUSES = ["draft", "scheduled", "sending", "sent", "failed", "cancelled"] as const;
+export type SendStatus = (typeof SEND_STATUSES)[number];
+
 export const DEAL_STATUSES = ["ouvert", "gagne", "perdu"] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
 
@@ -96,6 +100,16 @@ export interface ProspectSignal {
   scope?: "groupe";
   /** Entité réellement nommée par un signal de groupe. */
   entity?: string;
+  /**
+   * Contact nominatif retenu par la derniere generation.
+   *
+   * Note sur la fiche pour qu'elle en garde la trace : l'ecran l'affichait
+   * depuis la reponse de generation, et il disparaissait au rechargement.
+   */
+  contact_email?: string;
+  contact_name?: string;
+  contact_position?: string;
+  contact_confidence?: number;
   [key: string]: unknown;
 }
 
@@ -160,6 +174,29 @@ export interface ProspectKeyFigures {
    * seule, et rien ici ne doit laisser croire à une augmentation.
    */
   capital_after_eur?: number;
+  /**
+   * Date de nomination du dirigeant en poste, telle que Pappers la publie.
+   *
+   * C'est elle qui distingue un dirigeant ENTRANT d'un dirigeant installé. Une
+   * nomination de moins de douze mois est le meilleur moment de prospection
+   * qui existe : les outils et les process se remettent à plat pendant les
+   * premiers mois, pas trois ans après.
+   */
+  leader_since?: string;
+  /**
+   * Ouvertures d'établissements de moins d'un an : ville et date.
+   *
+   * Vient de la liste complète des établissements Pappers, qui porte une
+   * `date_de_creation` par site. Un fait daté, vérifiable, et qui se raconte
+   * sans citer aucun registre : « vous avez ouvert une agence à Périgueux ».
+   */
+  /**
+   * `siret` est conservé pour que le RATTACHEMENT soit vérifiable : un
+   * établissement appartient au prospect si et seulement si son SIRET commence
+   * par son SIREN. Sans lui, le lien était implicite — vrai par construction,
+   * mais impossible à contrôler à la relecture d'une fiche.
+   */
+  recent_openings?: { city: string; date: string; siret?: string | null; sign?: string | null }[];
   [key: string]: unknown;
 }
 
@@ -202,6 +239,10 @@ export type Prospect = {
   deleted_at?: string | null;
   /** Statut au moment de la mise à la corbeille, rendu à la restauration. */
   status_before_delete?: string | null;
+  /** Ne plus jamais écrire à ce prospect : tout envoi est refusé côté serveur. */
+  do_not_contact?: boolean;
+  /** Statut avant « ne plus contacter », rendu quand on lève le blocage. */
+  status_before_dnc?: string | null;
   status: ProspectStatus;
   created_at: string;
   updated_at: string;
@@ -219,6 +260,27 @@ export type Message = {
   /** Fil Gmail : permet de répondre dans la conversation d'origine. */
   thread_id: string | null;
   created_at: string;
+  /**
+   * Corbeille et envoi programmé (migration 20260927124154). Optionnels : une
+   * base pas encore migrée ne les renvoie pas.
+   */
+  deleted_at?: string | null;
+  scheduled_at?: string | null;
+  /** Destinataire confirmé à la programmation. */
+  scheduled_to?: string | null;
+  send_status?: SendStatus;
+  /** Raison lisible du dernier échec d'envoi. */
+  send_error?: string | null;
+  send_attempts?: number;
+  send_started_at?: string | null;
+  /** Notification « parti / échoué » déjà vue. */
+  send_seen_at?: string | null;
+  gmail_message_id?: string | null;
+  /** Réponse à un mail reçu (migration 20260927131230) : même fil Gmail. */
+  reply_to_inbound_id?: string | null;
+  reply_to_gmail_message_id?: string | null;
+  /** Destinataire réel d'un mail parti. */
+  sent_to?: string | null;
 }
 
 /**
@@ -240,6 +302,10 @@ export type InboundMessage = {
   /** Vrai dès qu'une réponse est partie depuis le Cockpit. */
   handled: boolean;
   created_at: string;
+  /** Corbeille (migration 20260927131230) : masqué partout, purgé à J+14. */
+  deleted_at?: string | null;
+  /** Identifiant Gmail du mail reçu, transmis par n8n. */
+  gmail_message_id?: string | null;
 }
 
 export type Deal = {

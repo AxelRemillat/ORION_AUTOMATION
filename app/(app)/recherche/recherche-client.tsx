@@ -15,11 +15,12 @@ import { SavedSearches } from "./saved-searches";
 import { SearchForm, type SearchCriteriaInput } from "./search-form";
 import { SignalsForm, type SignalCriteriaInput } from "./signals-form";
 import { ExcludedSectors } from "./excluded-sectors";
-import type { SignalSourceState } from "@/lib/signals/shared";
-import { DEFAULT_ANALYSIS_LIMIT } from "@/lib/enrichment/limits";
+import { startJob } from "@/lib/jobs/client";
 import { ScanProgress } from "./scan-progress";
 import { ScanSummary, type ScanStats } from "./scan-summary";
 import { useSearchRun } from "./use-search-run";
+import { criteriaLabel, readFinishedScan, signalsLabel } from "./scan-run";
+import type { SearchRun } from "@/types";
 import { SignalFilters } from "./signal-filters";
 
 type Mode = "auto" | "signaux" | "manuel" | "favoris";
@@ -30,66 +31,6 @@ const TAB_LABELS: Record<Mode, string> = {
   manuel: "Ajout manuel",
   favoris: "Favoris",
 };
-
-interface SearchResponse {
-  results: EnrichedCompany[];
-  /** Entreprises trouvees par l'annuaire, bien au-dela de ce qu'on scanne. */
-  total: number;
-  /** Candidats passes au scan Linkup (phase 1). */
-  scanned: number;
-  /** Parmi eux, ceux portant un signal atteste. */
-  withSignal: number;
-  /** Fiches Pappers reellement ouvertes (phase 2). */
-  analysed: number;
-  /** Appels Linkup perdus, comptes a part. */
-  unverified?: number;
-  /** `true` quand le total de l'annuaire est plafonne. */
-  totalCapped?: boolean;
-  /** Zone reellement appliquee, telle que resolue. */
-  zoneLabel?: string | null;
-  /** Entreprises ecartees car deja vues. */
-  skippedKnown?: number;
-  /** Pages d'annuaire lues. */
-  pagesRead?: number;
-  /** Pourquoi la boucle s'est arretee. */
-  stopReason?: string;
-  /** Entreprises ecartees apres enrichissement : effectif hors tranche. */
-  outOfBracket?: string[];
-  /** Entreprises ecartees par le ciblage : structure ou secteur. */
-  excluded?: string[];
-  warnings: EnrichmentWarning[];
-}
-
-interface SignalsResponse {
-  results: EnrichedCompany[];
-  sources: SignalSourceState[];
-  /** Signaux datés lus dans les sources, avant tout rapprochement. */
-  signalsFound: number;
-  /** Identités demandées à l'annuaire — gratuites. */
-  lookups: number;
-  analysed: number;
-  skippedKnown: number;
-  /** Écartées par le ciblage : structure juridique ou secteur exclu. */
-  excluded: string[];
-  outOfBracket: string[];
-  warnings: EnrichmentWarning[];
-}
-
-/**
- * Résumé des sources, affiché là où le mode par critères dit pourquoi le scan
- * s'est arrêté. Une source indisponible doit se voir dans le bilan, pas
- * seulement dans le formulaire : sinon un résultat maigre passe pour un marché
- * vide alors qu'il manque une source.
- */
-function sourceSummary(sources: SignalSourceState[]): string {
-  return sources
-    .map((source) =>
-      source.available
-        ? `${source.label} : ${source.count} signaux`
-        : `${source.label} : ${source.unavailableReason}`,
-    )
-    .join(" · ");
-}
 
 /** Identifie une carte de façon stable entre deux rendus. */
 const keyOf = (company: EnrichedCompany) => company.siren ?? company.company_name;
@@ -160,31 +101,48 @@ export function RechercheClient() {
 
   // Sondage du dernier scan : rapide sur cet ecran, c'est lui qui alimente la
   // barre et qui restitue les resultats au retour sur la page.
-  const { run, loaded } = useSearchRun(1_000);
+  const { run, loaded } = useSearchRun(1_000, true, runId);
   const running = run?.status === "running";
 
+  /** Affiche un scan terminé, tel que le job l'a rangé en base. */
+  function showRun(finished: SearchRun) {
+    const outcome = readFinishedScan(finished);
+    setResults(outcome.results);
+    setWarnings(outcome.warnings);
+    setScan(outcome.scan);
+    setError(outcome.error);
+    setAddStates({});
+    setFavoriteStates({});
+    setSignalFilter([]);
+    setSearched(true);
+  }
+
   useEffect(() => {
-    // Une seule reprise, au premier chargement : ensuite c'est la recherche en
-    // cours qui fait autorite, pas la ligne en base.
+    // Une seule reprise, au premier chargement : un scan en cours est suivi,
+    // un scan terminé est réaffiché — même si l'onglet a été fermé entre-temps.
     if (!loaded || restored.current) return;
     restored.current = true;
     if (!run) return;
 
-    setRunId(run.status === "running" ? run.id : null);
-    if (run.results.length) {
-      setResults(run.results as EnrichedCompany[]);
-      setWarnings(run.warnings as EnrichmentWarning[]);
-      setSearched(true);
+    if (run.status === "running") {
+      setRunId(run.id);
+      setLoading(true);
+    } else if (run.results.length || run.status === "error") {
+      showRun(run);
     }
   }, [loaded, run]);
 
-  /** Enveloppe commune aux deux modes : reset, appel, gestion d'erreur. */
+  useEffect(() => {
+    // Fin du scan suivi : le job l'a clos en base, on affiche son résultat.
+    if (!runId || !run || run.id !== runId || run.status === "running") return;
+    showRun(run);
+    setRunId(null);
+    setLoading(false);
+  }, [run, runId]);
+
+  /** Enveloppe de l'ajout manuel : reset, appel, gestion d'erreur. */
   async function runSearch(
-    request: () => Promise<{
-      results: EnrichedCompany[];
-      warnings: EnrichmentWarning[];
-      scan?: ScanStats;
-    }>,
+    request: () => Promise<{ results: EnrichedCompany[]; warnings: EnrichmentWarning[] }>,
   ) {
     setLoading(true);
     setError(null);
@@ -195,7 +153,7 @@ export function RechercheClient() {
       setAddStates({});
       setFavoriteStates({});
       setSignalFilter([]);
-      setScan(data.scan ?? null);
+      setScan(null);
     } catch (cause) {
       setResults([]);
       setWarnings([]);
@@ -207,76 +165,46 @@ export function RechercheClient() {
     }
   }
 
-  const searchAuto = (criteria: SearchCriteriaInput) => {
-    setLastCriteria(criteria);
-    return runSearch(async () => {
-      // Le job est ouvert AVANT le travail : l'ecran a son identifiant tout de
-      // suite, donc la barre apparait des la premiere seconde.
+  /**
+   * Lance un scan en TÂCHE DE FOND.
+   *
+   * La requête rend la main en quelques millisecondes : le scan tourne côté
+   * serveur (table `jobs`), et l'écran suit sa ligne `search_runs`. Quitter la
+   * page, ou fermer l'app, ne l'arrête plus.
+   */
+  async function launchScan(
+    type: "search_criteria" | "search_signals",
+    label: string,
+    criteria: SearchCriteriaInput | SignalCriteriaInput,
+  ) {
+    setLoading(true);
+    setError(null);
+    setResults([]);
+    setWarnings([]);
+    setScan(null);
+    try {
+      // La ligne est ouverte AVANT le job : la barre apparaît dès la 1re seconde.
       const opened = await postJson<{ id: string }>("/api/search/runs", criteria);
       setRunId(opened.id);
-      const data = await postJson<SearchResponse>("/api/prospects/search", {
-        ...criteria,
-        runId: opened.id,
-      });
+      await startJob(type, { label }, { ...criteria, runId: opened.id });
+    } catch (cause) {
       setRunId(null);
-      return {
-        results: data.results,
-        warnings: data.warnings,
-        scan: {
-          total: data.total,
-          scanned: data.scanned ?? 0,
-          unverified: data.unverified ?? 0,
-          withSignal: data.withSignal ?? data.results.length,
-          analysed: data.analysed ?? data.results.length,
-          // Une recherche sauvegardee avant la refonte n'a pas de plafond.
-          requested: criteria.limit ?? DEFAULT_ANALYSIS_LIMIT,
-          totalCapped: data.totalCapped ?? false,
-          zoneLabel: data.zoneLabel ?? null,
-          skippedKnown: data.skippedKnown ?? 0,
-          pagesRead: data.pagesRead ?? 0,
-          stopReason: data.stopReason,
-          outOfBracket: [...(data.excluded ?? []), ...(data.outOfBracket ?? [])],
-        },
-      };
-    });
+      setLoading(false);
+      setSearched(true);
+      setError(cause instanceof Error ? cause.message : "Recherche impossible.");
+    }
+  }
+
+  const searchAuto = (criteria: SearchCriteriaInput) => {
+    setLastCriteria(criteria);
+    return launchScan("search_criteria", criteriaLabel(criteria), criteria);
   };
 
   const searchBySignals = (criteria: SignalCriteriaInput) => {
     // Pas de `setLastCriteria` : les recherches sauvegardees sont au format du
     // mode par criteres, et melanger les deux rendrait leur relecture fausse.
     setLastCriteria(null);
-    return runSearch(async () => {
-      const opened = await postJson<{ id: string }>("/api/search/runs", criteria);
-      setRunId(opened.id);
-      const data = await postJson<SignalsResponse>("/api/prospects/signals", {
-        ...criteria,
-        runId: opened.id,
-      });
-      setRunId(null);
-      return {
-        results: data.results,
-        warnings: data.warnings,
-        scan: {
-          // Ce mode ne lit pas l'annuaire par pages : « total » est le nombre de
-          // signaux lus, et « scannees » celui des identites resolues. Les deux
-          // sont gratuits, contrairement au scan Linkup du mode par criteres.
-          total: data.signalsFound,
-          scanned: data.lookups,
-          unverified: 0,
-          withSignal: data.results.length,
-          analysed: data.analysed,
-          requested: criteria.limit,
-          totalCapped: false,
-          zoneLabel: `département ${criteria.departement}`,
-          skippedKnown: data.skippedKnown,
-          pagesRead: 0,
-          stopReason: sourceSummary(data.sources),
-          // Les deux listes sont montrees ensemble : un resultat maigre doit
-          // pouvoir s'expliquer par un reglage, pas seulement par le marche.
-          outOfBracket: [...data.excluded, ...data.outOfBracket],
-        },
-      };
-    });
+    return launchScan("search_signals", signalsLabel(criteria), criteria);
   };
 
   const searchManual = (query: string) => {
@@ -365,7 +293,13 @@ export function RechercheClient() {
           style={{ borderColor: "var(--line-soft)" }}
           role="tablist"
         >
-          {(["auto", "manuel", "favoris"] as const).map((value) => (
+          {/*
+            « Signaux d'abord » manquait ICI, et nulle part ailleurs : le mode
+            existait entierement — formulaire, appel serveur, filtres, etat vide —
+            mais son onglet n'a jamais figure dans cette liste. La fonction etait
+            donc injoignable depuis l'ecran depuis le jour de sa livraison.
+          */}
+          {(["auto", "signaux", "manuel", "favoris"] as const).map((value) => (
             <button
               key={value}
               type="button"

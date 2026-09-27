@@ -236,11 +236,19 @@ Règles absolues :
 - N'invente aucune date. Si le document n'en donne pas, mets null.
 - Ne déduis rien : tu rapportes ce qui est écrit, pas ce que tu supposes.
 - Si un document parle d'une entreprise homonyme, ignore-le.
+- UN ÉVÉNEMENT N'EST À ELLE QUE SI ELLE EN EST LE SUJET. Le site d'un cabinet de
+  conseil, d'une banque d'affaires, d'une agence ou d'un intégrateur raconte les
+  opérations de ses CLIENTS : « Groupe Échelle réalise une acquisition au
+  Québec » sur le site d'un conseil en fusions-acquisitions est l'acquisition du
+  Groupe Échelle, pas celle du conseil. N'émets pas cet event. Même règle pour
+  une référence client, un témoignage, une étude de cas, un communiqué commun où
+  l'autre partie agit.
 
 Ce que tu cherches :
 - parentGroup : l'entreprise est présentée comme filiale/membre d'un groupe ou détenue par une société mère. Sinon null.
 - jobPostings : postes ouverts. category = automation (automaticien, robotique, process), data, it, ops (logistique, ADV, planification, back-office), sales, other.
 - events : levée (levée de fonds), ouverture_site (nouveau site, agence, usine), acquisition (rachat), nouveau_client (contrat remporté), nouvelle_offre (nouveau produit ou service), autre.
+  Un event est un ÉVÉNEMENT DATABLE (il a eu ou aura lieu à un moment précis). La présentation de l'entreprise — date de fondation, historique, valeurs, savoir-faire, page « À propos », « Qui sommes-nous », « Notre histoire » ou page « Recrutement » sans poste précis — n'est PAS un event : n'en émets pas.
 - siteSummary : ce que l'entreprise vend (offer), pour qui (customers), et le vocabulaire métier qu'elle emploie (vocabulary). Uniquement depuis son propre site. Sinon null.
 
 Réponds en JSON strict conforme au schéma demandé, sans commentaire.`;

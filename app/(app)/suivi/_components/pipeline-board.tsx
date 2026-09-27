@@ -6,12 +6,16 @@ import { Button, EmptyState, Input, Select } from "@/components/ui";
 import { STAGES } from "../_lib/stages";
 import { PipelineKanban } from "./pipeline-kanban";
 import { ProspectTable } from "./prospect-table";
+import { useOptimisticStatus } from "./use-optimistic-status";
 import type { ProspectRow } from "../_lib/rows";
 
 type View = "kanban" | "table";
 
 /** Pipeline complet : recherche, filtre par étape, bascule colonnes / tableau. */
-export function PipelineBoard({ rows }: { rows: ProspectRow[] }) {
+export function PipelineBoard({ rows: serverRows }: { rows: ProspectRow[] }) {
+  // Statuts optimistes appliqués AVANT filtre et vues : colonne, filtre par
+  // étape et tableau suivent la carte dès le dépôt.
+  const { rows, move } = useOptimisticStatus(serverRows);
   const [view, setView] = useState<View>("kanban");
   const [stage, setStage] = useState<string>("all");
   const [query, setQuery] = useState("");
@@ -90,7 +94,7 @@ export function PipelineBoard({ rows }: { rows: ProspectRow[] }) {
         </div>
       </div>
 
-      {view === "kanban" ? <PipelineKanban rows={filtered} /> : <ProspectTable rows={filtered} />}
+      {view === "kanban" ? <PipelineKanban rows={filtered} onMove={move} /> : <ProspectTable rows={filtered} />}
     </div>
   );
 }

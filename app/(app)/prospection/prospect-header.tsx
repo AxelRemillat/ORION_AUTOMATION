@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin, Sparkles, Users } from "lucide-react";
+import { MapPin, RefreshCw, Sparkles, Users } from "lucide-react";
 import { Badge, Button, Card, CardContent, ProspectStatusBadge } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
 import type { Prospect } from "@/types";
@@ -15,6 +15,8 @@ export function ProspectHeader({
   tone,
   onToneChange,
   onGenerate,
+  onReanalyze,
+  reanalyzing = false,
 }: {
   prospect: Prospect;
   loading: boolean;
@@ -22,6 +24,16 @@ export function ProspectHeader({
   tone: ToneKey;
   onToneChange: (tone: ToneKey) => void;
   onGenerate: () => void;
+  /**
+   * Ré-enrichissement de la FICHE — distinct de la génération du mail.
+   *
+   * « Relancer l'analyse » ne relance que la rédaction : les données de la fiche
+   * ne bougent pas. Une fiche ouverte avant une amélioration de
+   * l'enrichissement restait donc dans son ancien état, sans aucun moyen de la
+   * rafraîchir depuis l'écran.
+   */
+  onReanalyze?: () => void;
+  reanalyzing?: boolean;
 }) {
   const revenue = prospect.key_figures?.revenue_eur;
   // Un prospect perdu a deja dit non : relancer la generation, c'est payer des
@@ -77,8 +89,14 @@ export function ProspectHeader({
             variant={hasAnalysis ? "secondary" : "primary"}
           >
             <Sparkles className="h-4 w-4" aria-hidden />
-            {hasAnalysis ? "Relancer l'analyse" : "Analyser et générer l'email"}
+            {hasAnalysis ? "Régénérer le mail" : "Analyser et générer l'email"}
           </Button>
+          {onReanalyze && (
+            <Button variant="ghost" size="sm" onClick={onReanalyze} loading={reanalyzing} disabled={loading}>
+              <RefreshCw className="h-4 w-4" aria-hidden />
+              Ré-enrichir la fiche
+            </Button>
+          )}
           {closed && (
             <p className="text-[12px] text-muted">
               Prospect clôturé : passez-le hors de « Perdu » pour générer un email.

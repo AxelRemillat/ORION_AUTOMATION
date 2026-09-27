@@ -19,6 +19,10 @@ import { ProspectHeader } from "./prospect-header";
 import { ProspectPicker } from "./prospect-picker";
 import type { UserOffer } from "@/types";
 import { OfferBanner } from "./_components/offer-banner";
+import { FeedingBanner } from "./_components/feeding-banner";
+import { GenerationProgress } from "./_components/generation-progress";
+import { DraftSendBar } from "./_components/draft-send-bar";
+import { useReanalyze } from "./_lib/use-reanalyze";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -39,6 +43,9 @@ export function ProspectionClient({
   offerComplete: boolean;
 }) {
   const router = useRouter();
+  // Ré-enrichissement de la fiche : au retour, on recharge la page pour que le
+  // prospect affiche ses nouveaux signaux et chiffres clés.
+  const { reanalyze, running: reanalyzing } = useReanalyze(() => router.refresh());
   const toast = useToast();
   const [prospects, setProspects] = useState(initialProspects);
   // La liste suit le serveur : une mise à la corbeille (ou son annulation)
@@ -47,13 +54,38 @@ export function ProspectionClient({
   const [selected, setSelected] = useState<Prospect | null>(null);
   const [tone, setTone] = useState<ToneKey>(DEFAULT_TONE);
   const [saving, setSaving] = useState(false);
-  const { result: analysis, draft, setDraft, generating, error, reset, generate, otherAngle, rewrite } =
+  const {
+    result: analysis,
+    draft,
+    setDraft,
+    generating,
+    progress,
+    error,
+    needsFeeding,
+    messageId,
+    load,
+    generate,
+    generateAnyway,
+    otherAngle,
+    rewrite,
+    reset,
+  } =
     useGeneration(tone);
 
+  /** Choisir un prospect recharge son dernier brouillon, ou reprend sa génération. */
   function select(prospect: Prospect) {
     setSelected(prospect);
-    reset();
+    void load(prospect);
   }
+
+  // Lien de la navbar (« /prospection?prospect=… ») : on rouvre ce prospect.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("prospect");
+    const target = id ? initialProspects.find((item) => item.id === id) : null;
+    if (target) select(target);
+    // Au premier rendu seulement : ensuite, c'est la liste qui décide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Enregistre le brouillon relu et avance le prospect dans le pipeline. */
   async function validate() {
@@ -61,13 +93,12 @@ export function ProspectionClient({
     setSaving(true);
     try {
       const supabase = createClient();
-      const { error: messageError } = await supabase.from("messages").insert({
-        prospect_id: selected.id,
-        type: "intro",
-        subject: draft.subject.trim() || null,
-        body: draft.body.trim(),
-        status: "draft",
-      });
+      const content = { subject: draft.subject.trim() || null, body: draft.body.trim() };
+      // Le job a déjà posé le brouillon en base : on le met à jour plutôt que
+      // d'en créer un second.
+      const { error: messageError } = messageId
+        ? await supabase.from("messages").update(content).eq("id", messageId)
+        : await supabase.from("messages").insert({ prospect_id: selected.id, type: "intro", status: "draft", ...content });
       if (messageError) throw new Error(messageError.message);
 
       const { error: prospectError } = await supabase
@@ -122,18 +153,24 @@ export function ProspectionClient({
             tone={tone}
             onToneChange={setTone}
             onGenerate={() => generate(selected)}
+            onReanalyze={() => reanalyze(selected)}
+            reanalyzing={reanalyzing}
           />
 
           <SequenceShell steps={sequences[selected.id] ?? []} />
 
           {error && <ErrorBanner message={error} />}
-
-          {generating && !analysis && (
-            <>
-              <Skeleton className="h-24" />
-              <Skeleton className="h-72" />
-            </>
+          {/* Manque de matiere, pas une panne : on propose de forcer. */}
+          {needsFeeding && selected && (
+            <FeedingBanner
+              message={needsFeeding}
+              loading={generating}
+              onForce={() => generateAnyway(selected)}
+            />
           )}
+
+          {generating && <GenerationProgress progress={progress} />}
+          {generating && !analysis && <Skeleton className="h-72" />}
 
           {analysis && (
             <>
@@ -160,6 +197,18 @@ export function ProspectionClient({
                   to={analysis.contact?.email ?? selected.email}
                 />
               </div>
+
+              {messageId && (
+                <DraftSendBar
+                  key={messageId}
+                  messageId={messageId}
+                  defaultTo={analysis.contact?.email ?? selected.email ?? ""}
+                  // `validate` fait passer un prospect « nouveau » à « à contacter ».
+                  validated={selected.status !== "nouveau"}
+                  companyName={selected.company_name}
+                  onTrashed={reset}
+                />
+              )}
 
               {/* Sous le brouillon : l'angle retenu, et de quoi en changer. */}
               <ChosenAngle

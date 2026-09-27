@@ -121,7 +121,23 @@ export function nearbyEntity(text: string, name: string): string | null {
       words.push(tokens[j]);
     }
     const candidate = words.map((token) => token.norm).join(" ");
-    if (candidate !== target) return words.map((token) => token.raw).join(" ");
+    if (candidate === target) continue;
+
+    /*
+     * Un fragment de LEUR PROPRE nom n'est pas une entite voisine.
+     *
+     * Sur MAISONS TERRE D'OC, le mot-tete est « maisons » : la phrase
+     * « constructeur de maisons individuelles » le contenait sans etre suivie
+     * du reste de la denomination, et « maisons » se retrouvait banni comme
+     * homonyme — un mot du nom du prospect, interdit dans son propre mail.
+     *
+     * Regle : si tous les mots du candidat figurent dans la denomination du
+     * prospect, ce n'est pas une autre entreprise.
+     */
+    const targetWords = new Set(denominationWords(name));
+    if (words.every((token) => targetWords.has(token.norm))) continue;
+
+    return words.map((token) => token.raw).join(" ");
   }
   return null;
 }
@@ -152,6 +168,7 @@ export type Attachment =
   | { kind: "prospect"; basis: "siren" | "domaine" | "dénomination exacte" }
   | { kind: "parent"; entity: string; basis: "registre" | "groupe cité" }
   | { kind: "rejected"; reason: "homonyme probable"; entity: string }
+  | { kind: "rejected"; reason: "autre entreprise"; entity: string }
   | { kind: "rejected"; reason: "non rattaché" };
 
 function hostOf(url: string | null | undefined): string | null {
@@ -161,6 +178,138 @@ function hostOf(url: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * L'entreprise dont parle une phrase, quand elle en nomme une AUTRE.
+ *
+ * Le cas qui a motivé cette règle : ADVISO PARTNERS est une banque d'affaires.
+ * Sur son propre site, chaque page raconte l'opération d'un CLIENT — « Groupe
+ * Échelle réalise une acquisition au Québec ». L'URL était sur le domaine du
+ * prospect, donc la mention était rattachée à lui, et son mail s'ouvrait sur
+ * l'acquisition de quelqu'un d'autre. Le même piège attend les cabinets de
+ * conseil, les agences, les intégrateurs, les holdings : leur site parle de
+ * leurs clients.
+ *
+ * On ne cherche pas à comprendre la phrase. On cherche sa forme la plus
+ * fréquente et la plus nette : un NOM PROPRE en tête, suivi d'un verbe d'action
+ * conjugué. « Groupe Échelle réalise », « Maisons Pierre ouvre », « STEF
+ * rachète ». C'est étroit, et c'est voulu — une règle large écarterait des
+ * signaux vrais.
+ *
+ * Rend `null` quand la phrase ne désigne personne nommément : « Nous ouvrons
+ * une agence », « L'entreprise recrute », « Ouverture d'un nouveau site ».
+ */
+
+/** Verbes d'action qui font d'un nom propre le SUJET d'un événement. */
+const ACTION_VERB =
+  /^(r[eé]alise|annonce|ouvre|rach[eè]te|acquiert|l[eè]ve|signe|remporte|inaugure|lance|reprend|c[eè]de|vend|recrute|nomme|s'implante|d[eé]m[eé]nage|investit|cr[eé]e|finalise|boucle|conclut|poursuit|renforce|d[eé]veloppe|int[eè]gre|absorbe)$/i;
+
+/** Mots qui ouvrent une phrase sans être un nom d'entreprise. */
+const SENTENCE_OPENERS = new Set([
+  "le",
+  "la",
+  "les",
+  "l",
+  "un",
+  "une",
+  "des",
+  "ce",
+  "cette",
+  "ces",
+  "notre",
+  "nos",
+  "votre",
+  "vos",
+  "leur",
+  "leurs",
+  "nous",
+  "vous",
+  "ils",
+  "elles",
+  "il",
+  "elle",
+  "on",
+  "son",
+  "sa",
+  "ses",
+  "depuis",
+  "apres",
+  "avec",
+  "pour",
+  "dans",
+  "en",
+  "au",
+  "aux",
+  "chez",
+  "lentreprise",
+  "lagence",
+  "lequipe",
+  "legroupe",
+]);
+
+/** Formes juridiques : elles font partie du nom, pas de la phrase. */
+const NAME_SUFFIX = new Set(["sas", "sasu", "sarl", "eurl", "sa", "snc", "scop", "sci", "group", "groupe"]);
+
+const isCapitalizedWord = (word: string): boolean => /^\p{Lu}[\p{L}'-]*$/u.test(word);
+
+/**
+ * Nom propre sujet d'un verbe d'action, en tête d'une des phrases du texte.
+ *
+ * On lit au plus les quatre premiers mots : au-delà, ce n'est plus un sujet
+ * mais un complément, et le risque de faux positif grimpe.
+ */
+export function namedSubject(text: string): string | null {
+  const sentences = text
+    .split(/(?<=[.!?])\s+|\n+|\s+[–—]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const sentence of sentences) {
+    const words = sentence.split(/\s+/);
+    const first = words[0]?.replace(/^[«"'(]+/, "") ?? "";
+    if (!isCapitalizedWord(first)) continue;
+    // « L'entreprise », « L'agence » : l'apostrophe fait partie du mot, elle
+    // doit disparaitre avant la comparaison.
+    if (SENTENCE_OPENERS.has(normalizeWord(first).replace(/['’]/g, ""))) continue;
+
+    const parts = [first];
+    for (let index = 1; index < Math.min(words.length, 5); index += 1) {
+      const word = words[index].replace(/[,;:.]+$/, "");
+      if (ACTION_VERB.test(word)) return parts.join(" ");
+      // Le nom se prolonge tant que les mots sont capitalisés ou une forme juridique.
+      if (isCapitalizedWord(word) || NAME_SUFFIX.has(normalizeWord(word))) {
+        parts.push(word);
+        continue;
+      }
+      break;
+    }
+  }
+  return null;
+}
+
+/**
+ * Le texte parle-t-il d'une AUTRE entreprise que le prospect ?
+ *
+ * Deux échappatoires : aucun nom propre n'est sujet d'un verbe d'action, ou ce
+ * sujet est le prospect lui-même. Sinon, c'est de quelqu'un d'autre qu'on parle.
+ *
+ * La première personne n'en est PAS une, et c'est le cœur du cas réel : « Groupe
+ * Échelle réalise une acquisition au Québec avec l'accompagnement de nos
+ * équipes » dit « nos » tout en parlant du client. Un « nous » ne rend pas la
+ * phrase leur actualité ; le sujet, si.
+ */
+export function speaksOfAnother(text: string, prospectName: string): string | null {
+  const words = new Set(denominationWords(prospectName));
+  const subject = namedSubject(text);
+  if (!subject) return null;
+
+  const subjectWords = denominationWords(subject).filter((word) => !NAME_SUFFIX.has(word));
+  if (!subjectWords.length) return null;
+  // Le sujet reprend un mot distinctif du prospect : c'est bien lui.
+  if (subjectWords.some((word) => words.has(word))) return null;
+
+  return subject;
 }
 
 /** Une entité voisine est-elle le groupe du prospect, preuve à l'appui ? */
@@ -196,6 +345,18 @@ export function attachMention(
   const domain = hostOf(target.website);
   const host = hostOf(mention.url);
   if (domain && host && (host === domain || host.endsWith(`.${domain}`))) {
+    /*
+     * Etre sur leur domaine ne suffit PAS.
+     *
+     * Une banque d'affaires, un cabinet de conseil, une agence racontent sur
+     * leur site les operations de leurs CLIENTS. Sur ADVISO PARTNERS, « Groupe
+     * Echelle realise une acquisition au Quebec » etait ainsi comptee comme une
+     * acquisition d'ADVISO. Quand la phrase donne un autre nom propre pour
+     * sujet, c'est de lui qu'elle parle — sauf s'il est prouve que c'est leur
+     * groupe.
+     */
+    const other = speaksOfAnother(mention.text, target.name);
+    if (other) return provenParent(other, links) ?? { kind: "rejected", reason: "autre entreprise", entity: other };
     return { kind: "prospect", basis: "domaine" };
   }
 
@@ -214,7 +375,7 @@ export function attachMention(
 export interface RejectedSignal {
   label: string;
   url?: string;
-  reason: "homonyme probable" | "non rattaché";
+  reason: "homonyme probable" | "autre entreprise" | "non rattaché";
   entity: string | null;
 }
 
@@ -232,6 +393,15 @@ export interface SignalAttachment {
  * Les signaux déduits (sans citation ni URL) ne décrivent aucune entité web :
  * ils passent tels quels.
  */
+/**
+ * Sources dont le rattachement est etabli par le SIREN, pas par le texte.
+ *
+ * Le greffe et France Travail publient une annonce POUR un SIREN : il n'y a
+ * pas d'homonymie possible, et leur libelle n'a aucune raison de nommer
+ * l'entreprise.
+ */
+const OFFICIAL_SOURCES = new Set(["BODACC", "France Travail", "La Bonne Boite"]);
+
 export function attachSignals(
   signals: readonly ProspectSignal[],
   target: EntityTarget,
@@ -247,6 +417,18 @@ export function attachSignals(
       kept.push(signal);
       continue;
     }
+    // Une annonce officielle est rattachee par le SIREN de l'annonce : c'est le
+    // rattachement le plus fort qui existe, plus fort qu'une citation nominative.
+    //
+    // Sans cette exception, la regle d'ancrage — ecrite pour les resultats web —
+    // ecartait TOUS les signaux BODACC : leur citation est le libelle du greffe
+    // (« Modification du capital »), qui ne nomme pas l'entreprise. Constate sur
+    // SUN'R GROUPE et L'ARBRE A SOUHAITS le 26/09/2026 : signal trouve, date,
+    // vrai, et jete a la redaction.
+    if (signal.dateBasis === "source" && typeof signal.source === "string" && OFFICIAL_SOURCES.has(signal.source)) {
+      kept.push(signal);
+      continue;
+    }
     const verdict = attachMention(
       { text: `${signal.label ?? ""}\n${quote}`, url: signal.url },
       target,
@@ -256,7 +438,12 @@ export function attachSignals(
     if (verdict.kind === "prospect") kept.push(signal);
     else if (verdict.kind === "parent") kept.push({ ...signal, scope: "groupe", entity: verdict.entity });
     else {
-      const entity = verdict.reason === "homonyme probable" ? verdict.entity : null;
+      const entity =
+        verdict.reason === "homonyme probable" || verdict.reason === "autre entreprise"
+          ? verdict.entity
+          : null;
+      // Le nom d'une autre entreprise ne doit jamais sortir dans un mail, qu'il
+      // s'agisse d'un homonyme ou du client dont leur site raconte l'operation.
       if (entity) foreign.add(entity);
       rejected.push({ label: signal.label, url: signal.url, reason: verdict.reason, entity });
     }
@@ -300,13 +487,23 @@ export function naturalCase(name: string): string {
   const raw = tokens.map((token) => token.raw).join(" ");
   if (raw !== raw.toUpperCase()) return name.replace(/\s+(SAS|SASU|SARL|EURL|SA|SNC)\s*$/, "").trim();
 
-  return tokens
-    .map((token, index) => {
-      const lower = token.raw.toLowerCase();
-      if (index > 0 && LOWER_WORDS.has(lower)) return lower;
-      // Sigle court sans voyelle (« SNCF » exclu, trop long) : on le garde.
-      if (token.raw.length <= 3 && !/[AEIOUY]/.test(token.raw)) return token.raw;
-      return lower.charAt(0).toUpperCase() + lower.slice(1);
-    })
-    .join(" ");
+  const cased = tokens.map((token, index) => {
+    const lower = token.raw.toLowerCase();
+    if (index > 0 && LOWER_WORDS.has(lower)) return lower;
+    // Sigle court sans voyelle (« SNCF » exclu, trop long) : on le garde.
+    if (token.raw.length <= 3 && !/[AEIOUY]/.test(token.raw)) return token.raw;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  });
+
+  // Les separateurs d'origine sont CONSERVES : le tokeniseur ignore
+  // l'apostrophe, et joindre par des espaces ecrivait « L ARBRE A SOUHAITS »
+  // en « L Arbre A Souhaits » — vu dans un mail reel le 26/09/2026. Une
+  // apostrophe ou un trait d'union se recolle sans espace.
+  let out = cased[0];
+  for (let index = 1; index < tokens.length; index += 1) {
+    const between = name.slice(tokens[index - 1].end, tokens[index].start);
+    const glue = /['’-]/.test(between) ? between.replace(/\s+/g, "") : " ";
+    out += glue + cased[index];
+  }
+  return out;
 }

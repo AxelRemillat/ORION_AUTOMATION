@@ -37,6 +37,10 @@ permissions:
   contents: write
   pull-requests: write
   actions: write
+  # statusCheckRollup (gh pr view) lit les check runs et les statuts de commit :
+  # sans ces deux droits, GraphQL répond « Resource not accessible by integration ».
+  checks: read
+  statuses: read
 
 jobs:
   merge:

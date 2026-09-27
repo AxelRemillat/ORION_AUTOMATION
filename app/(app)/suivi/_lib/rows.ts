@@ -21,6 +21,29 @@ export interface ProspectRow {
   nextDueAt: string | null;
   value: DealValue;
   action: NextAction;
+  /** Prochain envoi programmé (ISO), ou le dernier échec d'envoi. */
+  sendState: ProspectSendState | null;
+}
+
+export interface ProspectSendState {
+  sendStatus: "scheduled" | "failed";
+  scheduledAt: string | null;
+  sendError: string | null;
+}
+
+/**
+ * Badge d'envoi d'un prospect : son prochain mail programmé, sinon un envoi en
+ * échec (à reprendre). Ignore brouillons ordinaires et mails partis.
+ */
+export function prospectSendState(own: Message[]): ProspectSendState | null {
+  const scheduled = own
+    .filter((message) => message.send_status === "scheduled" && message.scheduled_at && !message.deleted_at)
+    .sort((a, b) => (a.scheduled_at as string).localeCompare(b.scheduled_at as string))[0];
+  if (scheduled) {
+    return { sendStatus: "scheduled", scheduledAt: scheduled.scheduled_at ?? null, sendError: scheduled.send_error ?? null };
+  }
+  const failed = own.find((message) => message.send_status === "failed" && !message.deleted_at);
+  return failed ? { sendStatus: "failed", scheduledAt: null, sendError: failed.send_error ?? null } : null;
 }
 
 export interface DueReminderRow {
@@ -65,7 +88,11 @@ export function buildRows(
       .filter((message) => message.status === "sent" && message.sent_at)
       .map((message) => message.sent_at as string)
       .sort();
-    const draftsCount = own.filter((message) => message.status === "draft").length;
+    // Un programmé partira seul : ce n'est plus un brouillon « à envoyer ».
+    const draftsCount = own.filter(
+      (message) =>
+        message.status === "draft" && message.send_status !== "scheduled" && message.send_status !== "sending",
+    ).length;
     const nextDueAt = nextDue.get(prospect.id) ?? null;
 
     return {
@@ -81,6 +108,7 @@ export function buildRows(
       nextDueAt,
       value: dealValue(dealsByProspect.get(prospect.id) ?? []),
       action: nextAction({ status: prospect.status, draftsCount, nextDueAt }),
+      sendState: prospectSendState(own),
     };
   });
 }

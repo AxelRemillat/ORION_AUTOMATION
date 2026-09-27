@@ -6,42 +6,45 @@ import { Check, Send, Sparkles } from "lucide-react";
 import { Button, Card, CardContent, Input, Label, Textarea, useToast } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
 import { postJson } from "@/lib/enrichment/api-client";
+import { saveReply } from "@/lib/outbox/actions";
+import type { ReplyDraft } from "@/lib/outbox/reply-draft";
+import { MailActions } from "@/components/outbox/mail-actions";
+import { MailTrashButton } from "@/components/outbox/mail-trash-button";
+import { ScheduleDialog } from "@/components/outbox/schedule-dialog";
 
 /**
- * Composeur de réponse — mode SEMI-AUTO, comme le reste de l'app.
- *
- * L'IA propose, l'utilisateur relit et corrige, et RIEN ne part sans un clic
- * explicite sur « Valider et envoyer ». L'envoi réel passe par le pipeline n8n
- * existant (`/api/emails/send`), en transportant le `thread_id` pour que la
- * réponse atterrisse dans la conversation Gmail d'origine.
+ * Composeur de réponse — mode SEMI-AUTO : l'IA propose, l'utilisateur relit,
+ * et RIEN ne part sans un clic. La réponse est enregistrée comme brouillon
+ * rattaché au mail reçu (même fil Gmail) : on peut l'envoyer tout de suite, la
+ * programmer, la mettre à la corbeille, ou la retrouver plus tard.
  */
 export function ReplyComposer({
   inboundId,
   prospectId,
-  threadId,
   defaultTo,
+  draft,
 }: {
   inboundId: string;
   /** `null` quand l'expéditeur ne correspond à aucun prospect connu. */
   prospectId: string | null;
-  threadId: string | null;
   defaultTo: string;
+  /** Brouillon de réponse déjà enregistré (non envoyé), s'il y en a un. */
+  draft: ReplyDraft | null;
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [to, setTo] = useState(defaultTo);
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [to, setTo] = useState(draft?.scheduled_to ?? defaultTo);
+  const [subject, setSubject] = useState(draft?.subject ?? "");
+  const [body, setBody] = useState(draft?.body ?? "");
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
   const [marking, setMarking] = useState(false);
+  const scheduled = draft?.send_status === "scheduled" || draft?.send_status === "sending";
 
-  async function draft() {
+  async function propose() {
     setDrafting(true);
     try {
-      const data = await postJson<{ subject: string; body: string }>("/api/emails/reply", {
-        inboundId,
-      });
+      const data = await postJson<{ subject: string; body: string }>("/api/emails/reply", { inboundId });
       setSubject(data.subject);
       setBody(data.body);
     } catch (cause) {
@@ -54,51 +57,26 @@ export function ReplyComposer({
   /** Clôt l'entrant sans répondre — utile pour un refus ou un message traité ailleurs. */
   async function markHandled() {
     setMarking(true);
-    try {
-      const { error } = await createClient()
-        .from("inbound_messages")
-        .update({ handled: true })
-        .eq("id", inboundId);
-      if (error) throw new Error(error.message);
-      toast.success("Message classé comme traité.");
-      router.push("/cockpit");
-      router.refresh();
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Impossible de classer le message.");
-      setMarking(false);
+    const { error } = await createClient().from("inbound_messages").update({ handled: true }).eq("id", inboundId);
+    if (error) {
+      toast.error(error.message);
+      return setMarking(false);
     }
+    toast.success("Message classé comme traité.");
+    router.push("/cockpit");
+    router.refresh();
   }
 
+  const save = () => saveReply(inboundId, subject, body);
+
   async function send() {
-    if (!prospectId) return;
     setSending(true);
-    const supabase = createClient();
     try {
-      // 1. Le brouillon relu devient un message en base…
-      const { data: message, error } = await supabase
-        .from("messages")
-        .insert({
-          prospect_id: prospectId,
-          type: "reponse",
-          subject: subject.trim() || null,
-          body: body.trim(),
-          status: "draft",
-          thread_id: threadId,
-        })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-
-      // 2. …puis part par le pipeline d'envoi existant.
-      await postJson("/api/emails/send", {
-        to: to.trim(),
-        prospect_id: prospectId,
-        message_id: message.id,
-      });
-
-      // 3. L'entrant est soldé seulement une fois le mail parti.
-      await supabase.from("inbound_messages").update({ handled: true }).eq("id", inboundId);
-
+      // Le brouillon (rattaché au fil) part par le pipeline d'envoi commun, qui
+      // solde aussi le mail reçu.
+      const saved = await save();
+      if (!saved.ok) throw new Error(saved.error);
+      await postJson("/api/emails/send", { to: to.trim(), prospect_id: prospectId, message_id: saved.messageId });
       toast.success("Réponse envoyée. Le prospect passe en discussion.");
       router.push("/cockpit");
       router.refresh();
@@ -113,9 +91,9 @@ export function ReplyComposer({
       <Card>
         <CardContent className="flex flex-col items-start gap-3 p-5">
           <p className="text-[13px] leading-relaxed text-muted">
-            Cette adresse ne correspond à aucun prospect enregistré. La réponse assistée
-            s&apos;appuie sur la fiche entreprise et l&apos;historique : ajoutez d&apos;abord le
-            contact depuis la Recherche, ou répondez directement depuis votre messagerie.
+            Cette adresse ne correspond à aucun prospect enregistré. La réponse assistée s&apos;appuie sur la fiche
+            entreprise et l&apos;historique : ajoutez d&apos;abord le contact depuis la Recherche, ou répondez
+            directement depuis votre messagerie.
           </p>
           <Button variant="secondary" loading={marking} onClick={markHandled}>
             <Check className="h-4 w-4" aria-hidden />
@@ -126,35 +104,50 @@ export function ReplyComposer({
     );
   }
 
+  if (draft && scheduled) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-5">
+          <h2 className="text-[15px] font-semibold tracking-tight text-text">Réponse programmée</h2>
+          {draft.subject && <p className="text-sm font-medium text-text">{draft.subject}</p>}
+          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted">{draft.body}</p>
+          <MailActions
+            state={{
+              messageId: draft.id,
+              sendStatus: draft.send_status,
+              scheduledAt: draft.scheduled_at,
+              scheduledTo: draft.scheduled_to,
+              sendError: draft.send_error,
+            }}
+            defaultTo={defaultTo}
+            label="la réponse"
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const ready = Boolean(body.trim() && to.trim());
   return (
     <Card>
       <CardContent className="flex flex-col gap-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-[15px] font-semibold tracking-tight text-text">Votre réponse</h2>
-          <Button size="sm" variant="secondary" loading={drafting} onClick={draft}>
+          <Button size="sm" variant="secondary" loading={drafting} onClick={propose}>
             <Sparkles className="h-4 w-4" aria-hidden />
             {body ? "Regénérer" : "Proposer un brouillon"}
           </Button>
         </div>
+        {draft?.send_error && <p className="text-[12px] text-lost-ink">{draft.send_error}</p>}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Label htmlFor="destinataire">Destinataire</Label>
-            <Input
-              id="destinataire"
-              type="email"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-            />
+            <Input id="destinataire" type="email" value={to} onChange={(event) => setTo(event.target.value)} />
           </div>
           <div>
             <Label htmlFor="objet">Objet</Label>
-            <Input
-              id="objet"
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
-              placeholder="Re : …"
-            />
+            <Input id="objet" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Re : …" />
           </div>
         </div>
 
@@ -171,17 +164,26 @@ export function ReplyComposer({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button loading={sending} disabled={!body.trim() || !to.trim()} onClick={send}>
+          <Button loading={sending} disabled={!ready} onClick={send}>
             <Send className="h-4 w-4" aria-hidden />
             Valider et envoyer
           </Button>
+          <ScheduleDialog messageId={draft?.id ?? null} defaultTo={to} prepare={save} disabled={!ready} />
           <Button variant="ghost" loading={marking} onClick={markHandled}>
             <Check className="h-4 w-4" aria-hidden />
             Traité sans répondre
           </Button>
-          <span className="text-xs text-muted">
-            Rien ne part tant que vous n&apos;avez pas validé.
-          </span>
+          {draft && (
+            <MailTrashButton
+              messageId={draft.id}
+              label="le brouillon de réponse"
+              onTrashed={() => {
+                setSubject("");
+                setBody("");
+              }}
+            />
+          )}
+          <span className="text-xs text-muted">Rien ne part tant que vous n&apos;avez pas validé.</span>
         </div>
       </CardContent>
     </Card>

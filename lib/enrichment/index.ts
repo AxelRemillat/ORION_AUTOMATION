@@ -41,11 +41,13 @@ import {
   type ScanStop,
 } from "./scan-plan";
 import { fetchPappers, hasPappersKey } from "./pappers";
+import { isHookFresh } from "@/lib/signals/dating";
 import { fetchWebResults, LINKUP_CONCURRENCY, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
 import { effectifFloor } from "./naf";
 import { extractSignals, type Extraction } from "./extract";
 import { extractionToSignals, mergeSignals } from "./structured-signals";
+import { dedupeFacts, separateSiteFacts, type SiteFact } from "./site-facts";
 import { checkJobPosting } from "./job-posting";
 import { assessGroup } from "./group";
 import { attachSignals } from "./entity-match";
@@ -109,6 +111,8 @@ interface ScanResult {
    * seconde recherche Linkup par entreprise.
    */
   web: WebResult[];
+  /** Pages institutionnelles lues au scan : faits « site », pas des signaux. */
+  siteFacts: SiteFact[];
   warning?: EnrichmentWarning;
 }
 
@@ -130,6 +134,7 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
       website: null,
       signals: [],
       web: [],
+      siteFacts: [],
       warning: { source: "linkup", message: web.error },
     };
   }
@@ -138,9 +143,14 @@ async function scanSignals(base: CompanyBase): Promise<ScanResult> {
   // (sans lui on perd la moitie de la confiance d'un signal), et il evite plus
   // tard a Hunter de chercher le domaine.
   const website = base.website ?? guessOwnWebsite(base.company_name, web.data);
-  const signals = qualifyWebResults(web.data, { name: base.company_name, website });
+  // Une page « Qui sommes-nous » ne rend pas une entreprise chaude : elle est
+  // retiree des signaux AVANT le classement, et gardee comme fait « site ».
+  const { signals, siteFacts } = separateSiteFacts(
+    qualifyWebResults(web.data, { name: base.company_name, website }),
+    web.data,
+  );
 
-  return { base, website, signals, web: web.data };
+  return { base, website, signals, web: web.data, siteFacts };
 }
 
 /**
@@ -165,6 +175,8 @@ export interface DeepEnrichOptions {
    * preuves textuelles, et sortent en premier.
    */
   attachedSignals?: ProspectSignal[];
+  /** Faits « site » deja isoles au scan, rejoints a ceux de l'extraction. */
+  siteFacts?: SiteFact[];
 }
 
 /**
@@ -204,6 +216,20 @@ export async function deepEnrich(
       if (data.capital_eur != null) keyFigures.capital_eur = data.capital_eur;
       if (data.leader) keyFigures.leader = data.leader;
       if (data.leader_role) keyFigures.leader_role = data.leader_role;
+      if (data.leader_since) keyFigures.leader_since = data.leader_since;
+      // Ouvertures de moins d'un an, les trois plus recentes : au-dela, le
+      // fait ne dit plus rien du moment present, et la liste devient un
+      // annuaire d'agences que personne ne lira.
+      const openings = data.openings
+        .filter((opening) => isHookFresh(opening.date))
+        .slice(0, 3)
+        .map((opening) => ({
+          city: opening.city,
+          date: opening.date,
+          siret: opening.siret,
+          sign: opening.sign,
+        }));
+      if (openings.length) keyFigures.recent_openings = openings;
     } else {
       warnings.push({ source: "pappers", message: pappers.error });
     }
@@ -337,8 +363,13 @@ export async function deepEnrich(
   // verifie, ni la denomination exacte n'est pas celui du prospect. S'il
   // nomme une entite voisine liee par un lien capitalistique prouve, il
   // devient un signal de groupe ; sinon il est ecarte.
+  // Seuls les evenements datables restent des signaux ; une presentation de
+  // soi (« Fondee en 1969 », page Recrutement generique) devient un fait site.
+  const separated = separateSiteFacts(mergeSignals(structured, webSignals), webResults);
+  const siteFacts = dedupeFacts([...(options.siteFacts ?? []), ...separated.siteFacts]);
+  if (siteFacts.length) keyFigures.site_facts = siteFacts;
   const attachment = attachSignals(
-    mergeSignals(structured, webSignals),
+    separated.signals,
     {
       name: base.company_name,
       siren: base.siren,
@@ -350,10 +381,12 @@ export async function deepEnrich(
       parentGroupQuote: group.parentGroupQuote,
     },
   );
-  for (const rejected of attachment.rejected.filter((item) => item.reason === "homonyme probable")) {
+  for (const rejected of attachment.rejected.filter(
+    (item) => item.reason === "homonyme probable" || item.reason === "autre entreprise",
+  )) {
     warnings.push({
       source: "linkup",
-      message: `signal écarté, homonyme probable : ${rejected.entity ?? rejected.label}`,
+      message: `signal écarté, ${rejected.reason} : ${rejected.entity ?? rejected.label}`,
     });
   }
   if (attachment.foreignEntities.length) keyFigures.foreign_entities = attachment.foreignEntities;
@@ -386,11 +419,13 @@ export async function enrichCompany(
   let identity = base;
 
   let webResults: WebResult[] = [];
+  let siteFacts: SiteFact[] = [];
   if (options.withSignals !== false) {
     if (hasLinkupKey()) {
       const scan = await scanSignals(base);
       webSignals = scan.signals;
       webResults = scan.web;
+      siteFacts = scan.siteFacts;
       if (scan.warning) warnings.push(scan.warning);
       if (scan.website) identity = { ...base, website: base.website ?? scan.website };
     } else {
@@ -398,7 +433,7 @@ export async function enrichCompany(
     }
   }
 
-  const enriched = await deepEnrich(identity, webSignals, webResults);
+  const enriched = await deepEnrich(identity, webSignals, webResults, { siteFacts });
   return { ...enriched, warnings: [...warnings, ...enriched.warnings] };
 }
 
@@ -562,6 +597,8 @@ export async function searchAndEnrich(
   const maxPages = plannedPages(first.data.pages);
   const plan = pagePlan(seed, first.data.pages, maxPages);
 
+  // Depart de la boucle : borne le temps d'UNE invocation (cf. SCAN_TIME_BUDGET_MS).
+  const startedAt = Date.now();
   const exclude = context.exclude ?? new Set<string>();
   const seen = new Set<string>();
   let skippedKnown = 0;
@@ -585,6 +622,7 @@ export async function searchAndEnrich(
       limit,
       budget,
       plan.length,
+      Date.now() - startedAt,
     );
     if (!check.go) {
       stop = check.stop;
@@ -682,6 +720,16 @@ export async function searchAndEnrich(
   const outOfBracket: string[] = [];
   const excluded: string[] = [];
   const results: EnrichedCompany[] = [];
+  /**
+   * Fiches gardees dont l'effectif reste inconnu.
+   *
+   * Tenues a part pour etre ajoutees APRES les effectifs confirmes : une
+   * recherche « 10 a 49 salaries » doit montrer d'abord ce qu'elle a pu
+   * verifier. Elles ne sont pas jetees pour autant — l'INSEE ne publie pas la
+   * tranche des entreprises jeunes, et les rejeter viderait la moitie des
+   * resultats.
+   */
+  const unknownHeadcount: EnrichedCompany[] = [];
 
   // Ciblage applique AVANT la phase 2 : une association ou une auto-ecole ne
   // doit pas consommer un appel Pappers. Le meme module sert aux deux modes,
@@ -708,36 +756,47 @@ export async function searchAndEnrich(
       pagesPlanned: plan.length,
       scanned: scannedCount,
       withSignal: hot.length,
-      analysed: results.length,
+      analysed: results.length + unknownHeadcount.length,
       analysedPlanned,
       step,
     });
 
   if (queue.length) await reportEnrich("Ouverture des fiches");
 
-  for (let index = 0; index < queue.length && results.length < limit; index += CONCURRENCY) {
+  const kept = () => results.length + unknownHeadcount.length;
+
+  for (let index = 0; index < queue.length && kept() < limit; index += CONCURRENCY) {
     const batch = queue.slice(index, index + CONCURRENCY);
     const enriched = await mapWithConcurrency(batch, CONCURRENCY, (item) =>
       deepEnrich(
         { ...item.base, website: item.base.website ?? item.website },
         item.signals,
         item.web,
+        { siteFacts: item.siteFacts },
       ),
     );
 
     for (const company of enriched) {
-      if (results.length >= limit) break;
+      if (kept() >= limit) break;
       const headcount =
         typeof company.key_figures.headcount === "number" ? company.key_figures.headcount : null;
       if (bracket && checkBracket(headcount, bracket) === "hors tranche") {
         outOfBracket.push(outOfBracketReason(company.company_name, headcount, bracket));
         continue;
       }
-      results.push(company);
+      // Effectif inconnu : la fiche est CONSERVEE — la rejeter faute
+      // d'information reviendrait a jeter les jeunes entreprises, dont l'INSEE
+      // ne publie pas encore la tranche — mais elle passe apres celles dont
+      // l'effectif est confirme. La carte porte un badge « effectif inconnu ».
+      if (headcount === null) unknownHeadcount.push(company);
+      else results.push(company);
     }
 
-    await reportEnrich(`Ouverture des fiches ${results.length}/${analysedPlanned}`);
+    await reportEnrich(`Ouverture des fiches ${results.length + unknownHeadcount.length}/${analysedPlanned}`);
   }
+
+  // Les effectifs confirmes d'abord, les inconnus ensuite.
+  results.push(...unknownHeadcount.slice(0, Math.max(0, limit - results.length)));
 
   return {
     results,

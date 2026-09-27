@@ -132,15 +132,38 @@ export function isOfferComplete(offer: Partial<UserOffer> | null | undefined): b
   );
 }
 
-/** Complète une ligne partielle avec les valeurs par défaut. */
+/**
+ * Complète une ligne avec les valeurs par défaut — et SEULEMENT ce qu'il faut.
+ *
+ * La version précédente filtrait les valeurs `null` de la ligne avant de les
+ * superposer aux défauts. Conséquence : tout champ vidé volontairement
+ * réapparaissait rempli au rechargement suivant. Axel effaçait un titre, le
+ * retrouvait au prochain passage, et n'avait aucun moyen de le vider.
+ *
+ * La règle est maintenant explicite : **un défaut ne comble qu'une absence, pas
+ * un vide choisi**.
+ *   - aucune ligne en base → tout vient des défauts (le préremplissage) ;
+ *   - clé absente de la ligne → défaut (ligne partielle, cas des tests) ;
+ *   - clé présente, même à `null` → la valeur de la ligne gagne, telle quelle.
+ */
 export function withDefaults(row: Partial<UserOffer> | null | undefined, userId = ""): UserOffer {
-  return {
-    user_id: row?.user_id ?? userId,
-    created_at: row?.created_at ?? "",
-    updated_at: row?.updated_at ?? "",
+  const base: UserOffer = {
     ...OFFER_DEFAULTS,
-    ...Object.fromEntries(Object.entries(row ?? {}).filter(([, value]) => value !== null && value !== undefined)),
+    user_id: userId,
+    created_at: "",
+    updated_at: "",
   } as UserOffer;
+
+  if (!row) return base;
+
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(row)) {
+    // `undefined` seul signifie « la ligne ne dit rien de ce champ ». Un `null`
+    // dit « ce champ est vide », et c'est une information qu'on respecte.
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  merged.user_id = row.user_id ?? userId;
+  return merged;
 }
 
 const normalize = (value: string): string =>
@@ -195,12 +218,68 @@ export interface ProofChoice {
  * sert, et c'est exactement ce qui est arrivé en production quand un flux
  * d'alertes frigorifiques était cité pour un organisme de formation.
  */
-export function chooseProof(offer: UserOffer, painText: string): ProofChoice {
+/**
+ * Metiers ou « devis » et « commande » ne veulent pas dire ce qu'on croit.
+ *
+ * Une agence d'interim, un cabinet RH, un organisme de formation ne passent pas
+ * de commandes : ils traitent des DOSSIERS — contrats, attestations, releves
+ * d'heures, conventions, dossiers de candidature. Leur proposer un agent qui
+ * transforme une demande client en devis tombe a cote, et ca se voit. Constate
+ * sur ARVE INTERIM le 27/09/2026.
+ */
+const DOCUMENT_TRADES =
+  /int[eé]rim|travail temporaire|mise a disposition|placement|recrutement|ressources humaines|\brh\b|paie|formation|apprentissage|organisme de formation|cabinet de conseil en recrutement/i;
+
+/** Demo n8n a mobiliser pour ces metiers : des documents, pas des devis. */
+const DOCUMENT_DEMO_KEY = "comptes-rendus";
+
+export function chooseProof(
+  offer: UserOffer,
+  painText: string,
+  options: { sector?: string | null } = {},
+): ProofChoice {
   const usable = (offer.proofs ?? []).filter(
     (proof) => proof.publicOk && proof.id !== CREDIBILITY_PROOF_ID,
   );
 
-  // Cas privilégié : le pain correspond à une des démos nommées.
+  // PRIORITE 0 : interim, RH, formation → une demo de DOCUMENTS, jamais l'agent
+  // devis. Le metier tourne autour de dossiers a constituer et a relancer.
+  const trade = `${options.sector ?? ""} ${painText}`;
+  if (DOCUMENT_TRADES.test(trade)) {
+    const n8n = usable.find((proof) => proof.id === "n8n");
+    if (n8n) {
+      // Une demo plus proche du pain l'emporte, tant qu'elle reste une demo de
+      // documents : tri d'e-mails, factures, comptes rendus, donnees.
+      const closest = matchingDemo(painText);
+      const demo =
+        closest ?? N8N_DEMOS.find((item) => item.key === DOCUMENT_DEMO_KEY) ?? N8N_DEMOS[0];
+      return {
+        proof: n8n,
+        sentence: `vous pouvez tester ${demo.label} en direct sur mon site`,
+        demo: { key: demo.key, label: demo.label },
+        reason: "metier de dossiers (interim, RH, formation) : une demo de documents, pas l'agent devis",
+      };
+    }
+  }
+
+  // PRIORITE 1 : commandes, devis, demandes clients → l'agent devis. Il fait
+  // exactement ce que decrit le pain, et le nommer vaut mieux qu'une demo
+  // generique de tri de documents.
+  const ORDER_TAGS = ["commande", "devis", "demande client", "negoce", "prise de rdv"];
+  if (ORDER_TAGS.some((tag) => tagMatches(tag, painText))) {
+    const agent = usable.find((proof) => proof.id === "agent-devis");
+    if (agent) {
+      return {
+        proof: agent,
+        sentence: agent.sentence,
+        demo: null,
+        reason: "le pain porte sur des commandes ou des devis : l'agent devis est le plus proche",
+      };
+    }
+  }
+
+  // PRIORITE 2 : e-mails, documents, factures, SAV, comptes rendus → la demo
+  // n8n correspondante, NOMMEE.
   const demo = matchingDemo(painText);
   if (demo) {
     const n8n = usable.find((proof) => proof.id === "n8n");

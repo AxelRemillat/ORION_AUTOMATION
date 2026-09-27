@@ -15,6 +15,7 @@
  */
 import { buildSearchParams, pageCount, ANNUAIRE_RESULT_CAP } from "../lib/enrichment/gouv";
 import { resolveZone } from "../lib/enrichment/geo";
+import { readFileSync } from "node:fs";
 import {
   filterCandidates,
   pagePlan,
@@ -22,7 +23,11 @@ import {
   scanBudget,
   searchSeed,
   shouldContinue,
+  SCAN_TIME_BUDGET_MS,
+  STOP_LABELS,
 } from "../lib/enrichment/scan-plan";
+import { MAX_SCAN_WIDTH, MIN_SCAN_WIDTH, clampScanWidth } from "../lib/enrichment/limits";
+import { attachMention, attachSignals, namedSubject } from "../lib/enrichment/entity-match";
 import { parseJobPostings, postingFreshness, sameDomain } from "../lib/enrichment/job-posting";
 import { jobUrlsFromSitemap } from "../lib/enrichment/site";
 import { whyNow } from "../lib/scoring";
@@ -296,6 +301,115 @@ async function main(): Promise<void> {
     // Une citation qui ne survit pas au nettoyage n'est pas une preuve.
     const empty = whyNow([{ ...posting("X", "ops"), quote: "- [](https://x.fr) **" }]);
     check("une citation vidée par le nettoyage est refusée", empty === null);
+  }
+
+
+  console.log("\nOnglets de /recherche : les quatre modes sont atteignables");
+  {
+    // Le mode « Signaux d'abord » existait entièrement — formulaire, appel
+    // serveur, filtres, état vide — mais son onglet n'a jamais figuré dans la
+    // barre : la fonction était injoignable depuis l'écran.
+    const client = readFileSync("app/(app)/recherche/recherche-client.tsx", "utf8");
+    const bar = /\(\[((?:\s*"[a-z]+",?)+)\] as const\)\.map/.exec(client);
+    check("la barre d'onglets est trouvée", Boolean(bar), "motif introuvable");
+    const tabs = (bar?.[1] ?? "").match(/"[a-z]+"/g)?.map((value) => value.slice(1, -1)) ?? [];
+    for (const mode of ["auto", "signaux", "manuel", "favoris"]) {
+      check(`l'onglet « ${mode} » est rendu`, tabs.includes(mode), tabs.join(", "));
+    }
+    // Chaque onglet rendu doit avoir un libellé, sinon le bouton sort vide.
+    const labels = client.slice(client.indexOf("TAB_LABELS"), client.indexOf("};", client.indexOf("TAB_LABELS")));
+    for (const mode of tabs) {
+      check(`« ${mode} » a un libellé`, labels.includes(`${mode}:`), labels);
+    }
+  }
+
+  console.log("\nLargeur de scan : jusqu'à 60, bornée dans le temps");
+  {
+    check("le plafond est à 60", MAX_SCAN_WIDTH === 60, String(MAX_SCAN_WIDTH));
+    check("le plancher n'a pas bougé", MIN_SCAN_WIDTH === 5);
+    check("60 est accepté tel quel", clampScanWidth(60) === 60, String(clampScanWidth(60)));
+    check("61 est ramené à 60", clampScanWidth(61) === 60, String(clampScanWidth(61)));
+    check("le budget suit le facteur 3", scanBudget(60) === 180, String(scanBudget(60)));
+    check("une saisie illisible rend le défaut", clampScanWidth("beaucoup") === 18);
+
+    // Sans garde-fou de temps, une étape coupée à 300 s serait rejouée depuis le
+    // début et les recherches Linkup déjà payées le seraient deux fois.
+    const state = { scanned: 12, withSignal: 0, pagesRead: 2 };
+    check("dans le temps imparti, on continue", shouldContinue(state, 5, 180, 40, 10_000).go);
+    const late = shouldContinue(state, 5, 180, 40, SCAN_TIME_BUDGET_MS + 1);
+    check("temps écoulé : on s'arrête", !late.go);
+    check("et on le dit", late.stop === "temps", late.stop);
+    check("le libellé est lisible", STOP_LABELS.temps.includes("relancez"), STOP_LABELS.temps);
+    // L'objectif et le budget passent toujours avant le temps.
+    check("objectif atteint d'abord", shouldContinue({ ...state, withSignal: 5 }, 5, 180, 40, 999_999).stop === "objectif");
+    check("budget atteint ensuite", shouldContinue({ ...state, scanned: 180 }, 5, 180, 40, 999_999).stop === "plafond");
+  }
+
+  console.log("\nUn signal qui parle d'une AUTRE entreprise n'est pas le sien");
+  {
+    // ADVISO PARTNERS est une banque d'affaires : son site raconte les
+    // opérations de ses clients. Le signal était sur son domaine, donc rattaché.
+    const adviso = { name: "ADVISO PARTNERS", siren: "812345678", website: "https://adviso-partners.com" };
+    const client = {
+      text: "Groupe Échelle réalise une acquisition au Québec avec l'accompagnement de nos équipes.",
+      url: "https://adviso-partners.com/operations/groupe-echelle",
+    };
+
+    const verdict = attachMention(client, adviso);
+    check("le signal du client est écarté", verdict.kind === "rejected", JSON.stringify(verdict));
+    check("la raison est explicite", verdict.kind === "rejected" && verdict.reason === "autre entreprise");
+    check(
+      "l'autre entreprise est nommée",
+      verdict.kind === "rejected" && verdict.reason === "autre entreprise" && /Échelle/.test(verdict.entity),
+      JSON.stringify(verdict),
+    );
+
+    // Leur propre actualité, sur le même domaine, passe toujours.
+    check(
+      "« nous ouvrons » reste rattaché",
+      attachMention(
+        { text: "Nous ouvrons un bureau à Lyon en mars 2026.", url: "https://adviso-partners.com/actualites/lyon" },
+        adviso,
+      ).kind === "prospect",
+    );
+    check(
+      "leur nom en sujet reste rattaché",
+      attachMention(
+        { text: "Adviso Partners recrute un analyste.", url: "https://adviso-partners.com/carrieres" },
+        adviso,
+      ).kind === "prospect",
+    );
+    check(
+      "une phrase sans sujet nommé reste rattachée",
+      attachMention(
+        { text: "Ouverture d'un nouveau bureau à Lyon, annoncée en mars.", url: "https://adviso-partners.com/a" },
+        adviso,
+      ).kind === "prospect",
+    );
+
+    // Le groupe prouvé n'est pas « une autre entreprise ».
+    const asParent = attachMention(client, adviso, { parentCompany: "Groupe Échelle" });
+    check("le groupe prouvé devient un signal de groupe", asParent.kind === "parent", JSON.stringify(asParent));
+
+    // Le nom du client ne doit jamais sortir dans un mail.
+    const attached = attachSignals(
+      [{ label: "Acquisition", url: client.url, quote: client.text }],
+      adviso,
+    );
+    check("aucun signal gardé", attached.kept.length === 0);
+    check("le client rejoint les noms interdits", attached.foreignEntities.some((name) => /Échelle/.test(name)), JSON.stringify(attached.foreignEntities));
+  }
+
+  console.log("\nnamedSubject : ce qu'il attrape, et ce qu'il laisse passer");
+  {
+    check("« Groupe Échelle réalise »", namedSubject("Groupe Échelle réalise une acquisition.") === "Groupe Échelle");
+    check("« STEF rachète »", namedSubject("STEF rachète un entrepôt.") === "STEF");
+    check("« Maisons Pierre ouvre »", namedSubject("Maisons Pierre ouvre une agence.") === "Maisons Pierre");
+    check("sujet en 2e phrase", namedSubject("Belle année. Groupe Échelle annonce une levée.") === "Groupe Échelle");
+    check("« Nous ouvrons » : personne", namedSubject("Nous ouvrons un bureau.") === null);
+    check("« L'entreprise recrute » : personne", namedSubject("L'entreprise recrute un analyste.") === null);
+    check("nom sans verbe d'action : personne", namedSubject("Groupe Échelle, client depuis 2019.") === null);
+    check("verbe sans nom propre : personne", namedSubject("ouvre une agence à Lyon") === null);
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

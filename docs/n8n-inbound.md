@@ -114,6 +114,7 @@ protection.
   "subject": "Re : votre message",
   "body": "Bonjour Axel,\n\nMerci pour votre retour…",
   "thread_id": "18f2c1a9b7d4e5f0",
+  "gmail_message_id": "18f2c1a9b7d4e5f1",
   "received_at": "2026-09-24T08:41:00.000Z",
   "category": "reponse"
 }
@@ -127,6 +128,7 @@ Expressions n8n correspondantes :
 | `subject` | `={{ $('Gmail Trigger').item.json.subject }}` | non |
 | `body` | `={{ $('Gmail Trigger').item.json.text }}` | **oui** |
 | `thread_id` | `={{ $('Gmail Trigger').item.json.threadId }}` | non, mais fortement recommandé |
+| `gmail_message_id` | `={{ $('Gmail Trigger').item.json.id }}` | non, mais requis pour qu'une réponse programmée parte dans le fil (Gmail → Reply) |
 | `received_at` | `={{ $('Gmail Trigger').item.json.date }}` | non (défaut : maintenant) |
 | `category` | `={{ JSON.parse($json.message.content).category }}` | non (défaut : `autre`) |
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, Clock, PenLine } from "lucide-react";
 import { formatDate, formatEur } from "@/lib/utils";
 import { TrashButton } from "@/components/trash/trash-button";
+import { SendStateBadge } from "@/components/outbox/send-state-badge";
 import type { ActionUrgency } from "../_lib/next-action";
 import type { ProspectRow } from "../_lib/rows";
 
@@ -65,6 +66,15 @@ export function KanbanCard({
       <p className="mt-0.5 truncate text-[12px] text-faint">
         {[row.sector, row.city].filter(Boolean).join(" · ") || "—"}
       </p>
+
+      {row.sendState && (
+        <SendStateBadge
+          className="mt-2"
+          sendStatus={row.sendState.sendStatus}
+          scheduledAt={row.sendState.scheduledAt}
+          sendError={row.sendState.sendError}
+        />
+      )}
 
       <p className="mt-2 flex items-center gap-1.5 text-[12px] text-muted">
         <span

@@ -15,6 +15,7 @@ import {
   matchingDemo,
   promiseLines,
   signatureFor,
+  OFFER_DEFAULTS,
   withDefaults,
 } from "../lib/offer/model";
 import { defaultOffer } from "../lib/offer/read";
@@ -286,6 +287,58 @@ console.log("\n12. La source légale ne se nomme jamais dans le mail");
     "le même fait, dit humainement, passe",
     !mail("Vous avez ouvert une agence à Lavelanet au printemps.").includes("interdites"),
   );
+}
+
+console.log("\n13. Un defaut comble une absence, jamais un vide choisi");
+{
+  // Le bug d'origine : la version precedente filtrait les `null` de la ligne
+  // avant de les superposer aux defauts. Un titre efface revenait donc rempli
+  // au rechargement suivant, et il etait impossible de vider un champ.
+  const vide = withDefaults({ user_id: "u1", title: null, entry_duration: null }, "u1");
+  check("un titre vide en base RESTE vide", vide.title === null, JSON.stringify(vide.title));
+  check("une duree vide en base RESTE vide", vide.entry_duration === null);
+
+  // Une cle absente, elle, est une absence : le defaut la comble.
+  const partielle = withDefaults({ user_id: "u1", full_name: "Axel R." }, "u1");
+  check("la valeur fournie gagne", partielle.full_name === "Axel R.");
+  check("une cle absente prend le defaut", partielle.title === OFFER_DEFAULTS.title);
+
+  // Aucune ligne : c'est le prereplissage, et lui seul.
+  const aucune = withDefaults(null, "u1");
+  check("sans ligne, tout vient du defaut", aucune.title === OFFER_DEFAULTS.title);
+  check("et l'utilisateur est pose", aucune.user_id === "u1");
+
+  // Une valeur enregistree ne doit JAMAIS etre remplacee par le defaut.
+  const enregistree = withDefaults(
+    { user_id: "u1", title: "Mise en production IA", phone: "06 12 34 56 78", show_phone: true },
+    "u1",
+  );
+  check("le titre enregistre survit", enregistree.title === "Mise en production IA");
+  check("le telephone enregistre survit", enregistree.phone === "06 12 34 56 78");
+  check("le defaut ne ramene pas show_phone a false", enregistree.show_phone === true);
+
+  // Un faux ne doit pas etre pris pour une absence.
+  const faux = withDefaults({ user_id: "u1", no_tool_change: false, human_validation: false }, "u1");
+  check("un booleen faux survit", faux.no_tool_change === false && faux.human_validation === false);
+
+  // Une liste de preuves videe volontairement reste vide.
+  const sansPreuve = withDefaults({ user_id: "u1", proofs: [] }, "u1");
+  check("des preuves videes restent vides", sansPreuve.proofs.length === 0);
+}
+
+console.log("\n14. Ce que la page charge peut toujours etre reenregistre");
+{
+  // L'aller-retour doit tenir : sinon l'ecran affiche une offre qu'il est
+  // incapable de sauvegarder, et l'echec n'arrive qu'au clic.
+  const charge = withDefaults({ user_id: "u1", ...OFFER_DEFAULTS }, "u1");
+  const renvoye = withDefaults(charge, "u1");
+  check("l'offre est stable apres un aller-retour", JSON.stringify(renvoye) === JSON.stringify(charge));
+
+  // Et une edition ordinaire ne casse rien.
+  const edite = withDefaults({ ...charge, title: "Nouveau titre", phone: "06 00 00 00 00" }, "u1");
+  check("le nouveau titre est conserve", edite.title === "Nouveau titre");
+  check("le nouveau telephone est conserve", edite.phone === "06 00 00 00 00");
+  check("les preuves survivent", edite.proofs.length === charge.proofs.length);
 }
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

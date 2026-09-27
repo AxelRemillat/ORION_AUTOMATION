@@ -1,7 +1,11 @@
 import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
-import { validateEmail, type ValidationResult } from "@/lib/emails/validate";
+import {
+  validateEmail,
+  type ValidationContext,
+  type ValidationResult,
+} from "@/lib/emails/validate";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import { chooseProof, entryOfferLabel, promiseLines, signatureFor } from "@/lib/offer/model";
 import type { UserOffer } from "@/types";
@@ -40,9 +44,18 @@ export interface DraftInput {
   /** Ouvertures et fins déjà servies. */
   avoid: string[];
   leaderPerson?: string | null;
+  /** Dirigeant entrant a qui le mail s'adresse nominativement. */
+  addressee?: string | null;
+  /** Secteur du prospect : oriente le choix de la preuve. */
+  sector?: string | null;
   forbiddenNames?: readonly string[];
   /** `false` pour « Réécrire depuis le brief » : rédacteur seul, pas de juge. */
   judge?: boolean;
+  /**
+   * Étape qui commence, pour la barre de progression d'un job de fond.
+   * Une erreur d'écriture de l'avancement ne doit jamais casser la rédaction.
+   */
+  onStage?: (stage: "judge" | "rewrite") => Promise<void> | void;
 }
 
 export interface DraftOutcome {
@@ -114,6 +127,8 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     prospectId: input.prospectId,
     avoid: input.avoid,
     leaderPerson: input.leaderPerson,
+    addressee: input.addressee,
+    sector: input.sector,
     offer: input.offer,
   };
   const plan = planFor(writingInput);
@@ -124,6 +139,9 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
   const allowedFacts = briefFacts(brief, input.facts);
   const context = {
     facts: allowedFacts,
+    // Le « a ne pas dire » du brief devient une regle verifiee, plus une
+    // simple consigne transmise au redacteur.
+    avoid: brief.avoid,
     contact: input.contact,
     tone,
     companyName: input.registryName,
@@ -166,13 +184,28 @@ ${signature}` } : null;
     return { email, validation, critique: null, failing: [], plan, rewritten: false };
   }
 
+  await Promise.resolve(input.onStage?.("judge")).catch(() => undefined);
   const critique = await judge(email, "critique");
   const failing = critique ? failingCriteria(critique) : [];
   const first: DraftOutcome = { email, validation, critique, failing, plan, rewritten: false };
   if (validation.ok && failing.length === 0) return first;
 
   // UNE seule réécriture : au-delà, on rend la main plutôt que de boucler.
-  const feedback = [...validation.failures, ...failing].map((line) => `- ${line}`).join("\n");
+  // La longueur est mise EN TETE : c'est le point le plus souvent rate, et
+  // celui qui empeche l'envoi.
+  const feedback = [
+    ...validation.failures.map((line) => `- ${line}`),
+    ...failing.map((line) => `- ${line}`),
+    ...(validation.failures.some((line) => /mots/.test(line))
+      ? [
+          "",
+          "Pour raccourcir : garde les quatre blocs et le fond, coupe les mots qui ne",
+          "portent rien — adverbes, redites, seconde clause du bloc 3. Ne supprime ni",
+          "l'accroche, ni la preuve, ni la demande.",
+        ]
+      : []),
+  ].join("\n");
+  await Promise.resolve(input.onStage?.("rewrite")).catch(() => undefined);
   const rewritten = await write(feedback);
   if (!rewritten) return first;
 
@@ -180,10 +213,73 @@ ${signature}` } : null;
   const secondCritique = await judge(rewritten, "critique:rewrite");
   const secondFailing = secondCritique ? failingCriteria(secondCritique) : [];
 
-  // On ne garde la réécriture que si elle est réellement meilleure.
+  /*
+   * Ce qui fait qu'une reecriture est MEILLEURE.
+   *
+   * Les deux familles d'echec ne se valent pas. Un echec de validateur est une
+   * regle dure : un mail de 138 mots depasse le plafond de 125, il ne part pas.
+   * Un critere du juge sous le seuil est un avis — utile, mais qui n'empeche
+   * pas l'envoi. La somme des deux mettait « trop long » et « ton un peu
+   * promotionnel » a egalite, et gardait le mail trop long. D'ou la comparaison
+   * lexicographique : d'abord les validateurs, ensuite le juge.
+   */
   const improved =
-    secondValidation.failures.length + secondFailing.length < validation.failures.length + failing.length;
-  return improved
+    secondValidation.failures.length < validation.failures.length ||
+    (secondValidation.failures.length === validation.failures.length &&
+      secondFailing.length < failing.length);
+  const best: DraftOutcome = improved
     ? { email: rewritten, validation: secondValidation, critique: secondCritique, failing: secondFailing, plan, rewritten: true }
     : first;
+
+  return enforceLength(best, { write, context, plan });
+}
+
+/**
+ * LE PLAFOND DE MOTS EST UN REFUS, PAS UN AVERTISSEMENT.
+ *
+ * Un mail de 123 mots sortait avec la mention « a revoir » et partait quand
+ * meme : l'ecran affiche le brouillon, et personne ne recompte. Le plafond n'a
+ * de sens que s'il bloque.
+ *
+ * Une passe de raccourcissement DEDIEE, sans juge : elle ne demande qu'une
+ * chose, couper N mots, et c'est ce que les modeles font le mieux. Elle n'est
+ * retenue que si elle regle la longueur SANS casser autre chose. Si la longueur
+ * resiste encore, on rend une erreur : mieux vaut pas de brouillon qu'un
+ * brouillon qu'on croit envoyable.
+ */
+async function enforceLength(
+  outcome: DraftOutcome,
+  deps: {
+    write: (critique?: string) => Promise<GeneratedEmail | null>;
+    context: ValidationContext;
+    plan: "A" | "B" | "C";
+  },
+): Promise<DraftOutcome | { error: string }> {
+  const tooLong = (result: ValidationResult) => result.failures.find((line) => /mots/.test(line));
+  const over = tooLong(outcome.validation);
+  if (!over) return outcome;
+
+  const shortened = await deps.write(
+    [
+      `- ${over}`,
+      "",
+      "RACCOURCIS, et ne fais que ca. Garde les quatre blocs, l'accroche, la preuve",
+      "et la demande. Coupe ce qui ne porte rien : adverbes, redites, seconde clause",
+      "du bloc offre, precisions que le lecteur devinera. Ne change ni le fond, ni",
+      "l'ordre, ni le sujet.",
+    ].join("\n"),
+  );
+  if (shortened) {
+    const check = validateEmail(shortened, deps.context);
+    // Retenue seulement si la longueur passe ET que rien d'autre n'a casse.
+    if (!tooLong(check) && check.failures.length <= outcome.validation.failures.length - 1) {
+      return { ...outcome, email: shortened, validation: check, rewritten: true };
+    }
+  }
+
+  return {
+    error:
+      `${over} Deux tentatives de raccourcissement n'ont pas suffi : le brouillon n'est pas ` +
+      "rendu, plutot que d'etre affiche comme envoyable. Relance la generation.",
+  };
 }

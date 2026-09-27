@@ -26,7 +26,9 @@ L'URL de production du webhook est renseignée côté app dans
   "subject": "Votre pipeline de données",
   "body": "Bonjour,\n\n…",
   "prospect_id": "0f5f…",
-  "message_id": "9ab1…"
+  "message_id": "9ab1…",
+  "thread_id": "18f2c1a9b7d4e5f0",
+  "reply_to_gmail_message_id": "18f2c1a9b7d4e5f1"
 }
 ```
 
@@ -35,6 +37,11 @@ L'URL de production du webhook est renseignée côté app dans
 - `body` : texte brut, sauts de ligne `\n`.
 - `prospect_id` / `message_id` : UUID Supabase, à recopier tels quels dans les
   logs n8n pour pouvoir tracer un envoi.
+- `thread_id` / `reply_to_gmail_message_id` : présents (sinon `null`) quand le
+  mail RÉPOND à un mail reçu, y compris une réponse programmée. Pour rester
+  dans le même fil Gmail, utiliser le nœud **Gmail → Reply** (Message ID =
+  `reply_to_gmail_message_id`) plutôt que **Send** quand ce champ est
+  renseigné — un nœud **IF** sur `reply_to_gmail_message_id` suffit.
 
 **Nœud `Gmail` → `Send`**
 
@@ -49,6 +56,9 @@ Credential : OAuth2 Gmail sur `axel@axelremillat.com`.
 
 **Réponse attendue**
 
+- Le corps renvoyé par le nœud Gmail (`{ id, threadId, … }`) est lu : `threadId`
+  est enregistré dans `messages.thread_id` s'il manquait, `id` dans
+  `messages.gmail_message_id`. Facultatif : sans eux, l'envoi est le même.
 - `200` (n'importe quel corps JSON) ⇒ l'app considère le mail parti et
   enchaîne : `messages.status = 'sent'`, `messages.sent_at = now()`, statut du
   prospect avancé, relance planifiée.
