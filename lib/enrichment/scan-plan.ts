@@ -17,14 +17,30 @@
  */
 
 /** Pourquoi la boucle s'est arrêtée. Affiché tel quel dans l'UI. */
-export type ScanStop = "objectif" | "plafond" | "annuaire" | "arrete";
+export type ScanStop = "objectif" | "plafond" | "annuaire" | "arrete" | "temps";
 
 export const STOP_LABELS: Record<ScanStop, string> = {
   objectif: "objectif atteint",
   plafond: "plafond de scan atteint",
   annuaire: "toutes les pages de l'annuaire ont été lues",
   arrete: "arrêté à votre demande",
+  temps: "temps de scan écoulé : relancez pour continuer",
 };
+
+/**
+ * Temps accordé à la boucle de scan, dans UNE invocation.
+ *
+ * L'étape de job dispose de 300 s (plafond du plan Hobby). Au-delà, la fonction
+ * est coupée et l'étape est rejouée DEPUIS LE DÉBUT : les recherches Linkup déjà
+ * payées le sont une seconde fois. Tant que la largeur maximale valait 25, la
+ * question ne se posait pas ; à 60 — donc jusqu'à 180 recherches — elle se pose.
+ *
+ * On s'arrête donc proprement à 230 s, avec de la marge pour la phase 2
+ * (ouverture des fiches) et l'écriture du résultat. Les entreprises déjà
+ * scannées sont conservées : l'utilisateur voit ce qui a été trouvé et relance
+ * s'il en veut plus.
+ */
+export const SCAN_TIME_BUDGET_MS = 230_000;
 
 /**
  * Plafond de pages lisibles en une recherche.
@@ -128,10 +144,14 @@ export function shouldContinue(
   goal: number,
   budget: number,
   pagesAvailable: number,
+  /** Millisecondes déjà consommées par la boucle, quand l'appelant les mesure. */
+  elapsedMs = 0,
 ): { go: boolean; stop: ScanStop } {
   if (state.withSignal >= goal) return { go: false, stop: "objectif" };
   if (state.scanned >= budget) return { go: false, stop: "plafond" };
   if (state.pagesRead >= pagesAvailable) return { go: false, stop: "annuaire" };
+  // Un lot de plus dépasserait le temps imparti : mieux vaut rendre ce qu'on a.
+  if (elapsedMs >= SCAN_TIME_BUDGET_MS) return { go: false, stop: "temps" };
   return { go: true, stop: "objectif" };
 }
 
