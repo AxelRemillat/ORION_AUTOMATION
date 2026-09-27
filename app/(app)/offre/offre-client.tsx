@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, Check, Plus, Save, Trash2 } from "lucide-react";
 import {
   Badge,
   Button,
@@ -15,6 +15,7 @@ import {
   Textarea,
   useToast,
 } from "@/components/ui";
+import { useRouter } from "next/navigation";
 import { postJson } from "@/lib/enrichment/api-client";
 import { isOfferComplete, signatureFor } from "@/lib/offer/model";
 import { ENTRY_OFFER_LABELS, type EntryOfferType, type OfferProof, type UserOffer } from "@/types";
@@ -30,10 +31,41 @@ import { ENTRY_OFFER_LABELS, type EntryOfferType, type OfferProof, type UserOffe
  * L'aperçu de signature est affiché en direct : c'est le seul endroit où Axel
  * voit ce que le destinataire verra.
  */
+/**
+ * Empreinte comparable d'une offre.
+ *
+ * `updated_at` en est exclu : il change à chaque enregistrement et ferait
+ * apparaître des modifications qui n'existent pas.
+ */
+function fingerprint(offer: UserOffer): string {
+  const { updated_at: _updated, created_at: _created, ...rest } = offer;
+  return JSON.stringify(rest);
+}
+
+const CONFIRM_SAVE =
+  "Enregistrer ces modifications ? L'IA utilisera ce nouveau contexte pour les prochains mails.";
+const CONFIRM_LEAVE = "Quitter sans enregistrer ?";
+
 export function OffreClient({ initial, empty }: { initial: UserOffer; empty: boolean }) {
   const toast = useToast();
+  const router = useRouter();
   const [offer, setOffer] = useState<UserOffer>(initial);
   const [saving, setSaving] = useState(false);
+  /**
+   * Référence : ce qui est ENREGISTRÉ, pas ce qui est affiché.
+   *
+   * C'est la comparaison à cette référence qui dit s'il reste des modifications
+   * — et c'est ce que la page n'avait pas. Le bouton était toujours actif, rien
+   * ne signalait un travail non enregistré, et quitter la page le perdait sans
+   * un mot.
+   */
+  const [saved, setSaved] = useState<string>(() => fingerprint(initial));
+
+  const dirty = fingerprint(offer) !== saved;
+  // Lu par les écouteurs de sortie : ils sont posés une fois, et une valeur
+  // capturée dans leur fermeture serait celle du premier rendu.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   const set = <K extends keyof UserOffer>(key: K, value: UserOffer[K]) =>
     setOffer((current) => ({ ...current, [key]: value }));
@@ -44,17 +76,62 @@ export function OffreClient({ initial, empty }: { initial: UserOffer; empty: boo
       proofs: current.proofs.map((proof, i) => (i === index ? { ...proof, ...patch } : proof)),
     }));
 
-  async function save() {
+  const save = useCallback(async () => {
+    if (!window.confirm(CONFIRM_SAVE)) return;
     setSaving(true);
     try {
-      await postJson("/api/offer", { offer });
-      toast.success("Offre enregistrée. Les prochains mails s'en servent.");
+      // La route rend la ligne telle qu'elle est en base : on réaffiche ÇA, pas
+      // l'état local. Un écart entre les deux devient donc visible au lieu
+      // d'être masqué par un « enregistré » optimiste.
+      const data = await postJson<{ offer?: UserOffer }>("/api/offer", { offer });
+      const stored = data.offer ?? offer;
+      setOffer(stored);
+      setSaved(fingerprint(stored));
+      toast.success("Offre enregistrée.");
+      // Les écrans serveur qui lisent l'offre (le brief, le bandeau) doivent
+      // repartir de la base.
+      router.refresh();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "Enregistrement impossible.");
     } finally {
       setSaving(false);
     }
-  }
+  }, [offer, router, toast]);
+
+  /**
+   * Sortie avec des modifications non enregistrées.
+   *
+   * Deux chemins, et il faut les deux : `beforeunload` couvre le rechargement
+   * et la fermeture de l'onglet, mais pas la navigation interne de Next, qui ne
+   * recharge rien. Celle-ci est interceptée à la capture sur les liens.
+   */
+  useEffect(() => {
+    const onUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      // Les navigateurs affichent leur propre texte ; la valeur sert de drapeau.
+      event.returnValue = CONFIRM_LEAVE;
+    };
+
+    const onClick = (event: MouseEvent) => {
+      if (!dirtyRef.current || event.defaultPrevented) return;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link) return;
+      const href = link.getAttribute("href") ?? "";
+      // Liens internes seulement : une ancre ou un lien externe ne quitte pas
+      // l'édition de la même façon.
+      if (!href.startsWith("/") || link.target === "_blank") return;
+      if (!window.confirm(CONFIRM_LEAVE)) event.preventDefault();
+    };
+
+    window.addEventListener("beforeunload", onUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, []);
 
   const complete = isOfferComplete(offer);
 
@@ -270,8 +347,30 @@ export function OffreClient({ initial, empty }: { initial: UserOffer; empty: boo
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
-        <Button onClick={save} loading={saving}>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <span
+          className={
+            dirty
+              ? "inline-flex items-center gap-1.5 text-[13px] text-warn-ink"
+              : "inline-flex items-center gap-1.5 text-[13px] text-muted"
+          }
+          aria-live="polite"
+        >
+          {dirty ? (
+            <>
+              <AlertCircle className="h-3.5 w-3.5" aria-hidden />
+              Modifications non enregistrées
+            </>
+          ) : (
+            <>
+              <Check className="h-3.5 w-3.5" aria-hidden />
+              {empty ? "Rien n'est encore enregistré" : "Tout est enregistré"}
+            </>
+          )}
+        </span>
+        {/* Désactivé tant que rien n'a changé : un bouton toujours actif ne dit
+            pas s'il reste quelque chose à faire. */}
+        <Button onClick={save} loading={saving} disabled={!dirty || saving}>
           <Save className="h-4 w-4" aria-hidden />
           Enregistrer
         </Button>

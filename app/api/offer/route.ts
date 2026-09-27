@@ -47,13 +47,24 @@ export async function POST(request: Request) {
   }
 
   // `upsert` sur la clé primaire : la première sauvegarde crée la ligne.
-  const { error } = await session.supabase.from("user_offer").upsert(
-    { ...parsed.data.offer, user_id: session.userId, updated_at: new Date().toISOString() },
-    { onConflict: "user_id" },
-  );
+  //
+  // `select()` derrière n'est pas un luxe : la réponse rend la ligne TELLE
+  // QU'ELLE EST EN BASE, et c'est elle que l'écran réaffiche. Sans ça, l'écran
+  // continuait de montrer son état local — donc « enregistré » même quand la
+  // valeur stockée différait, ce qui est précisément ce qu'on ne pouvait pas
+  // distinguer du bug d'origine.
+  const { data, error } = await session.supabase
+    .from("user_offer")
+    .upsert(
+      { ...parsed.data.offer, user_id: session.userId, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" },
+    )
+    .select("*")
+    .single();
+
   if (error) {
     return NextResponse.json({ error: `Enregistrement impossible : ${error.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, offer: data });
 }

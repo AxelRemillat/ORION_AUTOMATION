@@ -1,4 +1,5 @@
 import type { StrategyBrief } from "@/lib/emails/strategist";
+import { frenchDate } from "@/lib/enrichment/dates";
 import { chooseProof, entryOfferLabel } from "@/lib/offer/model";
 import type { UserOffer } from "@/types";
 
@@ -11,6 +12,9 @@ export function BriefDetails({ brief, offer }: { brief: StrategyBrief; offer: Us
   // reellement ete retenu, pas ce que le stratege avait propose.
   const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`);
   const entry = entryOfferLabel(offer);
+  // Quelle VERSION de l'offre a servi. Un brouillon déjà écrit ne change pas
+  // quand l'offre change : cette date dit s'il faut régénérer.
+  const offerDate = offer.updated_at ? frenchDate(offer.updated_at) : null;
 
   return (
     <dl className="grid gap-3 text-[13px] leading-relaxed">
@@ -33,6 +37,13 @@ export function BriefDetails({ brief, offer }: { brief: StrategyBrief; offer: Us
       </Row>
       <Row label="Demande d'entrée">
         {entry ? `${entry}${offer.entry_pitch ? ` — « ${offer.entry_pitch} »` : ""}` : "aucune : complétez /offre"}
+      </Row>
+      <Row label="Offre utilisée">
+        {offerDate ? `Offre du ${offerDate}` : "offre jamais enregistrée : valeurs de préremplissage"}
+        <span className="block text-[12px] text-muted">
+          Un brouillon déjà écrit ne change pas quand l&apos;offre change : cliquez sur
+          « Régénérer » pour qu&apos;il en tienne compte.
+        </span>
       </Row>
       <Row label="Test de substitution">
         appliqué par le juge sur la première phrase — un score de spécificité sous 3 déclenche une
