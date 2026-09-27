@@ -180,7 +180,13 @@ export interface ProspectKeyFigures {
    * `date_de_creation` par site. Un fait daté, vérifiable, et qui se raconte
    * sans citer aucun registre : « vous avez ouvert une agence à Périgueux ».
    */
-  recent_openings?: { city: string; date: string; sign?: string | null }[];
+  /**
+   * `siret` est conservé pour que le RATTACHEMENT soit vérifiable : un
+   * établissement appartient au prospect si et seulement si son SIRET commence
+   * par son SIREN. Sans lui, le lien était implicite — vrai par construction,
+   * mais impossible à contrôler à la relecture d'une fiche.
+   */
+  recent_openings?: { city: string; date: string; siret?: string | null; sign?: string | null }[];
   [key: string]: unknown;
 }
 

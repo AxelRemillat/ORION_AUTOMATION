@@ -865,6 +865,51 @@ async function main(): Promise<void> {
     check("Factuel + « Monsieur » : accepté", run("Bonjour Monsieur Torrecillas,", "factuel") === "");
   }
 
+
+  console.log("\n27. Une ouverture doit porter le SIREN du prospect");
+  {
+    // Contrôle réel du 27/09/2026 : Montmoreau (Charente) est à 400 km du siège
+    // de SELECTION HABITAT (Rodez), et c'est pourtant bien son établissement —
+    // SIRET 45345025600418, confirmé par l'annuaire public. Le rattachement est
+    // désormais vérifié dans le code plutôt que supposé.
+    const sh = (openings: { city: string; date: string; siret?: string | null; sign?: string | null }[]) =>
+      buildFacts(
+        prospect({
+          company_name: "SELECTION HABITAT",
+          siren: "453450256",
+          key_figures: { naf_code: "68.31Z", recent_openings: openings },
+        }),
+        null,
+        NOW,
+      ).facts.find((fact) => fact.key === "opening");
+
+    const mine = sh([{ city: "Montmoreau", date: "2026-03-01", siret: "45345025600418" }]);
+    check("un SIRET du prospect est retenu", Boolean(mine), "aucun fait d'ouverture");
+    check("la ville est citée", /Montmoreau/.test(mine?.value ?? ""), mine?.value);
+
+    const foreign = sh([{ city: "Montmoreau", date: "2026-03-01", siret: "99999999900011" }]);
+    check("un SIRET étranger est écarté", foreign === undefined, foreign?.value);
+
+    // Fiche enrichie avant que le SIRET ne soit conservé : on ne peut pas
+    // vérifier, et la source restait la fiche Pappers du prospect.
+    const legacy = sh([{ city: "Perigueux", date: "2026-03-01" }]);
+    check("une fiche ancienne reste exploitable", Boolean(legacy), "écartée à tort");
+
+    // Une agence peut porter une autre enseigne que la raison sociale.
+    const hamilton = sh([
+      { city: "Soorts-Hossegor", date: "2026-01-01", siret: "45345025600442", sign: "Agence Hamilton" },
+    ]);
+    check(
+      "l'enseigne locale est donnée au rédacteur",
+      /Agence Hamilton/.test(hamilton?.writerHint ?? ""),
+      hamilton?.writerHint,
+    );
+    const same = sh([
+      { city: "Lauzerte", date: "2026-01-01", siret: "45345025600459", sign: "SELECTION HABITAT" },
+    ]);
+    check("une enseigne identique n'est pas répétée", !/enseigne/.test(same?.writerHint ?? ""), same?.writerHint);
+  }
+
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
