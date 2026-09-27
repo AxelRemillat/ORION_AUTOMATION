@@ -1,7 +1,11 @@
 import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
-import { validateEmail, type ValidationResult } from "@/lib/emails/validate";
+import {
+  validateEmail,
+  type ValidationContext,
+  type ValidationResult,
+} from "@/lib/emails/validate";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import { chooseProof, entryOfferLabel, promiseLines, signatureFor } from "@/lib/offer/model";
 import type { UserOffer } from "@/types";
@@ -223,7 +227,59 @@ ${signature}` } : null;
     secondValidation.failures.length < validation.failures.length ||
     (secondValidation.failures.length === validation.failures.length &&
       secondFailing.length < failing.length);
-  return improved
+  const best: DraftOutcome = improved
     ? { email: rewritten, validation: secondValidation, critique: secondCritique, failing: secondFailing, plan, rewritten: true }
     : first;
+
+  return enforceLength(best, { write, context, plan });
+}
+
+/**
+ * LE PLAFOND DE MOTS EST UN REFUS, PAS UN AVERTISSEMENT.
+ *
+ * Un mail de 123 mots sortait avec la mention « a revoir » et partait quand
+ * meme : l'ecran affiche le brouillon, et personne ne recompte. Le plafond n'a
+ * de sens que s'il bloque.
+ *
+ * Une passe de raccourcissement DEDIEE, sans juge : elle ne demande qu'une
+ * chose, couper N mots, et c'est ce que les modeles font le mieux. Elle n'est
+ * retenue que si elle regle la longueur SANS casser autre chose. Si la longueur
+ * resiste encore, on rend une erreur : mieux vaut pas de brouillon qu'un
+ * brouillon qu'on croit envoyable.
+ */
+async function enforceLength(
+  outcome: DraftOutcome,
+  deps: {
+    write: (critique?: string) => Promise<GeneratedEmail | null>;
+    context: ValidationContext;
+    plan: "A" | "B" | "C";
+  },
+): Promise<DraftOutcome | { error: string }> {
+  const tooLong = (result: ValidationResult) => result.failures.find((line) => /mots/.test(line));
+  const over = tooLong(outcome.validation);
+  if (!over) return outcome;
+
+  const shortened = await deps.write(
+    [
+      `- ${over}`,
+      "",
+      "RACCOURCIS, et ne fais que ca. Garde les quatre blocs, l'accroche, la preuve",
+      "et la demande. Coupe ce qui ne porte rien : adverbes, redites, seconde clause",
+      "du bloc offre, precisions que le lecteur devinera. Ne change ni le fond, ni",
+      "l'ordre, ni le sujet.",
+    ].join("\n"),
+  );
+  if (shortened) {
+    const check = validateEmail(shortened, deps.context);
+    // Retenue seulement si la longueur passe ET que rien d'autre n'a casse.
+    if (!tooLong(check) && check.failures.length <= outcome.validation.failures.length - 1) {
+      return { ...outcome, email: shortened, validation: check, rewritten: true };
+    }
+  }
+
+  return {
+    error:
+      `${over} Deux tentatives de raccourcissement n'ont pas suffi : le brouillon n'est pas ` +
+      "rendu, plutot que d'etre affiche comme envoyable. Relance la generation.",
+  };
 }

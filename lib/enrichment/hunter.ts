@@ -141,6 +141,23 @@ export async function fetchQuota(): Promise<HunterQuota | null> {
 const DECISION_MAKER =
   /\b(pr[ée]sident|p-?dg|pdg|directeur? g[ée]n[ée]ral|directrice g[ée]n[ée]rale|g[ée]rant|co-?fondat|fondat|ceo|coo|cto|cfo|owner|dirigeant|directeur des op[ée]rations|directrice des op[ée]rations|directeur administratif|directrice administrative|daf|directeur financier|directrice financi[èe]re|responsable administratif|chief)\b/i;
 
+/**
+ * Postes COMMERCIAUX.
+ *
+ * Ils valent mieux que rien, mais pas mieux que le dirigeant : un directeur
+ * commercial n'arbitre pas la facon dont les dossiers circulent en interne. On
+ * ne lui ecrit que si le besoin porte sur la vente — devis, prise de rendez-
+ * vous, relance de prospects. Constate sur MAISONS TERRE D'OC, ou le mail
+ * partait a un commercial alors que le pain etait operationnel et que
+ * l'adresse du president etait connue.
+ */
+const COMMERCIAL_POSITION =
+  /commercial|business development|ventes?|sales|account|charg[eé]e? d'affaires|d[eé]veloppement/i;
+
+export function isCommercialPosition(position: string | null | undefined): boolean {
+  return Boolean(position && COMMERCIAL_POSITION.test(position) && !DECISION_MAKER.test(position));
+}
+
 /** `true` si l'intitulé de poste désigne un décideur. */
 export function isDecisionMakerPosition(position: string | null | undefined): boolean {
   return Boolean(position && DECISION_MAKER.test(position));
