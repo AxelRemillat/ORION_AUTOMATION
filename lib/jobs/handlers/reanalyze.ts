@@ -1,7 +1,7 @@
 import { enrichCompany } from "@/lib/enrichment";
 import { resolveCompany } from "@/lib/enrichment/gouv";
 import { activeProspects } from "@/lib/trash/scope";
-import type { Prospect } from "@/types";
+import type { Prospect, ProspectKeyFigures } from "@/types";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
 
 /**
@@ -12,6 +12,26 @@ import { JobError, type JobHandler, type StepContext, type StepOutcome } from ".
  * Une seule étape : `enrichCompany` est d'un seul tenant (lib/enrichment).
  * Elle est idempotente — rejouée, elle réécrit la même fiche.
  */
+/**
+ * Chiffres clés d'une fiche réanalysée : FUSION, et non remplacement.
+ *
+ * Les faits du SIGNAL qui a fait remonter la fiche — `signal_source`,
+ * `signal_date`, `new_leader_name`, `job_title`, `capital_after_eur` — sont
+ * écrits par la recherche, pas par l'enrichissement. Les remplacer en bloc les
+ * effaçait, et une fiche réanalysée perdait la raison pour laquelle on l'avait
+ * ouverte : une annonce sortie de la fenêtre de soixante jours n'est plus
+ * recalculable, une offre d'emploi est dépubliée.
+ *
+ * L'enrichissement garde la priorité sur ce qu'il RECALCULE : effectif,
+ * ouvertures d'établissements, dirigeant, groupe, contenu de site.
+ */
+export function mergedFigures(
+  existing: ProspectKeyFigures | null | undefined,
+  enriched: ProspectKeyFigures,
+): ProspectKeyFigures {
+  return { ...(existing ?? {}), ...enriched };
+}
+
 async function reanalyze(ctx: StepContext): Promise<StepOutcome> {
   const prospectId =
     (ctx.job.target as { prospectId?: string }).prospectId ?? (ctx.job.params.prospectId as string | undefined);
@@ -41,7 +61,7 @@ async function reanalyze(ctx: StepContext): Promise<StepOutcome> {
       sector: enriched.sector,
       size_range: enriched.size_range,
       signals: enriched.signals,
-      key_figures: enriched.key_figures,
+      key_figures: mergedFigures(prospect.key_figures, enriched.key_figures),
     })
     .eq("id", prospect.id);
   if (error) throw new Error(`fiche non mise à jour : ${error.message}`);

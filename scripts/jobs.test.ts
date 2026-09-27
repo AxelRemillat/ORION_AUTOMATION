@@ -23,6 +23,7 @@ import { clampFanout } from "../lib/jobs/dispatch";
 import { drainJobs, missingSettings } from "../lib/jobs/background";
 import { HEARTBEAT_MS } from "../lib/jobs/handlers/search-shared";
 import { EMAIL_STAGES } from "../lib/jobs/handlers/email";
+import { mergedFigures } from "../lib/jobs/handlers/reanalyze";
 import { fromScan } from "../lib/jobs/handlers/search-shared";
 import { clampDays, signalsParamsError } from "../lib/jobs/handlers/signals";
 import { authorizeCron } from "../lib/trash/cron-auth";
@@ -275,6 +276,33 @@ async function main() {
   check("prise sous verrou", /for update skip locked/.test(sql));
   check("claim_job refusé aux utilisateurs", /revoke execute on function public\.claim_job\(uuid, int, int\) from anon, authenticated/.test(sql));
   check("aucun secret en dur dans le cron", /vault\.decrypted_secrets/.test(sql) && !/Bearer [A-Za-z0-9]{16,}/.test(sql));
+
+  console.log("\nmergedFigures : une réanalyse ne perd pas les faits du signal");
+  {
+    // La fiche porte les faits de la RECHERCHE ; l'enrichissement n'en sait
+    // rien et rendait un objet sans eux. Les remplacer en bloc effaçait la
+    // raison pour laquelle la fiche avait été ouverte.
+    const onCard = {
+      signal_source: "bodacc" as const,
+      signal_date: "2026-08-12",
+      new_leader_name: "Bernard Narbonnet",
+      job_title: "Assistant ADV",
+      headcount: 20,
+    };
+    const fromEnrichment = {
+      headcount: 35,
+      recent_openings: [{ city: "Perigueux", date: "2026-03-01", siret: "45345025600426" }],
+    };
+    const merged = mergedFigures(onCard, fromEnrichment);
+
+    check("le signal d'origine survit", merged.signal_source === "bodacc");
+    check("sa date aussi", merged.signal_date === "2026-08-12");
+    check("le dirigeant nommé par l'annonce aussi", merged.new_leader_name === "Bernard Narbonnet");
+    check("l'offre d'emploi aussi", merged.job_title === "Assistant ADV");
+    check("l'effectif recalculé gagne", merged.headcount === 35);
+    check("les ouvertures arrivent", (merged.recent_openings ?? []).length === 1);
+    check("une fiche vide ne casse rien", mergedFigures(null, fromEnrichment).headcount === 35);
+  }
 
   if (failures) {
     console.log(`\n${failures} échec(s).`);

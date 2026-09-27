@@ -515,8 +515,28 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   if (similarity > SIMILARITY_LIMIT) {
     warnings.push({ source: "openai", message: `Ce brouillon ressemble à ${Math.round(similarity * 100)} % à un mail déjà envoyé.` });
   }
-  if (contact && !prospect.email && params.mode === "full") {
-    await ctx.db.from("prospects").update({ email: contact.email }).eq("id", prospect.id);
+  /*
+   * Le contact trouve est ECRIT sur la fiche.
+   *
+   * L'ecran l'affichait depuis la reponse de generation, donc il disparaissait
+   * au rechargement : la fiche ne gardait aucune trace de qui avait ete trouve.
+   * L'adresse ne remplace jamais une adresse deja renseignee — elle a pu etre
+   * saisie a la main — mais le NOM et le POSTE sont notes dans tous les cas.
+   */
+  if (contact && params.mode === "full") {
+    await ctx.db
+      .from("prospects")
+      .update({
+        ...(prospect.email ? {} : { email: contact.email }),
+        key_figures: {
+          ...prospect.key_figures,
+          contact_email: contact.email,
+          ...(contact.full_name ? { contact_name: contact.full_name } : {}),
+          ...(contact.position ? { contact_position: contact.position } : {}),
+          ...(contact.confidence != null ? { contact_confidence: contact.confidence } : {}),
+        },
+      })
+      .eq("id", prospect.id);
   }
 
   const figures = prospect.key_figures ?? {};

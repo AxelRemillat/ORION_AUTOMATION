@@ -22,6 +22,7 @@ import { OfferBanner } from "./_components/offer-banner";
 import { FeedingBanner } from "./_components/feeding-banner";
 import { GenerationProgress } from "./_components/generation-progress";
 import { DraftSendBar } from "./_components/draft-send-bar";
+import { useReanalyze } from "./_lib/use-reanalyze";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -42,6 +43,9 @@ export function ProspectionClient({
   offerComplete: boolean;
 }) {
   const router = useRouter();
+  // Ré-enrichissement de la fiche : au retour, on recharge la page pour que le
+  // prospect affiche ses nouveaux signaux et chiffres clés.
+  const { reanalyze, running: reanalyzing } = useReanalyze(() => router.refresh());
   const toast = useToast();
   const [prospects, setProspects] = useState(initialProspects);
   // La liste suit le serveur : une mise à la corbeille (ou son annulation)
@@ -149,6 +153,8 @@ export function ProspectionClient({
             tone={tone}
             onToneChange={setTone}
             onGenerate={() => generate(selected)}
+            onReanalyze={() => reanalyze(selected)}
+            reanalyzing={reanalyzing}
           />
 
           <SequenceShell steps={sequences[selected.id] ?? []} />
