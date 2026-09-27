@@ -588,6 +588,58 @@ export type SearchRun = {
 };
 
 /**
+ * Un signal de l'entonnoir « signaux d'abord » (lib/funnel), avec son statut
+ * dans les 4 étages et son motif de rejet.
+ */
+export type SignalCandidateRow = {
+  id: string;
+  user_id: string;
+  run_id: string | null;
+  source: string;
+  date_signal: string | null;
+  texte_brut: string;
+  url_source: string | null;
+  siren: string | null;
+  company_name: string | null;
+  hash: string;
+  statut: "brut" | "filtré" | "rejeté" | "retenu" | "creusé";
+  motif_rejet: string | null;
+  facts: Record<string, unknown>;
+  identity: Record<string, unknown> | null;
+  weight: number | null;
+  badges: string[];
+  triage: Record<string, unknown> | null;
+  score: number | null;
+  contact: Record<string, unknown> | null;
+  prospect_id: string | null;
+  publication: "pret" | "a_completer" | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SignalCandidateInsert = Partial<
+  Omit<SignalCandidateRow, "source" | "texte_brut" | "hash">
+> &
+  Pick<SignalCandidateRow, "source" | "texte_brut" | "hash">;
+export type SignalCandidateUpdate = Partial<SignalCandidateRow>;
+
+/** Réglages de l'entonnoir : zones, secteurs, run quotidien. */
+export type FunnelSettings = {
+  user_id: string;
+  departements: string[];
+  preferred_sectors: string[];
+  excluded_sectors: string[];
+  days: number;
+  dig_limit: number;
+  daily: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FunnelSettingsInsert = Partial<FunnelSettings>;
+export type FunnelSettingsUpdate = Partial<FunnelSettings>;
+
+/**
  * Réglages de recherche d'un utilisateur.
  *
  * `excluded_sectors` contient des PRÉFIXES NAF, pas des codes complets :
@@ -682,6 +734,18 @@ export type Database = {
         Row: SearchSettings;
         Insert: SearchSettingsInsert;
         Update: SearchSettingsUpdate;
+        Relationships: [];
+      };
+      signal_candidates: {
+        Row: SignalCandidateRow;
+        Insert: SignalCandidateInsert;
+        Update: SignalCandidateUpdate;
+        Relationships: [];
+      };
+      funnel_settings: {
+        Row: FunnelSettings;
+        Insert: FunnelSettingsInsert;
+        Update: FunnelSettingsUpdate;
         Relationships: [];
       };
       search_runs: {

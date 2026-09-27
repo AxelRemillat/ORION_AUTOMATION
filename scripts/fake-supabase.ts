@@ -145,9 +145,15 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
       for (const row of Array.isArray(this.payload) ? this.payload : [this.payload]) {
         const existing = all.find((item) => this.conflict.every((key) => item[key] === row[key]));
         if (existing && this.ignoreDuplicates) continue;
-        if (existing) Object.assign(existing, row);
-        else all.push({ created_at: new Date().toISOString(), ...row });
-        result.push(row);
+        if (existing) {
+          Object.assign(existing, row);
+          result.push(existing);
+        } else {
+          // Comme pour insert : un `id` est attribué s'il n'est pas fourni.
+          const created = { id: `gen-${++generated}`, created_at: new Date().toISOString(), ...row };
+          all.push(created);
+          result.push(created);
+        }
       }
     } else if (this.op === "update") {
       for (const row of matches) Object.assign(row, this.payload);
