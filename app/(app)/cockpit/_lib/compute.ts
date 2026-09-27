@@ -26,13 +26,14 @@ const MAX_INBOX = 30;
  * une messagerie sans historique n'est pas une messagerie. Le point « non lu »
  * distingue ce qui reste a faire.
  */
-export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[]): InboxEntry[] {
+export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[], max = MAX_INBOX): InboxEntry[] {
   const names = new Map(prospects.map((prospect) => [prospect.id, prospect.company_name]));
+  const blocked = new Set(prospects.filter((prospect) => prospect.do_not_contact).map((prospect) => prospect.id));
 
   return inbound
-    .slice()
+    .filter((message) => !message.deleted_at)
     .sort((a, b) => Date.parse(b.received_at) - Date.parse(a.received_at))
-    .slice(0, MAX_INBOX)
+    .slice(0, max)
     .map((message) => ({
       id: message.id,
       prospectId: message.prospect_id,
@@ -44,6 +45,7 @@ export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[]): 
       category: message.category,
       receivedAt: message.received_at,
       unread: !message.handled,
+      doNotContact: Boolean(message.prospect_id && blocked.has(message.prospect_id)),
     }));
 }
 

@@ -6,20 +6,30 @@ import { Trash2 } from "lucide-react";
 import { useToast } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { offerUndo } from "@/lib/trash/undo";
-import { restoreMail, trashMail } from "@/lib/outbox/actions";
+import { restoreMail, restoreReceived, trashMail, trashReceived } from "@/lib/outbox/actions";
 
 /**
- * « Mettre à la corbeille » pour un brouillon ou un mail programmé — même
- * geste que la corbeille des prospects : premier clic « Êtes-vous sûr ? »
- * pendant 4 s, second clic pour agir, puis toast « Annuler » de 8 s.
+ * « Mettre à la corbeille » pour un brouillon, un mail programmé ou un mail
+ * REÇU (`kind="received"`). Même geste que la corbeille des prospects :
+ * premier clic « Êtes-vous sûr ? » pendant 4 s, second clic pour agir, puis
+ * toast « Annuler » de 8 s.
  */
 export function MailTrashButton({
   messageId,
+  kind = "sent",
   label = "ce mail",
+  compact = false,
   onTrashed,
+  redirectTo,
   className,
 }: {
+  /** Page à rejoindre après coup (celle du mail supprimé n'existe plus). */
+  redirectTo?: string;
   messageId: string;
+  /** `received` : un mail de la boîte de réception (`inbound_messages`). */
+  kind?: "sent" | "received";
+  /** Icône seule tant que le bouton n'est pas armé (listes). */
+  compact?: boolean;
   /** Ce qui est nommé dans le toast (« le brouillon pour ACME »). */
   label?: string;
   onTrashed?: () => void;
@@ -42,16 +52,17 @@ export function MailTrashButton({
     if (!armed) return setArmed(true);
 
     startTransition(async () => {
-      const result = await trashMail(messageId);
+      const result = kind === "received" ? await trashReceived(messageId) : await trashMail(messageId);
       setArmed(false);
       if (!result.ok) return void toast.error(result.error);
       onTrashed?.();
       offerUndo(`${label.charAt(0).toUpperCase()}${label.slice(1)} mis à la corbeille`, async () => {
-        const restored = await restoreMail(messageId);
+        const restored = kind === "received" ? await restoreReceived(messageId) : await restoreMail(messageId);
         if (!restored.ok) toast.error(restored.error);
         router.refresh();
       });
-      router.refresh();
+      if (redirectTo) router.push(redirectTo);
+      else router.refresh();
     });
   }
 
@@ -71,7 +82,7 @@ export function MailTrashButton({
       )}
     >
       <Trash2 className="h-3.5 w-3.5" aria-hidden />
-      {armed ? "Êtes-vous sûr ?" : "Mettre à la corbeille"}
+      {armed ? "Êtes-vous sûr ?" : compact ? null : "Mettre à la corbeille"}
     </button>
   );
 }

@@ -10,6 +10,7 @@ import type { Deal, Message, Prospect, Reminder } from "@/types";
 import { DealTimeline } from "../_components/deal-timeline";
 import { TrashButton } from "@/components/trash/trash-button";
 import { SendStateBadge } from "@/components/outbox/send-state-badge";
+import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
 import { FollowUpButton } from "../_components/follow-up-button";
 import { ProspectSummary } from "../_components/prospect-summary";
 import { EstimateInput } from "../_components/estimate-input";
@@ -96,7 +97,13 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
                 sendError={sendState.sendError}
               />
             )}
-            {followUp && <FollowUpButton prospectId={typed.id} type={followUp} />}
+            {typed.do_not_contact && <Badge tone="danger">Ne plus contacter</Badge>}
+            {followUp && !typed.do_not_contact && <FollowUpButton prospectId={typed.id} type={followUp} />}
+            <DoNotContactButton
+              prospectId={typed.id}
+              companyName={typed.company_name}
+              active={Boolean(typed.do_not_contact)}
+            />
             <TrashButton
               prospectId={typed.id}
               companyName={typed.company_name}

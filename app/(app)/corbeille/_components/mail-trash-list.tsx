@@ -21,7 +21,7 @@ export function MailTrashList({ items }: { items: TrashedMessage[] }) {
     return (
       <EmptyState
         icon={<Mail />}
-        title="Aucun mail à la corbeille"
+        title="Aucun brouillon à la corbeille"
         description="Les brouillons et mails programmés mis à la corbeille apparaîtront ici."
       />
     );

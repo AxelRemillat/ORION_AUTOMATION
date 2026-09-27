@@ -24,8 +24,14 @@ export function ScheduleDialog({
   scheduledAt,
   scheduledTo,
   onScheduled,
+  prepare,
+  disabled,
 }: {
-  messageId: string;
+  /** `null` : le mail n'existe pas encore en base, `prepare` le crée. */
+  messageId: string | null;
+  /** Enregistre le mail juste avant de le programmer (réponse en cours de saisie). */
+  prepare?: () => Promise<{ ok: true; messageId: string } | { ok: false; error: string }>;
+  disabled?: boolean;
   defaultTo: string;
   /** Présent : on modifie l'heure d'un mail déjà programmé. */
   scheduledAt?: string | null;
@@ -56,7 +62,14 @@ export function ScheduleDialog({
     const invalid = scheduleError(at);
     if (invalid) return setError(invalid);
     startTransition(async () => {
-      const result = await scheduleMail(messageId, to, (at as Date).toISOString());
+      let id = messageId;
+      if (prepare) {
+        const prepared = await prepare();
+        if (!prepared.ok) return setError(prepared.error);
+        id = prepared.messageId;
+      }
+      if (!id) return setError("Mail introuvable.");
+      const result = await scheduleMail(id, to, (at as Date).toISOString());
       if (!result.ok) return setError(result.error);
       toast.success(`Envoi programmé : ${formatScheduled((at as Date).toISOString())} (heure de Paris).`);
       setOpen(false);
@@ -67,7 +80,16 @@ export function ScheduleDialog({
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled}
+        onClick={() => {
+          // Le destinataire saisi à côté (composeur de réponse) fait foi à l'ouverture.
+          setTo(scheduledTo ?? defaultTo);
+          setOpen(true);
+        }}
+      >
         <CalendarClock className="h-3.5 w-3.5" aria-hidden />
         {scheduledAt ? "Modifier l'heure" : "Programmer l'envoi"}
       </Button>
@@ -91,9 +113,9 @@ export function ScheduleDialog({
       >
         <div className="space-y-4">
           <div>
-            <Label htmlFor={`schedule-to-${messageId}`}>Destinataire</Label>
+            <Label htmlFor={`schedule-to-${messageId ?? "new"}`}>Destinataire</Label>
             <Input
-              id={`schedule-to-${messageId}`}
+              id={`schedule-to-${messageId ?? "new"}`}
               type="email"
               value={to}
               onChange={(event) => setTo(event.target.value)}
@@ -109,9 +131,9 @@ export function ScheduleDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor={`schedule-date-${messageId}`}>Date</Label>
+              <Label htmlFor={`schedule-date-${messageId ?? "new"}`}>Date</Label>
               <Input
-                id={`schedule-date-${messageId}`}
+                id={`schedule-date-${messageId ?? "new"}`}
                 type="date"
                 value={date}
                 onChange={(event) => {
@@ -121,9 +143,9 @@ export function ScheduleDialog({
               />
             </div>
             <div>
-              <Label htmlFor={`schedule-time-${messageId}`}>Heure (Paris)</Label>
+              <Label htmlFor={`schedule-time-${messageId ?? "new"}`}>Heure (Paris)</Label>
               <Input
-                id={`schedule-time-${messageId}`}
+                id={`schedule-time-${messageId ?? "new"}`}
                 type="time"
                 value={time}
                 onChange={(event) => {

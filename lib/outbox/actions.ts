@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { cancelSchedule, scheduleMessage } from "./scheduler";
 import { deleteMessageForever, restoreMessage, trashMessage } from "./trash";
+import { deleteInboundForever, restoreInbound, trashInbound } from "./inbound-trash";
+import { setDoNotContact } from "./do-not-contact";
+import { saveReplyDraft } from "./reply-draft";
 
 /**
  * Actions « mail » appelées depuis l'UI (fiche prospect, /prospection,
@@ -14,7 +17,7 @@ import { deleteMessageForever, restoreMessage, trashMessage } from "./trash";
 export type MailActionResult = { ok: true } | { ok: false; error: string };
 
 function done(result: { ok: true } | { ok: false; error: string }): MailActionResult {
-  // Compteur de la corbeille, badges et listes vivent dans tout l'arbre.
+  // Compteurs, badges et listes vivent dans tout l'arbre.
   if (result.ok) revalidatePath("/", "layout");
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
@@ -51,4 +54,42 @@ export async function unscheduleMail(messageId: string): Promise<MailActionResul
   const id = await userId();
   if (!id) return SESSION_ERROR;
   return done(await cancelSchedule(createClient(), { userId: id, messageId }));
+}
+
+// --- Mails reçus -----------------------------------------------------------
+
+export async function trashReceived(inboundId: string): Promise<MailActionResult> {
+  return done(await trashInbound(createClient(), inboundId));
+}
+
+export async function restoreReceived(inboundId: string): Promise<MailActionResult> {
+  return done(await restoreInbound(createClient(), inboundId));
+}
+
+export async function deleteReceivedForever(inboundId: string): Promise<MailActionResult> {
+  return done(await deleteInboundForever(createClient(), inboundId));
+}
+
+/** Enregistre (ou réécrit) le brouillon de réponse ; rend son id pour le programmer. */
+export async function saveReply(
+  inboundId: string,
+  subject: string,
+  body: string,
+): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  const id = await userId();
+  if (!id) return { ok: false, error: "Session expirée. Reconnectez-vous." };
+  const result = await saveReplyDraft(createClient(), { userId: id, inboundId, subject, body });
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
+}
+
+// --- Ne plus contacter -----------------------------------------------------
+
+export async function setProspectDoNotContact(
+  prospectId: string,
+  on: boolean,
+): Promise<{ ok: true; cancelled: number } | { ok: false; error: string }> {
+  const result = await setDoNotContact(createClient(), prospectId, on);
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
 }

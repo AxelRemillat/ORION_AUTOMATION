@@ -66,7 +66,7 @@ export function OutboxIndicator() {
 
   return (
     <Link
-      href="/cockpit#envois-programmes"
+      href={failed ? "/cockpit/mails?onglet=envoyes" : "/cockpit/mails?onglet=programmes"}
       aria-label={label}
       title={label}
       className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-text"

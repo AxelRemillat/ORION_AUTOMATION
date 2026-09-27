@@ -6,6 +6,9 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { activeProspects } from "@/lib/trash/scope";
 import type { InboundMessage, Message, Prospect } from "@/types";
+import { currentReplyDraft } from "@/lib/outbox/reply-draft";
+import { MailTrashButton } from "@/components/outbox/mail-trash-button";
+import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
 import { ReplyComposer } from "./reply-composer";
 import { ThreadView, type ThreadEntry } from "./thread-view";
 
@@ -27,6 +30,7 @@ export default async function InboxThreadPage({ params }: { params: { id: string
     .from("inbound_messages")
     .select("*")
     .eq("id", params.id)
+    .is("deleted_at", null)
     .maybeSingle();
   if (!data) notFound();
   const inbound = data as InboundMessage;
@@ -48,6 +52,7 @@ export default async function InboxThreadPage({ params }: { params: { id: string
         .from("inbound_messages")
         .select("*")
         .eq("prospect_id", inbound.prospect_id)
+        .is("deleted_at", null)
         .order("received_at", { ascending: true }),
     ]);
     prospect = (prospectResult.data as Prospect) ?? null;
@@ -60,6 +65,8 @@ export default async function InboxThreadPage({ params }: { params: { id: string
 
   // Seuls les messages réellement partis font partie du fil : un brouillon
   // jamais envoyé n'a pas été lu par l'interlocuteur.
+  const replyDraft = await currentReplyDraft(supabase, inbound.id).catch(() => null);
+
   const entries: ThreadEntry[] = [
     ...messages
       .filter((message) => message.status === "sent")
@@ -97,15 +104,28 @@ export default async function InboxThreadPage({ params }: { params: { id: string
             ? `Conversation avec ${inbound.from_email}.`
             : "Expéditeur non rattaché à un prospect."
         }
+        actions={
+          <>
+            {prospect && (
+              <DoNotContactButton
+                prospectId={prospect.id}
+                companyName={prospect.company_name}
+                active={Boolean(prospect.do_not_contact)}
+              />
+            )}
+            <MailTrashButton messageId={inbound.id} kind="received" label="ce mail reçu" redirectTo="/cockpit" />
+          </>
+        }
       />
 
       <div className="flex flex-col gap-6">
         <ThreadView entries={entries} />
         <ReplyComposer
+          key={replyDraft?.id ?? "new"}
           inboundId={inbound.id}
           prospectId={inbound.prospect_id}
-          threadId={inbound.thread_id}
           defaultTo={inbound.from_email}
+          draft={replyDraft}
         />
       </div>
     </>
