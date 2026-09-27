@@ -217,6 +217,16 @@ export type Prospect = {
   website: string | null;
   /** Contact trouvé par l'enrichissement (Pappers/Hunter) ou saisi à la main. */
   email: string | null;
+  /**
+   * Provenance de l'adresse, posée par lib/contact-finder (migration
+   * 20260927210701). Absentes tant que la migration n'est pas appliquée.
+   */
+  email_type?: "nominatif" | "generique" | null;
+  email_source_url?: string | null;
+  contact_confidence?: number | null;
+  contact_found_by?: string | null;
+  contact_search?: Record<string, unknown> | null;
+  contact_checked_at?: string | null;
   sector: string | null;
   size_range: string | null;
   city: string | null;

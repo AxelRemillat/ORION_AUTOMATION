@@ -35,6 +35,7 @@ import type { Prospect } from "@/types";
 import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
 import type { Evidence } from "@/app/api/emails/generate/prompt";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
+import { findContact as findContactOnSite } from "@/lib/contact-finder";
 
 /**
  * Génération d'un mail, en trois étapes reprenables :
@@ -337,6 +338,18 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
     contact = outcome.contact;
     candidates = outcome.candidates ?? [];
     if (outcome.warning) warnings.push(outcome.warning);
+    // Hunter n'a rien donné et la fiche n'a pas d'adresse : le module contact
+    // cherche le vrai site et l'adresse publiée (mentions légales, contact).
+    if (!contact && !candidates.length && !prospect.email) {
+      const found = await findContactOnSite(prospect.id, { db: ctx.db, userId: ctx.userId }).catch(() => null);
+      if (found?.email) {
+        contact = { email: found.email, full_name: null, position: null, confidence: found.confidence };
+        warnings.push({
+          source: "hunter",
+          message: `adresse ${found.email_type === "nominatif" ? "nominative" : "générique"} trouvée par le module contact (${found.found_by})`,
+        });
+      }
+    }
   } else {
     // Hors génération complète, AUCUN appel Hunter : le contact revient du client.
     contact = (params.cachedContact as DecisionMakerContact | null | undefined) ?? null;
