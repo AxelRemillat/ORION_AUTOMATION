@@ -132,15 +132,38 @@ export function isOfferComplete(offer: Partial<UserOffer> | null | undefined): b
   );
 }
 
-/** Complète une ligne partielle avec les valeurs par défaut. */
+/**
+ * Complète une ligne avec les valeurs par défaut — et SEULEMENT ce qu'il faut.
+ *
+ * La version précédente filtrait les valeurs `null` de la ligne avant de les
+ * superposer aux défauts. Conséquence : tout champ vidé volontairement
+ * réapparaissait rempli au rechargement suivant. Axel effaçait un titre, le
+ * retrouvait au prochain passage, et n'avait aucun moyen de le vider.
+ *
+ * La règle est maintenant explicite : **un défaut ne comble qu'une absence, pas
+ * un vide choisi**.
+ *   - aucune ligne en base → tout vient des défauts (le préremplissage) ;
+ *   - clé absente de la ligne → défaut (ligne partielle, cas des tests) ;
+ *   - clé présente, même à `null` → la valeur de la ligne gagne, telle quelle.
+ */
 export function withDefaults(row: Partial<UserOffer> | null | undefined, userId = ""): UserOffer {
-  return {
-    user_id: row?.user_id ?? userId,
-    created_at: row?.created_at ?? "",
-    updated_at: row?.updated_at ?? "",
+  const base: UserOffer = {
     ...OFFER_DEFAULTS,
-    ...Object.fromEntries(Object.entries(row ?? {}).filter(([, value]) => value !== null && value !== undefined)),
+    user_id: userId,
+    created_at: "",
+    updated_at: "",
   } as UserOffer;
+
+  if (!row) return base;
+
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(row)) {
+    // `undefined` seul signifie « la ligne ne dit rien de ce champ ». Un `null`
+    // dit « ce champ est vide », et c'est une information qu'on respecte.
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  merged.user_id = row.user_id ?? userId;
+  return merged;
 }
 
 const normalize = (value: string): string =>
