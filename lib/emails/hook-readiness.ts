@@ -23,6 +23,25 @@ import type { DerivedFact } from "./derived-facts";
  */
 const TARGETING_ONLY = new Set([
   "naf",
+  /*
+   * LE FAIT DE SITE N'OUVRE PLUS UN MAIL.
+   *
+   * Il y etait autorise : ce que l'entreprise dit d'elle-meme semblait un point
+   * de depart legitime. Deux constats l'ont contredit, sur MAISONS TERRE D'OC
+   * le 27/09/2026 :
+   *
+   *   - la fiche n'avait AUCUN signal date, et le mail est parti quand meme,
+   *     porte par ce seul fait de site ;
+   *   - ce « fait de site » venait en realite de l'extrait du registre (son
+   *     `site_status` valait « non trouve »), et le mail ouvrait sur « votre
+   *     presentation relie l'etude… » — une paraphrase de leur objet social.
+   *
+   * Une accroche doit dire quelque chose que le lecteur ne sait pas deja de
+   * lui-meme. Sans evenement date, la fiche est a nourrir.
+   */
+  "site_offer",
+  "site_customers",
+  "site_vocabulary",
   // Une adresse de site n'est pas une accroche : c'est une coordonnee. La
   // sonde reelle sur TERDICI VEGETAL passait le gating grace a elle seule.
   "website",
@@ -87,7 +106,7 @@ export function hookReadiness(facts: readonly DerivedFact[]): HookReadiness {
     strong: [],
     reason: hasStaleSignal
       ? "À nourrir : aucun signal daté — les signaux trouvés n'ont pas de date exploitable."
-      : "À nourrir : aucun signal daté, et rien de distinctif sur son site.",
+      : "À nourrir : aucun événement daté sur cette fiche (signal, ouverture, arrivée d'un dirigeant).",
   };
 }
 

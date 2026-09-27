@@ -27,7 +27,9 @@ import {
   secondaryEstablishmentDate,
 } from "../lib/signals/dating";
 import { buildFacts } from "../lib/emails/derived-facts";
-import { attachSignals } from "../lib/enrichment/entity-match";
+import { attachSignals, nearbyEntity } from "../lib/enrichment/entity-match";
+import { isCommercialPosition } from "../lib/enrichment/hunter";
+import { chooseRecipient, painIsCommercial } from "../lib/jobs/handlers/email";
 import { officialQuote } from "../lib/signals";
 import { chooseProof, signatureFor } from "../lib/offer/model";
 import { defaultOffer } from "../lib/offer/read";
@@ -738,6 +740,129 @@ async function main(): Promise<void> {
       sector: "Commerce de gros de matériaux",
     });
     check("un négoce garde l'agent devis", negoce.proof?.id === "agent-devis", String(negoce.proof?.id));
+  }
+
+
+  console.log("\n22. MAISONS TERRE D'OC : un fait de site n'ouvre plus un mail");
+  {
+    // La fiche réelle : aucun signal daté, et un « fait de site » qui venait en
+    // vérité de l'extrait du registre (site_status valait « non trouvé »).
+    const facts = buildFacts(
+      prospect({
+        company_name: "MAISONS TERRE D'OC",
+        sector: "Construction de maisons individuelles",
+        key_figures: {
+          naf_code: "41.20A",
+          headcount: 35,
+          leader_person: "Julien Anthony Torrecillas",
+          leader_role: "Président",
+          leader_since: "2019-01-10",
+          site_status: "non trouvé",
+          site_offer: "Constructeur de maisons ; l'extrait mentionne une étude et la mise en œuvre d'un projet.",
+        },
+        signals: [{ label: "Effectif d'au moins 35 personnes", source: "Données INSEE" }],
+      }),
+      null,
+      NOW,
+    );
+
+    const readiness = hookReadiness(facts.facts);
+    check("la fiche est bloquée", !readiness.ready, JSON.stringify(readiness.strong.map((f) => f.key)));
+    check("la raison parle d'événement daté", /événement daté/.test(readiness.reason), readiness.reason);
+
+    const site = facts.facts.find((fact) => fact.key === "site_offer");
+    check("le fait de site existe toujours", Boolean(site));
+    check("mais il n'ouvre pas le mail", site ? !canOpenMail(site) : false);
+
+    // Un dirigeant en poste depuis 2019 n'est pas une arrivée.
+    check("sept ans en poste : aucune arrivée", !facts.facts.some((fact) => fact.key === "new_leader"));
+  }
+
+  console.log("\n23. « Votre présentation… » est une paraphrase du site");
+  {
+    const signature = "Axel Remillat\nAutomatisation & IA en production pour PME";
+    const mail = (first: string) =>
+      `Bonjour,\n\n${first}\n\nJe suis Axel Remillat.\n\nUn flux lirait vos dossiers.\n\nOn en parle ?\n\n${signature}`;
+
+    check(
+      "« Votre présentation relie… » est refusé",
+      opensOnSiteMention(mail("Votre présentation relie l'étude et la mise en œuvre du projet."), signature),
+    );
+    check("« votre site » aussi", opensOnSiteMention(mail("Votre site décrit huit implantations."), signature));
+    check("« leur plaquette » aussi", opensOnSiteMention(mail("Selon leur plaquette, deux ateliers."), signature));
+    check(
+      "parler d'eux sans parler de leur communication passe",
+      !opensOnSiteMention(mail("Vous construisez des maisons individuelles en Occitanie."), signature),
+    );
+  }
+
+  console.log("\n24. Anti-homonymie : jamais un mot de leur propre nom");
+  {
+    // Le bug réel : « maisons » est le mot-tête de MAISONS TERRE D'OC, et une
+    // phrase qui le contient sans le reste du nom le faisait bannir.
+    check(
+      "un fragment du nom n'est pas un homonyme",
+      nearbyEntity("Constructeur de maisons individuelles depuis 2019.", "MAISONS TERRE D'OC") === null,
+      String(nearbyEntity("Constructeur de maisons individuelles depuis 2019.", "MAISONS TERRE D'OC")),
+    );
+    check(
+      "une vraie autre entreprise reste détectée",
+      nearbyEntity("Maisons Pierre ouvre une agence.", "MAISONS TERRE D'OC") === "Maisons Pierre",
+      String(nearbyEntity("Maisons Pierre ouvre une agence.", "MAISONS TERRE D'OC")),
+    );
+
+    const attached = attachSignals(
+      [
+        {
+          label: "Présentation",
+          url: "https://maisons-terre-doc.fr/",
+          quote: "Constructeur de maisons individuelles depuis 2019.",
+        },
+      ],
+      { name: "MAISONS TERRE D'OC", siren: "845206317", website: null },
+    );
+    check("aucun nom interdit tiré de leur nom", attached.foreignEntities.length === 0, JSON.stringify(attached.foreignEntities));
+  }
+
+  console.log("\n25. Destinataire : le dirigeant, sauf si le besoin est commercial");
+  {
+    const commercial = { email: "c@x.fr", full_name: "Claire Vidal", position: "Directrice commerciale", confidence: 95 };
+    const ops = { email: "o@x.fr", full_name: "Marc Roux", position: "Directeur des opérations", confidence: 92 };
+
+    check("besoin opérationnel → on passe au décideur", chooseRecipient(commercial, [commercial, ops], "préparer les dossiers de chantier")?.email === ops.email);
+    check("besoin commercial → le commercial convient", chooseRecipient(commercial, [commercial, ops], "produire les devis clients")?.email === commercial.email);
+    check("pas de décideur → on garde le commercial", chooseRecipient(commercial, [commercial], "préparer les dossiers")?.email === commercial.email);
+    // Un agent n'est pas un decideur : on ne descend pas jusqu'a lui.
+    const agent = { email: "a@x.fr", full_name: "Lea Blanc", position: "Real Estate Agent", confidence: 99 };
+    check(
+      "un simple agent ne remplace pas le commercial",
+      chooseRecipient(commercial, [commercial, agent], "préparer les dossiers")?.email === commercial.email,
+    );
+    check("un dirigeant n'est jamais écarté", chooseRecipient(ops, [ops, commercial], "préparer les dossiers")?.email === ops.email);
+    check("aucun contact reste aucun contact", chooseRecipient(null, [], "préparer les dossiers") === null);
+
+    check("un devis est un besoin commercial", painIsCommercial("produire un devis à partir d'une demande"));
+    check("une prise de rendez-vous aussi", painIsCommercial("caler les rendez-vous de prospection"));
+    check("un dossier de chantier, non", !painIsCommercial("constituer les dossiers de chantier"));
+    check("« Directrice commerciale » est un poste commercial", isCommercialPosition("Directrice commerciale"));
+    check("« Président » ne l'est pas", !isCommercialPosition("Président"));
+    check("« Business Development Director » l'est", isCommercialPosition("Business Development Director"));
+  }
+
+  console.log("\n26. Ton Direct : « Bonjour prénom », jamais « Monsieur Nom »");
+  {
+    const facts = buildFacts(prospect(), null, NOW).facts;
+    const signature = signatureFor(offer);
+    const body = (greeting: string) =>
+      `${greeting}\n\nVous préparez des commandes en mars 2026.\n\nJe suis Axel Remillat, je construis des flux.\n\nUn flux lirait vos e-mails, en 2 à 3 semaines.\n\nOn en parle ?\n\n${signature}`;
+    const run = (greeting: string, tone: "direct" | "factuel") =>
+      validateEmail({ subject: "commandes", body: body(greeting) }, { facts, contact: null, tone, companyName: "X", signature })
+        .failures.filter((line) => line.includes("Salutation"))
+        .join(" | ");
+
+    check("Direct + « Monsieur » : refusé", run("Bonjour Monsieur Torrecillas,", "direct") !== "", "aucun échec");
+    check("Direct + prénom : accepté", run("Bonjour Julien,", "direct") === "", run("Bonjour Julien,", "direct"));
+    check("Factuel + « Monsieur » : accepté", run("Bonjour Monsieur Torrecillas,", "factuel") === "");
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

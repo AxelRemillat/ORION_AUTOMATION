@@ -513,8 +513,18 @@ export function contradictsAvoid(
  *   - la paraphrase de leur propre page : ils la connaissent, la leur relire ne
  *     leur apprend rien.
  */
-const SITE_MENTION =
-  /(sur|d'apr[eè]s|selon|d'ap[rè]es)\s+(votre|leur|le)\s+(site|page|plaquette)|votre site (indique|dit|pr[eé]cise|annonce|mentionne)|on (lit|voit|peut lire) sur/i;
+const SITE_MENTION = new RegExp(
+  [
+    // « Sur votre site », « d'apres leur plaquette »…
+    "(sur|d'apr[eè]s|selon)\\s+(votre|leur|le)\\s+(site|page|plaquette|brochure|pr[eé]sentation|descriptif)",
+    // « Votre presentation relie… », « votre site indique… » : le document
+    // devient SUJET de la phrase, ce qui revient au meme — on parle de leur
+    // communication au lieu de parler d'eux. Vu sur MAISONS TERRE D'OC.
+    "\\b(votre|leur)\\s+(site|page|plaquette|brochure|pr[eé]sentation|descriptif|profil|documentation|fiche)\\b",
+    "on (lit|voit|peut lire) sur",
+  ].join("|"),
+  "i",
+);
 
 export function opensOnSiteMention(body: string, signature?: string): boolean {
   const first = bodyParagraphs(body, signature)[0] ?? "";
@@ -725,6 +735,18 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     failures.push(
       "L'accroche reprend presque mot pour mot ce que dit leur site : ils le connaissent. " +
         "Sers-t'en pour dire ce que ca implique, pas pour le leur relire.",
+    );
+  }
+
+  // --- Salutation : « Monsieur » n'appartient qu'au registre factuel --------
+  //
+  // Le ton Direct s'adresse par le PRENOM. « Bonjour Monsieur Torrecillas » sur
+  // un mail direct sonne comme un courrier d'huissier, et ce n'est pas ce que
+  // le code avait impose : c'est le redacteur qui l'a ecrit de lui-meme.
+  if (context.tone !== "factuel" && /^bonjour\s+(monsieur|madame|mme|mr)\b/i.test(body)) {
+    failures.push(
+      `Salutation : le registre « ${context.tone} » s'adresse par le prénom. ` +
+        "« Bonjour Monsieur X » n'appartient qu'au ton factuel.",
     );
   }
 

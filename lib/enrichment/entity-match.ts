@@ -121,7 +121,23 @@ export function nearbyEntity(text: string, name: string): string | null {
       words.push(tokens[j]);
     }
     const candidate = words.map((token) => token.norm).join(" ");
-    if (candidate !== target) return words.map((token) => token.raw).join(" ");
+    if (candidate === target) continue;
+
+    /*
+     * Un fragment de LEUR PROPRE nom n'est pas une entite voisine.
+     *
+     * Sur MAISONS TERRE D'OC, le mot-tete est « maisons » : la phrase
+     * « constructeur de maisons individuelles » le contenait sans etre suivie
+     * du reste de la denomination, et « maisons » se retrouvait banni comme
+     * homonyme — un mot du nom du prospect, interdit dans son propre mail.
+     *
+     * Regle : si tous les mots du candidat figurent dans la denomination du
+     * prospect, ce n'est pas une autre entreprise.
+     */
+    const targetWords = new Set(denominationWords(name));
+    if (words.every((token) => targetWords.has(token.norm))) continue;
+
+    return words.map((token) => token.raw).join(" ");
   }
   return null;
 }
