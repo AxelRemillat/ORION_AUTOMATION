@@ -11,6 +11,10 @@ const EXCLUDED = [
   "pappers", "societe.com", "infogreffe", "verif.com", "manageo", "infonet", "annuaire-entreprises",
   "data.gouv", "bodacc", "kompass", "corporama", "entreprises.lefigaro", "score3", "insee",
   "lagazettefrance", "ellisphere", "creditsafe", "dnb.com", "b-reputation", "annuaire",
+  // Vus en direct sur BRIOL DIFFUSION et ARTFLEX : republieurs de donnees
+  // legales, indiscernables d'un site officiel pour la validation.
+  "inpi", "contract-factory", "prodestravaux", "mil.wf", "trabajo", "bilansgratuits", "dirigeant.com",
+  "rubypayeur", "firmania", "energierecrute", "altigoo",
   "entreprise.pro", "hoodspot", "yelp", "tripadvisor", "justacote", "118000", "118712", "cylex",
   "pagesjaunes", "pages-jaunes", "mappy", "waze", "google", "bing", "apple.com",
   // Réseaux et petites annonces
@@ -35,6 +39,34 @@ export function isExcludedDomain(domain: string): boolean {
     entry.includes(".")
       ? host === entry || host.endsWith(`.${entry}`) || host.startsWith(`${entry}.`) || host.includes(`.${entry}.`)
       : labels.some((label) => label === entry || label.startsWith(`${entry}-`) || (label.startsWith(entry) && entry.length >= 6)),
+  );
+}
+
+/**
+ * PRESTATAIRES TECHNIQUES : hébergeur, registrar, éditeur du site, régie.
+ *
+ * Toute page de mentions légales cite son hébergeur — c'est une obligation. Sur
+ * boulangerie-bonnin.fr, la page porte `support@ovh.com` ; le module en a
+ * déduit qu'ovh.com était un domaine d'adresses de l'entreprise, a interrogé
+ * Hunter dessus, et a proposé d'écrire à un salarié d'OVH. Vérifié le
+ * 28/09/2026.
+ *
+ * Ces domaines ne sont donc ni un site candidat, ni un domaine d'adresses.
+ */
+const PROVIDERS = [
+  "ovh", "ovhcloud", "ionos", "1and1", "gandi", "o2switch", "hostinger", "godaddy", "namecheap",
+  "infomaniak", "lws.fr", "planethoster", "nuxit", "phpnet", "amen.fr", "bluehost", "siteground",
+  "wix", "wixsite", "squarespace", "shopify", "wordpress", "jimdo", "weebly", "webflow", "strikingly",
+  "cloudflare", "amazonaws", "azurewebsites", "netlify", "vercel", "github", "gitlab",
+  "hubspot", "mailchimp", "sendinblue", "brevo", "sellsy", "salesforce", "zendesk", "wengo",
+  "sarbacane", "mailjet", "cegid", "orange-business",
+];
+
+export function isServiceProvider(domain: string): boolean {
+  const host = domain.toLowerCase().replace(/^www\./, "");
+  const labels = host.split(".");
+  return PROVIDERS.some((entry) =>
+    entry.includes(".") ? host === entry || host.endsWith(`.${entry}`) : labels.some((label) => label === entry),
   );
 }
 

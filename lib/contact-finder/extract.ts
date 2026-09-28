@@ -1,4 +1,4 @@
-import { domainOfEmail } from "./domains";
+import { domainOfEmail, isServiceProvider } from "./domains";
 
 /**
  * Extraction d'adresses dans une page, y compris masquées.
@@ -50,6 +50,20 @@ export type EmailKind = "nominatif" | "generique";
  * Nominatif si la partie locale porte le nom (ou prénom.nom, p.nom) d'une
  * personne connue, ou si elle a la forme « prenom.nom ». Sinon générique.
  */
+/**
+ * Le libelle d'adresse peut-il porter le nom d'une personne ?
+ *
+ * Hunter etiquette « personal » des alias opaques : sur briol-diffusion.fr il
+ * rend `xbr@` en « personal », et le module le presentait donc comme un contact
+ * NOMINATIF — trois lettres qui ne nomment personne, classees au-dessus de
+ * l'adresse que l'entreprise publie elle-meme. On exige donc quatre lettres au
+ * minimum avant de croire l'etiquette.
+ */
+export function namesSomeone(email: string): boolean {
+  const letters = email.split("@")[0].toLowerCase().replace(/[^a-z]/g, "");
+  return letters.length >= 4;
+}
+
 export function classifyEmail(email: string, person?: { firstName: string; lastName: string } | null): EmailKind {
   const local = email.split("@")[0].toLowerCase();
   if (GENERIC_LOCAL.test(local)) return "generique";
@@ -69,7 +83,8 @@ export function emailDomains(emails: string[], siteDomain: string | null): strin
   const domains = new Set<string>();
   for (const email of emails) {
     const domain = domainOfEmail(email);
-    if (domain) domains.add(domain);
+    // L'hébergeur cité dans les mentions légales n'est pas l'entreprise.
+    if (domain && !isServiceProvider(domain)) domains.add(domain);
   }
   // Le domaine du site passe en dernier : c'est l'hypothèse la plus faible
   // quand une adresse publiée pointe ailleurs.

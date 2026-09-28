@@ -1,7 +1,7 @@
-import { domainOfEmail, isExcludedDomain, isFreeMailbox, toDomain } from "./domains";
-import { classifyEmail, emailDomains, extractEmails, type EmailKind } from "./extract";
+import { domainOfEmail, isExcludedDomain, isFreeMailbox, isServiceProvider, toDomain } from "./domains";
+import { classifyEmail, emailDomains, extractEmails, namesSomeone, type EmailKind } from "./extract";
 import { pagesToVisit, textOf } from "./links";
-import { judgePage } from "./validate";
+import { coreName, judgePage } from "./validate";
 import {
   DEFAULT_BUDGET,
   type CompanyIdentity,
@@ -65,12 +65,43 @@ const EMPTY_SPENT = (): ContactBudget => ({
 
 /** Requêtes web, dans l'ordre : nom commercial, mentions légales, SIREN. */
 export function searchQueries(company: CompanyIdentity): string[] {
+  /*
+   * L'ORDRE DÉCIDE DU RÉSULTAT, parce que le budget de pages est petit.
+   *
+   * Mesuré sur BRIOL DIFFUSION (SIREN 421882440) le 28/09/2026 : la requête par
+   * nom commercial partait en premier et rendait trois domaines sans rapport
+   * (un blog, data.inpi.fr, un agrégateur). Chacun coûte deux lectures — une
+   * pour le domaine nu, une pour « www. » — donc les huit pages du budget
+   * étaient dépensées avant la requête suivante. Or le site officiel,
+   * menuiseriebriol-diffusion.com, était le PREMIER résultat de
+   * « "BRIOL DIFFUSION" mentions légales ». Il n'a jamais été lu.
+   *
+   * On commence donc par le plus précis. Le SIREN d'abord : il ne peut pas
+   * désigner une homonyme, et une page de mentions légales qui le porte prouve
+   * le rattachement à elle seule.
+   */
   const queries: string[] = [];
-  const trade = company.tradeNames.find((name) => name.toLowerCase() !== company.legalName.toLowerCase());
-  if (trade) queries.push(`"${trade}" ${company.city ?? ""}`.trim());
-  queries.push(`"${company.legalName}" mentions légales`);
   if (company.siren) queries.push(`"${company.siren}" mentions légales`);
-  else if (!trade) queries.push(`"${company.legalName}" ${company.city ?? ""}`.trim());
+  queries.push(`"${company.legalName}" mentions légales`);
+
+  /*
+   * Troisième requête : le NOM, le MÉTIER et la VILLE, sans guillemets.
+   *
+   * Pour SARL BONNIN FRERES, les deux requêtes de mentions légales ne rendent
+   * que des annuaires et des homonymes (bonin-tp.fr, bonnin-freres.com, une
+   * psychologue). « "BONNIN FRERES" ANGLES » aussi. Ce qui fait sortir
+   * boulangerie-bonnin.fr, c'est d'ajouter le métier :
+   * « bonnin freres Boulangerie et boulangerie-pâtisserie ANGLES ».
+   *
+   * Le nom commercial passe devant la raison sociale quand il en diffère : c'est
+   * lui que le site affiche.
+   */
+  const trade = company.tradeNames.find((name) => name.toLowerCase() !== company.legalName.toLowerCase());
+  const name = trade ?? company.legalName;
+  const place = company.city ?? "";
+  if (company.activity) queries.push(`${name} ${company.activity} ${place}`.replace(/\s+/g, " ").trim());
+  else if (trade) queries.push(`"${trade}" ${place}`.trim());
+  else if (!company.siren) queries.push(`"${company.legalName}" ${place}`.trim());
   return queries;
 }
 
@@ -89,7 +120,7 @@ export async function runContactSearch(
   // --- 1. Candidats gratuits ----------------------------------------------
   const candidates: Candidate[] = [];
   const add = (domain: string | null, by: string) => {
-    if (!domain || isExcludedDomain(domain) || isFreeMailbox(domain)) return;
+    if (!domain || isExcludedDomain(domain) || isFreeMailbox(domain) || isServiceProvider(domain)) return;
     if (!candidates.some((item) => item.domain === domain)) candidates.push({ domain, by });
   };
   add(toDomain(company.knownWebsite), "site connu");
@@ -113,9 +144,27 @@ export async function runContactSearch(
   }
 
   // --- 2. Recherche web, tant qu'aucun domaine n'est prouvé -----------------
+  /*
+   * UNE REQUÊTE NE PEUT PAS DÉPENSER TOUT LE BUDGET DE PAGES.
+   *
+   * Mesuré sur BRIOL DIFFUSION et ARTFLEX le 28/09/2026 : la première requête
+   * rendait deux ou trois domaines sans rapport (un répertoire de créances, un
+   * site dont la page de mentions légales cite des SIREN de clients). Chacun
+   * coûte deux lectures — domaine nu, puis « www. » — et les huit pages du
+   * budget étaient dépensées avant la requête suivante. Or le site officiel
+   * était dans les résultats de cette requête suivante, deux fois sur deux.
+   *
+   * On réserve donc une part égale à chaque requête. La dernière hérite de ce
+   * qui reste : rien n'est perdu quand les premières ont été économes.
+   */
+  const queries = searchQueries(company);
+  const shareOfPages = Math.max(2, Math.floor(budget.pages / Math.max(1, queries.length)));
   const snippetEmails: SiteEmail[] = [];
-  for (const query of searchQueries(company)) {
+  for (const [index, query] of queries.entries()) {
     if (checked.some((item) => item.validated) || !can("linkup")) break;
+    const pagesAtStart = spent.pages;
+    const last = index === queries.length - 1;
+    const withinShare = () => last || spent.pages - pagesAtStart < shareOfPages;
     use("linkup");
     const results = (await deps.webSearch(query)) ?? [];
     trace.steps.push(`recherche « ${query} » : ${results.length} résultat(s)`);
@@ -123,13 +172,35 @@ export async function runContactSearch(
     for (const item of results) {
       for (const email of extractEmails(`${item.title} ${item.snippet}`)) snippetEmails.push({ email, url: item.url });
       const domain = toDomain(item.url);
-      if (domain && !isExcludedDomain(domain) && !candidates.some((c) => c.domain === domain) && !fresh.some((c) => c.domain === domain)) {
+      if (
+        domain &&
+        !isExcludedDomain(domain) &&
+        !isServiceProvider(domain) &&
+        !candidates.some((c) => c.domain === domain) &&
+        !fresh.some((c) => c.domain === domain)
+      ) {
         fresh.push({ domain, by: `linkup:${query}` });
       }
     }
     candidates.push(...fresh);
-    for (const candidate of fresh.slice(0, 3)) {
-      if (!can("pages")) break;
+
+    /*
+     * UN DOMAINE QUI PORTE LEUR NOM PASSE DEVANT.
+     *
+     * Trois candidats au plus sont lus par requête, dans l'ordre du moteur. Sur
+     * SARL BONNIN FRERES, cet ordre donnait boulangeriespatisseries.fr (un
+     * annuaire), boulangerie-patisserie-harel.fr (un concurrent) puis un
+     * domaine parasite — et boulangerie-bonnin.fr, quatrième, n'était jamais lu.
+     *
+     * Le nom dans le domaine n'est pas une preuve — la validation reste
+     * nécessaire — mais c'est le meilleur ordre de lecture disponible, et il ne
+     * coûte rien.
+     */
+    const ranked = [...fresh].sort(
+      (a, b) => Number(carriesName(b.domain, company)) - Number(carriesName(a.domain, company)),
+    );
+    for (const candidate of ranked.slice(0, 3)) {
+      if (!can("pages") || !withinShare()) break;
       if ((await check(candidate)).validated) break;
     }
   }
@@ -163,7 +234,13 @@ export async function runContactSearch(
     const hits = (await deps.hunterDomainSearch(domain)) ?? [];
     trace.steps.push(`Hunter domain-search ${domain} : ${hits.length} adresse(s)`);
     for (const hit of hits) {
-      const kind: EmailKind = hit.type === "personal" ? "nominatif" : hit.type === "generic" ? "generique" : classifyEmail(hit.email, person);
+      // « personal » de Hunter n'est cru que si le libelle peut nommer quelqu'un.
+      const kind: EmailKind =
+        hit.type === "generic"
+          ? "generique"
+          : hit.type === "personal" && namesSomeone(hit.email)
+            ? "nominatif"
+            : classifyEmail(hit.email, person);
       const url = hit.sources[0] ?? siteUrl ?? `https://${domain}`;
       if (kind === "nominatif") nominals.push({ email: hit.email, url, by: "hunter:domain-search", verified: null, guessed: false });
       else hunterGeneric.push({ email: hit.email, url });
@@ -243,6 +320,22 @@ function pageKind(url: string): string {
   return path === "/" || !path ? "accueil" : path.replace(/^\//, "");
 }
 
+/**
+ * Le libellé du domaine reprend-il un mot distinctif de leur nom ?
+ *
+ * On compare des mots de quatre lettres au moins, formes juridiques retirées :
+ * « briol » dans menuiseriebriol-diffusion.com, « bonnin » dans
+ * boulangerie-bonnin.fr. Les mots trop courts ou trop communs sont écartés par
+ * `coreName`, qui enlève déjà « societe », « groupe », « ets ».
+ */
+export function carriesName(domain: string, company: CompanyIdentity): boolean {
+  const host = domain.toLowerCase().replace(/^www\./, "").split(".")[0].replace(/[^a-z0-9]/g, "");
+  const words = [company.legalName, ...company.tradeNames]
+    .flatMap((name) => coreName(name).split(" "))
+    .filter((word) => word.length >= 4);
+  return words.some((word) => host.includes(word));
+}
+
 function pickBest(checked: Checked[]): Checked | null {
   return [...checked].filter((item) => item.validated).sort((a, b) => b.confidence - a.confidence)[0] ?? null;
 }
@@ -277,9 +370,21 @@ async function inspect(
   }
 
   // Bonus de source : un site saisi ou déclaré chez Pappers part avec un a priori.
-  const prior = candidate.by === "site connu" || candidate.by === "pappers" ? 5 : 0;
+  const declared = candidate.by === "site connu" || candidate.by === "pappers" || candidate.by === "adresse connue";
+  const prior = declared ? 5 : 0;
   for (const page of pages) {
     const evidence = judgePage(textOf(page.html), company);
+    /*
+     * La raison sociale SEULE ne valide pas un domaine trouvé sur le web — un
+     * homonyme la porte aussi (cf. artflex.software). Mais quand le domaine a été
+     * SAISI par l'utilisateur ou DÉCLARÉ au registre, la question de l'identité
+     * ne se pose plus : y lire le nom de l'entreprise suffit à confirmer qu'on
+     * est au bon endroit.
+     */
+    if (declared && !evidence.validated && evidence.confidence >= 60) {
+      evidence.validated = true;
+      evidence.reason = `${evidence.reason} — domaine déclaré`;
+    }
     if (evidence.confidence > out.confidence) Object.assign(out, { confidence: evidence.confidence, validated: evidence.validated, reason: evidence.reason });
     for (const email of extractEmails(page.html)) {
       if (!out.emails.some((item) => item.email === email)) out.emails.push({ email, url: page.url });

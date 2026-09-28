@@ -58,12 +58,24 @@ export function usageName(
     words = raw.split(" ");
   }
 
-  const plain = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // Lettres seules : « Mathieu, » et « Mathieu » doivent se reconnaitre.
+  const plain = (value: string) =>
+    value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z-]/g, "");
   const known = hint.firstName ? plain(hint.firstName).split(/[\s-]+/)[0] : null;
   if (known && !usage) {
     const rest = words.filter((word) => plain(word).split("-")[0] !== known);
     if (rest.length && rest.length < words.length) {
-      return { firstName: cap(hint.firstName!.split(" ")[0]), lastName: cap(rest.join(" ")) };
+      /*
+       * LES DEUXIÈMES PRÉNOMS NE SONT PAS DES NOMS DE FAMILLE.
+       *
+       * « Mathieu Robert Alain BONNIN » donnait « Mathieu » + « Robert Alain
+       * Bonnin », et Hunter cherchait une adresse sur ce nom-là. Le nom de
+       * famille, ce sont les mots en CAPITALES quand la source en a gardé —
+       * c'est l'écriture du registre — sinon le DERNIER mot.
+       */
+      const upperRest = rest.filter(isUpper);
+      const family = upperRest.length ? upperRest.join(" ") : rest[rest.length - 1];
+      return { firstName: cap(hint.firstName!.split(" ")[0]), lastName: cap(family) };
     }
   }
 

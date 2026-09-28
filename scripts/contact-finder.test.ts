@@ -14,7 +14,8 @@
  *
  * Exécution : `npm run test:contact`.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { runContactSearch, type ContactDeps, type HunterHit, type VerifierStatus } from "../lib/contact-finder/finder";
 import { usageName } from "../lib/contact-finder/names";
 import { classifyEmail, deobfuscate, extractEmails } from "../lib/contact-finder/extract";
@@ -36,7 +37,69 @@ function check(name: string, condition: boolean, detail = "") {
 const same = (actual: unknown, expected: unknown) => JSON.stringify(actual) === JSON.stringify(expected);
 
 const FIX = "scripts/fixtures/contact-finder";
-const page = (file: string) => readFileSync(`${FIX}/${file}`, "utf8");
+
+/** Une page enregistrée. Les vraies pages sont gzippées : 1 Mo de HTML Wix. */
+const page = (file: string) =>
+  file.endsWith(".gz")
+    ? gunzipSync(readFileSync(`${FIX}/${file}`)).toString("utf8")
+    : readFileSync(`${FIX}/${file}`, "utf8");
+
+/** Nom de fichier d'une page enregistrée (même règle que le script d'enregistrement). */
+function fileNameOf(url: string): string {
+  const parsed = new URL(url);
+  const path = decodeURIComponent(parsed.pathname).replace(/\/$/, "");
+  const slug = (path || "/index").replace(/^\//, "").replace(/[^A-Za-z0-9._-]+/g, "-") || "index";
+  return `${slug.replace(/\.html?$/, "")}.html.gz`;
+}
+
+/**
+ * Rejoue un cas enregistré : l'identité réelle, les vrais résultats de recherche,
+ * et les pages telles qu'elles ont répondu.
+ *
+ * Les fixtures viennent de `npx tsx scripts/record-contact-fixtures.ts`. Elles
+ * étaient auparavant écrites à la main, et c'est ce qui a laissé passer trois
+ * défauts : contenu au-delà de la troncature, URL accentuée, hébergeur pris pour
+ * l'entreprise.
+ */
+function recorded(dir: string) {
+  const meta = JSON.parse(readFileSync(`${FIX}/${dir}/search.json`, "utf8")) as {
+    identity: CompanyIdentity;
+    searches: { query: string; results: { url: string; title: string; snippet: string }[] }[];
+  };
+  const searches: Record<string, { url: string; title: string; snippet: string }[]> = {};
+  for (const item of meta.searches) searches[item.query] = item.results;
+
+  // Toute page enregistrée répond, sous sa forme nue comme en « www. ».
+  const pages: Record<string, string> = {};
+  for (const file of readdirSync(`${FIX}/${dir}`)) {
+    if (!file.endsWith(".html.gz")) continue;
+    const html = page(`${dir}/${file}`);
+    for (const url of urlsFor(dir, file)) pages[url] = html;
+  }
+  return { company: meta.identity, searches, pages };
+}
+
+/** Les URL sous lesquelles une page enregistrée doit répondre. */
+function urlsFor(dir: string, file: string): string[] {
+  const host = HOSTS[dir];
+  const slug = file.replace(/\.html\.gz$/, "");
+  const paths =
+    slug === "index"
+      ? ["", "/"]
+      : slug === "mentions-l-gales"
+        ? ["/mentions-légales", `/${encodeURI("mentions-légales")}`]
+        : slug === "en-terms-legal-notice"
+          ? ["/en/terms/legal-notice"]
+          : [`/${slug}`, `/${slug}/`, `/${slug}.html`];
+  const hosts = slug === "en-terms-legal-notice" ? ["artflex.software"] : [host];
+  return hosts.flatMap((name) => paths.flatMap((path) => [`https://${name}${path}`, `https://www.${name}${path}`]));
+}
+
+const HOSTS: Record<string, string> = {
+  briol: "menuiseriebriol-diffusion.com",
+  bonnin: "boulangerie-bonnin.fr",
+  artflex: "robinetterieindustrielle.fr",
+};
 
 /** Faux réseau : des pages par URL, des résultats de recherche, des réponses Hunter. */
 function fakeDeps(setup: {
@@ -105,7 +168,11 @@ async function main() {
   check("annuaire sectoriel écarté", isExcludedDomain("annuaire-boulangeries.fr"));
   check("dunkerque-menuiserie.fr gardé (pas de faux positif « dun »)", !isExcludedDomain("dunkerque-menuiserie.fr"));
   check("boulangerie-bonnin.fr gardé", !isExcludedDomain("boulangerie-bonnin.fr"));
-  check("liens légaux suivis d'abord", pagesToVisit(page("bonnin/home.html"), "https://boulangerie-bonnin.fr")[0] === "https://boulangerie-bonnin.fr/infos-legales");
+  check(
+    "liens légaux suivis d'abord",
+    pagesToVisit(page("bonnin/index.html.gz"), "https://boulangerie-bonnin.fr")[0] === "https://boulangerie-bonnin.fr/mentions-legales/",
+    pagesToVisit(page("bonnin/index.html.gz"), "https://boulangerie-bonnin.fr")[0],
+  );
 
   console.log("validation");
   const artflex = identity({ legalName: "ARTFLEX", siren: "520644386" });
@@ -113,69 +180,89 @@ async function main() {
   check("SIREN espacé → validé", judgePage("RCS 520 644 386", artflex).validated);
   check("nom commercial seul → pas validé", !judgePage("Boulangerie Bonnin Frères", identity({ legalName: "SARL BONNIN FRERES", tradeNames: ["Boulangerie Bonnin Frères"] })).validated);
 
-  console.log("cas 1 — BRIOL DIFFUSION (421882440)");
+  console.log("cas 1 — BRIOL DIFFUSION (421882440), réponses réelles");
   {
-    const site = "https://menuiseriebriol-diffusion.com";
+    const { company, searches, pages } = recorded("briol");
     const { deps, calls } = fakeDeps({
-      pages: { [site]: page("briol/home.html"), [`${site}/mentions-legales`]: page("briol/mentions-legales.html"), [`${site}/contact`]: page("briol/contact.html") },
-      search: { '"BRIOL DIFFUSION" mentions légales': [
-        { url: "https://www.societe.com/societe/briol-diffusion-421882440.html", title: "BRIOL DIFFUSION", snippet: "SIREN 421 882 440" },
-        { url: `${site}/mentions-legales`, title: "Mentions légales", snippet: "BRIOL DIFFUSION" },
-      ] },
-      // Hunter devine s.briol@ mais ne peut que répondre accept_all : REFUSÉ.
-      finder: { "Séverine Briol@briol-diffusion.fr": "s.briol@briol-diffusion.fr" },
-      verify: { "s.briol@briol-diffusion.fr": "accept_all" },
+      pages,
+      search: searches,
+      // Les quatre adresses que Hunter rend vraiment sur briol-diffusion.fr, dont
+      // un alias opaque qu'il étiquette « personal ».
+      domainSearch: {
+        "briol-diffusion.fr": [
+          { email: "xbr@briol-diffusion.fr", type: "personal", firstName: null, lastName: null, sources: ["https://mairie-caraman.fr/secteur_d_activite/batiment"] },
+          { email: "j.benes@briol-diffusion.fr", type: "personal", firstName: "J", lastName: "Benes", sources: ["https://crouzil.fr/partenaires"] },
+        ],
+      },
+      verify: { "j.benes@briol-diffusion.fr": "valid" },
     });
-    const { result, trace } = await runContactSearch(identity({
-      legalName: "BRIOL DIFFUSION", siren: "421882440", leader: usageName("BRIOL Séverine née NASSIF"),
-    }), deps);
-    const expected: ContactResult = {
-      website: site, email: "contact@briol-diffusion.fr", email_type: "generique",
-      email_source_url: `${site}/mentions-legales`, confidence: 85, found_by: "site:mentions-legales",
-    };
-    check("résultat exact", same(result, expected), JSON.stringify(result));
+
+    const { result, trace } = await runContactSearch(company, deps);
+    check("le site est trouvé", result.website === "https://menuiseriebriol-diffusion.com", JSON.stringify(result));
+    check(
+      "prouvé par le SIREN de la page des mentions légales",
+      trace.candidates.some((item) => item.reason === "SIREN présent sur la page"),
+      JSON.stringify(trace.candidates),
+    );
+    // L'URL est accentuée (« /mentions-légales ») : le chemin doit être relu en
+    // clair pour être reconnu, sinon la page n'est jamais lue.
+    check(
+      "la page accentuée est lue",
+      calls.pages.some((url) => decodeURIComponent(url).endsWith("/mentions-légales")),
+      calls.pages.join(" "),
+    );
     check("domaine d'adresse ≠ domaine du site, cherché en premier", trace.emailDomains[0] === "briol-diffusion.fr", trace.emailDomains.join(","));
-    check("Hunter domain-search sur le domaine de l'ADRESSE", calls.domainSearch[0] === "briol-diffusion.fr");
-    check("email-finder avec le NOM D'USAGE", same(calls.finder, ["Séverine Briol@briol-diffusion.fr"]));
-    check("adresse devinée + accept_all → refusée", result.email !== "s.briol@briol-diffusion.fr");
-    check("societe.com jamais lu", !calls.pages.some((url) => url.includes("societe.com")));
+    check("le dirigeant éponyme est retenu", `${company.leader?.firstName} ${company.leader?.lastName}` === "Xavier Briol", JSON.stringify(company.leader));
+    check("adresse nominative vérifiée retenue", result.email === "j.benes@briol-diffusion.fr" && result.email_type === "nominatif", JSON.stringify(result));
+    // « xbr » ne nomme personne : Hunter le dit « personal », on ne le croit pas.
+    check("l'alias opaque n'est pas présenté comme nominatif", result.email !== "xbr@briol-diffusion.fr");
+    check("aucun annuaire lu", !calls.pages.some((url) => /societe\.com|verif\.com|data\.inpi/.test(url)), calls.pages.join(" "));
   }
 
-  console.log("cas 2 — SARL BONNIN FRERES (Angles 85)");
+  console.log("cas 2 — SARL BONNIN FRERES (349925735), réponses réelles");
   {
-    const site = "https://boulangerie-bonnin.fr";
-    const { deps, calls } = fakeDeps({
-      pages: { [site]: page("bonnin/home.html"), [`${site}/infos-legales`]: page("bonnin/infos-legales.html") },
-      search: { '"Boulangerie Bonnin Frères" Angles': [
-        { url: "https://www.pagesjaunes.fr/pros/boulangerie-bonnin", title: "Boulangerie Bonnin", snippet: "Angles" },
-        { url: `${site}/`, title: "Boulangerie Bonnin Frères", snippet: "Pains au levain à Angles" },
-      ] },
-    });
-    const { result } = await runContactSearch(identity({
-      legalName: "SARL BONNIN FRERES", tradeNames: ["Boulangerie Bonnin Frères"], city: "Angles", postalCode: "85750",
-    }), deps);
-    const expected: ContactResult = {
-      website: site, email: "contact@boulangerie-bonnin.fr", email_type: "generique",
-      email_source_url: `${site}/infos-legales`, confidence: 75, found_by: "site:mentions-legales",
-    };
-    check("résultat exact", same(result, expected), JSON.stringify(result));
-    check("recherche par nom commercial en premier", calls.search[0] === '"Boulangerie Bonnin Frères" Angles');
-    check("une seule recherche web suffit", calls.search.length === 1);
-    check("pagesjaunes jamais lu", !calls.pages.some((url) => url.includes("pagesjaunes")));
+    const { company, searches, pages } = recorded("bonnin");
+    const { deps, calls } = fakeDeps({ pages, search: searches });
+
+    const { result } = await runContactSearch(company, deps);
+    check("le site est trouvé", result.website === "https://boulangerie-bonnin.fr", JSON.stringify(result));
+    check("adresse publiée retenue", result.email === "contact@boulangerie-bonnin.fr", JSON.stringify(result));
+    check("elle vient des mentions légales", (result.email_source_url ?? "").includes("mentions-legales"), result.email_source_url);
+    // La requête par métier est celle qui fait sortir le site : ni le SIREN ni la
+    // raison sociale ne le rendent (annuaires et homonymes seulement).
+    check(
+      "le métier entre dans la troisième requête",
+      (calls.search[2] ?? "").includes("Boulangerie et boulangerie-pâtisserie"),
+      calls.search.join(" | "),
+    );
+    // L'hébergeur est cité dans les mentions légales : il ne doit jamais devenir
+    // un domaine d'adresses, sinon on écrit à un salarié d'OVH.
+    check("ovh.com n'est pas interrogé", !calls.domainSearch.includes("ovh.com"), calls.domainSearch.join(","));
+    check("nom de famille du dirigeant correct", company.leader?.lastName === "Bonnin", JSON.stringify(company.leader));
   }
 
-  console.log("cas 3 — ARTFLEX (520644386)");
+  console.log("cas 3 — ARTFLEX (520644386), réponses réelles");
   {
-    const site = "https://robinetterieindustrielle.fr";
-    const { deps, calls } = fakeDeps({
-      pages: { [site]: page("artflex/home.html"), [`${site}/mentions-legales`]: page("artflex/mentions-legales.html"), [`${site}/contact`]: page("artflex/contact.html") },
-      search: { '"520644386" mentions légales': [{ url: `${site}/mentions-legales/`, title: "Mentions légales", snippet: "ARTFLEX 520644386" }] },
-    });
-    const { result } = await runContactSearch(identity({ legalName: "ARTFLEX", siren: "520644386" }), deps);
-    const expected: ContactResult = { website: site, confidence: 45, found_by: `site:linkup:"520644386" mentions légales` };
-    check("résultat exact (site trouvé, aucune adresse publiée)", same(result, expected), JSON.stringify(result));
-    check("retrouvé par le SIREN après la raison sociale", same(calls.search, ['"ARTFLEX" mentions légales', '"520644386" mentions légales']));
-    check("Hunter interrogé sur le site trouvé", same(calls.domainSearch, ["robinetterieindustrielle.fr"]));
+    const { company, searches, pages } = recorded("artflex");
+    const { deps, calls } = fakeDeps({ pages, search: searches });
+
+    const { result, trace } = await runContactSearch(company, deps);
+    // artflex.software est un éditeur de logiciels homonyme : sa page légale
+    // écrit « ARTFLEX », et le nom seul suffisait à le faire retenir.
+    check("l'homonyme n'est pas retenu", result.website !== "https://artflex.software", JSON.stringify(result));
+    check(
+      "il est lu, mais non validé",
+      trace.candidates.some((item) => item.domain === "artflex.software" && !item.validated),
+      JSON.stringify(trace.candidates),
+    );
+    check("le vrai site est trouvé", result.website === "https://robinetterieindustrielle.fr", JSON.stringify(result));
+    check(
+      "prouvé par le SIREN",
+      trace.candidates.some((item) => item.domain === "robinetterieindustrielle.fr" && item.reason === "SIREN présent sur la page"),
+      JSON.stringify(trace.candidates),
+    );
+    check("aucune adresse publiée sur ce site", !result.email, JSON.stringify(result));
+    check("Hunter interrogé sur le site trouvé", calls.domainSearch.includes("robinetterieindustrielle.fr"), calls.domainSearch.join(","));
   }
 
   console.log("règles");
@@ -204,7 +291,9 @@ async function main() {
     const { deps, calls } = fakeDeps({ pages, search });
     const { result, trace } = await runContactSearch(company, deps);
     check("budget : 3 recherches au plus", calls.search.length <= 3, String(calls.search.length));
-    check("budget : 8 pages au plus", calls.pages.length <= 8, String(calls.pages.length));
+    // 14 lectures : elles ne coûtent aucun crédit, et 8 ne suffisaient pas à
+    // atteindre le vrai site quand les premiers candidats étaient morts.
+    check("budget : 14 pages au plus", calls.pages.length <= 14, String(calls.pages.length));
     check("rien de prouvé → aucune adresse, aucun Hunter", !result.email && calls.domainSearch.length === 0);
     check("dépenses tracées", trace.spent.pages === calls.pages.length && trace.spent.linkup === calls.search.length);
   }

@@ -28,6 +28,16 @@ export interface CompanyIdentity {
   postalCode: string | null;
   /** Dirigeant personne physique, NOM D'USAGE (voir names.ts). */
   leader: { firstName: string; lastName: string } | null;
+  /**
+   * Métier, au libellé PRÉCIS (sous-classe NAF) et seulement là.
+   *
+   * Sert à retrouver un site que le nom seul ne trouve pas : « bonnin freres
+   * ANGLES » ne rend que des annuaires, « bonnin freres Boulangerie et
+   * boulangerie-pâtisserie ANGLES » rend boulangerie-bonnin.fr. Un libellé de
+   * division (« Industries alimentaires ») est trop large pour aider : il reste
+   * donc `null` dans ce cas.
+   */
+  activity?: string | null;
   /** Site déjà connu ou saisi à la main : candidat prioritaire. */
   knownWebsite: string | null;
   /** Site déclaré chez Pappers. */
@@ -48,7 +58,18 @@ export interface ContactBudget {
 
 export const DEFAULT_BUDGET: ContactBudget = {
   linkup: 3,
-  pages: 8,
+  /*
+   * Lectures de pages. Elles ne coûtent AUCUN crédit — ce sont de simples
+   * requêtes HTTP — et ce budget ne borne donc que le temps.
+   *
+   * Il valait 8, et c'était trop serré : un candidat lit son accueil puis
+   * jusqu'à trois pages (mentions légales, contact, à propos), soit quatre
+   * lectures, et un domaine mort en coûte deux (nu, puis « www. »). Sur ARTFLEX
+   * le 28/09/2026, les huit lectures étaient dépensées avant d'arriver à
+   * robinetterieindustrielle.fr — le vrai site, qui se validait dès sa page
+   * d'accueil. À 14, les deux cas passent en moins de vingt secondes.
+   */
+  pages: 14,
   llm: 1,
   hunterDomainSearch: 2,
   hunterFinder: 1,

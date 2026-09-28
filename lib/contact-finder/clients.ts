@@ -55,6 +55,21 @@ async function allowed(url: URL): Promise<boolean> {
   return !(robots.get(url.origin) ?? []).some((rule) => rule === "/" || url.pathname.startsWith(rule));
 }
 
+/**
+ * Taille lue d'une page.
+ *
+ * Elle etait plafonnee a 400 000 caracteres, ce qui paraissait large. Mesure sur
+ * menuiseriebriol-diffusion.com (site Wix) le 28/09/2026 : la page d'accueil
+ * pese 1 031 619 caracteres, l'adresse « contact@… » se trouve a l'octet 509 638
+ * et le lien vers les mentions legales a 512 232. Les DEUX etaient coupes. Le
+ * module concluait « aucune mention de l'entreprise » sur son propre site.
+ *
+ * Les constructeurs de sites embarquent des centaines de kilo-octets de JSON de
+ * configuration AVANT le contenu : sur eux, une troncature basse ne garde que la
+ * tuyauterie. On monte donc a 2 Mo — au-dela, la page n'est plus un document.
+ */
+const MAX_HTML_BYTES = 2_000_000;
+
 async function fetchHtml(url: string): Promise<{ html: string; url: string } | null> {
   let parsed: URL;
   try {
@@ -67,7 +82,7 @@ async function fetchHtml(url: string): Promise<{ html: string; url: string } | n
   if (!response) return null;
   const type = response.headers.get("content-type") ?? "";
   if (!type.includes("html") && !type.includes("text")) return null;
-  const html = decodeBody(await response.arrayBuffer(), type).slice(0, 400_000);
+  const html = decodeBody(await response.arrayBuffer(), type).slice(0, MAX_HTML_BYTES);
   return { html, url: response.url || url };
 }
 
