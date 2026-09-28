@@ -4,6 +4,7 @@ import { MapPin, RefreshCw, Sparkles, Users } from "lucide-react";
 import { Badge, Button, Card, CardContent, ProspectStatusBadge } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
 import type { Prospect } from "@/types";
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { ToneSelector } from "./_components/tone-selector";
 import type { ToneKey } from "./_lib/tones";
 
@@ -36,6 +37,7 @@ export function ProspectHeader({
   reanalyzing?: boolean;
 }) {
   const revenue = prospect.key_figures?.revenue_eur;
+  const offTarget = offTargetReason(prospect);
   // Un prospect perdu a deja dit non : relancer la generation, c'est payer des
   // credits pour ecrire a quelqu'un qu'on ne recontactera pas.
   const closed = prospect.status === "perdu";
@@ -51,7 +53,21 @@ export function ProspectHeader({
               {prospect.company_name}
             </h2>
             <ProspectStatusBadge status={prospect.status} />
+            {/*
+              Hors cible : opposition à la prospection, aucun salarié, capitaux
+              propres sous le seuil d'alerte, commerce de détail sous 20
+              salariés. Les mêmes règles que l'entonnoir, appliquées aux fiches
+              déjà ouvertes — une entreprise ne devient pas contactable parce
+              que sa fiche est ancienne.
+            */}
+            {offTarget && <Badge tone="danger">hors cible</Badge>}
           </div>
+
+          {offTarget && (
+            <p className="mt-1.5 text-[13px] text-lost-ink">
+              Hors cible : {offTarget}. L&apos;envoi est désactivé.
+            </p>
+          )}
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {prospect.sector && <Badge tone="accent">{prospect.sector}</Badge>}

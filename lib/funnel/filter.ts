@@ -1,3 +1,4 @@
+import { isSmallB2C } from "./eligible";
 import { isStaffingNaf } from "@/lib/signals";
 import { painForJob } from "./pain-map";
 import type { FilterVerdict, HarvestedSignal, Identity } from "./types";
@@ -17,45 +18,6 @@ export const DEFAULT_PREFERRED_SECTORS = [
 ] as const;
 /** Épicerie, nettoyage, commerce de détail télécom. */
 export const DEFAULT_EXCLUDED_SECTORS = ["4711", "4729", "812", "4742"] as const;
-
-/**
- * COMMERCE DE DÉTAIL ET SERVICES AUX PARTICULIERS — écartés sous 20 salariés.
- *
- * Mesuré sur le run 69+31 du 28/09/2026 : les DIX fiches retenues étaient des
- * reprises de fonds de commerce B2C — une boulangerie, deux opticiens, un
- * institut de beauté, une salle de sport, un paysagiste. Ces commerces n'ont pas
- * de back-office qui déborde : le gérant fait tout, et il n'achète pas
- * d'automatisation.
- *
- * Au-delà de 20 salariés, c'est une autre entreprise : une chaîne d'optique à
- * trente personnes a bien un service ADV. Le seuil garde donc la porte ouverte.
- *
- *   47.xx  commerce de détail
- *   96.xx  autres services personnels (coiffure, beauté, pressing…)
- *   93.13Z salles de sport
- *   56.1   restaurants — hors traiteur B2B (56.21Z), qui livre des entreprises
- *   96.03Z pompes funèbres, 95.xx réparation d'articles domestiques
- */
-export const B2C_NAF_PREFIXES = ["47", "96", "9313", "561", "9521", "9522", "9523", "9524", "9525", "9529"] as const;
-
-/** Traiteur : le seul 56 qui vend à des entreprises. */
-const B2B_CATERING = ["5621"] as const;
-
-/** Au-dessus de ce seuil, un commerce a un back-office et des salariés à soulager. */
-export const B2C_MIN_HEADCOUNT_CODE = "21";
-
-/**
- * Codes de tranche INSEE représentant au moins 20 salariés.
- * 21 = 20-49, 22 = 50-99, 31 = 100-199, 32 = 200-249, 41, 42, 51, 52, 53.
- */
-const AT_LEAST_TWENTY = new Set(["21", "22", "31", "32", "41", "42", "51", "52", "53"]);
-
-export function isSmallB2C(naf: string | null | undefined, effectifCode: string | null | undefined): boolean {
-  if (!naf) return false;
-  if (prefixMatch(naf, B2B_CATERING)) return false;
-  if (!prefixMatch(naf, B2C_NAF_PREFIXES)) return false;
-  return !(effectifCode && AT_LEAST_TWENTY.has(effectifCode));
-}
 
 /** Bâtiment : préféré seulement à partir de 20 salariés. */
 const BUILDING = ["41", "43"];
