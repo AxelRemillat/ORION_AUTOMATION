@@ -35,6 +35,7 @@
     "test:jobs": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/jobs.test.js",
     "test:accroche": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/accroche.test.js",
     "test:routes": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/routes-budget.test.js",
+    "test:contact": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-finder.test.js",
     "test:funnel": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel.test.js",
     "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js"
   },

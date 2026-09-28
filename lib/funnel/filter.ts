@@ -103,6 +103,46 @@ const reject = (reason: string): FilterVerdict => ({
   legalOnly: false,
 });
 
+/**
+ * SITES D'AVIS ET FORUMS — jamais un signal.
+ *
+ * Une note d'employés ou un fil de discussion ne dit rien d'un changement dans
+ * l'entreprise : il n'y a ni date d'événement, ni décision, ni sujet. Pire, la
+ * page mentionne l'entreprise assez souvent pour passer l'ancrage, et le mail
+ * finit par s'ouvrir sur ce que ses salariés pensent d'elle.
+ *
+ * Cas réel du 28/09/2026 : EFAP RHONE-ALPES SAS (SIREN 509516860) remontait
+ * avec, pour seul « signal », sa fiche d'avis gowork.fr.
+ */
+const REVIEW_SITES = [
+  "gowork",
+  "glassdoor",
+  "indeed.com/cmp",
+  "avis-entreprises",
+  "avisentreprise",
+  "trustpilot",
+  "opinion-assurances",
+  "custplace",
+  "societe-avis",
+  "balancetastartup",
+  "choosemycompany",
+  "reviews.",
+  "avis.",
+  "forum",
+  "reddit",
+  "quora",
+  "commentcamarche",
+  "trustindex",
+  "yelp",
+  "tripadvisor",
+];
+
+export function isReviewSite(url: string | null | undefined): boolean {
+  const raw = (url ?? "").toLowerCase();
+  if (!raw) return false;
+  return REVIEW_SITES.some((needle) => raw.includes(needle));
+}
+
 /** Verdict d'un signal, à partir de sa source et de son identité annuaire. */
 export function filterSignal(
   signal: HarvestedSignal,
@@ -135,6 +175,7 @@ export function filterSignal(
   if (signal.source === "france-travail" && AGGREGATORS.test(signal.url ?? "") && !identity.employerConfirmed) {
     return reject("offre republiée par un agrégateur, employeur non confirmé");
   }
+  if (isReviewSite(signal.url)) return reject("avis/forum : une note de salariés n'est pas un signal d'entreprise");
   if (ABOUT_CLIENT.test(text)) return reject("le signal parle d'un client de l'entreprise, pas d'elle");
   if (signal.source === "france-travail" && !painForJob(signal.facts.jobTitle ?? signal.text)) {
     return reject("intitulé de poste qui ne révèle aucun pain automatisable");

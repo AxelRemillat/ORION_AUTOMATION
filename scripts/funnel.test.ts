@@ -138,7 +138,7 @@ const verdictOf = (key: keyof typeof CASES) => {
     const byName = new Map(Object.values(CASES).map((item) => [item.signal.companyName, item.company]));
     await runFilterStage(db, "u1", "run1", {
       prefs: DEFAULT_PREFS,
-      lookup: async (signal) => byName.get(signal.companyName) ?? null,
+      lookup: async (signal) => ({ ok: true, company: byName.get(signal.companyName) ?? null }),
       known: new Set([CASES.sunr.signal.siren!]),
       now: TODAY,
     });

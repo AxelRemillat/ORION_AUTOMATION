@@ -49,8 +49,14 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
       continue;
     }
     lookups += 1;
-    const base = await options.lookup(signal);
-    const identity = base ? toIdentity(signal, base) : null;
+    const found = await options.lookup(signal);
+    // Annuaire saturé : le signal n'est PAS faux, il n'a pas pu être identifié.
+    // On le laisse « à rejouer » plutôt que de le classer introuvable.
+    if (!found.ok) {
+      await updateCandidate(db, row.id, { motif_rejet: "annuaire saturé : identité non vérifiée, à rejouer" });
+      continue;
+    }
+    const identity = found.company ? toIdentity(signal, found.company) : null;
     if (identity?.siren && options.known.has(identity.siren)) {
       await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: "déjà en portefeuille, en corbeille ou exclu" });
       continue;
@@ -66,7 +72,7 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
       weight: verdict.weight,
       badges: verdict.badges,
       siren: identity?.siren || row.siren,
-      identity: identity ? { ...identity, legalOnly: verdict.legalOnly, base } : null,
+      identity: identity ? { ...identity, legalOnly: verdict.legalOnly, base: found.company } : null,
     });
   }
   return { lookups };

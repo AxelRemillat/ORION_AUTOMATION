@@ -59,8 +59,13 @@ const histogram = (reasons: string[]) => {
   const kept: TriageInput[] = [];
   const record: { signal: HarvestedSignal; company: CompanyBase | null }[] = [];
   for (const signal of collected.signals.slice(0, 250)) {
-    const company = await annuaireLookup(signal);
+    const found = await annuaireLookup(signal);
+    const company = found.ok ? found.company : null;
     record.push({ signal, company });
+    if (!found.ok) {
+      rejected.push("annuaire saturé : identité non vérifiée, à rejouer");
+      continue;
+    }
     const identity = company ? toIdentity(signal, company) : null;
     const verdict = filterSignal(signal, identity);
     if (verdict.status === "rejeté" || !identity) rejected.push(verdict.reason ?? "sans motif");
