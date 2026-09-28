@@ -176,7 +176,9 @@ function mapRepresentatives(raw: PappersRepresentant[] | undefined): PappersRepr
   return (raw ?? [])
     .map((item) => {
       const isCompany = Boolean(item.personne_morale ?? (item.siren && !item.nom));
-      const firstName = (item.prenom ?? item.prenoms ?? "").trim().split(/\s+/)[0] || null;
+      // Pappers rend « Mathieu, Robert, Alain » dans `prenoms` : la virgule
+      // restait collee au prenom, et le nom d'usage se calculait de travers.
+      const firstName = (item.prenom ?? item.prenoms ?? "").trim().split(/[\s,;]+/)[0] || null;
       const lastName = item.nom?.trim() || null;
       const name =
         item.nom_complet?.trim() ||

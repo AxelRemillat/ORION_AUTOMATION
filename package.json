@@ -13,7 +13,7 @@
     "test:signals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/signals.test.js",
     "test:enrichment": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/enrichment.test.js",
     "test:usage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/usage.test.js",
-    "test": "npm run test:signals && npm run test:usage && npm run test:queue && npm run test:emails && npm run test:emails-extra && npm run test:strategist && npm run test:recherche && npm run test:migrations && npm run test:qualite && npm run test:trash && npm run test:ai-params && npm run test:middleware && npm run test:search-runs && npm run test:signaux && npm run test:ciblage && npm run test:offre && npm run test:jobs && npm run test:encodage && npm run test:accroche && npm run test:routes && npm run test:outbox && npm run test:mailbox && npm run test:funnel",
+    "test": "npm run test:signals && npm run test:usage && npm run test:queue && npm run test:emails && npm run test:emails-extra && npm run test:strategist && npm run test:recherche && npm run test:migrations && npm run test:qualite && npm run test:trash && npm run test:ai-params && npm run test:middleware && npm run test:search-runs && npm run test:signaux && npm run test:ciblage && npm run test:offre && npm run test:jobs && npm run test:encodage && npm run test:accroche && npm run test:routes && npm run test:outbox && npm run test:mailbox && npm run test:contact && npm run test:funnel",
     "test:queue": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/queue.test.js",
     "test:charts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/charts.test.js",
     "test:emails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/emails.test.js",
@@ -35,7 +35,8 @@
     "test:jobs": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/jobs.test.js",
     "test:accroche": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/accroche.test.js",
     "test:routes": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/routes-budget.test.js",
-    "test:funnel": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel.test.js"
+    "test:funnel": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel.test.js",
+    "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

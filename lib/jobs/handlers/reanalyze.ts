@@ -3,6 +3,16 @@ import { resolveCompany } from "@/lib/enrichment/gouv";
 import { activeProspects } from "@/lib/trash/scope";
 import type { Prospect, ProspectKeyFigures } from "@/types";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
+import { findContact } from "@/lib/contact-finder";
+
+/**
+ * `scope: "contact"` : seule l'étape contact tourne (bouton « Trouver le
+ * contact (IA) », site saisi à la main). Sans scope, la réanalyse complète est
+ * suivie de l'étape contact QUAND la fiche n'a toujours ni site ni adresse.
+ */
+const scopeOf = (ctx: StepContext) => (ctx.job.params.scope === "contact" ? "contact" : "full");
+const prospectIdOf = (ctx: StepContext) =>
+  (ctx.job.target as { prospectId?: string }).prospectId ?? (ctx.job.params.prospectId as string | undefined);
 
 /**
  * Réanalyse d'un prospect : la chaîne d'enrichissement complète rejouée sur
@@ -33,8 +43,8 @@ export function mergedFigures(
 }
 
 async function reanalyze(ctx: StepContext): Promise<StepOutcome> {
-  const prospectId =
-    (ctx.job.target as { prospectId?: string }).prospectId ?? (ctx.job.params.prospectId as string | undefined);
+  if (scopeOf(ctx) === "contact") return {};
+  const prospectId = prospectIdOf(ctx);
   if (!prospectId) throw new JobError("Prospect manquant.", false, 400);
 
   const { data } = await activeProspects(ctx.db).eq("id", prospectId).eq("user_id", ctx.userId).maybeSingle();
@@ -100,4 +110,35 @@ async function reanalyze(ctx: StepContext): Promise<StepOutcome> {
   };
 }
 
-export const reanalyzeHandler: JobHandler = { steps: [reanalyze] };
+/**
+ * Étape contact : site officiel + adresse (lib/contact-finder), avec ses
+ * plafonds de coût. Automatique après une réanalyse qui n'a trouvé ni site ni
+ * adresse ; systématique quand on l'a demandée.
+ */
+async function contact(ctx: StepContext): Promise<StepOutcome> {
+  const prospectId = prospectIdOf(ctx);
+  if (!prospectId) throw new JobError("Prospect manquant.", false, 400);
+  const { data } = await activeProspects(ctx.db).eq("id", prospectId).eq("user_id", ctx.userId).maybeSingle();
+  const prospect = data as Prospect | null;
+  if (!prospect) throw new JobError("Prospect introuvable.", false, 404);
+  if (scopeOf(ctx) === "full" && prospect.website && prospect.email) return {};
+
+  await ctx.progress({ step: "Recherche du site et du contact", pct: 60, counts: { scanned: 0, signals: 0, sheets: 1 } });
+  const website = typeof ctx.job.params.website === "string" ? ctx.job.params.website : null;
+  const found = await findContact(prospect.id, { db: ctx.db, userId: ctx.userId, website });
+  return {
+    state: { contact: found },
+    result: { prospectIds: [prospect.id] },
+    progress: {
+      step: found.email
+        ? `Contact trouvé : ${found.email}`
+        : found.website
+          ? "Site trouvé, aucune adresse publiée"
+          : "Aucun site prouvé pour cette entreprise",
+      pct: 100,
+      counts: { scanned: 1, signals: 0, sheets: 1 },
+    },
+  };
+}
+
+export const reanalyzeHandler: JobHandler = { steps: [reanalyze, contact] };
