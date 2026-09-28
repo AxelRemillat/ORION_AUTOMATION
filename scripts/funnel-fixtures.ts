@@ -1,19 +1,39 @@
 /**
  * Fixtures de l'entonnoir « signaux d'abord ».
  *
- * RECONSTITUÉES à partir des faits constatés en production et rapportés par
- * Axel (montants, motifs, sièges) : l'environnement cloud n'a accès ni à
- * BODACC ni à l'annuaire. SIREN fictifs. À remplacer par les réponses brutes
- * enregistrées lors du run local (scripts/funnel-run.ts --record).
+ * Les FICHES viennent de l'annuaire public, enregistrées telles quelles par
+ * `npx tsx scripts/record-funnel-fiches.ts` : SIREN réels, NAF réel, tranche
+ * d'effectif réelle, statut de diffusion réel. Elles étaient auparavant
+ * reconstituées avec des SIREN fictifs et des valeurs supposées — et l'une de
+ * ces suppositions était fausse : on écrivait `diffusion: "P"` pour DBP MEDICAL
+ * en croyant que l'annuaire signalait ainsi son opposition à la prospection.
+ * L'API rend « O ». L'opposition n'est portée que par Pappers, et elle est donc
+ * vérifiée à l'étage 4 (lib/funnel/eligible.ts), pas au filtre.
  *
- * GLOBAL 2F : le brief dit « exclu » sans donner le motif. HYPOTHÈSE retenue
- * ici : 0 salarié (tranche 00). À confirmer au run local.
+ * Les TEXTES de signaux restent ceux relevés en production : ce sont de vraies
+ * formulations BODACC et France Travail. Un seul cas est synthétique et le dit,
+ * « LOGIFLUX » : c'est le témoin d'une hausse de capital franche.
  */
+import { readFileSync } from "node:fs";
 import type { CompanyBase } from "../lib/enrichment/types";
 import type { HarvestedSignal, SignalFacts } from "../lib/funnel/types";
 import { signalHash } from "../lib/funnel/harvest";
 
 export const TODAY = new Date("2026-09-27T06:00:00+02:00");
+
+/** Fiches annuaire enregistrées, par clé de cas. */
+const FICHES = (
+  JSON.parse(readFileSync("scripts/fixtures/funnel-fiches.json", "utf8")) as {
+    fiches: Record<string, CompanyBase | null>;
+  }
+).fiches;
+
+/** Fiche réelle d'un cas, éventuellement retouchée pour isoler une règle. */
+function fiche(key: string, over: Partial<CompanyBase> = {}): CompanyBase {
+  const recorded = FICHES[key];
+  if (!recorded) throw new Error(`fiche non enregistrée : ${key} (lancer scripts/record-funnel-fiches.ts)`);
+  return { ...recorded, ...over, figures: { ...recorded.figures, ...(over.figures ?? {}) } };
+}
 
 let counter = 0;
 function signal(
@@ -63,42 +83,50 @@ export interface Case {
 }
 
 const artflex = signal("ARTFLEX", {
+  siren: "520644386",
   text: "Modification du capital : capital social porté de 10 000,00 € à 10 959,76 €.",
   facts: { label: "Modification du capital", capitalAfter: 10_959.76, capitalBefore: 10_000 },
 });
 const sunr = signal("SUN'R GROUPE", {
+  siren: "501428676",
   text: "Capital social augmenté de 400 000,00 € à 402 000,00 €.",
   facts: { label: "Modification du capital", capitalAfter: 402_000, capitalBefore: 400_000 },
 });
 const devesa = signal("BOULANGERIE DEVESA", {
+  siren: "444866008",
   text: "Modification de la forme juridique : SAS devient EURL.",
   facts: { label: "Changement de forme juridique", signalType: "presse", strength: "faible" },
 });
 const dbp = signal("DBP MEDICAL", {
+  siren: "844687566",
   text: "Modification de l'administration : Mme Claire MARTIN devient présidente.",
   facts: { label: "Claire Martin devient présidente", signalType: "direction", newLeaders: [{ firstName: "Claire", surname: "MARTIN", role: "présidente" }] },
 });
 const global2f = signal("GLOBAL 2F", {
+  siren: "833040736",
   text: "Modification de l'administration : M. Karim BENALI devient gérant.",
   facts: { label: "Karim Benali devient gérant", signalType: "direction", newLeaders: [{ firstName: "Karim", surname: "BENALI", role: "gérant" }] },
 });
 const adviso = signal("ADVISO PARTNERS", {
+  siren: "808611990",
   source: "linkup",
   url: "https://adviso-partners.com/operations/groupe-echelle",
   text: "ADVISO PARTNERS a conseillé le Groupe Échelle dans l'acquisition de trois sociétés de maintenance.",
   facts: { label: "Opération annoncée" },
 });
 const delica = signal("DELICADESSERT", {
+  siren: "432158012",
   text: "Modification survenue suite au jugement du tribunal de commerce de Lyon du 12/09/2026.",
   facts: { label: "Modification au registre", signalType: "presse", strength: "faible" },
 });
 const champeil = signal("CHAMPEIL", {
+  siren: "422684027",
   text: "Création d'un établissement secondaire à Lyon.",
   facts: { label: "Nouvel établissement ou siège", strength: "moyen", city: "Lyon" },
 });
 const humanSight = signal("HUMAN SIGHT", {
   source: "france-travail",
-  siren: null,
+  siren: "912176435",
   url: "https://candidat.francetravail.fr/offres/recherche/detail/123ABC",
   text: "Assistant ADV H/F",
   facts: { label: "Recrutement", signalType: "recrutement", jobTitle: "Assistant ADV H/F", city: "Lyon", postalCode: "69003" },
@@ -109,32 +137,24 @@ const growth = signal("LOGIFLUX", {
 });
 
 export const CASES: Record<string, Case> = {
-  artflex: { name: "ARTFLEX", signal: artflex, company: base("ARTFLEX", { siren: artflex.siren, naf_code: "74.10Z" }) },
-  sunr: { name: "SUN'R GROUPE", signal: sunr, company: base("SUN'R GROUPE", { siren: sunr.siren, naf_code: "35.11Z" }) },
-  devesa: {
-    name: "BOULANGERIE DEVESA",
-    signal: devesa,
-    company: base("BOULANGERIE DEVESA", { siren: devesa.siren, naf_code: "10.71C", figures: { effectif_code: "11" } }),
-  },
-  dbp: { name: "DBP MEDICAL", signal: dbp, company: base("DBP MEDICAL", { siren: dbp.siren, naf_code: "46.46Z", figures: { diffusion: "P" } }) },
-  global2f: { name: "GLOBAL 2F", signal: global2f, company: base("GLOBAL 2F", { siren: global2f.siren, figures: { effectif_code: "00" } }) },
-  adviso: { name: "ADVISO PARTNERS", signal: adviso, company: base("ADVISO PARTNERS", { siren: adviso.siren, naf_code: "64.99Z" }) },
-  delica: { name: "DELICADESSERT", signal: delica, company: base("DELICADESSERT", { siren: delica.siren, naf_code: "10.71D" }) },
-  champeil: {
-    name: "CHAMPEIL",
-    signal: champeil,
-    company: base("CHAMPEIL", { siren: champeil.siren, city: "Bordeaux", naf_code: "46.69B", figures: { effectif_code: "21" } }),
-  },
+  artflex: { name: "ARTFLEX", signal: artflex, company: fiche("artflex") },
+  sunr: { name: "SUN'R GROUPE", signal: sunr, company: fiche("sunr") },
+  devesa: { name: "BOULANGERIE DEVESA", signal: devesa, company: fiche("devesa") },
+  dbp: { name: "DBP MEDICAL", signal: dbp, company: fiche("dbp") },
+  global2f: { name: "GLOBAL 2F", signal: global2f, company: fiche("global2f") },
+  adviso: { name: "ADVISO PARTNERS", signal: adviso, company: fiche("adviso") },
+  delica: { name: "DELICADESSERT", signal: delica, company: fiche("delica") },
+  champeil: { name: "CHAMPEIL", signal: champeil, company: fiche("champeil") },
   humanSight: {
     name: "HUMAN SIGHT",
     signal: humanSight,
-    company: base("HUMAN SIGHT", {
-      siren: "812000111",
-      city: "Lyon",
-      matched_branch: true,
-      naf_code: "70.22Z",
-      figures: { head_office_city: "Puteaux", effectif_code: "21" },
-    }),
+    // Offre à Lyon, siège à Puteaux : c'est le cas du badge « décision au siège ».
+    company: fiche("humanSight", { city: "Lyon", matched_branch: true }),
   },
-  growth: { name: "LOGIFLUX", signal: growth, company: base("LOGIFLUX", { siren: growth.siren, naf_code: "49.41A", figures: { effectif_code: "21" } }) },
+  growth: {
+    name: "LOGIFLUX",
+    signal: growth,
+    // Témoin SYNTHÉTIQUE, et le seul : +150 % de capital doit rester une croissance.
+    company: base("LOGIFLUX", { siren: growth.siren, naf_code: "49.41A", figures: { effectif_code: "21" } }),
+  },
 };

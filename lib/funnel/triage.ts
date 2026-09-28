@@ -58,7 +58,14 @@ Pour CHAQUE signal, réponds :
 Postes → pain :
 ${painMapBlock()}
 Une modification purement juridique (forme, dénomination, transfert à une holding) vaut au plus 2.
-Réponds UNIQUEMENT : {"items":[{"id":"...","utilisable":true,"sujet_est_l_entreprise":true,"type":"...","pain_probable":"...","accroche_possible":"...","score":4,"raison":"..."}]}`;
+Réponds UNIQUEMENT avec cet objet JSON, sans commentaire :
+{"items":[{"id":"...","utilisable":true,"sujet_est_l_entreprise":true,"type":"...","pain_probable":"...","accroche_possible":"...","score":4,"raison":"..."}]}`;
+/*
+ * Le mot « JSON » doit figurer dans les messages : sans lui, l'API refuse
+ * `response_format: json_object` avec un 400 (« 'messages' must contain the
+ * word 'json' »). Le tri rendait alors « tri indisponible » sur CHAQUE signal —
+ * 145 sur 145 — et l'erreur était avalée par le `catch` du lot.
+ */
 
 function userPrompt(batch: readonly TriageInput[]): string {
   return batch
@@ -105,10 +112,15 @@ export function settle(input: TriageInput, raw: z.infer<typeof ITEM> | undefined
 async function askBatch(ask: TriageAsk, batch: readonly TriageInput[]) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const parsed = RESPONSE.safeParse(JSON.parse(await ask(SYSTEM, userPrompt(batch))));
+      const answer = await ask(SYSTEM, userPrompt(batch));
+      const parsed = RESPONSE.safeParse(JSON.parse(answer));
       if (parsed.success) return parsed.data.items;
-    } catch {
-      // JSON illisible : une reprise, puis on abandonne ce lot.
+      // Réponse lisible mais non conforme : on dit LAQUELLE des règles a sauté.
+      // Sans cette trace, un lot entier ressortait « tri indisponible » sans
+      // qu'on sache si le modèle avait répondu, mal répondu, ou pas répondu.
+      console.warn(`[entonnoir] tri : réponse non conforme — ${parsed.error.issues[0]?.message ?? "?"}`);
+    } catch (error) {
+      console.warn(`[entonnoir] tri : ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return [];

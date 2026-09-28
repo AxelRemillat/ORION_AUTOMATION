@@ -174,6 +174,16 @@ export interface ProspectKeyFigures {
    * seule, et rien ici ne doit laisser croire à une augmentation.
    */
   capital_after_eur?: number;
+  /** Capitaux propres du dernier exercice publié (Pappers). */
+  equity_eur?: number;
+  /**
+   * L'entreprise s'oppose à l'usage commercial de ses données (registre Sirene,
+   * via Pappers). À ne pas confondre avec `statut_diffusion` de l'annuaire, qui
+   * ne dit que la diffusion de la fiche.
+   */
+  refuses_prospecting?: boolean;
+  /** Aucun salarié déclaré (Pappers) — distinct d'un effectif inconnu. */
+  no_staff?: boolean;
   /**
    * Date de nomination du dirigeant en poste, telle que Pappers la publie.
    *

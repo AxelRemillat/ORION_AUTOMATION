@@ -12,6 +12,8 @@ import type { Result } from "./http";
 const BASE_URL = "https://api.pappers.fr/v2/entreprise";
 
 interface PappersFinance {
+  /** Capitaux propres de l'exercice. Absent quand les comptes sont confidentiels. */
+  fonds_propres?: number | null;
   annee?: number;
   chiffre_affaires?: number | null;
   resultat?: number | null;
@@ -50,6 +52,9 @@ interface PappersEtablissement {
 
 interface PappersResponse {
   nom_entreprise?: string;
+  opposition_utilisation_commerciale?: boolean;
+  /** `false` quand l'entreprise n'emploie personne. */
+  entreprise_employeuse?: boolean;
   siren?: string;
   forme_juridique?: string;
   capital?: number | null;
@@ -115,6 +120,29 @@ export interface PappersData {
   sector: string | null;
   legal_form: string | null;
   capital_eur: number | null;
+  /**
+   * Capitaux propres du dernier exercice publié, et `null` quand ils ne le sont
+   * pas — une petite société peut déposer ses comptes en confidentialité.
+   */
+  equity_eur: number | null;
+  /**
+   * OPPOSITION À LA PROSPECTION COMMERCIALE, déclarée au registre Sirene.
+   *
+   * À ne pas confondre avec `statut_diffusion` de l'annuaire public, qui vaut
+   * « O » pour DBP MEDICAL (844687566) alors que cette société s'oppose bel et
+   * bien à l'usage commercial de ses données. Vérifié le 28/09/2026 : seul
+   * Pappers porte le drapeau, sous le nom `opposition_utilisation_commerciale`.
+   */
+  refuses_prospecting: boolean;
+  /**
+   * L'entreprise n'emploie PERSONNE, et le registre le dit — a ne pas confondre
+   * avec un effectif inconnu. GLOBAL 2F (833040736) : `effectif: "0 salarie"`,
+   * `effectif_min: 0`, `effectif_max: 0`, `entreprise_employeuse: false`, alors
+   * que l'annuaire public rend la tranche « NN », c'est-a-dire « non
+   * renseigne ». Le filtre de l'etage 2, qui lit l'annuaire, ne peut donc pas le
+   * savoir ; l'etage 4, si.
+   */
+  no_staff: boolean;
   headcount: number | null;
   revenue_eur: number | null;
   revenue_year: number | null;
@@ -221,6 +249,9 @@ export async function fetchPappers(siren: string): Promise<Result<PappersData>> 
       sector: raw.libelle_code_naf ?? raw.domaine_activite ?? null,
       legal_form: raw.forme_juridique ?? null,
       capital_eur: raw.capital ?? null,
+      equity_eur: finance?.fonds_propres ?? null,
+      refuses_prospecting: raw.opposition_utilisation_commerciale === true,
+      no_staff: raw.entreprise_employeuse === false && raw.effectif_max === 0,
       // `effectif_max` seul est un piege : il vaut 500000 pour une fourchette
       // ouverte (« Au moins 1 salarie »), et c'est ce chiffre qui s'affichait.
       headcount: readPappersHeadcount({

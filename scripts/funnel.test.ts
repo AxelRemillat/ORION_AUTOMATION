@@ -6,6 +6,7 @@
  */
 import { FakeDb } from "./fake-supabase";
 import { CASES, TODAY } from "./funnel-fixtures";
+import { disqualify } from "../lib/funnel/eligible";
 import { filterSignal } from "../lib/funnel/filter";
 import { parseCapitalChange } from "../lib/funnel/harvest";
 import { toIdentity } from "../lib/funnel/identify";
@@ -45,10 +46,14 @@ const verdictOf = (key: keyof typeof CASES) => {
     const devesa = verdictOf("devesa");
     check("DEVESA SAS→EURL : gardé mais purement juridique", devesa.status === "filtré" && devesa.legalOnly);
     check("DEVESA : poids faible", devesa.weight <= 0.2, String(devesa.weight));
+    // DBP MEDICAL et GLOBAL 2F passent le FILTRE : l'annuaire ne porte ni
+    // l'opposition à la prospection (il rend « O ») ni l'effectif zéro (il rend
+    // « NN »). Les deux sont écartés à l'étage 4, sur les données Pappers —
+    // vérifié en direct le 28/09/2026, voir le bloc « étage 4 ».
     const dbp = verdictOf("dbp");
-    check("DBP MEDICAL : exclu (opposition à la prospection)", dbp.status === "rejeté" && /opposée à la prospection/.test(dbp.reason ?? ""), dbp.reason ?? "");
+    check("DBP MEDICAL : le filtre ne peut pas voir l'opposition", dbp.status === "filtré", dbp.reason ?? "");
     const global = verdictOf("global2f");
-    check("GLOBAL 2F : exclu (0 salarié, motif supposé)", global.status === "rejeté" && /0 salarié/.test(global.reason ?? ""), global.reason ?? "");
+    check("GLOBAL 2F : le filtre ne voit pas l'effectif zéro", global.status === "filtré", global.reason ?? "");
     const adviso = verdictOf("adviso");
     check("ADVISO / Groupe Échelle : rejeté (client)", adviso.status === "rejeté" && /client/.test(adviso.reason ?? ""), adviso.reason ?? "");
     const delica = verdictOf("delica");
@@ -60,9 +65,9 @@ const verdictOf = (key: keyof typeof CASES) => {
   console.log("\n2. Siège et établissement secondaire");
   {
     const champeil = verdictOf("champeil");
-    check("CHAMPEIL : badge « décision au siège (Bordeaux) »", champeil.badges.some((badge) => badge === "décision au siège (Bordeaux)"), champeil.badges.join(","));
+    check("CHAMPEIL : badge « décision au siège (BORDEAUX) »", champeil.badges.some((badge) => badge === "décision au siège (BORDEAUX)"), champeil.badges.join(","));
     const human = verdictOf("humanSight");
-    check("HUMAN SIGHT : badge « décision au siège (Puteaux) »", human.badges.some((badge) => badge.includes("Puteaux")), human.badges.join(","));
+    check("HUMAN SIGHT : badge « décision au siège (PUTEAUX) »", human.badges.some((badge) => badge.includes("PUTEAUX")), human.badges.join(","));
     check("HUMAN SIGHT : offre ADV gardée (employeur confirmé)", human.status === "filtré", human.reason ?? "");
     const aggregated = filterSignal(
       { ...CASES.humanSight.signal, url: "https://www.hellowork.com/fr-fr/emplois/1.html" },
@@ -216,6 +221,32 @@ const verdictOf = (key: keyof typeof CASES) => {
     calls.length = 0;
     await run("funnel");
     check("kind funnel : les 5 étapes de l'entonnoir", calls.join(",") === "entonnoir0,entonnoir1,entonnoir2,entonnoir3,entonnoir4", calls.join(","));
+  }
+
+  console.log("\n étage 4 — ce qu'on refuse de publier (chiffres réels Pappers)");
+  {
+    const facts = (over: Partial<Parameters<typeof disqualify>[0]>) =>
+      disqualify({ refusesProspecting: false, noStaff: false, capitalEur: null, equityEur: null, ...over });
+
+    // DBP MEDICAL (844687566), releve le 28/09/2026 : l'annuaire rend
+    // statut_diffusion « O », Pappers rend opposition_utilisation_commerciale
+    // « true ». C'est Pappers qui fait foi.
+    check(
+      "opposition à la prospection : écartée",
+      /opposition à la prospection/.test(facts({ refusesProspecting: true, capitalEur: 50_000, equityEur: 305_926 })?.reason ?? ""),
+    );
+    // GLOBAL 2F (833040736) : « 0 salarie », effectif_max 0, entreprise_employeuse false.
+    check("aucun salarié : écarté", /aucun salarié/.test(facts({ noStaff: true, capitalEur: 6_000 })?.reason ?? ""));
+    // 901509364, releve le 28/09/2026 : capital 5 085,75 €, capitaux propres 2 376 €.
+    check(
+      "capitaux propres sous la moitié du capital : écartés",
+      /capitaux propres/.test(facts({ capitalEur: 5_085.75, equityEur: 2_376 })?.reason ?? ""),
+    );
+    check("capitaux propres au-dessus : gardés", facts({ capitalEur: 50_000, equityEur: 305_926 }) === null);
+    // GLOBAL 2F n'a AUCUN compte publie : la regle des capitaux propres ne peut
+    // pas s'appliquer, et l'absence de chiffre n'est pas un mauvais chiffre.
+    check("comptes confidentiels : la règle ne s'applique pas", facts({ capitalEur: 6_000, equityEur: null }) === null);
+    check("capital inconnu : la règle ne s'applique pas", facts({ capitalEur: null, equityEur: 100 }) === null);
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

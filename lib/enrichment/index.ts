@@ -214,6 +214,10 @@ export async function deepEnrich(
       if (data.revenue_year != null) keyFigures.revenue_year = data.revenue_year;
       if (data.net_income_eur != null) keyFigures.net_income_eur = data.net_income_eur;
       if (data.capital_eur != null) keyFigures.capital_eur = data.capital_eur;
+      if (data.equity_eur != null) keyFigures.equity_eur = data.equity_eur;
+      // Opposition a la prospection : portee par Pappers seul (cf. lib/funnel/eligible.ts).
+      if (data.refuses_prospecting) keyFigures.refuses_prospecting = true;
+      if (data.no_staff) keyFigures.no_staff = true;
       if (data.leader) keyFigures.leader = data.leader;
       if (data.leader_role) keyFigures.leader_role = data.leader_role;
       if (data.leader_since) keyFigures.leader_since = data.leader_since;

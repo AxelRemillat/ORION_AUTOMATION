@@ -120,7 +120,9 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
       triage: verdict,
       weight,
     });
-    await updateCandidate(db, row.id, outcome.error
+    await updateCandidate(db, row.id, outcome.skipped
+      ? { motif_rejet: outcome.skipped }
+      : outcome.error
       ? { motif_rejet: `creusage : ${outcome.error}` }
       : {
           statut: "creusé",

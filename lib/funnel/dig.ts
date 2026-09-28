@@ -1,6 +1,7 @@
 import type { ContactResult } from "@/lib/contact-finder";
 import type { CompanyBase, EnrichedCompany } from "@/lib/enrichment/types";
 import type { ProspectSignal } from "@/types";
+import { disqualify } from "./eligible";
 import type { HarvestedSignal, Triage } from "./types";
 
 /**
@@ -35,6 +36,12 @@ export interface DigDeps {
 
 export interface DigOutcome {
   id: string;
+  /**
+   * Renoncement DÉLIBÉRÉ, avec sa raison : opposition à la prospection,
+   * capitaux propres sous le seuil d'alerte. Ce n'est pas un échec — rien n'a
+   * raté — et ça ne doit pas se lire comme tel dans le bandeau du run.
+   */
+  skipped?: string | null;
   prospectId: string | null;
   contact: ContactResult | null;
   publication: "pret" | "a_completer" | null;
@@ -76,6 +83,24 @@ export async function digOne(deps: DigDeps, candidate: DigCandidate): Promise<Di
   const base = { id: candidate.id, prospectId: null, contact: null, publication: null };
   try {
     const company = await deps.enrich(candidate);
+
+    /*
+     * DERNIER CONTRÔLE AVANT PUBLICATION.
+     *
+     * L'enrichissement vient de lire la fiche Pappers : c'est le premier moment
+     * où l'on sait qu'une entreprise s'oppose à la prospection, ou que ses
+     * capitaux propres sont tombés sous la moitié de son capital. On renonce
+     * ICI, avant de créer la fiche et avant de dépenser la recherche de contact.
+     */
+    const figures = company.key_figures ?? {};
+    const verdict = disqualify({
+      refusesProspecting: figures.refuses_prospecting === true,
+      noStaff: figures.no_staff === true,
+      capitalEur: typeof figures.capital_eur === "number" ? figures.capital_eur : null,
+      equityEur: typeof figures.equity_eur === "number" ? figures.equity_eur : null,
+    });
+    if (verdict) return { ...base, skipped: verdict.reason, error: null };
+
     const created = await deps.createProspect(company, candidate);
     if ("error" in created) return { ...base, error: `fiche non créée : ${created.error}` };
     if ("existing" in created) return { ...base, error: "déjà en portefeuille" };

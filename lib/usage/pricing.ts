@@ -45,13 +45,26 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
   "gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6 },
   "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8 },
   "gpt-4.1-nano": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
+
+  /*
+   * Famille gpt-6, relevee le 28/09/2026 sur la page officielle :
+   * https://developers.openai.com/api/docs/pricing (tableau « Standard », en
+   * dollars par million de tokens).
+   *
+   *   gpt-6-astra   10,00 en entree   50,00 en sortie
+   *   gpt-6-sol      2,00              10,00
+   *   gpt-6-luna     0,10               0,50
+   *
+   * `gpt-6-luna` est le modele de TRI de l'entonnoir : un run de 140 signaux
+   * consomme environ 32 000 tokens, soit moins d'un centime.
+   */
+  "gpt-6-astra": { inputPerMillion: 10, outputPerMillion: 50 },
+  "gpt-6-sol": { inputPerMillion: 2, outputPerMillion: 10 },
+  "gpt-6-luna": { inputPerMillion: 0.1, outputPerMillion: 0.5 },
 };
 
-// TODO(tarifs) : ajouter ici les modeles retenus pour le stratege, le
-// redacteur, l'extraction et le juge (lib/ai/models.ts, PROPOSED_MODELS), avec
-// les prix relus sur developers.openai.com/api/docs/pricing. La page n'etait
-// pas accessible lors de l'ecriture : aucun prix n'a ete devine. En attendant,
-// OPENAI_PRICES_JSON permet de les renseigner sans redeployer le code.
+// OPENAI_PRICES_JSON reste disponible pour un modele hors grille, sans
+// redeployer le code.
 
 const DEFAULT_MODEL_PRICE: ModelPrice = { inputPerMillion: 0.15, outputPerMillion: 0.6 };
 
