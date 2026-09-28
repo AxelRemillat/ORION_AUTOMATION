@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { painForJob, painMapBlock } from "./pain-map";
+import { applyTypeQuota } from "./quota";
 import type { FilterVerdict, HarvestedSignal, Identity, Triage } from "./types";
 
 /**
@@ -135,5 +136,6 @@ export async function triage(ask: TriageAsk, inputs: readonly TriageInput[]): Pr
     const byId = new Map(items.map((item) => [item.id, item]));
     outcomes.push(...batch.map((input) => settle(input, byId.get(input.id))));
   }
-  return outcomes;
+  // Variété : un seul type ne peut pas rafler tous les retenus (cf. quota.ts).
+  return applyTypeQuota(outcomes);
 }

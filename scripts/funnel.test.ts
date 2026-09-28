@@ -52,8 +52,11 @@ const verdictOf = (key: keyof typeof CASES) => {
     // vérifié en direct le 28/09/2026, voir le bloc « étage 4 ».
     const dbp = verdictOf("dbp");
     check("DBP MEDICAL : le filtre ne peut pas voir l'opposition", dbp.status === "filtré", dbp.reason ?? "");
+    // GLOBAL 2F est un commerce de détail (NAF 47.25Z, boissons) sans effectif
+    // déclaré : la nouvelle règle B2C l'écarte dès le filtre. Son effectif zéro,
+    // lui, reste invisible à l'annuaire — c'est l'étage 4 qui le voit.
     const global = verdictOf("global2f");
-    check("GLOBAL 2F : le filtre ne voit pas l'effectif zéro", global.status === "filtré", global.reason ?? "");
+    check("GLOBAL 2F : écarté, commerce de détail sous 20 salariés", global.status === "rejeté" && /commerce de détail/.test(global.reason ?? ""), global.reason ?? "");
     const adviso = verdictOf("adviso");
     check("ADVISO / Groupe Échelle : rejeté (client)", adviso.status === "rejeté" && /client/.test(adviso.reason ?? ""), adviso.reason ?? "");
     const delica = verdictOf("delica");

@@ -11,11 +11,19 @@ interface PainRule {
 }
 
 const RULES: readonly PainRule[] = [
+  // Élargi le 28/09/2026 : sur 95 offres France Travail du run 69+31, 26 étaient
+  // écartées faute d'intitulé reconnu alors que le poste disait bien le pain —
+  // « gestionnaire ADV », « approvisionneur », « assistant facturation ».
+  { pattern: /back[- ]office|facturation|factures/, pain: "édition et suivi des factures" },
+  { pattern: /approvisionn|supply chain|logistique/, pain: "suivi des approvisionnements et des expéditions" },
+  { pattern: /secretaire|secretariat|accueil/, pain: "production des documents et classement" },
+  { pattern: /achats?\b|acheteur/, pain: "demandes d'achat et commandes fournisseurs" },
+  { pattern: /qualite|qhse|hse/, pain: "traçabilité et comptes rendus de contrôle" },
   { pattern: /\badv\b|administration des ventes|assistant(e)? commercial/, pain: "saisie des commandes et des devis" },
   { pattern: /deviseur|charge(e)? d'affaires|technico[- ]commercial/, pain: "production des devis" },
   { pattern: /aide[- ]comptable|comptable/, pain: "factures fournisseurs et rapprochement bancaire" },
   { pattern: /planificat|ordonnanc/, pain: "planning" },
-  { pattern: /magasinier|gestionnaire de stock|gestionnaire des stocks/, pain: "gestion du stock" },
+  { pattern: /magasinier|gestionnaire de stock|gestionnaire des stocks|preparateur de commandes/, pain: "gestion du stock" },
   { pattern: /assistant(e)? (administratif|administrative|rh)|assistant(e)? ressources humaines|gestionnaire rh/, pain: "dossiers administratifs et onboarding" },
   { pattern: /service client|charge(e)? de clientele|relation client/, pain: "tri des demandes clients" },
 ];
@@ -40,5 +48,8 @@ export function painMapBlock(): string {
     "- magasinier / gestionnaire de stock → gestion du stock",
     "- assistant administratif / RH → dossiers administratifs, onboarding",
     "- service client → tri des demandes clients",
+    "- facturation / back-office → édition et suivi des factures",
+    "- approvisionneur / supply chain → suivi des approvisionnements",
+    "- acheteur → demandes d'achat et commandes fournisseurs",
   ].join("\n");
 }
