@@ -23,6 +23,7 @@ import { FeedingBanner } from "./_components/feeding-banner";
 import { GenerationProgress } from "./_components/generation-progress";
 import { ContactCard } from "@/components/prospect/contact-card";
 import { DraftSendBar } from "./_components/draft-send-bar";
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { useReanalyze } from "./_lib/use-reanalyze";
 
 /**
@@ -202,7 +203,18 @@ export function ProspectionClient({
                 />
               </div>
 
-              {messageId && (
+              {/*
+                Fiche hors cible : pas de barre d'envoi du tout. Le brouillon
+                reste lisible et modifiable, mais on ne propose ni envoi ni
+                programmation — c'est la même règle que l'entonnoir, appliquée
+                à une fiche déjà ouverte.
+              */}
+              {messageId && offTargetReason(selected) && (
+                <p className="rounded-lg border border-lost/25 bg-lost/10 px-3 py-2 text-[13px] text-lost-ink">
+                  Envoi désactivé — {offTargetReason(selected)}.
+                </p>
+              )}
+              {messageId && !offTargetReason(selected) && (
                 <DraftSendBar
                   key={messageId}
                   messageId={messageId}
