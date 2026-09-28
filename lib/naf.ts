@@ -29,6 +29,11 @@ export interface NafLabel {
 
 /** Sous-classes rencontrées en prospection, vérifiées une à une. */
 const SUBCLASS: Record<string, string> = {
+  // Rencontrés le 28/09/2026 en cherchant le site de SARL BONNIN FRERES : la
+  // division seule (« Industries alimentaires ») ne permet pas de retrouver une
+  // boulangerie sur le web.
+  "10.71C": "Boulangerie et boulangerie-pâtisserie",
+  "10.71D": "Pâtisserie",
   "25.50A": "Forge, estampage, matriçage ; métallurgie des poudres",
   "25.50B": "Découpage, emboutissage",
   "25.61Z": "Traitement et revêtement des métaux",

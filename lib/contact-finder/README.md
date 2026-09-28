@@ -1,0 +1,49 @@
+# Module contact (`lib/contact-finder`)
+
+Trouve le **site officiel** et **l'adresse à laquelle écrire** quand la fiche
+n'en a pas, ou que Hunter ne renvoie rien.
+
+```ts
+import { findContact } from "@/lib/contact-finder";
+const result = await findContact(prospectId); // ContactResult, écrit sur la fiche
+```
+
+## Chemin
+
+1. **Identité** (`sources.ts`) : fiche → annuaire public (noms commerciaux,
+   enseignes, dirigeant) → Pappers en cache (site déclaré, représentants).
+   Dirigeant au **nom d'usage** : « BRIOL Séverine née NASSIF » → Briol.
+2. **Domaines candidats** (`finder.ts`) : site connu, site Pappers, domaine de
+   l'adresse connue ; puis Linkup (≤ 3) : `"<nom commercial>" <ville>`,
+   `"<raison sociale>" mentions légales`, `"<SIREN>" mentions légales`.
+   Annuaires et réseaux écartés **avant** lecture (`domains.ts`).
+3. **Validation** (`validate.ts`) : accueil + mentions légales / contact /
+   à-propos (≤ 8 pages). Validé si SIREN/SIRET (90), raison sociale + ville
+   (75), raison sociale (60), dirigeant + ville (60). Un modèle (1 appel au plus,
+   `OPENAI_MODEL_CONTACT`, défaut `gpt-6-luna`) ne sert qu'à départager.
+4. **Extraction** (`extract.ts`) : adresses en clair ou masquées (`[at]`,
+   `(at)`, `&#64;`), et les **domaines d'adresse** ≠ domaine du site.
+5. **Hunter** : domain-search sur les domaines d'adresse (≤ 2), email-finder sur
+   le dirigeant (≤ 1), email-verifier sur les nominatifs (≤ 3).
+6. **Priorité** : nominatif `valid` > nominatif `accept_all` (jamais pour une
+   adresse devinée) > générique publié sur le site > rien.
+
+Écrit sur la fiche : `website` (si vide ou saisi), `email` (jamais par-dessus
+une adresse saisie à la main), `email_type`, `email_source_url`,
+`contact_confidence`, `contact_found_by`, `contact_search` (journal et
+dépenses), `contact_checked_at`.
+
+## Déclenchement
+
+- Bouton « Trouver le contact (IA) » et site éditable : carte Contact sur
+  /prospection et sur la fiche Suivi (job `reanalyze`, `scope: "contact"`).
+- Automatique : après une réanalyse qui laisse la fiche sans site ou sans
+  adresse ; dans la génération de mail quand Hunter ne trouve rien.
+- Programmation d'un envoi : déjà refusée sans destinataire valide
+  (`lib/outbox/scheduler.ts`, non modifié).
+
+## Tests
+
+- `npm run test:contact` : HTML des 3 cas (BRIOL, BONNIN, ARTFLEX), règles,
+  budget, écriture sur la fiche. Fixtures dans `scripts/fixtures/contact-finder`.
+- `npm run contact:live -- <siren> [--save]` : test réel, **payant**, en local.

@@ -21,6 +21,7 @@ import type { UserOffer } from "@/types";
 import { OfferBanner } from "./_components/offer-banner";
 import { FeedingBanner } from "./_components/feeding-banner";
 import { GenerationProgress } from "./_components/generation-progress";
+import { ContactCard } from "@/components/prospect/contact-card";
 import { DraftSendBar } from "./_components/draft-send-bar";
 import { useReanalyze } from "./_lib/use-reanalyze";
 
@@ -156,6 +157,9 @@ export function ProspectionClient({
             onReanalyze={() => reanalyze(selected)}
             reanalyzing={reanalyzing}
           />
+
+          {/* Sans adresse, pas d'envoi : le contact se cherche d'ici. */}
+          <ContactCard key={selected.id} prospect={selected} />
 
           <SequenceShell steps={sequences[selected.id] ?? []} />
 
