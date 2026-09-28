@@ -70,6 +70,10 @@ export interface BaseFigures {
   company_category: string | null;
   /** Ville du siège, conservée quand `city` pointe vers un établissement. */
   head_office_city: string | null;
+  /** Statut de diffusion INSEE (`O`, `P`) tel que l'annuaire le rend. */
+  diffusion?: string | null;
+  /** État administratif de l'unité légale (`A` active, `C` cessée). */
+  administrative_state?: string | null;
 }
 
 /** Entreprise après passage par Pappers + Linkup. */

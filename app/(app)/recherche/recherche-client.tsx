@@ -22,12 +22,17 @@ import { useSearchRun } from "./use-search-run";
 import { criteriaLabel, readFinishedScan, signalsLabel } from "./scan-run";
 import type { SearchRun } from "@/types";
 import { SignalFilters } from "./signal-filters";
+import { FunnelResults, FunnelSettingsBlock, useFunnel } from "./funnel/funnel-panel";
 
-type Mode = "auto" | "signaux" | "manuel" | "favoris";
+/** Scan ouvert par l'entonnoir (job `search_signals`, critères `kind: "funnel"`). */
+const isFunnelRun = (run: SearchRun) => (run.criteria as { kind?: unknown } | null)?.kind === "funnel";
+
+type Mode = "entonnoir" | "auto" | "signaux" | "manuel" | "favoris";
 
 const TAB_LABELS: Record<Mode, string> = {
+  entonnoir: "Signaux",
   auto: "Recherche par critères",
-  signaux: "Signaux d'abord",
+  signaux: "Scan par signaux",
   manuel: "Ajout manuel",
   favoris: "Favoris",
 };
@@ -38,7 +43,11 @@ const keyOf = (company: EnrichedCompany) => company.siren ?? company.company_nam
 export function RechercheClient() {
   const router = useRouter();
   const toast = useToast();
-  const [mode, setMode] = useState<Mode>("auto");
+  const [mode, setMode] = useState<Mode>("entonnoir");
+  // L'entonnoir a son propre suivi (table signal_candidates) : sondé seulement sur son onglet.
+  const funnel = useFunnel(mode === "entonnoir");
+  /** Modes qui affichent des résultats de scan ou d'ajout manuel. */
+  const scanMode = mode === "auto" || mode === "signaux" || mode === "manuel";
   const [loading, setLoading] = useState(false);
   const [stopping, setStopping] = useState(false);
   /** Identifiant du scan suivi : tant qu'il vit, la barre s'affiche. */
@@ -122,7 +131,8 @@ export function RechercheClient() {
     // un scan terminé est réaffiché — même si l'onglet a été fermé entre-temps.
     if (!loaded || restored.current) return;
     restored.current = true;
-    if (!run) return;
+    // Un run de l'entonnoir vit dans l'onglet « Signaux », pas dans ces résultats.
+    if (!run || isFunnelRun(run)) return;
 
     if (run.status === "running") {
       setRunId(run.id);
@@ -299,7 +309,7 @@ export function RechercheClient() {
             mais son onglet n'a jamais figure dans cette liste. La fonction etait
             donc injoignable depuis l'ecran depuis le jour de sa livraison.
           */}
-          {(["auto", "signaux", "manuel", "favoris"] as const).map((value) => (
+          {(["entonnoir", "auto", "signaux", "manuel", "favoris"] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -321,6 +331,7 @@ export function RechercheClient() {
         </div>
 
         <CardContent className="flex flex-col gap-4 pt-5">
+          {mode === "entonnoir" && <FunnelSettingsBlock funnel={funnel} />}
           {mode === "auto" && (
             <SearchForm
               key={formSeed}
@@ -338,13 +349,15 @@ export function RechercheClient() {
           )}
           {mode === "manuel" && <ManualForm onSubmit={searchManual} loading={loading} />}
           {mode === "favoris" && <FavoritesPanel refreshKey={favoritesKey} />}
-          {mode !== "favoris" && (
+          {scanMode && (
             <SavedSearches current={lastCriteria} canSave={mode === "auto"} onApply={applySaved} />
           )}
         </CardContent>
       </Card>
 
-      {runId && running && run && (
+      {mode === "entonnoir" && <FunnelResults funnel={funnel} />}
+
+      {scanMode && runId && running && run && (
         <ScanProgress
           run={run}
           stopping={stopping}
@@ -362,10 +375,10 @@ export function RechercheClient() {
         />
       )}
 
-      {error && <ErrorBanner message={error} />}
-      <WarningBanner warnings={warnings} />
+      {scanMode && error && <ErrorBanner message={error} />}
+      {scanMode && <WarningBanner warnings={warnings} />}
 
-      {loading && (
+      {scanMode && loading && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((index) => (
             <Skeleton key={index} className="h-80" />
@@ -373,9 +386,9 @@ export function RechercheClient() {
         </div>
       )}
 
-      {!loading && mode !== "favoris" && scan && <ScanSummary scan={scan} />}
+      {!loading && scanMode && scan && <ScanSummary scan={scan} />}
 
-      {!loading && mode !== "favoris" && results.length > 0 && (
+      {!loading && scanMode && results.length > 0 && (
         <>
           <div className="flex flex-col gap-3">
             <p className="text-[13px]" style={{ color: "var(--muted)" }}>
@@ -429,7 +442,7 @@ export function RechercheClient() {
         se mettre sous la dent. Quand le scan a tourne, c'est <ScanSummary> qui
         explique pourquoi — et surtout qu'aucune fiche n'a ete facturee.
       */}
-      {!loading && mode !== "favoris" && searched && !results.length && !error && !scan?.scanned && (
+      {!loading && scanMode && searched && !results.length && !error && !scan?.scanned && (
         <EmptyState
           icon={<SearchX />}
           title="Aucune entreprise trouvée"
@@ -437,7 +450,7 @@ export function RechercheClient() {
         />
       )}
 
-      {!loading && mode !== "favoris" && !searched && (
+      {!loading && scanMode && !searched && (
         <EmptyState
           icon={<Building2 />}
           title="Lancez une recherche"

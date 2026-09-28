@@ -55,6 +55,13 @@ interface GouvResult {
   siege?: GouvSiege;
   matching_etablissements?: GouvEtablissement[];
   dirigeants?: GouvDirigeant[];
+  /**
+   * Statut de diffusion INSEE : « O » diffusible, « P » partiellement
+   * diffusible (l'entreprise a demandé à ne pas voir ses données exposées).
+   */
+  statut_diffusion?: string;
+  /** « A » active, « C » cessée. */
+  etat_administratif?: string;
 }
 
 interface GouvResponse {
@@ -208,6 +215,8 @@ function mapResult(raw: GouvResult, geoFiltered: boolean): CompanyBase | null {
       legal_code: raw.nature_juridique ?? null,
       company_category: raw.categorie_entreprise ?? null,
       head_office_city: headOffice !== city ? headOffice : null,
+      diffusion: raw.statut_diffusion ?? null,
+      administrative_state: raw.etat_administratif ?? null,
       ...latestFinance(raw.finances),
     },
   };

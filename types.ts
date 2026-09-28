@@ -174,6 +174,16 @@ export interface ProspectKeyFigures {
    * seule, et rien ici ne doit laisser croire à une augmentation.
    */
   capital_after_eur?: number;
+  /** Capitaux propres du dernier exercice publié (Pappers). */
+  equity_eur?: number;
+  /**
+   * L'entreprise s'oppose à l'usage commercial de ses données (registre Sirene,
+   * via Pappers). À ne pas confondre avec `statut_diffusion` de l'annuaire, qui
+   * ne dit que la diffusion de la fiche.
+   */
+  refuses_prospecting?: boolean;
+  /** Aucun salarié déclaré (Pappers) — distinct d'un effectif inconnu. */
+  no_staff?: boolean;
   /**
    * Date de nomination du dirigeant en poste, telle que Pappers la publie.
    *
@@ -598,6 +608,58 @@ export type SearchRun = {
 };
 
 /**
+ * Un signal de l'entonnoir « signaux d'abord » (lib/funnel), avec son statut
+ * dans les 4 étages et son motif de rejet.
+ */
+export type SignalCandidateRow = {
+  id: string;
+  user_id: string;
+  run_id: string | null;
+  source: string;
+  date_signal: string | null;
+  texte_brut: string;
+  url_source: string | null;
+  siren: string | null;
+  company_name: string | null;
+  hash: string;
+  statut: "brut" | "filtré" | "rejeté" | "retenu" | "creusé";
+  motif_rejet: string | null;
+  facts: Record<string, unknown>;
+  identity: Record<string, unknown> | null;
+  weight: number | null;
+  badges: string[];
+  triage: Record<string, unknown> | null;
+  score: number | null;
+  contact: Record<string, unknown> | null;
+  prospect_id: string | null;
+  publication: "pret" | "a_completer" | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SignalCandidateInsert = Partial<
+  Omit<SignalCandidateRow, "source" | "texte_brut" | "hash">
+> &
+  Pick<SignalCandidateRow, "source" | "texte_brut" | "hash">;
+export type SignalCandidateUpdate = Partial<SignalCandidateRow>;
+
+/** Réglages de l'entonnoir : zones, secteurs, run quotidien. */
+export type FunnelSettings = {
+  user_id: string;
+  departements: string[];
+  preferred_sectors: string[];
+  excluded_sectors: string[];
+  days: number;
+  dig_limit: number;
+  daily: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FunnelSettingsInsert = Partial<FunnelSettings>;
+export type FunnelSettingsUpdate = Partial<FunnelSettings>;
+
+/**
  * Réglages de recherche d'un utilisateur.
  *
  * `excluded_sectors` contient des PRÉFIXES NAF, pas des codes complets :
@@ -692,6 +754,18 @@ export type Database = {
         Row: SearchSettings;
         Insert: SearchSettingsInsert;
         Update: SearchSettingsUpdate;
+        Relationships: [];
+      };
+      signal_candidates: {
+        Row: SignalCandidateRow;
+        Insert: SignalCandidateInsert;
+        Update: SignalCandidateUpdate;
+        Relationships: [];
+      };
+      funnel_settings: {
+        Row: FunnelSettings;
+        Insert: FunnelSettingsInsert;
+        Update: FunnelSettingsUpdate;
         Relationships: [];
       };
       search_runs: {
