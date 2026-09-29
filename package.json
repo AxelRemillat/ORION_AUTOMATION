@@ -41,7 +41,8 @@
     "test:contact": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-finder.test.js",
     "test:funnel": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel.test.js",
     "test:contact-report": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-report.test.js",
-    "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js"
+    "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js",
+    "check:site-offers": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/check-site-offers.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

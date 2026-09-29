@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import { loadOffer } from "@/lib/offer/read";
 import { OffreClient } from "./offre-client";
+import { SiteOffersCard } from "./site-offers-card";
 
 /**
  * « Mon offre » — ce qu'Axel vend, et comment il signe.
@@ -26,9 +27,10 @@ export default async function OffrePage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Mon offre"
-        description="Ce que les mails disent de vous : votre signature, ce que vous proposez en premier contact, et les preuves que vous pouvez citer."
+        description="Ce que les mails disent de vous : votre signature, ce que vous proposez en premier contact, les preuves que vous pouvez citer, et les offres du site."
       />
       <OffreClient initial={loaded.offer} empty={loaded.empty} />
+      <SiteOffersCard />
     </div>
   );
 }

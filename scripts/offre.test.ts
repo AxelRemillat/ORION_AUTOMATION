@@ -17,7 +17,11 @@ import {
   signatureFor,
   OFFER_DEFAULTS,
   withDefaults,
+  agentMetier,
+  AGENT_METIER_SENTENCE,
+  SIGNATURE_URL,
 } from "../lib/offer/model";
+import { SITE_OFFERS } from "../lib/offer/site-offers";
 import { defaultOffer } from "../lib/offer/read";
 import { commitmentsOf, offerNumbers, stripSignature } from "../app/api/emails/generate/pipeline";
 import { bodyParagraphs, opensOnSector, validateEmail, withoutSignature, wordCount } from "../lib/emails/validate";
@@ -343,6 +347,78 @@ console.log("\n14. Ce que la page charge peut toujours etre reenregistre");
   check("le nouveau titre est conserve", edite.title === "Nouveau titre");
   check("le nouveau telephone est conserve", edite.phone === "06 00 00 00 00");
   check("les preuves survivent", edite.proofs.length === charge.proofs.length);
+}
+
+console.log("\n15. Aligné sur le site refondu pour les PME");
+{
+  // Mêmes intitulés et prix que PORTFOLIO_V2/components/offres/offres-data.ts.
+  check(
+    "4 offres, intitulés du site",
+    SITE_OFFERS.map((o) => o.name).join(" | ") ===
+      "Audit automatisation | Automatisation clé en main | Suivi & évolutions | Mise en production IA",
+  );
+  check(
+    "prix « à partir de » du site",
+    SITE_OFFERS.map((o) => o.price).join(" | ") ===
+      "À partir de 290 € | À partir de 1 200 € | À partir de 190 €/mois | À partir de 1 900 €",
+  );
+
+  // Signature : la page prospects, avec les UTM lus par Umami.
+  check("lien de signature → /pme avec UTM", signatureFor(offer).includes(SIGNATURE_URL), signatureFor(offer));
+  check(
+    "UTM source/medium/campagne",
+    SIGNATURE_URL === "https://axelremillat.com/pme?utm_source=orion&utm_medium=email&utm_campaign=prospection",
+  );
+
+  // Preuves : URLs et descriptions du site.
+  const byId = (id: string) => offer.proofs.find((proof) => proof.id === id);
+  check(
+    "agent devis → /agent, 5 métiers",
+    byId("agent-devis")?.url === "https://axelremillat.com/agent" && /5 métiers/.test(byId("agent-devis")?.sentence ?? ""),
+  );
+  check(
+    "automatisations → /automatisations, fichiers clients",
+    byId("n8n")?.url === "https://axelremillat.com/automatisations" && /fichiers clients/.test(byId("n8n")?.sentence ?? ""),
+  );
+
+  // Les 5 métiers de l'agent, reconnus au secteur (libellé ou NAF).
+  const cas: [string, string | null][] = [
+    ["Travaux de menuiserie bois et PVC", "menuiserie"],
+    ["43.32A", "menuiserie"],
+    ["Boulangerie et boulangerie-pâtisserie", "boulangerie"],
+    ["Services des traiteurs", "boulangerie"],
+    ["Commerce de gros de matériaux", "negoce"],
+    ["Travaux de peinture et vitrerie", "btp"],
+    ["Travaux de maçonnerie générale et gros œuvre de bâtiment", "btp"],
+    ["Nettoyage courant des bâtiments", "services"],
+    ["Conseil en systèmes et logiciels informatiques", null],
+    ["Agences immobilières", null],
+    [" ", null],
+  ];
+  for (const [secteur, attendu] of cas) {
+    const trouve = agentMetier(secteur)?.id ?? null;
+    check(`métier « ${secteur.trim() || "(vide)"} » → ${attendu ?? "aucun"}`, trouve === attendu, String(trouve));
+  }
+
+  const menuisier = chooseProof(offer, "chiffrer les demandes de devis de fenêtres", {
+    sector: "Travaux de menuiserie bois et PVC",
+  });
+  check(
+    "menuisier + devis → agent, exemple de son métier",
+    menuisier.proof?.id === "agent-devis" && menuisier.sentence === AGENT_METIER_SENTENCE,
+    String(menuisier.sentence),
+  );
+  check("… et la démo est nommée (métier)", /menuiserie/.test(menuisier.demo?.label ?? ""), String(menuisier.demo?.label));
+  const agence = chooseProof(offer, "produire un devis à partir d'une demande client", { sector: "Agences immobilières" });
+  check(
+    "hors des 5 métiers : phrase générale de l'agent",
+    agence.proof?.id === "agent-devis" && agence.sentence === byId("agent-devis")?.sentence,
+    String(agence.sentence),
+  );
+  const fournil = chooseProof(offer, "regrouper les commandes des boutiques en fiches de production", {
+    sector: "Boulangerie et boulangerie-pâtisserie",
+  });
+  check("boulangerie SANS devis : toujours les exemples du site", fournil.proof === null, String(fournil.proof?.id));
 }
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
