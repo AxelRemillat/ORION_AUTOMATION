@@ -60,6 +60,14 @@ const TARGETING_ONLY = new Set([
   // Un mouvement de capital est un fait de STRUCTURE, et son sens n'est pas
   // publie. Il ne porte jamais l'accroche (cf. derived-facts).
   "capital_move",
+  // Profil métier lu sur le site : il dit le METIER (et nourrit le pain), mais
+  // il ne remplace pas un événement daté pour le gating « À nourrir ». Le
+  // stratège peut s'en servir d'accroche une fois la génération autorisée.
+  "business_offer",
+  "business_customers",
+  "business_channels",
+  "business_locations",
+  "business_services",
 ]);
 
 /**

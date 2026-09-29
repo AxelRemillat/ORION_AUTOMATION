@@ -17,7 +17,7 @@ import {
   parseCritique,
   type Critique,
 } from "./critic";
-import { buildWritingPrompt, parseEmail, planFor, type GeneratedEmail, type PlanKey } from "./prompt";
+import { buildGreeting, buildWritingPrompt, parseEmail, planFor, type GeneratedEmail, type PlanKey } from "./prompt";
 
 /**
  * RÉDACTEUR → validateurs → JUGE → une réécriture au plus.
@@ -150,6 +150,8 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     proofs: publicProofsOf(input.offer),
     plan,
     forbiddenNames: input.forbiddenNames,
+    // La salutation est fixee par le code : le validateur la fait respecter.
+    greeting: buildGreeting(tone, input.contact, input.leaderPerson, input.addressee),
   };
 
   const sign = (email: GeneratedEmail | null): GeneratedEmail | null =>
@@ -255,7 +257,14 @@ async function enforceLength(
     plan: "A" | "B" | "C";
   },
 ): Promise<DraftOutcome | { error: string }> {
-  const tooLong = (result: ValidationResult) => result.failures.find((line) => /mots/.test(line));
+  /*
+   * LE MOTIF VISE LA LONGUEUR DU MAIL, pas n'importe quel message qui parle de
+   * mots. La regle de phrase dit « 1 phrase(s) de plus de 20 mots » : prise pour
+   * un depassement de longueur, elle declenchait la passe de raccourcissement,
+   * puis le REFUS du brouillon. HUMAN SIGHT est ainsi sorti en « Echec apres 3
+   * tentatives » alors que son mail faisait 112 mots.
+   */
+  const tooLong = (result: ValidationResult) => result.failures.find((line) => /la cible est \d+-\d+/.test(line));
   const over = tooLong(outcome.validation);
   if (!over) return outcome;
 

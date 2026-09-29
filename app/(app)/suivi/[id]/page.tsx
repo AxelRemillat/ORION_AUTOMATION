@@ -13,6 +13,7 @@ import { SendStateBadge } from "@/components/outbox/send-state-badge";
 import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
 import { FollowUpButton } from "../_components/follow-up-button";
 import { ProspectSummary } from "../_components/prospect-summary";
+import { BusinessProfileCard } from "../_components/business-profile-card";
 import { ContactCard } from "@/components/prospect/contact-card";
 import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
@@ -167,6 +168,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
           {/* Site et adresse, avec leur provenance : le bouton relance la recherche. */}
           <ContactCard prospect={typed} />
           <ProspectSummary prospect={typed} deals={deals} reminders={reminders} />
+          <BusinessProfileCard prospect={typed} />
         </div>
       </div>
     </>

@@ -1,6 +1,8 @@
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import type { ToneKey } from "@/lib/tones";
 import { knownNumbers, type DerivedFact } from "./derived-facts";
+import { sentenceProblems } from "./sentences";
+import { MAX_BODY_WORDS, wordCount as sharedWordCount, withoutSignature as sharedWithoutSignature } from "./word-count";
 
 /**
  * Garde-fous déterministes, appliqués AVANT d'afficher un brouillon.
@@ -121,6 +123,13 @@ export interface ValidationContext {
    * qu'elle était suivie, et le mail affirmait justement ce qu'elle interdisait.
    */
   avoid?: readonly string[];
+  /**
+   * Salutation imposee par le code (buildGreeting). Le mail doit s'ouvrir
+   * EXACTEMENT par elle : « Bonjour Monsieur Briol, » ou « Bonjour, ».
+   */
+  greeting?: string;
+  /** Horloge, pour juger qu'un fait a plus de douze mois. */
+  now?: Date;
 }
 
 export interface ValidationResult {
@@ -179,7 +188,7 @@ export function bodyParagraphs(body: string, signature?: string): string[] {
 }
 
 export function wordCount(body: string): number {
-  return body.split(/\s+/).filter(Boolean).length;
+  return sharedWordCount(body);
 }
 
 /** Bornes de longueur par registre. « bref » est volontairement plus serré. */
@@ -196,7 +205,9 @@ function lengthBounds(tone: ToneKey): { min: number; max: number } {
   // Cible 100 mots, plafond 120 hors signature — STRICT. Les mails mesures a
   // 115-122 tenaient tous en 120 apres avoir resserre le bloc offre : c'est ce
   // bloc qui deborde, et un flux se decrit en trois etapes, pas en cinq.
-  return tone === "bref" ? { min: 60, max: 95 } : { min: 80, max: 120 };
+  // 110 mots hors signature, STRICT (décision du 27/09/2026) : les mails de
+  // référence écrits à la main tiennent en 95-105 mots.
+  return tone === "bref" ? { min: 60, max: 95 } : { min: 75, max: MAX_BODY_WORDS };
 }
 
 /** Nombres écrits dans le corps, y compris « 41 M€ » et « 40,9 M ». */
@@ -370,10 +381,9 @@ export function echoesSlogan(body: string): string[] {
 }
 
 /** Corps sans la signature ajoutee par le code. */
+/** Même fonction que l'écran (lib/emails/word-count.ts). */
 export function withoutSignature(body: string, signature?: string): string {
-  if (!signature) return body;
-  const index = body.lastIndexOf(signature.trim());
-  return index >= 0 ? body.slice(0, index) : body;
+  return sharedWithoutSignature(body, signature);
 }
 
 /**
@@ -548,6 +558,57 @@ export function undatedEventHook(body: string, signature?: string): boolean {
 }
 
 /**
+ * Paraphrase creuse : « rappelle l'importance de… », « témoigne de… ».
+ *
+ * Une accroche dit UN fait, dans une phrase dont l'entreprise est le sujet.
+ * Ces tournures commentent un fait au lieu de le dire, et se retrouvent mot
+ * pour mot dans tous les mails générés.
+ */
+const HOLLOW_PARAPHRASE =
+  /\b(rappelle|souligne|illustre|montre|traduit|refl[eè]te)\s+(bien\s+)?(l['’]\s*)?(importance|enjeu|place|r[oô]le|n[eé]cessit[eé])\b|\bt[eé]moigne(nt)?\s+d/i;
+
+export function hollowParaphrase(body: string, signature?: string): string | null {
+  const text = bodyParagraphs(body, signature).join(" ");
+  return text.match(HOLLOW_PARAPHRASE)?.[0] ?? null;
+}
+
+/**
+ * Une offre d'emploi est un INDICE du pain, pas le sujet du mail.
+ *
+ * Eval du 28/09/2026 : BRIOL (menuisier, 3 showrooms) s'ouvrait sur « Vous
+ * recrutez un chauffeur-livreur », BONNIN (boulangerie) sur « Vous recrutez
+ * une aide cuisine » — deux mails perdus contre la reference, qui partait du
+ * metier (showrooms, laboratoire). Le recrutement peut justifier le pain ; il
+ * n'ouvre pas le mail.
+ */
+const JOB_OFFER_HOOK =
+  /^(vous\s+recrutez|vous\s+(cherchez|recherchez)\s+(un|une|des)\b|vous\s+avez\s+(publi[eé]|ouvert|mis\s+en\s+ligne)\s+(une|un)\s+(offre|poste|annonce)|votre\s+(offre|annonce)\s+(d['’]emploi|de\s+poste)|(une|votre)\s+offre\s+d['’]emploi)/i;
+
+export function opensOnJobOffer(body: string, signature?: string): boolean {
+  const hook = bodyParagraphs(body, signature)[0] ?? "";
+  return JOB_OFFER_HOOK.test(hook.trim());
+}
+
+/** Un fait de plus de douze mois n'est jamais « récent ». */
+const RECENT_WORDS =
+  /\b(r[eé]cemment|derni[eè]rement|vient\s+d[e']|venez\s+d[e']|viennent\s+d[e']|tout\s+juste|fra[iî]chement|nouvelle?s?\s+(agence|boutique|showroom|magasin|site|[eé]tablissement))/i;
+
+const YEAR_MS = 365 * 86_400_000;
+
+export function oldFactAsRecent(
+  body: string,
+  facts: readonly DerivedFact[],
+  signature?: string,
+  now = new Date(),
+): boolean {
+  const hook = bodyParagraphs(body, signature)[0] ?? "";
+  if (!RECENT_WORDS.test(hook)) return false;
+  const dated = facts.map((fact) => Date.parse(fact.date ?? "")).filter((time) => !Number.isNaN(time));
+  if (!dated.length) return false;
+  return dated.every((time) => now.getTime() - time > YEAR_MS);
+}
+
+/**
  * L'accroche n'est-elle qu'une paraphrase de leur site ?
  *
  * Le fait de site reste une accroche LÉGITIME — c'est ce que l'entreprise dit
@@ -702,6 +763,15 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     );
   }
 
+  // --- Phrases : une idee chacune, courtes, une seule question --------------
+  //
+  // Vu sur GLOBAL 2F : des phrases de trente mots qui enchainent deux idees, et
+  // des formules qui ne disent rien (« revoir le suivi »). Le detail est dans
+  // lib/emails/sentences.ts, avec la liste des formules bannies.
+  for (const problem of sentenceProblems(withoutSignature(body, context.signature))) {
+    failures.push(problem.message);
+  }
+
   // --- Consigne « a ne pas dire » du brief ----------------------------------
   const breach = contradictsAvoid(body, context.avoid ?? [], {
     facts: context.facts,
@@ -738,16 +808,34 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     );
   }
 
-  // --- Salutation : « Monsieur » n'appartient qu'au registre factuel --------
-  //
-  // Le ton Direct s'adresse par le PRENOM. « Bonjour Monsieur Torrecillas » sur
-  // un mail direct sonne comme un courrier d'huissier, et ce n'est pas ce que
-  // le code avait impose : c'est le redacteur qui l'a ecrit de lui-meme.
-  if (context.tone !== "factuel" && /^bonjour\s+(monsieur|madame|mme|mr)\b/i.test(body)) {
+  // --- Paraphrase creuse ----------------------------------------------------
+  const hollow = hollowParaphrase(body, context.signature);
+  if (hollow) {
     failures.push(
-      `Salutation : le registre « ${context.tone} » s'adresse par le prénom. ` +
-        "« Bonjour Monsieur X » n'appartient qu'au ton factuel.",
+      `Paraphrase creuse (« ${hollow} ») : dis le fait lui-même, dans une phrase simple dont ` +
+        "l'entreprise est le sujet.",
     );
+  }
+
+  // --- Offre d'emploi en sujet ---------------------------------------------
+  if (opensOnJobOffer(body, context.signature)) {
+    failures.push(
+      "L'accroche ouvre sur une offre d'emploi (« Vous recrutez… ») : c'est un indice du pain, pas le " +
+        "sujet. Ouvre sur leur métier (implantations, clientèle, façon dont arrivent commandes et devis).",
+    );
+  }
+
+  // --- Fait ancien presente comme recent -----------------------------------
+  if (oldFactAsRecent(body, context.facts, context.signature, context.now)) {
+    failures.push(
+      "L'accroche présente comme récent un fait de plus de douze mois : retire « récemment », " +
+        "« vient de »… ou date-le.",
+    );
+  }
+
+  // --- Salutation imposee ----------------------------------------------------
+  if (context.greeting && !normalize(body).startsWith(normalize(context.greeting))) {
+    failures.push(`Salutation : le mail doit commencer exactement par « ${context.greeting} ».`);
   }
 
   // --- Accroche fondee sur la structure -------------------------------------
@@ -775,7 +863,7 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
   }
 
   // --- Salutation ----------------------------------------------------------
-  const first = greetingName(context.contact);
+  const first = context.greeting ? null : greetingName(context.contact);
   const surname = greetingSurname(context.contact);
   if (first) {
     const usesName =
@@ -817,7 +905,7 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
 }
 
 /** Règles d'objet, isolées : elles servent aussi aux tests. */
-export function validateSubject(subject: string, companyName: string): string[] {
+export function validateSubject(subject: string, _companyName?: string): string[] {
   const failures: string[] = [];
   const trimmed = subject.trim();
   const words = trimmed.split(/\s+/).filter(Boolean);
@@ -828,8 +916,13 @@ export function validateSubject(subject: string, companyName: string): string[] 
   if (/^automatisation\s+(de|du|des)\b/i.test(trimmed)) {
     failures.push("Objet : « Automatisation de… » est interdit.");
   }
-  if (companyName && normalize(trimmed).includes(normalize(`chez ${companyName}`))) {
-    failures.push("Objet : « … chez <société> » est interdit.");
+  // « Demandes de devis chez Menuiserie Briol » est l'objet de reference : le
+  // nom COMMERCIAL est bienvenu. La raison sociale, elle, trahit l'annuaire.
+  if (/\b(sarl|sas|sasu|eurl|sa|sci|snc)\b/i.test(trimmed)) {
+    failures.push("Objet : pas de forme juridique (SARL, SAS…) — le nom commercial, ou rien.");
+  }
+  if (trimmed && /^\p{Ll}/u.test(trimmed)) {
+    failures.push("Objet : il commence par une majuscule (« Demandes de devis… »).");
   }
   if (/[!]/.test(trimmed)) failures.push("Objet : pas de point d'exclamation.");
   if (/\p{Extended_Pictographic}/u.test(trimmed)) failures.push("Objet : pas d'emoji.");

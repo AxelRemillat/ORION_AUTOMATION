@@ -33,6 +33,8 @@ import { activeProspects } from "@/lib/trash/scope";
 import { loadOffer } from "@/lib/offer/read";
 import type { Prospect } from "@/types";
 import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
+import { storedProfile } from "@/lib/emails/business-profile";
+import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import type { Evidence } from "@/app/api/emails/generate/prompt";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
 import { findContact as findContactOnSite } from "@/lib/contact-finder";
@@ -365,6 +367,18 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   const params = paramsOf(ctx);
   const prospect = await loadProspect(ctx, params.prospectId);
   const warnings = [...warningsOf(ctx)];
+
+  // --- PROFIL MÉTIER : lu sur le site AVANT le stratège ------------------
+  // Génération complète seulement : « autre angle » et « réécrire » relisent
+  // le profil déjà stocké, sans nouvelle lecture du site.
+  if (params.mode === "full") {
+    const run = await ensureBusinessProfile(ctx.db, prospect, profileAsk(prospect.id)).catch((error: unknown) => ({
+      profile: storedProfile(prospect.business_profile),
+      refreshed: false,
+      note: `profil métier non lu : ${error instanceof Error ? error.message : "erreur"}`,
+    }));
+    if (run.note) warnings.push({ source: "openai", message: run.note });
+  }
   let factsResult = buildFacts(prospect, contactOf(ctx));
 
   // --- DERNIÈRE CHANCE DONNÉE AUX SIGNAUX SANS DATE -----------------------
@@ -429,6 +443,8 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
     history: (sent ?? []) as HistoryMessage[],
     excludeAngles: params.mode === "full" ? [] : excludeAngles,
     sector: prospect.sector,
+    businessProfile: storedProfile(prospect.business_profile),
+    nafCode: typeof figures.naf_code === "string" ? figures.naf_code : null,
   };
 
   let outcome: BriefOutcome;
@@ -470,6 +486,29 @@ async function replaceableDraft(
     .eq("status", "draft")
     // Un brouillon à la corbeille ne se réécrit pas : la génération en crée un neuf.
     .is("deleted_at", null)
+    // Un mail PROGRAMMÉ ou en cours d'envoi ne se réécrit jamais en douce.
+    .not("send_status", "in", "(scheduled,sending)")
+    .maybeSingle();
+  return (data as { id: string } | null)?.id ?? null;
+}
+
+/**
+ * Dernier brouillon d'intro non envoyé du prospect, quand l'appelant n'en
+ * désigne pas : une nouvelle génération le RÉÉCRIT au lieu d'en empiler un
+ * second. Jamais un mail programmé, en cours d'envoi ou à la corbeille.
+ */
+export async function latestIntroDraft(ctx: Pick<StepContext, "db" | "userId">, prospectId: string): Promise<string | null> {
+  const { data } = await ctx.db
+    .from("messages")
+    .select("id")
+    .eq("user_id", ctx.userId)
+    .eq("prospect_id", prospectId)
+    .eq("type", "intro")
+    .eq("status", "draft")
+    .is("deleted_at", null)
+    .not("send_status", "in", "(scheduled,sending)")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   return (data as { id: string } | null)?.id ?? null;
 }
@@ -575,13 +614,17 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   if (params.saveDraft) {
     // Écrit en dernier, juste avant le commit de l'étape : seule une coupure
     // entre les deux laisserait un brouillon en double (jamais un mail envoyé).
-    const existing = ctx.job.result.messageId ?? (await replaceableDraft(ctx, prospect.id, params.replaceMessageId));
+    const existing =
+      ctx.job.result.messageId ??
+      (await replaceableDraft(ctx, prospect.id, params.replaceMessageId)) ??
+      (await latestIntroDraft(ctx, prospect.id));
     if (existing) {
       const { error } = await ctx.db
         .from("messages")
         .update({ subject: email.subject.trim() || null, body: email.body.trim() })
         .eq("id", existing)
-        .eq("status", "draft");
+        .eq("status", "draft")
+        .not("send_status", "in", "(scheduled,sending)");
       if (error) throw new Error(`brouillon non enregistré : ${error.message}`);
       messageId = existing;
     } else {

@@ -139,9 +139,13 @@ console.log("\n6. Preuve : recoupement, et démo nommée en priorité");
   const factures = chooseProof(offer, "rapprocher les factures fournisseurs des bons de réception");
   check("factures → démo nommée", factures.sentence?.includes("le traitement des factures") === true, String(factures.sentence));
 
-  // Aucun recoupement : pas de preuve, plutôt qu'une preuve à côté.
+  // Aucun recoupement : pas de preuve nommée, les exemples du site — jamais une démo à côté.
   const rien = chooseProof(offer, "surveiller la température des chambres froides");
-  check("aucun recoupement → aucune preuve", rien.proof === null && rien.sentence === null);
+  check(
+    "aucun recoupement → exemples du site, aucune démo",
+    rien.proof === null && rien.demo === null && rien.sentence === "des exemples testables sur mon site",
+    String(rien.sentence),
+  );
   check("la raison est explicite", rien.reason.includes("aucune preuve"), rien.reason);
 
   // La crédibilité n'est jamais choisie à la place d'une preuve métier.

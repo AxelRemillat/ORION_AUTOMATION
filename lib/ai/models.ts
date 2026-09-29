@@ -1,7 +1,7 @@
 /**
  * Modèles OpenAI, un par rôle de la chaîne d'emails.
  *
- *   extraction → STRATÈGE → RÉDACTEUR → JUGE
+ *   extraction → PROFIL MÉTIER → STRATÈGE → RÉDACTEUR → JUGE
  *
  * Chaque rôle lit sa variable d'environnement serveur. Sans elle, il retombe
  * sur `OPENAI_MODEL`, puis sur `gpt-4o-mini` : c'est exactement le
@@ -11,12 +11,13 @@
  * Module sans dépendance : importable par les routes comme par les scripts.
  */
 
-export const AI_ROLES = ["extract", "strategist", "writer", "judge"] as const;
+export const AI_ROLES = ["extract", "profile", "strategist", "writer", "judge"] as const;
 export type AiRole = (typeof AI_ROLES)[number];
 
 /** Variable d'environnement de chaque rôle. */
 export const MODEL_ENV: Record<AiRole, string> = {
   extract: "OPENAI_MODEL_EXTRACT",
+  profile: "OPENAI_MODEL_PROFILE",
   strategist: "OPENAI_MODEL_STRATEGIST",
   writer: "OPENAI_MODEL_WRITER",
   judge: "OPENAI_MODEL_JUDGE",
@@ -38,6 +39,7 @@ export const LEGACY_DEFAULT_MODEL = "gpt-4o-mini";
  * (voir lib/usage/pricing.ts). Aucun nom ni prix n'est inventé ici.
  */
 export const PROPOSED_MODELS: Record<AiRole, string | null> = {
+  profile: null,
   strategist: null,
   writer: null,
   extract: null,
@@ -46,9 +48,21 @@ export const PROPOSED_MODELS: Record<AiRole, string | null> = {
 
 type Env = Record<string, string | undefined>;
 
+/**
+ * Défauts DEMANDÉS explicitement pour un rôle, avant le repli global.
+ *
+ * Le profil métier lit trois pages de site et rend un JSON court : Axel a
+ * choisi gpt-6-luna pour ce rôle. OPENAI_MODEL_PROFILE le remplace.
+ */
+export const ROLE_DEFAULTS: Partial<Record<AiRole, string>> = {
+  profile: "gpt-6-luna",
+};
+
 /** Modèle effectif d'un rôle. */
 export function modelFor(role: AiRole, env: Env = process.env): string {
-  return env[MODEL_ENV[role]]?.trim() || env.OPENAI_MODEL?.trim() || LEGACY_DEFAULT_MODEL;
+  return (
+    env[MODEL_ENV[role]]?.trim() || ROLE_DEFAULTS[role] || env.OPENAI_MODEL?.trim() || LEGACY_DEFAULT_MODEL
+  );
 }
 
 export type ReasoningEffort = "low" | "medium" | "high";

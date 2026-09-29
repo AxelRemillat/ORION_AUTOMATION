@@ -1,0 +1,39 @@
+[
+  {
+    "id": "briol",
+    "match": "%BRIOL DIFFUSION%",
+    "note": "NAF 46.73A (négoce de bois) mais menuisier fourniture + pose, 3 showrooms, 12 commerciaux : le pain est le DEVIS.",
+    "reference": {
+      "subject": "Demandes de devis chez Menuiserie Briol",
+      "body": "Bonjour Monsieur Briol,\n\nAvec trois showrooms et une douzaine de commerciaux, chaque demande de devis (fenêtres, portes, cuisines) doit être triée, chiffrée puis relancée, souvent à la main.\n\nJe suis Axel Remillat, je construis des automatisations et agents IA pour PME. J'ai conçu un agent qui transforme une demande client en devis, réponse et rendez-vous, testable sur mon site.\n\nChez vous, il pourrait qualifier les demandes du site et des showrooms, préparer un pré-devis et proposer un créneau de métré au bon commercial. Mise en place en 2 à 3 semaines.\n\nAuriez-vous 15 minutes cette semaine pour en parler ?"
+    }
+  },
+  {
+    "id": "bonnin",
+    "match": "%BONNIN FRERES%",
+    "note": "Boulangerie : un laboratoire qui alimente les boutiques. Jamais une démo RH / comptes rendus.",
+    "reference": {
+      "subject": "Commandes des boutiques vers le laboratoire",
+      "body": "Bonjour Monsieur Bonnin,\n\nAvec un laboratoire qui alimente toutes vos boutiques, les commandes de chaque magasin, du click & collect et du traiteur doivent chaque jour se retrouver dans une seule liste de production.\n\nJe suis Axel Remillat, je construis des automatisations et agents IA pour PME, avec des exemples testables sur mon site.\n\nChez vous, un flux pourrait regrouper automatiquement ces commandes en fiches de production par produit et par boutique, et signaler les oublis. Mise en place en 2 à 3 semaines.\n\nAuriez-vous 15 minutes pour que je vous montre à quoi ça ressemblerait ?"
+    }
+  },
+  {
+    "id": "selection-habitat",
+    "match": "%SELECTION HABITAT%",
+    "note": "Référence : la version programmée (retouchée à la main) de la table messages.",
+    "referenceFromScheduled": true
+  },
+  {
+    "id": "human-sight",
+    "match": "%HUMAN SIGHT%",
+    "note": "Cabinet de conseil : angle partenariat / renfort sur leurs missions clients. Référence : version programmée.",
+    "referenceFromScheduled": true
+  },
+  {
+    "id": "global2f",
+    "match": "%GLOBAL 2F%",
+    "note": "CAS NÉGATIF. Commerce de détail de boissons (NAF 47.25Z), aucun salarié déclaré au registre (Pappers : effectif_max 0, entreprise_employeuse false), aucun compte publié. Rien à automatiser : la génération doit REFUSER, pas produire un mail. Constaté le 28/09/2026 — le mail généré ouvrait « Bonjour Birama, » et proposait l'agent devis pour un pain de réassort.",
+    "expect": "refus",
+    "reference": null
+  }
+]

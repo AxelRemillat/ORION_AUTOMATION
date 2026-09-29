@@ -61,8 +61,13 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
   eq(column: string, value: unknown) { return this.where((row) => row[column] === value); }
   neq(column: string, value: unknown) { return this.where((row) => row[column] !== value); }
   is(column: string, value: null) { return this.where((row) => (row[column] ?? null) === value); }
-  not(column: string, operator: "is", value: null) {
-    return this.where((row) => (operator === "is" ? (row[column] ?? null) !== value : true));
+  not(column: string, operator: "is" | "in", value: null | string) {
+    if (operator === "in") {
+      // PostgREST : « (a,b) ». Comme en SQL, NULL NOT IN (…) ne retient pas la ligne.
+      const values = String(value).replace(/^\(|\)$/g, "").split(",").map((item) => item.trim());
+      return this.where((row) => row[column] != null && !values.includes(String(row[column])));
+    }
+    return this.where((row) => (row[column] ?? null) !== value);
   }
   in(column: string, values: unknown[]) { return this.where((row) => values.includes(row[column])); }
   /**
