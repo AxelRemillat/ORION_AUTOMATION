@@ -20,6 +20,7 @@ import {
   agentMetier,
   AGENT_METIER_SENTENCE,
   SIGNATURE_URL,
+  CALENDAR_URL,
 } from "../lib/offer/model";
 import { SITE_OFFERS } from "../lib/offer/site-offers";
 import { defaultOffer } from "../lib/offer/read";
@@ -363,12 +364,12 @@ console.log("\n15. Aligné sur le site refondu pour les PME");
       "À partir de 290 € | À partir de 1 200 € | À partir de 190 €/mois | À partir de 1 900 €",
   );
 
-  // Signature : la page prospects, avec les UTM lus par Umami.
-  check("lien de signature → /pme avec UTM", signatureFor(offer).includes(SIGNATURE_URL), signatureFor(offer));
-  check(
-    "UTM source/medium/campagne",
-    SIGNATURE_URL === "https://axelremillat.com/pme?utm_source=orion&utm_medium=email&utm_campaign=prospection",
-  );
+  // Signature : la page prospects, lien court sans paramètres.
+  check("lien de signature → /pme", signatureFor(offer).includes(SIGNATURE_URL), signatureFor(offer));
+  check("sans paramètres UTM", SIGNATURE_URL === "https://axelremillat.com/pme" && !signatureFor(offer).includes("utm_"));
+
+  // Démo de 15 min : le lien Cal.eu « appel découverte » du site, plus /contact.
+  check("démo 15 min → Cal.eu appel découverte", offer.entry_url === CALENDAR_URL && CALENDAR_URL === "https://cal.eu/axel-remillat/appel-decouverte");
 
   // Preuves : URLs et descriptions du site.
   const byId = (id: string) => offer.proofs.find((proof) => proof.id === id);
