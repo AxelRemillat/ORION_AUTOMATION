@@ -152,7 +152,7 @@ async function main(): Promise<void> {
     const mail = (accroche: string) =>
       validateEmail(
         {
-          subject: "commandes et livraisons",
+          subject: "Commandes et livraisons",
           body:
             `Bonjour,\n\n${accroche}\n\nJe suis Axel Remillat, je construis des flux.\n\n` +
             `Comptez 2 à 3 semaines.\n\nEst-ce que ça vous parlerait ?\n\n${signature}`,
@@ -181,20 +181,25 @@ async function main(): Promise<void> {
   {
     const facts = buildFacts(prospect(), null, NOW).facts;
     const signature = signatureFor(offer);
-    const corps = (n: number) => Array.from({ length: n }, (_, i) => `mot${i}`).join(" ");
+    // Phrases de 12 mots : ce bloc mesure la LONGUEUR du mail, pas celle des
+    // phrases (une phrase de 100 mots echouerait desormais sur l'autre regle).
+    const corps = (n: number) =>
+      Array.from({ length: n }, (_, i) => `mot${i}${(i + 1) % 12 === 0 ? "." : ""}`).join(" ");
     const mail = (n: number) =>
       validateEmail(
         {
-          subject: "commandes et livraisons",
+          subject: "Commandes et livraisons",
           body: `Bonjour,\n\nVous préparez des commandes.\n\nJe suis Axel Remillat.\n\n${corps(n)}\n\nOk ?\n\n${signature}`,
         },
         { facts, contact: null, tone: "direct", companyName: "X", signature },
       ).failures.filter((f) => f.includes("mots")).join(" | ");
 
     check("un mail dans la cible passe", mail(95) === "", mail(95));
-    // Le plafond est passe de 125 a 120, strict : c'est le bloc offre qui paie
-    // la difference (budget 35 mots au lieu de 40).
-    check("au-delà de 120, échec", mail(130).includes("120"), mail(130));
+    // Corps exact : 1 (Bonjour,) + 4 + 4 + n + 2 (Ok ?) mots.
+    const mailWords = (total: number) => mail(total - 11);
+    // Plafond 110 mots hors signature, BLOQUANT (mails de reference ecrits a la main).
+    check("au-delà de 110, échec", mail(130).includes("110"), mail(130));
+    check("110 pile passe, 111 échoue", mailWords(110) === "" && mailWords(111) !== "", `${mailWords(110)} / ${mailWords(111)}`);
     check("la signature reste hors comptage", wordCount(signature) > 5);
   }
 
@@ -849,22 +854,31 @@ async function main(): Promise<void> {
     check("« Business Development Director » l'est", isCommercialPosition("Business Development Director"));
   }
 
-  console.log("\n26. Ton Direct : « Bonjour prénom », jamais « Monsieur Nom »");
+  console.log("\n26. Salutation imposée : « Monsieur Nom » dans tous les tons");
   {
     const facts = buildFacts(prospect(), null, NOW).facts;
     const signature = signatureFor(offer);
     const body = (greeting: string) =>
       `${greeting}\n\nVous préparez des commandes en mars 2026.\n\nJe suis Axel Remillat, je construis des flux.\n\nUn flux lirait vos e-mails, en 2 à 3 semaines.\n\nOn en parle ?\n\n${signature}`;
-    const run = (greeting: string, tone: "direct" | "factuel") =>
-      validateEmail({ subject: "commandes", body: body(greeting) }, { facts, contact: null, tone, companyName: "X", signature })
+    const run = (greeting: string, tone: "direct" | "factuel", expected?: string) =>
+      validateEmail(
+        { subject: "Commandes", body: body(greeting) },
+        { facts, contact: null, tone, companyName: "X", signature, greeting: expected },
+      )
         .failures.filter((line) => line.includes("Salutation"))
         .join(" | ");
 
-    check("Direct + « Monsieur » : refusé", run("Bonjour Monsieur Torrecillas,", "direct") !== "", "aucun échec");
-    check("Direct + prénom : accepté", run("Bonjour Julien,", "direct") === "", run("Bonjour Julien,", "direct"));
-    check("Factuel + « Monsieur » : accepté", run("Bonjour Monsieur Torrecillas,", "factuel") === "");
+    check("Direct + « Monsieur » : accepté", run("Bonjour Monsieur Torrecillas,", "direct") === "");
+    check(
+      "salutation imposée respectée",
+      run("Bonjour Monsieur Torrecillas,", "direct", "Bonjour Monsieur Torrecillas,") === "",
+    );
+    check(
+      "« Bonjour, » alors que le dirigeant est connu : refusé",
+      run("Bonjour,", "direct", "Bonjour Monsieur Torrecillas,") !== "",
+      "aucun échec",
+    );
   }
-
 
   console.log("\n27. Une ouverture doit porter le SIREN du prospect");
   {

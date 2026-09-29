@@ -147,6 +147,8 @@ Le harnais est sans dépendance : `tsc -p tsconfig.test.json` compile dans
 | `npm run test:emails` / `test:emails-extra` | validateurs et garde-fous de rédaction |
 | `npm run check:migrations` | garde-fou anti-destructif sur `supabase/migrations` |
 | `npm run eval:emails` | évaluation LLM sur fixtures (**consomme des appels payants**) |
+| `npm run test:mails` | profil métier, plafond 110 mots, salutation, table pain → preuve, créneau conseillé |
+| `npm run eval:mails` | mails générés (vrai pipeline) contre `evals/mails/cases.json`, juge aveugle `gpt-6-sol` ; **payant**, écrit un brouillon par prospect, rapport `evals/mails/report-*.md` |
 | `npx tsx scripts/debug-search.ts [bloc]` | diagnostic recherche ; `live` et `bluefull` sont **payants** |
 
 ---

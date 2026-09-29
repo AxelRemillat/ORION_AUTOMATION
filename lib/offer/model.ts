@@ -101,11 +101,16 @@ export const CREDIBILITY_WORD_BUDGET = 110;
  * et c'est le cas le plus fréquent chez une PME.
  */
 export const N8N_DEMOS: { key: string; label: string; tags: string[] }[] = [
-  { key: "emails", label: "le tri d'e-mails", tags: ["e-mail", "mail", "boîte", "message", "courrier"] },
+  // Tags ETROITS : un pain qui mentionne un e-mail comme simple canal (« le
+  // bon arrive par e-mail ») n'est pas un pain de tri d'e-mails. Eval du
+  // 28/09/2026 : BRIOL (bons de livraison) et HUMAN SIGHT (onboarding) ont recu
+  // « le tri d'e-mails », SELECTION HABITAT (estimations) « les comptes rendus »
+  // via « visite » — trois demos hors sujet que le juge a sanctionnees.
+  { key: "emails", label: "le tri d'e-mails", tags: ["tri des e-mails", "trier les e-mails", "trier les mails", "boîte de réception", "e-mails entrants", "mails entrants", "courrier entrant"] },
   { key: "factures", label: "le traitement des factures", tags: ["facture", "facturation", "comptab", "règlement", "impayé"] },
   { key: "sav", label: "le SAV", tags: ["sav", "réclamation", "support", "litige", "après-vente", "service client"] },
-  { key: "comptes-rendus", label: "les comptes rendus", tags: ["compte rendu", "compte-rendu", "réunion", "visite", "rapport"] },
-  { key: "donnees", label: "le nettoyage de données", tags: ["donnée", "doublon", "fichier", "base", "saisie", "ressaisie"] },
+  { key: "comptes-rendus", label: "les comptes rendus", tags: ["compte rendu", "compte-rendu", "réunion", "procès-verbal"] },
+  { key: "donnees", label: "le nettoyage de données", tags: ["doublon", "nettoyage de données", "dédoublonn", "fichier clients"] },
 ];
 
 export interface OfferView {
@@ -230,6 +235,22 @@ export interface ProofChoice {
 const DOCUMENT_TRADES =
   /int[eé]rim|travail temporaire|mise a disposition|placement|recrutement|ressources humaines|\brh\b|paie|formation|apprentissage|organisme de formation|cabinet de conseil en recrutement/i;
 
+/**
+ * Commerces de bouche et restauration : JAMAIS une demo de documents.
+ *
+ * SARL BONNIN FRERES (boulangerie) a recu la demo « comptes rendus » — une
+ * demo RH, hors sujet pour un laboratoire qui alimente des boutiques. Leur
+ * sujet est la production et les commandes des magasins ; aucune demo ne le
+ * montre, on renvoie donc aux exemples du site.
+ */
+const FOOD_TRADES =
+  /boulang|p[aâ]tiss|viennois|traiteur|restaura|chocolat|glacier|boucher|charcut|fromag|primeur|[eé]picer|brasserie|pizz|\b10\.7|\b56\.10/i;
+
+const CONSULTING = /conseil|int[eé]grat|ing[eé]nierie informatique|programmation informatique|\b70\.2|\b62\.0/i;
+
+/** Repli quand aucune preuve ne recoupe le pain : jamais une demo hors sujet. */
+export const GENERIC_PROOF_SENTENCE = "des exemples testables sur mon site";
+
 /** Demo n8n a mobiliser pour ces metiers : des documents, pas des devis. */
 const DOCUMENT_DEMO_KEY = "comptes-rendus";
 
@@ -245,7 +266,11 @@ export function chooseProof(
   // PRIORITE 0 : interim, RH, formation → une demo de DOCUMENTS, jamais l'agent
   // devis. Le metier tourne autour de dossiers a constituer et a relancer.
   const trade = `${options.sector ?? ""} ${painText}`;
-  if (DOCUMENT_TRADES.test(trade)) {
+  const food = FOOD_TRADES.test(trade);
+  // Un cabinet de conseil ou un integrateur n'est pas un metier de dossiers :
+  // l'angle est un renfort sur ses missions (HUMAN SIGHT), pas une demo RH.
+  const consulting = CONSULTING.test(options.sector ?? "") && !/recrutement/i.test(options.sector ?? "");
+  if (!food && !consulting && DOCUMENT_TRADES.test(trade)) {
     const n8n = usable.find((proof) => proof.id === "n8n");
     if (n8n) {
       // Une demo plus proche du pain l'emporte, tant qu'elle reste une demo de
@@ -262,11 +287,23 @@ export function chooseProof(
     }
   }
 
-  // PRIORITE 1 : commandes, devis, demandes clients → l'agent devis. Il fait
-  // exactement ce que decrit le pain, et le nommer vaut mieux qu'une demo
-  // generique de tri de documents.
-  const ORDER_TAGS = ["commande", "devis", "demande client", "negoce", "prise de rdv"];
-  if (ORDER_TAGS.some((tag) => tagMatches(tag, painText))) {
+  // PRIORITE 1 : devis, demandes clients, rendez-vous → l'agent devis. Il fait
+  // exactement ce que decrit le pain. « Commande » SEUL ne suffit pas : les
+  // commandes de boutiques vers un laboratoire ne sont pas des devis. Une
+  // COMMANDE CLIENT (negoce, TERDICI), elle, est bien une demande client.
+  /*
+   * RÉASSORT ET STOCK NE SONT PAS DES DEVIS.
+   *
+   * Sur GLOBAL 2F, le pain était « transmettre les besoins de réassort et
+   * suivre leur passage en commande fournisseur » : le mot « commande » suffisait
+   * à sortir l'agent devis, qui transforme une demande CLIENT en devis. Deux
+   * métiers différents, et ça se voit à la lecture.
+   */
+  const STOCK_TAGS = ["reassort", "réassort", "stock", "approvisionnement", "inventaire", "commande fournisseur"];
+  const aboutStock = STOCK_TAGS.some((tag) => tagMatches(tag, painText));
+
+  const ORDER_TAGS = ["devis", "demande client", "commande client", "demande de prix", "chiffrage", "prise de rdv", "rendez-vous"];
+  if (!aboutStock && ORDER_TAGS.some((tag) => tagMatches(tag, painText))) {
     const agent = usable.find((proof) => proof.id === "agent-devis");
     if (agent) {
       return {
@@ -277,6 +314,9 @@ export function chooseProof(
       };
     }
   }
+
+  // Commerce de bouche sans devis : les exemples du site, rien de plus.
+  if (food) return genericProof("commerce de bouche : aucune demo de documents, les exemples du site");
 
   // PRIORITE 2 : e-mails, documents, factures, SAV, comptes rendus → la demo
   // n8n correspondante, NOMMEE.
@@ -293,7 +333,11 @@ export function chooseProof(
     }
   }
 
-  const matched = usable.find((proof) => proof.tags.some((tag) => tagMatches(tag, painText)));
+  // L'agent devis ne sort QUE par la priorite 1 : ses tags (« commande »…)
+  // l'attribuaient a des pains de commandes qui ne sont pas des devis.
+  const matched = usable.find(
+    (proof) => proof.id !== "agent-devis" && proof.tags.some((tag) => tagMatches(tag, painText)),
+  );
   if (matched) {
     return {
       proof: matched,
@@ -303,12 +347,11 @@ export function chooseProof(
     };
   }
 
-  return {
-    proof: null,
-    sentence: null,
-    demo: null,
-    reason: "aucune preuve ne recoupe le pain : mieux vaut n'en citer aucune",
-  };
+  return genericProof("aucune preuve ne recoupe le pain : les exemples du site, jamais une demo hors sujet");
+}
+
+function genericProof(reason: string): ProofChoice {
+  return { proof: null, sentence: GENERIC_PROOF_SENTENCE, demo: null, reason };
 }
 
 /** La preuve de crédibilité tient-elle encore dans le mail ? */

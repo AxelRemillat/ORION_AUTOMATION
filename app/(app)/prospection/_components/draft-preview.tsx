@@ -1,9 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-
-/** Consigne de rédaction : au-delà, un cold email perd son efficacité. */
-const MAX_WORDS = 120;
-
-const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+import { MAX_BODY_WORDS, bodyWordCount } from "@/lib/emails/word-count";
 
 /**
  * Aperçu du brouillon tel qu'il arrivera dans la boîte du destinataire.
@@ -12,25 +8,24 @@ const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).le
 export function DraftPreview({
   subject,
   body,
+  signature,
   to,
 }: {
   subject: string;
   body: string;
+  signature: string;
   /** Destinataire connu, ou `null` si aucune adresse n'est encore trouvée. */
   to: string | null;
 }) {
-  const words = countWords(body);
+  const words = bodyWordCount(body, signature);
 
   return (
     <Card className="overflow-hidden">
       <CardHeader className="pb-2">
         <div className="flex items-baseline justify-between gap-3">
           <CardTitle>Aperçu</CardTitle>
-          <span
-            className="font-data text-[11px]"
-            style={{ color: words > MAX_WORDS ? "var(--warn)" : "var(--faint)" }}
-          >
-            {words} / {MAX_WORDS} mots
+          <span className={`font-data text-[11px] ${words > MAX_BODY_WORDS ? "text-lost-ink" : "text-faint"}`}>
+            {words} / {MAX_BODY_WORDS} mots
           </span>
         </div>
       </CardHeader>

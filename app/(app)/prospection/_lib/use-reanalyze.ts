@@ -18,7 +18,7 @@ import { useToast } from "@/components/ui";
  * d'un an étaient trouvables chez Pappers, absentes de la fiche, et la
  * génération répondait « à nourrir ».
  */
-export function useReanalyze(onDone: () => void) {
+export function useReanalyze(onDone: (prospect: { id: string; company_name: string }) => void) {
   const [running, setRunning] = useState(false);
   const [step, setStep] = useState<string | null>(null);
   const toast = useToast();
@@ -48,8 +48,8 @@ export function useReanalyze(onDone: () => void) {
           toast.error(snapshot.job.error ?? "Réanalyse en échec.");
           return;
         }
-        toast.success("Fiche réanalysée : signaux et chiffres clés à jour.");
-        onDone();
+        toast.success("Fiche réanalysée : signaux, profil métier et chiffres clés à jour. Nouveau brouillon en cours.");
+        onDone(prospect);
       } catch (cause) {
         toast.error(cause instanceof ApiError ? cause.message : "Réanalyse impossible.");
       } finally {

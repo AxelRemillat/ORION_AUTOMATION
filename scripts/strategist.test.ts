@@ -288,7 +288,7 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     check("la promesse est transmise", prompt.includes("sans changer d'outil"));
     check(
       "aucune preuve hors sujet n'est imposée",
-      prompt.includes("AUCUNE PREUVE ne recoupe ce pain") || prompt.includes("PREUVE A MOBILISER"),
+      prompt.includes("aucune demo ne correspond a CE pain") || prompt.includes("PREUVE A MOBILISER"),
     );
     check("le nom exact est imposé", prompt.includes(`« ${brief.companyName} »`));
 

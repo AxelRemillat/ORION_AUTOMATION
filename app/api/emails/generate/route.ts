@@ -19,8 +19,9 @@ export const maxDuration = 300;
  *
  * La route vérifie d'abord ce qui ne coûte rien (corps, prospect, statut, clé)
  * pour répondre comme avant sans créer de job, puis pilote le job et rend la
- * même réponse. L'écran Prospection enregistre lui-même le brouillon à la
- * validation : `saveDraft` vaut donc `false` ici.
+ * même réponse. TOUT brouillon généré est enregistré sur le prospect
+ * (`saveDraft: true`) : il réécrit le dernier brouillon non envoyé plutôt que
+ * d'en empiler un second, et ne touche jamais un mail programmé.
  */
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
 
   const parsed = EMAIL_PARAMS_SCHEMA.safeParse(await readJson<unknown>(request));
   if (!parsed.success) return NextResponse.json({ error: "Requête invalide." }, { status: 400 });
-  const params = { ...parsed.data, saveDraft: false };
+  const params = { ...parsed.data, saveDraft: true };
 
   // Corbeille exclue : aucun crédit dépensé pour un prospect supprimé.
   const { data } = await activeProspects(session.supabase).eq("id", params.prospectId).maybeSingle();

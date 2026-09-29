@@ -3,6 +3,7 @@ import { PERSONA, type PersonaProof } from "@/lib/persona";
 import { factsBlock, knownNumbers, stripUnknownNumbers, type DerivedFact } from "./derived-facts";
 import { jobRolesBlock } from "./job-roles";
 import { DATED_EVENT_KEYS } from "./hook-readiness";
+import { profileBlock, type BusinessProfile } from "./business-profile";
 
 /**
  * ÉTAPE 2 — le STRATÈGE : il trie, il ne rédige pas.
@@ -78,6 +79,50 @@ export interface StrategistInput {
   excludeAngles?: BriefAngle[];
   /** Secteur ou activité déclarée : sert à repérer un pain qui redit l'offre. */
   sector?: string | null;
+  /** Profil métier lu sur le site : le pain se choisit DEPUIS lui. */
+  businessProfile?: BusinessProfile | null;
+  /** Code NAF : repère les cabinets de conseil et intégrateurs (angle partenariat). */
+  nafCode?: string | null;
+}
+
+/**
+ * Cabinets de conseil et intégrateurs : ils vendent ce qu'Axel vend. On ne
+ * leur propose pas d'automatiser leurs tâches, on leur propose un RENFORT sur
+ * leurs missions clients (HUMAN SIGHT, conseil en organisation).
+ */
+const PARTNER_NAF = /^(70\.22Z|70\.21Z|62\.01Z|62\.02A|62\.02B|62\.03Z|62\.09Z|63\.11Z|74\.90B)$/i;
+
+export function isPartnerProspect(nafCode: string | null | undefined): boolean {
+  return Boolean(nafCode && PARTNER_NAF.test(nafCode.trim()));
+}
+
+/** Un pain de partenaire parle de LEURS clients, de missions, de renfort. */
+const PARTNER_PAIN = /client|mission|renfort|partenari|sous-trait|livrable|projet/i;
+
+/** Mots de fond du profil : ce que le site dit du métier réel. */
+function profileWords(profile: BusinessProfile): Set<string> {
+  const text = [
+    profile.offer,
+    profile.customerDetail ?? "",
+    ...profile.demandChannels,
+    ...profile.counts.map((item) => item.label),
+    ...profile.services.map((item) => item.name),
+  ].join(" ");
+  return significant(text);
+}
+
+/**
+ * Le pain est-il ANCRÉ dans le profil ? Au moins un mot de fond partagé
+ * (devis, showroom, commandes, boutiques…). Un pain qui n'en partage aucun a
+ * été déduit du NAF — c'est l'erreur BRIOL (« expéditions » pour un poseur).
+ */
+export function painGroundedInProfile(painText: string, profile: BusinessProfile | null | undefined): boolean {
+  if (!profile) return true;
+  const words = profileWords(profile);
+  if (!words.size) return true;
+  const singular = (word: string) => word.replace(/[sx]$/, "");
+  const pool = new Set([...words].map(singular));
+  return [...significant(painText)].some((word) => pool.has(singular(word)));
 }
 
 const PUBLIC_PROOFS = (PERSONA.proofs as readonly PersonaProof[]).filter((proof) => proof.publicOk);
@@ -195,6 +240,23 @@ ${jobRolesBlock()}
 8. NOM : l'entreprise s'appelle « ${input.companyName} ». Aucun autre nom
    d'entite ne la designe.${input.foreignEntities.length ? ` En particulier, ${input.foreignEntities.map((name) => `« ${name} »`).join(", ")} est une AUTRE entreprise (homonyme) : n'en parle jamais.` : ""}
 9. N'invente aucun chiffre ; ne cite que des factIds existants.
+10. PROFIL METIER : quand il est fourni, le pain se choisit DEPUIS lui — ce qu'ils
+   vendent, comment arrivent commandes et devis, leurs implantations. Le code
+   NAF seul ne suffit JAMAIS : un « commerce de gros de bois » qui fait de la
+   fourniture + pose avec trois showrooms a un probleme de DEVIS, pas
+   d'expeditions. Un fait d'implantation (« trois showrooms et douze
+   commerciaux », « un laboratoire qui alimente toutes les boutiques ») est une
+   excellente accroche structurelle.
+11. OFFRE D'EMPLOI : c'est un INDICE du pain, pas le sujet du mail — sauf si le
+   poste EST le pain (une assistante devis recrutee = les devis debordent).${
+     isPartnerProspect(input.nafCode)
+       ? `
+12. PARTENAIRE : ce prospect est un cabinet de conseil ou un integrateur. Il vend
+   ce que tu vends. Angle OBLIGATOIRE : un partenariat — un renfort sur LEURS
+   missions clients (automatisations livrees chez leurs clients). Le pain parle
+   de leurs clients ou de leurs missions, jamais de leurs taches internes.`
+       : ""
+   }
 
 Reponds UNIQUEMENT avec un objet JSON :
 {
@@ -207,6 +269,8 @@ Reponds UNIQUEMENT avec un objet JSON :
 }`;
 
   const user = `Entreprise : ${input.companyName}
+
+${profileBlock(input.businessProfile ?? null)}
 
 ${factsBlock(input.facts)}
 
@@ -417,6 +481,22 @@ export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcom
   }
 
 
+  // Le pain vient du METIER lu sur le site, pas du NAF.
+  const painText = `${data.pain.task} ${data.pain.automationIdea}`;
+  if (!painGroundedInProfile(painText, input.businessProfile)) {
+    errors.push(
+      `pain « ${data.pain.task} » ne s'appuie sur rien du PROFIL METIER (ce qu'ils vendent, ` +
+        "arrivee des commandes et devis, implantations, services) : il a ete deduit du NAF. " +
+        "Choisis le pain depuis le profil.",
+    );
+  }
+  if (isPartnerProspect(input.nafCode) && !PARTNER_PAIN.test(painText)) {
+    errors.push(
+      "prospect partenaire (conseil / integrateur) : l'angle est un renfort sur LEURS missions clients. " +
+        "Le pain doit parler de leurs clients ou de leurs missions.",
+    );
+  }
+
   // Paraphrase de plaquette : ça ne dit rien et ça se voit.
   const slogan = [data.angle.insight, data.pain.task].find(paraphrasesSlogan);
   if (slogan) {
@@ -440,7 +520,6 @@ export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcom
   // que de rejeter tout le brief. Le mail ANDRA LEARNING mobilisait « j'ai
   // relie des flux d'alertes » pour un pain de formation — mieux vaut ne rien
   // citer que de citer a cote.
-  const painText = `${data.pain.task} ${data.pain.automationIdea}`;
   const proofId = proofMatchesPain(data.proofId, painText) ? data.proofId : null;
 
   return {

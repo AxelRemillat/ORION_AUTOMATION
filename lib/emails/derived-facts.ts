@@ -1,3 +1,4 @@
+import { locationsLine, storedProfile } from "./business-profile";
 import type { Prospect } from "@/types";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import { isOpaqueNaf, nafLabel } from "@/lib/naf";
@@ -63,6 +64,12 @@ export type FactKey =
   | "city"
   | "website"
   | "site_offer"
+  /** Profil métier lu sur le site (lib/emails/business-profile.ts). */
+  | "business_offer"
+  | "business_customers"
+  | "business_channels"
+  | "business_locations"
+  | "business_services"
   | "size_range"
   | "headcount"
   | "revenue"
@@ -608,6 +615,33 @@ export function buildFacts(
   );
   add("site_offer", "Ce que dit leur site", str(figures.site_offer), "Site officiel", 3);
 
+  // --- Profil métier, lu et vérifié sur le site --------------------------
+  // C'est lui qui dit le métier réel ; le NAF n'en est qu'une approximation.
+  const profile = storedProfile(prospect.business_profile);
+  if (profile) {
+    add("business_offer", "Ce qu'ils vendent (site)", profile.offer, "Site officiel", 3);
+    add(
+      "business_customers",
+      "Clientèle (site)",
+      `${profile.customers}${profile.customerDetail ? ` — ${profile.customerDetail}` : ""}`,
+      "Site officiel",
+      4,
+    );
+    add("business_channels", "Arrivée des commandes et devis (site)", profile.demandChannels.join(" ; ") || null, "Site officiel", 3);
+    add("business_locations", "Implantations et équipe (site)", locationsLine(profile), "Site officiel", 2, {
+      writerHint:
+        "Fait STRUCTUREL, accepté en accroche : « Avec trois showrooms et une douzaine de commerciaux, … ». " +
+        "Chiffres en lettres, sujet = l'entreprise, jamais « d'après votre site ».",
+    });
+    add(
+      "business_services",
+      "Services (site)",
+      profile.services.map((item) => item.name).join(", ") || null,
+      "Site officiel",
+      3,
+    );
+  }
+
   // --- Tier 5 : taille et finances -----------------------------------------
   const sizeRange = str(prospect.size_range) ?? str(figures.size_range);
   add("size_range", "Tranche d'effectif", sizeRange, "Annuaire Entreprises", 5, { url: annuaireUrl });
@@ -709,7 +743,8 @@ export function buildFacts(
     leaderVia,
     isLargeGroupSubsidiary: isSubsidiary,
     groupEvidence,
-    companyName: displayCompanyName(prospect.company_name, [
+    // Le nom commercial lu sur le site passe devant : c'est celui qu'ils emploient.
+    companyName: storedProfile(prospect.business_profile)?.commercialName ?? displayCompanyName(prospect.company_name, [
       str(figures.site_offer) ?? "",
       ...attachment.kept
         .filter((signal) => signal.scope !== "groupe")

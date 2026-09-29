@@ -263,6 +263,12 @@ export type Prospect = {
   do_not_contact?: boolean;
   /** Statut avant « ne plus contacter », rendu quand on lève le blocage. */
   status_before_dnc?: string | null;
+  /**
+   * Profil métier lu sur le site (lib/emails/business-profile.ts), migration
+   * 20260927210139. Le stratège choisit le pain depuis ce profil.
+   */
+  business_profile?: Record<string, unknown> | null;
+  business_profile_at?: string | null;
   status: ProspectStatus;
   created_at: string;
   updated_at: string;

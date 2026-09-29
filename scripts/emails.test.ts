@@ -157,14 +157,19 @@ console.log("\n7. Validateur — salutation");
 
 console.log("\n8. Validateur — objet");
 {
-  check("objet conforme", validateSubject("contrats de mission et relevés d'heures", "RAS").length === 0);
+  check("objet conforme", validateSubject("Contrats de mission et relevés d'heures", "RAS").length === 0);
+  check("minuscule initiale rejetée", validateSubject("contrats de mission", "RAS").some((f) => f.includes("majuscule")));
   check(
     "« Automatisation de… » rejeté",
     validateSubject("Automatisation de vos processus", "RAS").some((f) => f.includes("Automatisation")),
   );
   check(
-    "« chez <société> » rejeté",
-    validateSubject("tri des candidatures chez RAS", "RAS").some((f) => f.includes("chez")),
+    "« chez <nom commercial> » accepté (objet de référence)",
+    validateSubject("Demandes de devis chez Menuiserie Briol", "Menuiserie Briol").length === 0,
+  );
+  check(
+    "forme juridique rejetée",
+    validateSubject("Devis chez SARL Briol", "Briol").some((f) => f.includes("juridique")),
   );
   check("un seul mot rejeté", validateSubject("automatisation", "RAS").some((f) => f.includes("mot")));
   check("capitales rejetées", validateSubject("URGENT contrats de mission", "RAS").some((f) => f.includes("capitales")));

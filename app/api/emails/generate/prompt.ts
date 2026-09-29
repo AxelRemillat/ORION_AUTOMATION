@@ -6,7 +6,8 @@ import {
 } from "@/lib/offer/model";
 import type { UserOffer } from "@/types";
 import { toneInstruction, type ToneKey } from "@/lib/tones";
-import { greetingName, greetingSurname } from "@/lib/emails/validate";
+import { greetingName } from "@/lib/emails/validate";
+import { addresseeOf, civilityFor, salutationFor, usagePerson } from "@/lib/emails/salutation";
 import { buildFacts, factsBlock, type DerivedFact } from "@/lib/emails/derived-facts";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import type { Prospect } from "@/types";
@@ -29,9 +30,9 @@ import { briefFacts, proofById, type StrategyBrief } from "@/lib/emails/strategi
  */
 const VOICE_EXAMPLES = [
   `[EXEMPLE FICTIF — cabinet comptable]
-Objet : pièces clients et relances
+Objet : Pièces clients et relances
 
-Bonjour Claire,
+Bonjour Madame Roux,
 
 Un cabinet de 12 personnes qui suit 300 dossiers, ça veut dire que la collecte des pièces occupe quelqu'un presque à plein temps en fin de trimestre.
 
@@ -42,7 +43,7 @@ C'est encore fait à la main chez vous ?
 Axel`,
 
   `[EXEMPLE FICTIF — e-commerce]
-Objet : commandes et service après-vente
+Objet : Commandes et service après-vente
 
 Bonjour,
 
@@ -55,7 +56,7 @@ C'est un sujet chez vous en ce moment, ou c'est déjà outillé ?
 Axel`,
 
   `[EXEMPLE FICTIF — BTP]
-Objet : pointages et situations de travaux
+Objet : Pointages et situations de travaux
 
 Bonjour Monsieur Ferrand,
 
@@ -132,8 +133,19 @@ const strip = (value: string): string =>
 export function emailBelongsTo(email: string | null | undefined, person: string | null): boolean {
   if (!email || !person) return false;
   const local = strip(email.split("@")[0] ?? "");
-  const surname = strip(person.trim().split(/\s+/).slice(-1)[0] ?? "");
-  return surname.length > 2 && local.includes(surname);
+  /*
+   * N'IMPORTE LEQUEL de ses noms suffit.
+   *
+   * On ne comparait que le nom de famille : `fabien@selectionhabitat.com`, dont
+   * Hunter dit qu'elle appartient à Fabien Sirven, n'était donc rattachée à
+   * personne, et le mail saluait le gérant du registre — quelqu'un d'autre que
+   * son lecteur. Une adresse au prénom est courante dans les PME.
+   */
+  return person
+    .trim()
+    .split(/\s+/)
+    .map(strip)
+    .some((part) => part.length > 2 && local.includes(part));
 }
 
 /**
@@ -157,38 +169,60 @@ export function splitPerson(fullName: string): { first: string; last: string } |
 }
 
 /**
- * Salutation.
+ * Salutation — « Bonjour Monsieur <nom d'usage>, » des que le dirigeant est connu.
  *
- * Deux sources de prenom, dans cet ordre : le contact Hunter quand sa
- * confiance atteint 80, sinon le dirigeant du registre. Le registre ne sert
- * que de repli — c'est l'adresse qui recoit le mail qui compte.
+ * Regle des mails ecrits a la main : on nomme le dirigeant MEME si l'adresse
+ * est generique (contact@) — il la lit ou la fait suivre. Le registre ne
+ * change plus la forme : « Monsieur/Madame + nom » dans tous les tons.
  *
- * Forme : prenom seul pour Direct, Chaleureux et Bref ; « Monsieur <Nom> »
- * pour Factuel. JAMAIS « Monsieur <Prenom> <Nom> », qui ne se dit pas.
+ * Qui nommer, dans cet ordre :
+ * 1. le dirigeant explicitement vise (arrivee recente) ;
+ * 2. la personne dont l'adresse est nominative (Hunter >= 80, adresse a son
+ *    nom) quand ce n'est pas le dirigeant : le mail arrive chez ELLE ;
+ * 3. le dirigeant du registre ;
+ * 4. le contact Hunter a haute confiance.
+ * Sinon « Bonjour, ». Civilite inconnue → « Bonjour Prenom Nom, » (lib/emails/salutation).
  */
 export function buildGreeting(
-  tone: ToneKey,
+  _tone: ToneKey,
   contact?: DecisionMakerContact | null,
   leaderPerson?: string | null,
-  /**
-   * Dirigeant a qui le mail est explicitement adresse — une arrivee recente.
-   *
-   * Il passe devant, et SANS exiger que l'adresse soit la sienne : quand
-   * l'accroche est « vous avez pris la direction de… », le mail ne peut pas
-   * commencer par « Bonjour, ». Une adresse generique le fera suivre ; un mail
-   * anonyme sur une nomination, lui, se contredit des la premiere ligne.
-   */
   addressee?: string | null,
 ): string {
-  const fromHunter = greetingName(contact) ? contact?.full_name ?? null : null;
-  // Le dirigeant du registre ne vaut que si le mail part bien chez lui.
-  const fromRegistry =
-    leaderPerson && emailBelongsTo(contact?.email, leaderPerson) ? leaderPerson : null;
+  const hunter = greetingName(contact) ? contact?.full_name ?? null : null;
+  const hunterInbox = hunter && emailBelongsTo(contact?.email, hunter) ? hunter : null;
+  // Meme nom de famille ne veut pas dire meme personne (entreprise familiale) :
+  // on compare les prenoms.
+  const sameAsLeader = (name: string) =>
+    Boolean(leaderPerson) && strip(splitPerson(name)?.first ?? "") === strip(splitPerson(leaderPerson ?? "")?.first ?? "");
+  const otherThanLeader = hunterInbox && !sameAsLeader(hunterInbox);
+  const person = addressee ?? (otherThanLeader ? hunterInbox : null) ?? null;
+  if (person) return salutationFor(person);
 
-  const person = splitPerson(addressee ?? fromHunter ?? fromRegistry ?? "");
-  if (!person) return "Bonjour,";
+  /*
+   * LE LECTEUR D'ABORD. Le mail arrive dans une boîte : c'est son titulaire
+   * qu'on salue. Sur BRIOL DIFFUSION, l'adresse retenue était `j.benes@` et le
+   * mail ouvrait sur « Bonjour Monsieur Briol » — le juge l'a relevé.
+   *
+   * Une adresse nominative dont on ne tire pas de civilité donne « Bonjour, » :
+   * une initiale ne dit pas le genre, et se tromper est pire que rester neutre.
+   * Une adresse de SERVICE, elle, ne désigne personne : on nomme le dirigeant.
+   */
+  const owner = addresseeOf(contact?.email);
+  if (owner) {
+    // L'adresse est celle d'une personne qu'on connaît par ailleurs (dirigeant
+    // du registre, contact Hunter) : c'est son nom COMPLET qu'on prend, lui seul
+    // donne le prénom, donc la civilité. « b.dumont@ » ne dit pas « Benjamin ».
+    const known = [leaderPerson, hunter].find((name) => {
+      const person = name ? usagePerson(name) : null;
+      return person && strip(person.last) === strip(owner.last);
+    });
+    if (known) return salutationFor(known);
 
-  return tone === "factuel" ? `Bonjour Monsieur ${person.last},` : `Bonjour ${person.first},`;
+    const civility = owner.first ? civilityFor(owner.first) : null;
+    return civility ? `Bonjour ${civility} ${owner.last},` : "Bonjour,";
+  }
+  return salutationFor(leaderPerson ?? hunter);
 }
 
 export interface Evidence {
@@ -268,7 +302,12 @@ export function buildWritingPrompt(input: WritingInput): string {
   const choice = chooseProof(offer, `${brief.pain.task} ${brief.pain.automationIdea}`, {
     sector: input.sector,
   });
-  const proofLine = choice.sentence
+  const proofLine = choice.sentence && !choice.proof
+    ? `PREUVE — aucune demo ne correspond a CE pain. Dis seulement que tu as ${choice.sentence}
+  (« …, avec des exemples testables sur mon site »). N'invente AUCUNE demo, n'en
+  nomme aucune : une demo hors sujet (des comptes rendus RH pour une boulangerie)
+  coule le mail.`
+    : choice.sentence
     ? `PREUVE A MOBILISER — une seule, jamais deux. Son contenu : ${choice.sentence}
   Dis-la avec TES mots, en une clause courte. NE LA RECOPIE PAS mot pour mot et
   ne la mets pas entre guillemets : une phrase citee au milieu d'un mail sonne
@@ -320,12 +359,22 @@ FAITS AUTORISES — les seuls sur lesquels tu peux t'appuyer :
 ${factLines(facts) || "aucun"}
 
 STRUCTURE — QUATRE blocs, dans cet ordre, un paragraphe chacun.
-BUDGET DE MOTS PAR BLOC, a respecter : 30 / 25 / 35 / 20. Un budget par bloc
+BUDGET DE MOTS PAR BLOC, a respecter : 28 / 22 / 30 / 18. Un budget par bloc
 tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
-1. ACCROCHE : UN fait propre a CETTE entreprise (signal date, page de son site,
-   etablissement, recrutement...). Elle doit echouer au TEST DE SUBSTITUTION :
-   si la phrase reste vraie en remplaçant le nom par un concurrent du meme code
-   NAF, elle est refusee.
+1. ACCROCHE : UN SEUL fait concret propre a CETTE entreprise, dans une phrase
+   simple centree sur elle, suivi de ce qu'il implique pour le pain. Elle doit
+   echouer au TEST DE SUBSTITUTION : si la phrase reste vraie en remplaçant le
+   nom par un concurrent du meme code NAF, elle est refusee.
+   - Un fait STRUCTUREL est une tres bonne accroche : « Avec trois showrooms et
+     une douzaine de commerciaux, chaque demande de devis doit être triée… »,
+     « Avec un laboratoire qui alimente toutes vos boutiques, … ».
+   - Une offre d'emploi est un INDICE du pain, JAMAIS le sujet du mail : une
+     accroche qui commence par « Vous recrutez… » est refusee par du code.
+     Pars de leur metier (implantations, clientele, arrivee des demandes).
+   - Un fait de plus de douze mois n'est JAMAIS « recent » : ni « recemment »,
+     ni « vient de », ni « nouvelle agence ».
+   - Pas de commentaire du fait : « rappelle l'importance de », « souligne »,
+     « temoigne de » sont refuses par du code. Dis le fait, c'est tout.
    QUATRE OUVERTURES INTERDITES, verifiees par du code :
    - « Dans le/la <secteur> » : c'est le contraire d'une accroche ;
    - « Sur votre site, on lit que… », « d'apres votre site » : citer le site
@@ -336,8 +385,8 @@ tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
    - la paraphrase de leur propre page : ils la connaissent. Le fait de site
      sert a dire ce qu'il IMPLIQUE, jamais a le leur relire.
 2. QUI + PREUVE : « Je suis ${offer.full_name ?? "Axel Remillat"}, » suivi de ton
-   titre reformule naturellement (pas recopie mot pour mot), puis la preuve
-   ci-dessous. Dis ce que tu CONSTRUIS, jamais qui tu aides : « j'aide les PME »
+   titre reformule naturellement (« je construis des automatisations et agents
+   IA pour PME »), puis la preuve ci-dessous. Dis ce que tu CONSTRUIS, jamais qui tu aides : « j'aide les PME »
    ou « j'accompagne des entreprises » revendique une clientele que les preuves
    ne permettent pas d'affirmer.
 3. OFFRE POUR EUX : le flux applique a LEUR cas — ce qui declenche, ce qui est
@@ -345,17 +394,17 @@ tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
    quatrieme n'apprend rien et coute dix mots. UNE seule phrase, puis la
    promesse en UNE clause courte : le delai SEUL. « Sans changer d'outil » et
    la validation humaine sont vraies mais couteuses ; elles se disent a l'oral.
-   Ce bloc est celui qui fait deborder le mail : 35 mots, pas un de plus.
+   Ce bloc est celui qui fait deborder le mail : 30 mots, pas un de plus.
 4. DEMANDE FACILE : ton offre d'entree, formulee en question FERMEE a laquelle
    on repond oui ou non (« Est-ce que ca vous parlerait ? »).
 
 REGLES DURES — chacune est verifiee par du code apres generation
 1. SALUTATION, exactement : « ${greeting} » Rien d'autre.
 2. LONGUEUR — la contrainte la plus souvent ratee. EXACTEMENT QUATRE
-   paragraphes, separes par une ligne vide, un par bloc. Vise 100 mots,
-   signature non comprise ; 120 est un PLAFOND STRICT. UNE seule phrase par
-   paragraphe. Compte tes mots avant de repondre : au-dela de 120, le mail est
-   refuse par du code, sans discussion.
+   paragraphes, separes par une ligne vide, un par bloc. Vise 95 mots,
+   signature non comprise ; 110 est un PLAFOND STRICT. Deux phrases au plus par
+   paragraphe. Compte tes mots avant de repondre : au-dela de 110, le mail est
+   refuse par du code, sans discussion, et ne peut pas etre valide.
 3. UNE SEULE question dans tout le mail : celle du bloc 4.
 4. Aucun chiffre absent des faits autorises. Les arrondis sont permis.
 5. Rien qu'on ne puisse tenir : pas de « garantir », pas de « sans
@@ -373,9 +422,13 @@ REGLES DURES — chacune est verifiee par du code apres generation
 ${proofLine}
 
 OBJET
-2 a 6 mots, minuscules sauf noms propres, dans le vocabulaire metier du pain.
-INTERDIT : commencer par « Automatisation de », contenir « chez ${brief.companyName} »,
-les majuscules de mise en avant, les emojis, les points d'exclamation.
+2 a 6 mots, court et SPECIFIQUE, majuscule initiale puis minuscules sauf noms
+propres, dans le vocabulaire metier du pain. Exemples : « Demandes de devis chez
+Menuiserie Briol », « Commandes des boutiques vers le laboratoire ». Le nom
+commercial est permis (« chez ${brief.companyName} ») ; la raison sociale avec
+sa forme juridique (SARL, SAS…) ne l'est pas.
+INTERDIT : commencer par « Automatisation de », les mots en capitales, les
+emojis, les points d'exclamation.
 
 REGISTRE
 ${toneInstruction(tone)}
@@ -384,7 +437,7 @@ ${avoidBlock}
 
 ${critiqueBlock}
 
-DEUX EXEMPLES — entreprises FICTIVES, structure en quatre blocs. Ce sont des
+TROIS EXEMPLES — entreprises FICTIVES, structure en quatre blocs. Ce sont des
 exemples de TON et de FORME. N'en reutilise aucune phrase.
 ${VOICE_EXAMPLES.join("\n\n")}
 

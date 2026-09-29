@@ -273,31 +273,25 @@ console.log("\n9. Salutation : prénom usuel, jamais « Monsieur Prénom Nom »"
     confidence: 92,
   };
 
-  check("Direct → prénom seul", buildGreeting("direct", hunter, "Victor Grynbaum") === "Bonjour Sacha,");
-  check("Bref → prénom seul", buildGreeting("bref", hunter, null) === "Bonjour Sacha,");
-  check("Chaleureux → prénom seul", buildGreeting("chaleureux", hunter, null) === "Bonjour Sacha,");
-  check("Factuel → Monsieur + nom", buildGreeting("factuel", hunter, null) === "Bonjour Monsieur Grynbaum,");
+  // Sacha Grynbaum recoit le mail a SON adresse : c'est lui qu'on nomme, pas le
+  // dirigeant du meme nom. « Sacha » est mixte, donc aucune civilite sure — et
+  // « Bonjour Sacha Grynbaum, » ne s'ecrit pas a un dirigeant inconnu : neutre.
+  check("adresse nominative d'un autre → jamais le dirigeant homonyme", !buildGreeting("direct", hunter, "Victor Grynbaum").includes("Victor"), buildGreeting("direct", hunter, "Victor Grynbaum"));
+  check("civilite incertaine → neutre", buildGreeting("direct", hunter, "Victor Grynbaum") === "Bonjour,", buildGreeting("direct", hunter, "Victor Grynbaum"));
+  check("le ton ne change plus la forme", buildGreeting("bref", hunter, null) === buildGreeting("factuel", hunter, null));
+  check("jamais « Monsieur Prénom Nom »", !buildGreeting("factuel", hunter, "Victor Grynbaum").includes("Monsieur Sacha"));
 
-  // Le cas parti en production.
-  check(
-    "jamais « Monsieur Prénom Nom »",
-    !buildGreeting("factuel", hunter, "Victor Grynbaum").includes("Monsieur Sacha"),
-    buildGreeting("factuel", hunter, "Victor Grynbaum"),
-  );
-
-  // Hunter peu fiable : on retombe sur le registre, si l'adresse est la sienne.
   const faible = { ...hunter, full_name: "Sacha Grynbaum", confidence: 40 };
   check(
-    "confiance Hunter < 80 → registre",
+    "confiance Hunter < 80 → dirigeant du registre",
     buildGreeting("direct", { ...faible, email: "v.grynbaum@andra-learning.fr" }, "Victor Grynbaum") ===
-      "Bonjour Victor,",
-    buildGreeting("direct", { ...faible, email: "v.grynbaum@andra-learning.fr" }, "Victor Grynbaum"),
+      "Bonjour Monsieur Grynbaum,",
   );
   check("aucun nom fiable → salutation neutre", buildGreeting("direct", null, null) === "Bonjour,");
   check(
-    "adresse générique → pas de prénom du registre",
+    "adresse générique → le dirigeant quand même",
     buildGreeting("direct", { ...faible, email: "contact@andra-learning.fr" }, "Victor Grynbaum") ===
-      "Bonjour,",
+      "Bonjour Monsieur Grynbaum,",
   );
 }
 

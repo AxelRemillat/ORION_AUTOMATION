@@ -3,6 +3,7 @@ import { resolveCompany } from "@/lib/enrichment/gouv";
 import { activeProspects } from "@/lib/trash/scope";
 import type { Prospect, ProspectKeyFigures } from "@/types";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
+import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import { findContact } from "@/lib/contact-finder";
 
 /**
@@ -126,6 +127,14 @@ async function contact(ctx: StepContext): Promise<StepOutcome> {
   await ctx.progress({ step: "Recherche du site et du contact", pct: 60, counts: { scanned: 0, signals: 0, sheets: 1 } });
   const website = typeof ctx.job.params.website === "string" ? ctx.job.params.website : null;
   const found = await findContact(prospect.id, { db: ctx.db, userId: ctx.userId, website });
+
+  // Un site trouve ICI n'a pas pu etre lu par l'etape precedente : le profil
+  // metier se lit maintenant, sinon le prochain mail repart du NAF.
+  if (found.website && !prospect.business_profile && process.env.OPENAI_API_KEY) {
+    await ensureBusinessProfile(ctx.db, { ...prospect, website: found.website }, profileAsk(prospect.id)).catch(
+      () => null,
+    );
+  }
   return {
     state: { contact: found },
     result: { prospectIds: [prospect.id] },

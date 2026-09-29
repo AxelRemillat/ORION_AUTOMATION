@@ -25,6 +25,9 @@ import { ContactCard } from "@/components/prospect/contact-card";
 import { DraftSendBar } from "./_components/draft-send-bar";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { useReanalyze } from "./_lib/use-reanalyze";
+import { signatureFor } from "@/lib/offer/model";
+import { exceedsWordLimit } from "@/lib/emails/word-count";
+import { suggestSendTime } from "@/lib/emails/send-time";
 
 /**
  * Écran de prospection : sélection d'un prospect → analyse IA chiffrée →
@@ -45,9 +48,6 @@ export function ProspectionClient({
   offerComplete: boolean;
 }) {
   const router = useRouter();
-  // Ré-enrichissement de la fiche : au retour, on recharge la page pour que le
-  // prospect affiche ses nouveaux signaux et chiffres clés.
-  const { reanalyze, running: reanalyzing } = useReanalyze(() => router.refresh());
   const toast = useToast();
   const [prospects, setProspects] = useState(initialProspects);
   // La liste suit le serveur : une mise à la corbeille (ou son annulation)
@@ -73,6 +73,12 @@ export function ProspectionClient({
     reset,
   } =
     useGeneration(tone);
+  // « Relancer l'analyse » : la fiche est ré-enrichie (établissements Pappers,
+  // profil métier relu sur le site), puis le mail est RÉGÉNÉRÉ sur ces bases.
+  const { reanalyze, running: reanalyzing } = useReanalyze((done) => {
+    router.refresh();
+    if (selected?.id === done.id) void generate(selected);
+  });
 
   /** Choisir un prospect recharge son dernier brouillon, ou reprend sa génération. */
   function select(prospect: Prospect) {
@@ -90,8 +96,12 @@ export function ProspectionClient({
   }, []);
 
   /** Enregistre le brouillon relu et avance le prospect dans le pipeline. */
+  const signature = signatureFor(offer);
+
   async function validate() {
     if (!selected || !analysis) return;
+    // Plafond BLOQUANT : le bouton est grisé, et ce garde-fou couvre le reste.
+    if (exceedsWordLimit(draft.body, signature)) return;
     setSaving(true);
     try {
       const supabase = createClient();
@@ -190,6 +200,8 @@ export function ProspectionClient({
                 <EmailEditor
                   subject={draft.subject}
                   body={draft.body}
+                  signature={signature}
+                  sendHint={suggestSendTime(selected.sector, selected.key_figures?.naf_code).label}
                   saving={saving}
                   regenerating={generating}
                   onChange={setDraft}
@@ -199,6 +211,7 @@ export function ProspectionClient({
                 <DraftPreview
                   subject={draft.subject}
                   body={draft.body}
+                  signature={signature}
                   to={analysis.contact?.email ?? selected.email}
                 />
               </div>

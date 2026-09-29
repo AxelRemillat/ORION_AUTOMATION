@@ -270,11 +270,11 @@ console.log("\n11. Salutation : le dirigeant du registre quand l'adresse est la 
   };
   check("l'adresse porte le nom du dirigeant", emailBelongsTo(contact.email, "Benjamin Dumont"));
   check("une adresse générique ne compte pas", !emailBelongsTo("contact@blue-enerfreeze.com", "Benjamin Dumont"));
-  // Regle revue : « Monsieur + nom » est reserve au registre FACTUEL. En
-  // Direct, Chaleureux et Bref, on appelle les gens par leur prenom.
+  // Regle revue (mails de reference ecrits a la main) : « Monsieur + nom » des
+  // que le dirigeant est connu, dans TOUS les tons.
   check(
-    "Direct : prénom, même avec un dirigeant connu",
-    buildGreeting("direct", contact, "Benjamin Dumont") === "Bonjour Benjamin,",
+    "Direct : Monsieur + nom, dirigeant connu",
+    buildGreeting("direct", contact, "Benjamin Dumont") === "Bonjour Monsieur Dumont,",
     buildGreeting("direct", contact, "Benjamin Dumont"),
   );
   check(
@@ -283,9 +283,9 @@ console.log("\n11. Salutation : le dirigeant du registre quand l'adresse est la 
     buildGreeting("factuel", contact, "Benjamin Dumont"),
   );
   check(
-    "sans correspondance, on retombe sur le prénom",
+    "adresse générique : on nomme QUAND MÊME le dirigeant",
     buildGreeting("direct", { ...contact, email: "contact@blue-enerfreeze.com" }, "Benjamin Dumont") ===
-      "Bonjour Benjamin,",
+      "Bonjour Monsieur Dumont,",
   );
   check("aucun contact : salutation neutre", buildGreeting("direct", null, null) === "Bonjour,");
 }
