@@ -7,7 +7,7 @@ import {
   type ValidationResult,
 } from "@/lib/emails/validate";
 import type { DecisionMakerContact } from "@/lib/enrichment/types";
-import { chooseProof, entryOfferLabel, promiseLines, signatureFor } from "@/lib/offer/model";
+import { AGENT_METIER_SENTENCE, chooseProof, entryOfferLabel, promiseLines, signatureFor } from "@/lib/offer/model";
 import type { UserOffer } from "@/types";
 import type { ToneKey } from "@/lib/tones";
 import {
@@ -27,9 +27,16 @@ import { buildGreeting, buildWritingPrompt, parseEmail, planFor, type GeneratedE
  * ce que l'utilisateur voit à l'écran.
  */
 
-/** Phrases de preuve citables : elles viennent de /offre, plus du code. */
-const publicProofsOf = (offer: UserOffer): string[] =>
-  (offer.proofs ?? []).filter((proof) => proof.publicOk).map((proof) => proof.sentence);
+/**
+ * Phrases de preuve citables : elles viennent de /offre, plus du code. L'agent
+ * devis a une variante « avec un exemple de votre métier » (chooseProof), que
+ * le juge doit reconnaître comme une preuve publique et non comme une invention.
+ */
+const publicProofsOf = (offer: UserOffer): string[] => {
+  const proofs = (offer.proofs ?? []).filter((proof) => proof.publicOk);
+  const sentences = proofs.map((proof) => proof.sentence);
+  return proofs.some((proof) => proof.id === "agent-devis") ? [...sentences, AGENT_METIER_SENTENCE] : sentences;
+};
 
 export interface DraftInput {
   ask: AskFn;

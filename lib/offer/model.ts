@@ -16,6 +16,14 @@
 import type { EntryOfferType, OfferProof, UserOffer } from "@/types";
 
 /**
+ * Lien de la signature : la page d'atterrissage des prospects, avec les UTM que
+ * lit Umami sur le site (source, support, campagne). Un clic depuis un mail
+ * ORION s'y distingue donc des visites directes.
+ */
+export const SIGNATURE_URL =
+  "https://axelremillat.com/pme?utm_source=orion&utm_medium=email&utm_campaign=prospection";
+
+/**
  * Préremplissage, tiré du portfolio public.
  *
  * Rien d'inventé : chaque preuve renvoie à une démo réellement en ligne. Les
@@ -24,7 +32,7 @@ import type { EntryOfferType, OfferProof, UserOffer } from "@/types";
 export const OFFER_DEFAULTS: Omit<UserOffer, "user_id" | "created_at" | "updated_at"> = {
   full_name: "Axel Remillat",
   title: "Automatisation & IA en production pour PME",
-  portfolio_url: "https://axelremillat.com",
+  portfolio_url: SIGNATURE_URL,
   // Saisi à la main : on ne devine pas un numéro de téléphone.
   phone: null,
   show_phone: false,
@@ -41,20 +49,20 @@ export const OFFER_DEFAULTS: Omit<UserOffer, "user_id" | "created_at" | "updated
   proofs: [
     {
       id: "n8n",
-      title: "5 automatisations métier testables",
+      title: "5 automatisations testables",
       sentence:
-        "5 automatisations métier testables en direct sur mon site : tri d'e-mails, " +
-        "factures, SAV, comptes rendus, nettoyage de données.",
-      tags: ["e-mails", "factures", "SAV", "comptes rendus", "dossiers", "documents", "administratif", "données"],
+        "5 automatisations testables en direct sur mon site : tri d'e-mails, " +
+        "factures, comptes rendus, fichiers clients, SAV.",
+      tags: ["e-mails", "factures", "SAV", "comptes rendus", "fichiers clients", "dossiers", "documents", "administratif", "données"],
       url: "https://axelremillat.com/automatisations",
       publicOk: true,
     },
     {
       id: "agent-devis",
-      title: "Agent demande → devis",
+      title: "Agent devis (5 métiers)",
       sentence:
-        "Un agent qui transforme une demande client en devis, réponse et créneau, " +
-        "testable sur mon site.",
+        "Un agent qui transforme une demande client en devis chiffré, testable sur mon site " +
+        "sur 5 métiers : menuiserie, BTP, négoce B2B, boulangerie-traiteur, services B2B.",
       tags: ["commandes", "devis", "négoce", "demandes clients", "prise de rdv"],
       url: "https://axelremillat.com/agent",
       publicOk: true,
@@ -110,8 +118,46 @@ export const N8N_DEMOS: { key: string; label: string; tags: string[] }[] = [
   { key: "factures", label: "le traitement des factures", tags: ["facture", "facturation", "comptab", "règlement", "impayé"] },
   { key: "sav", label: "le SAV", tags: ["sav", "réclamation", "support", "litige", "après-vente", "service client"] },
   { key: "comptes-rendus", label: "les comptes rendus", tags: ["compte rendu", "compte-rendu", "réunion", "procès-verbal"] },
-  { key: "donnees", label: "le nettoyage de données", tags: ["doublon", "nettoyage de données", "dédoublonn", "fichier clients"] },
+  { key: "donnees", label: "le nettoyage des fichiers clients", tags: ["doublon", "nettoyage de données", "dédoublonn", "fichier clients", "fichiers clients"] },
 ];
+
+/**
+ * Les 5 métiers de l'agent devis (https://axelremillat.com/agent), reconnus au
+ * SECTEUR du prospect (libellé ou code NAF). Source : PORTFOLIO_V2, lib/metiers.
+ *
+ * Quand le prospect exerce l'un d'eux, la preuve devient vérifiable sur SON cas :
+ * « testable sur mon site avec un exemple de votre métier ». On ne lit que le
+ * secteur, jamais le pain : « fenêtre » ou « volet » y ont d'autres sens.
+ * L'ordre compte : la menuiserie (43.32) passe avant le BTP (43.x), et le
+ * nettoyage avant le BTP (« Nettoyage courant des bâtiments » n'est pas du BTP).
+ */
+export const AGENT_METIERS: { id: string; label: string; pattern: RegExp }[] = [
+  { id: "menuiserie", label: "menuiserie / fenêtres", pattern: /menuis|fen[eê]tre|volet|huisser|\b16\.23|\b43\.32/i },
+  { id: "boulangerie", label: "boulangerie-traiteur", pattern: /boulang|p[aâ]tiss|traiteur|viennois|\b10\.71|\b56\.21/i },
+  { id: "negoce", label: "négoce B2B", pattern: /n[eé]goc|grossiste|commerce de gros|centrale d.achat|\b46\.\d/i },
+  {
+    id: "services",
+    label: "services B2B",
+    pattern: /nettoyage|propret[eé]|entretien des locaux|maintenance informatique|infog[eé]rance|services? aux entreprises|\b81\.2|\b62\.03/i,
+  },
+  {
+    id: "btp",
+    label: "BTP / rénovation",
+    pattern: /b[aâ]timent|\bbtp\b|r[eé]novation|ma[cç]onn|pl[aâ]tr|peinture|carrel|plomb|chauffag|couvert?ure|second [oœ]uvre|gros [oœ]uvre|\b4[13]\.\d/i,
+  },
+];
+
+/** Phrase de preuve quand le métier du prospect est l'un des 5 de l'agent devis. */
+export const AGENT_METIER_SENTENCE =
+  "un agent qui transforme une demande client en devis chiffré, testable sur mon site avec un exemple de votre métier";
+
+/** Métier de l'agent devis correspondant au secteur, s'il y en a un. */
+export function agentMetier(sector: string | null | undefined): { id: string; label: string } | null {
+  const text = (sector ?? "").trim();
+  if (!text) return null;
+  const found = AGENT_METIERS.find((metier) => metier.pattern.test(text));
+  return found ? { id: found.id, label: found.label } : null;
+}
 
 export interface OfferView {
   /** `true` quand la page /offre n'a pas encore été remplie. */
@@ -306,6 +352,16 @@ export function chooseProof(
   if (!aboutStock && ORDER_TAGS.some((tag) => tagMatches(tag, painText))) {
     const agent = usable.find((proof) => proof.id === "agent-devis");
     if (agent) {
+      // Métier du prospect parmi les 5 de l'agent : la démo se teste sur SON métier.
+      const metier = agentMetier(options.sector);
+      if (metier) {
+        return {
+          proof: agent,
+          sentence: AGENT_METIER_SENTENCE,
+          demo: { key: `agent-${metier.id}`, label: `l'agent devis, métier ${metier.label}` },
+          reason: `le pain porte sur des devis et le métier (${metier.label}) est l'un des 5 de l'agent : testable sur son métier`,
+        };
+      }
       return {
         proof: agent,
         sentence: agent.sentence,
