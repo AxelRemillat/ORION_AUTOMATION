@@ -6,6 +6,10 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # `ready_for_review` : une PR passée de brouillon à prête relance la CI, donc
+    # l'auto-merge (déclenché par la fin de CI). Sans lui, une CI finie pendant
+    # le brouillon ne se relançait jamais et la PR restait ouverte (#38, #40, #41).
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: ci-${{ github.event.pull_request.number }}
@@ -35,6 +39,18 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
+      # Un script appelé dans une chaîne mais absent (« Missing script:
+      # test:contact », #39) ne se voyait qu'au milieu de `npm test`.
+      - name: Scripts npm appelés et définis
+        run: |
+          node -e '
+            const s = require("./package.json").scripts;
+            const missing = Object.entries(s).flatMap(([name, cmd]) =>
+              [...cmd.matchAll(/npm run ([\w:.-]+)/g)].map((m) => m[1]).filter((c) => !(c in s)).map((c) => `${name} → ${c}`));
+            if (missing.length) { console.error("Scripts appelés mais absents :", missing.join(", ")); process.exit(1); }
+            console.log("Chaîne test :", s.test.split("&&").length, "suites, toutes définies.");
+          '
+
       - name: Garde-fou des migrations
         run: npm run check:migrations
 
@@ -44,6 +60,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Toutes les suites, sans réseau ni clé (mocks et fixtures). test:recherche
+      # compris : il ne fait aucun appel réseau, il reste donc bloquant.
       - name: Tests
         run: npm test
 
