@@ -39,7 +39,7 @@ loadEnv();
 
 const FIX = "scripts/fixtures/contact-finder";
 
-/** Les trois cas, avec le nom de dossier et les pages à lire. */
+/** Les cas enregistrés, avec le nom de dossier et les pages à lire. */
 const CASES = [
   {
     siren: "421882440",
@@ -59,6 +59,13 @@ const CASES = [
       // L'homonyme : un éditeur de logiciels dont la page légale écrit « ARTFLEX ».
       "https://www.artflex.software/en/terms/legal-notice",
     ],
+  },
+  {
+    // Pas de site connu : on enregistre seulement les recherches, qui doivent
+    // ne rendre que des annuaires (compte rendu « probablement pas de site »).
+    siren: "833040736",
+    dir: "global2f",
+    pages: [],
   },
   {
     siren: "349925735",

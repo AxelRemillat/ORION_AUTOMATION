@@ -33,6 +33,16 @@ une adresse saisie à la main), `email_type`, `email_source_url`,
 `contact_confidence`, `contact_found_by`, `contact_search` (journal et
 dépenses), `contact_checked_at`.
 
+## Compte rendu (`report.ts`)
+
+Sous le résultat, la carte Contact affiche « Recherches effectuées » (ouvert
+d'office en cas d'échec) : requêtes Linkup au mot près, domaines écartés sans
+lecture et leur motif (annuaire, réseau social, hébergeur…), pages lues et ce
+qui y a été cherché, appels Hunter et leur résultat, coût. Une conclusion en
+une phrase (« Aucun site ne mentionne ce SIREN : l'entreprise n'a probablement
+pas de site. »). Tout est déduit du journal `contact_search` — aucun modèle.
+Les 5 conclusions précédentes sont gardées dans `contact_search.history`.
+
 ## Déclenchement
 
 - Bouton « Trouver le contact (IA) » et site éditable : carte Contact sur
@@ -46,4 +56,6 @@ dépenses), `contact_checked_at`.
 
 - `npm run test:contact` : HTML des 3 cas (BRIOL, BONNIN, ARTFLEX), règles,
   budget, écriture sur la fiche. Fixtures dans `scripts/fixtures/contact-finder`.
+- `npm run test:contact-report` : compte rendu sur GLOBAL 2F (pas de site) et
+  BRIOL (site trouvé), nom en double.
 - `npm run contact:live -- <siren> [--save]` : test réel, **payant**, en local.

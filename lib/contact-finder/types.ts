@@ -79,7 +79,26 @@ export const DEFAULT_BUDGET: ContactBudget = {
 /** Journal d'une recherche : enregistré sur la fiche pour comprendre un résultat. */
 export interface ContactTrace {
   spent: ContactBudget;
-  candidates: { domain: string; by: string; confidence: number; validated: boolean; reason: string }[];
+  candidates: {
+    domain: string;
+    by: string;
+    confidence: number;
+    validated: boolean;
+    reason: string;
+    /** Pages demandées sur ce domaine, lues ou non. Absent des journaux antérieurs. */
+    pages?: { url: string; ok: boolean }[];
+  }[];
   emailDomains: string[];
   steps: string[];
+  /*
+   * Champs structurés, pour le compte rendu (report.ts). OPTIONNELS : les
+   * journaux enregistrés avant eux n'en ont pas, et le compte rendu se rabat
+   * alors sur `steps`.
+   */
+  /** Requêtes Linkup, texte exact, et nombre de résultats. */
+  queries?: { query: string; results: number }[];
+  /** Domaines vus mais écartés SANS lecture, avec le motif. */
+  skipped?: { domain: string; reason: string }[];
+  /** Appels Hunter et leur résultat, lisible. */
+  hunter?: { call: "domain-search" | "email-finder" | "email-verifier"; target: string; result: string }[];
 }

@@ -3,6 +3,7 @@
  * Gratuit, sans clé : c'est le socle de la recherche et de la résolution de
  * SIREN (mode manuel). Toutes les autres sources viennent se greffer dessus.
  */
+import { singleCompanyName } from "@/lib/company-name";
 import { fetchJson, toDomain } from "./http";
 import { cached } from "./cache";
 import { ANNUAIRE_RATE_PER_SECOND, limitedFetch } from "./rate-limit";
@@ -177,7 +178,8 @@ function parentCompany(dirigeants: GouvDirigeant[] | undefined): string | null {
  * écarte les résultats dont le seul établissement local est fermé.
  */
 function mapResult(raw: GouvResult, geoFiltered: boolean): CompanyBase | null {
-  const name = raw.nom_complet ?? raw.nom_raison_sociale;
+  // « GLOBAL 2F (GLOBAL 2F) » : le sigle qui répète le nom est retiré.
+  const name = singleCompanyName(raw.nom_complet ?? raw.nom_raison_sociale);
   if (!name) return null;
 
   // Sur une recherche plein texte, `matching_etablissements` contient des sites
