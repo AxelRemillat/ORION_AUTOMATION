@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { MAX_BODY_WORDS, bodyWordCount } from "@/lib/emails/word-count";
+import { MAX_BODY_WORDS, bodyWordCount } from "@/lib/mail-preflight";
 
 /**
  * Aperçu du brouillon tel qu'il arrivera dans la boîte du destinataire.

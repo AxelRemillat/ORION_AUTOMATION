@@ -54,13 +54,21 @@ export function ProspectHeader({
             </h2>
             <ProspectStatusBadge status={prospect.status} />
             {/*
-              Hors cible : opposition à la prospection, aucun salarié, capitaux
-              propres sous le seuil d'alerte, commerce de détail sous 20
-              salariés. Les mêmes règles que l'entonnoir, appliquées aux fiches
-              déjà ouvertes — une entreprise ne devient pas contactable parce
-              que sa fiche est ancienne.
+              Deux badges, un seul à la fois :
+              - « opposé à la prospection » quand l'entreprise s'est opposée à
+                l'usage commercial de ses données au registre (INPI/RNE, lu via
+                Pappers) — le motif le plus précis, et le plus contraignant ;
+              - « hors cible » pour les autres motifs de l'entonnoir (aucun
+                salarié, capitaux propres sous le seuil d'alerte, commerce de
+                détail sous 20 salariés), appliqués aux fiches déjà ouvertes.
+              Dans les deux cas l'envoi est désactivé, et le motif est écrit
+              sous le nom.
             */}
-            {offTarget && <Badge tone="danger">hors cible</Badge>}
+            {prospect.key_figures?.refuses_prospecting === true ? (
+              <Badge tone="danger">opposé à la prospection</Badge>
+            ) : (
+              offTarget && <Badge tone="danger">hors cible</Badge>
+            )}
           </div>
 
           {offTarget && (

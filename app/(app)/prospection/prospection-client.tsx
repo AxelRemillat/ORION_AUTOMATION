@@ -26,7 +26,7 @@ import { DraftSendBar } from "./_components/draft-send-bar";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { useReanalyze } from "./_lib/use-reanalyze";
 import { signatureFor } from "@/lib/offer/model";
-import { exceedsWordLimit } from "@/lib/emails/word-count";
+import { exceedsWordLimit } from "@/lib/mail-preflight/words";
 import { suggestSendTime } from "@/lib/emails/send-time";
 
 /**
@@ -235,6 +235,7 @@ export function ProspectionClient({
                   // `validate` fait passer un prospect « nouveau » à « à contacter ».
                   validated={selected.status !== "nouveau"}
                   companyName={selected.company_name}
+                  refusesProspecting={selected.key_figures?.refuses_prospecting === true}
                   onTrashed={reset}
                 />
               )}

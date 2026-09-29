@@ -7,6 +7,7 @@ import { deleteMessageForever, restoreMessage, trashMessage } from "./trash";
 import { deleteInboundForever, restoreInbound, trashInbound } from "./inbound-trash";
 import { setDoNotContact } from "./do-not-contact";
 import { saveReplyDraft } from "./reply-draft";
+import { editScheduledMessage, type EditResult } from "./edit-scheduled";
 
 /**
  * Actions « mail » appelées depuis l'UI (fiche prospect, /prospection,
@@ -43,11 +44,30 @@ export async function deleteMailForever(messageId: string): Promise<MailActionRe
   return done(await deleteMessageForever(createClient(), messageId));
 }
 
-/** `at` : instant ISO (UTC), calculé côté client depuis la saisie Europe/Paris. */
-export async function scheduleMail(messageId: string, to: string, at: string): Promise<MailActionResult> {
+/**
+ * `at` : instant ISO (UTC), calculé côté client depuis la saisie Europe/Paris.
+ * `scheduledAt` rend l'heure RÉELLE (espacement, fenêtre 8 h – 18 h ouvrés).
+ */
+export async function scheduleMail(
+  messageId: string,
+  to: string,
+  at: string,
+): Promise<{ ok: true; scheduledAt: string } | { ok: false; error: string }> {
   const id = await userId();
-  if (!id) return SESSION_ERROR;
-  return done(await scheduleMessage(createClient(), { userId: id, messageId, to: to.trim(), at: new Date(at) }));
+  if (!id) return { ok: false, error: "Session expirée. Reconnectez-vous." };
+  const result = await scheduleMessage(createClient(), { userId: id, messageId, to: to.trim(), at: new Date(at) });
+  if (!result.ok) return result;
+  revalidatePath("/", "layout");
+  return { ok: true, scheduledAt: result.scheduledAt ?? at };
+}
+
+/** Texte d'un mail programmé ou bloqué, modifié avant son départ (« Programmés »). */
+export async function editScheduledMail(messageId: string, subject: string, body: string): Promise<EditResult> {
+  const id = await userId();
+  if (!id) return { ok: false, error: "Session expirée. Reconnectez-vous." };
+  const result = await editScheduledMessage(createClient(), { userId: id, messageId, subject, body });
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
 }
 
 export async function unscheduleMail(messageId: string): Promise<MailActionResult> {

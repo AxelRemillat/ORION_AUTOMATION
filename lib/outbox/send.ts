@@ -1,7 +1,11 @@
 import { advanceStatus } from "@/lib/constants";
 import { TRASHED_ERROR, type Db } from "@/lib/trash/scope";
 import type { Message, MessageType, ProspectStatus } from "@/types";
+import { loadOffer } from "@/lib/offer/read";
+import { signatureFor } from "@/lib/offer/model";
+import { blockReason, normalizeSubject, preflight, type PreflightResult } from "@/lib/mail-preflight";
 import { buildDeliverability } from "./deliverability";
+import { RELANCE_TYPES, replySinceLastSend } from "./relances";
 
 /**
  * LE chemin d'envoi d'un mail — manuel (/api/emails/send) comme programmé
@@ -40,8 +44,10 @@ export const isEmail = (value: unknown): value is string =>
  * moment de l'envoi, pas de la programmation.
  * `unrecorded` : le mail est PARTI mais son état n'a pas pu être écrit ; il ne
  * doit surtout pas être renvoyé.
+ * `preflight` : le contrôle avant envoi (lib/mail-preflight) refuse le mail —
+ * le tick le passe en `blocked`, motif visible dans « Programmés ».
  */
-export type SendFailureKind = "invalid" | "blocked" | "conflict" | "config" | "transient" | "unrecorded";
+export type SendFailureKind = "invalid" | "blocked" | "preflight" | "conflict" | "config" | "transient" | "unrecorded";
 
 export type SendResult =
   | {
@@ -78,15 +84,24 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
 
   const { data: prospect } = await db
     .from("prospects")
-    .select("id, deleted_at, do_not_contact")
+    .select("id, deleted_at, do_not_contact, email, key_figures, website")
     .eq("id", message.prospect_id)
     .eq("user_id", message.user_id)
     .maybeSingle();
-  const row = prospect as { deleted_at?: string | null; do_not_contact?: boolean } | null;
+  const row = prospect as ProspectForPreflight | null;
   if (!row || row.deleted_at) return fail("blocked", TRASHED_ERROR, 409);
   if (row.do_not_contact) {
     return fail("blocked", "Prospect marqué « ne plus contacter » : envoi refusé.", 409);
   }
+
+  // Une relance ne part jamais vers quelqu'un qui a répondu.
+  if (RELANCE_TYPES.includes(message.type)) {
+    const replied = await replySinceLastSend(db, message.user_id, message.prospect_id);
+    if (replied) return fail("preflight", `Relance refusée : le prospect a répondu (${replied.slice(0, 10)}).`, 422);
+  }
+
+  const check = await preflightFor(db, message, to, row);
+  if (!check.ok) return fail("preflight", blockReason(check), 422);
 
   const { data: sent } = await db
     .from("messages")
@@ -102,6 +117,42 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
     );
   }
   return null;
+}
+
+type ProspectForPreflight = {
+  deleted_at?: string | null;
+  do_not_contact?: boolean;
+  email?: string | null;
+  key_figures?: Record<string, unknown> | null;
+  website?: string | null;
+};
+
+/** Clés où un enrichissement antérieur a pu déposer une adresse TROUVÉE. */
+const EMAIL_KEYS = ["email", "contact_email", "hunter_email", "contact"] as const;
+
+/** Adresses trouvées pour ce prospect, avec une source (fiche, enrichissement). */
+export const knownAddresses = (prospect: ProspectForPreflight | null): string[] =>
+  [prospect?.email, ...EMAIL_KEYS.map((key) => prospect?.key_figures?.[key])].filter(
+    (value): value is string => typeof value === "string" && value.includes("@"),
+  );
+
+/** Contrôle avant envoi, avec la signature du compte et les adresses connues. */
+export async function preflightFor(
+  db: Db,
+  message: Pick<OutboxMessage, "user_id" | "subject" | "body" | "type">,
+  to: unknown,
+  prospect: ProspectForPreflight | null,
+): Promise<PreflightResult> {
+  const { offer } = await loadOffer(db as never, message.user_id);
+  return preflight({
+    subject: message.subject,
+    body: message.body,
+    to: typeof to === "string" ? to : null,
+    signature: signatureFor(offer),
+    knownAddresses: knownAddresses(prospect),
+    website: prospect?.website ?? null,
+    kind: message.type === "reponse" ? "reponse" : "prospection",
+  });
 }
 
 /** Identifiants Gmail renvoyés par le nœud Gmail de n8n, s'il y en a. */
@@ -134,7 +185,8 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to,
-        subject: message.subject ?? "",
+        // Majuscule initiale, sans point final : corrigé d'office au départ.
+        subject: normalizeSubject(message.subject ?? ""),
         body: message.body,
         prospect_id: message.prospect_id,
         message_id: message.id,
@@ -163,6 +215,7 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
       status: "sent",
       sent_at: sentAt,
       send_status: "sent",
+      subject: normalizeSubject(message.subject ?? ""),
       sent_to: to,
       send_error: null,
       send_started_at: null,
@@ -254,7 +307,7 @@ export async function sendNow(
     .eq("id", message.id)
     .eq("user_id", input.userId)
     .eq("status", "draft")
-    .in("send_status", ["draft", "scheduled", "failed"])
+    .in("send_status", ["draft", "scheduled", "failed", "blocked"])
     .is("deleted_at", null)
     .select("id");
   if (!locked?.length) return fail("conflict", "Ce message vient de changer d'état (envoyé ou programmé) : rechargez.", 409);

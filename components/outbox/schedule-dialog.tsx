@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CalendarClock } from "lucide-react";
 import { Button, Input, Label, Modal, useToast } from "@/components/ui";
 import { scheduleMail } from "@/lib/outbox/actions";
+import { RecipientField } from "./recipient-field";
 import {
   formatScheduled,
   parisToUtc,
@@ -26,6 +27,7 @@ export function ScheduleDialog({
   onScheduled,
   prepare,
   disabled,
+  suggestions = [],
 }: {
   /** `null` : le mail n'existe pas encore en base, `prepare` le crée. */
   messageId: string | null;
@@ -37,6 +39,8 @@ export function ScheduleDialog({
   scheduledAt?: string | null;
   scheduledTo?: string | null;
   onScheduled?: () => void;
+  /** Adresses TROUVÉES pour ce prospect, avec leur source (jamais devinées). */
+  suggestions?: { email: string; source: string }[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -71,7 +75,10 @@ export function ScheduleDialog({
       if (!id) return setError("Mail introuvable.");
       const result = await scheduleMail(id, to, (at as Date).toISOString());
       if (!result.ok) return setError(result.error);
-      toast.success(`Envoi programmé : ${formatScheduled((at as Date).toISOString())} (heure de Paris).`);
+      // L'heure RÉELLE : espacée de 2 à 7 min d'un autre envoi, 8 h – 18 h les jours ouvrés.
+      const real = result.scheduledAt;
+      const moved = real !== (at as Date).toISOString();
+      toast.success(`Envoi programmé : ${formatScheduled(real)} (heure de Paris)${moved ? ", décalé pour espacer les envois" : ""}.`);
       setOpen(false);
       onScheduled?.();
       router.refresh();
@@ -112,16 +119,7 @@ export function ScheduleDialog({
         }
       >
         <div className="space-y-4">
-          <div>
-            <Label htmlFor={`schedule-to-${messageId ?? "new"}`}>Destinataire</Label>
-            <Input
-              id={`schedule-to-${messageId ?? "new"}`}
-              type="email"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-              placeholder="prenom.nom@entreprise.fr"
-            />
-          </div>
+          <RecipientField id={`schedule-to-${messageId ?? "new"}`} value={to} onChange={setTo} suggestions={suggestions} />
           <div className="flex flex-wrap gap-2">
             {shortcuts.map((shortcut) => (
               <Button key={shortcut.label} size="sm" variant="secondary" onClick={() => pick(shortcut.at)}>
@@ -157,7 +155,10 @@ export function ScheduleDialog({
             </div>
           </div>
           {at && !error && (
-            <p className="text-[12px] text-faint">Départ prévu : {formatScheduled(at.toISOString())}, heure de Paris.</p>
+            <p className="text-[12px] text-faint">
+              Départ demandé : {formatScheduled(at.toISOString())}, heure de Paris. Jamais avant 8 h, après 18 h ni le
+              week-end ; espacé de 2 à 7 min d&apos;un autre envoi sur le même créneau.
+            </p>
           )}
         </div>
       </Modal>

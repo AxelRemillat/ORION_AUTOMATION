@@ -29,10 +29,13 @@ export function DealTimeline({
   events,
   prospectId,
   defaultTo,
+  suggestions,
 }: {
   events: TimelineEvent[];
   prospectId: string;
   defaultTo: string;
+  /** Adresses trouvées, avec leur source, proposées à la programmation. */
+  suggestions?: { email: string; source: string }[];
 }) {
   if (events.length === 0) {
     return (
@@ -94,6 +97,7 @@ export function DealTimeline({
                       sendError: event.sendError,
                     }}
                     defaultTo={defaultTo}
+                    suggestions={suggestions}
                     label="ce brouillon"
                   />
                 </div>

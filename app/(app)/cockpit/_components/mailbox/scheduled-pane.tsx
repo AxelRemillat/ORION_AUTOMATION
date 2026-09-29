@@ -2,6 +2,8 @@ import Link from "next/link";
 import { CalendarClock } from "lucide-react";
 import { MailActions } from "@/components/outbox/mail-actions";
 import type { ScheduledItem } from "@/lib/outbox/mailbox";
+import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
+import { ScheduledText } from "./scheduled-editor";
 
 /** Onglet « Programmés » : heure prévue, modifier l'heure, annuler, corbeille. */
 export function ScheduledPane({ items }: { items: ScheduledItem[] }) {
@@ -25,7 +27,7 @@ export function ScheduledPane({ items }: { items: ScheduledItem[] }) {
               {item.companyName}
             </Link>
             <p className="truncate text-[12px] text-faint">
-              {item.subject || "(sans objet)"}
+              {MESSAGE_TYPE_LABELS[item.type]} · {item.subject || "(sans objet)"}
               {item.to ? ` · à ${item.to}` : ""}
             </p>
           </div>
@@ -40,6 +42,8 @@ export function ScheduledPane({ items }: { items: ScheduledItem[] }) {
             defaultTo={item.to ?? ""}
             label={`le mail pour ${item.companyName}`}
           />
+          {/* Le texte se relit — et se corrige — avant le départ. */}
+          <ScheduledText item={item} />
         </li>
       ))}
     </ul>

@@ -7,6 +7,10 @@ import { completeText } from "@/lib/openai";
 import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
 import type { MessageType, ProspectStatus } from "@/types";
 import { writeProspectStatus } from "./_lib/write-status";
+import { applyGreeting, cleanDraft, withOptOut } from "@/lib/mail-preflight";
+import { stripSignature } from "@/app/api/emails/generate/pipeline";
+import { loadOffer } from "@/lib/offer/read";
+import { signatureFor } from "@/lib/offer/model";
 
 /** Résultat uniforme : les composants clients en font un toast. */
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -183,7 +187,15 @@ export async function generateFollowUp(
   }
   if (!body.trim()) body = fallbackFollowUp(prospect.company_name, type);
 
-  const subject = intro?.subject ? `Re: ${intro.subject}` : `${prospect.company_name} — suite`;
+  // Même nettoyage que l'intro : une seule salutation, pas de ligne « Objet »,
+  // la signature du compte (le contrôle avant envoi l'exige).
+  const { offer } = await loadOffer(supabase, prospect.user_id);
+  const clean = cleanDraft({ subject: intro?.subject ? `Re: ${intro.subject}` : `${prospect.company_name} — suite`, body });
+  // Et la phrase d'opposition, avant la signature : une relance est un mail de
+  // prospection comme un autre (lib/mail-preflight/opt-out.ts).
+  const signature = signatureFor(offer);
+  body = withOptOut(`${applyGreeting(stripSignature(clean.body), "Bonjour,")}\n\n${signature}`, signature);
+  const subject = clean.subject;
   const { error } = await supabase
     .from("messages")
     .insert({ prospect_id: prospectId, type, subject, body, status: "draft", sent_at: null });

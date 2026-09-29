@@ -20,12 +20,15 @@ export function DraftSendBar({
   validated,
   companyName,
   onTrashed,
+  refusesProspecting = false,
 }: {
   messageId: string;
   defaultTo: string;
   validated: boolean;
   companyName: string;
   onTrashed: () => void;
+  /** L'entreprise s'oppose à l'usage commercial de ses données (registre). */
+  refusesProspecting?: boolean;
 }) {
   const [state, setState] = useState<MailSendState | null>(null);
 
@@ -63,7 +66,14 @@ export function DraftSendBar({
             : "Validez le brouillon pour pouvoir programmer son envoi."}
         </p>
         {validated ? (
-          <MailActions state={state} defaultTo={defaultTo} label={label} onTrashed={onTrashed} onChanged={refresh} />
+          <MailActions
+            state={state}
+            defaultTo={defaultTo}
+            label={label}
+            onTrashed={onTrashed}
+            onChanged={refresh}
+            refusesProspecting={refusesProspecting}
+          />
         ) : (
           <MailTrashButton messageId={messageId} label={label} onTrashed={onTrashed} />
         )}

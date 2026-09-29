@@ -19,6 +19,7 @@ import {
 import { markResultsSeen, unseenResults, upcomingSends } from "../lib/outbox/feed";
 import { formatScheduled, parisToUtc, scheduleError, scheduleShortcuts } from "../lib/outbox/paris-time";
 import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
+import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -55,7 +56,7 @@ const prospect = (id: string, over: Record<string, unknown> = {}) => ({
 });
 
 const draft = (id: string, prospectId: string, over: Record<string, unknown> = {}) => ({
-  id, prospect_id: prospectId, user_id: "u1", type: "intro", subject: `Objet ${id}`, body: "Bonjour",
+  id, prospect_id: prospectId, user_id: "u1", type: "intro", subject: `Objet ${id}`, body: `Bonjour,\n\nCorps ${id}.\n\n${OPT_OUT_SENTENCE}\n\nAxel Remillat`,
   status: "draft", sent_at: null, thread_id: null, created_at: T0.toISOString(), deleted_at: null,
   send_status: "draft", scheduled_at: null, scheduled_to: null, send_error: null, send_attempts: 0,
   send_started_at: null, send_seen_at: null, ...over,
@@ -170,12 +171,15 @@ async function main() {
     await scheduleMessage(db, { userId: "u1", messageId: "m2", to: "b@beta.fr", at: at(10) }, at(0));
     const web = n8n();
     const [one, two] = await Promise.all([
-      runDueSends(db, { ...web.deps, now: at(11) }),
-      runDueSends(db, { ...web.deps, now: at(11) }),
+      // Même créneau demandé : m2 part 2 à 7 min après m1 (espacement).
+      runDueSends(db, { ...web.deps, now: at(20) }),
+      runDueSends(db, { ...web.deps, now: at(20) }),
     ]);
     const ids = web.calls.map((call) => call.message_id).sort();
     check("deux ticks simultanés : chaque mail part UNE fois", JSON.stringify(ids) === '["m1","m2"]', ids);
-    check("le second tick les voit déjà pris", one.sent + two.sent === 2 && one.skipped + two.skipped === 2, { one, two });
+    // Chaque mail est soit pris par un tick, soit vu déjà pris, soit retenu par
+    // le filet anti-rafale (2 min entre deux départs) — jamais envoyé deux fois.
+    check("le second tick les voit déjà pris", one.sent + two.sent === 2 && one.skipped + two.skipped + one.spaced + two.spaced === 2, { one, two });
   }
   {
     const { fake, db } = seed();
