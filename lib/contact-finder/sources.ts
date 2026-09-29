@@ -1,3 +1,4 @@
+import { singleCompanyName } from "@/lib/company-name";
 import { cached } from "@/lib/enrichment/cache";
 import { fetchPappers, hasPappersKey } from "@/lib/enrichment/pappers";
 import { limitedFetch, ANNUAIRE_RATE_PER_SECOND } from "@/lib/enrichment/rate-limit";
@@ -58,7 +59,9 @@ function preciseActivity(code: string | null | undefined): string | null {
   return label?.precision === "sous-classe" ? label.label : null;
 }
 
-export async function identityOf(prospect: Prospect, website?: string | null): Promise<CompanyIdentity> {
+export async function identityOf(rawProspect: Prospect, website?: string | null): Promise<CompanyIdentity> {
+  // « GLOBAL 2F (GLOBAL 2F) » partait tel quel dans les requêtes et la validation.
+  const prospect = { ...rawProspect, company_name: singleCompanyName(rawProspect.company_name) };
   const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
   const text = (key: string) => (typeof figures[key] === "string" ? (figures[key] as string) : null);
   const siren = prospect.siren?.replace(/\s/g, "") || null;

@@ -1,3 +1,4 @@
+import { singleCompanyName } from "@/lib/company-name";
 import type { ProspectSignal } from "@/types";
 
 /**
@@ -467,7 +468,9 @@ export function isLargeGroup(size: { headcount?: number | null; revenueEur?: num
  * confirmée et on la reprend. Sinon, casse naturelle calculée : BLUE
  * ENERFREEZE → Blue Enerfreeze. Jamais le nom d'une autre entité.
  */
-export function displayCompanyName(registryName: string, confirmedTexts: readonly string[] = []): string {
+export function displayCompanyName(rawRegistryName: string, confirmedTexts: readonly string[] = []): string {
+  // Un sigle qui répète le nom ne doit jamais atteindre le mail (« Global 2F Global 2F »).
+  const registryName = singleCompanyName(rawRegistryName);
   const words = denominationWords(registryName);
   for (const text of confirmedTexts) {
     for (const item of occurrences(text, words)) {

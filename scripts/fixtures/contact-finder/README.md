@@ -12,3 +12,10 @@ au réel, lancer en local :
 Si une page réelle diffère, remplacer le fichier par le HTML enregistré
 (`curl -A "OrionProspectBot/1.0" <url> > fichier.html`) et relancer
 `npm run test:contact`.
+
+`global2f/search.json` (GLOBAL 2F, SIREN 833040736, sans site) est lui aussi
+**reconstitué** : les deux requêtes sont celles que produit le module, les
+résultats ne sont que des annuaires et un réseau social. Pour le remplacer par
+les vraies réponses :
+
+    npx tsx scripts/record-contact-fixtures.ts 833040736

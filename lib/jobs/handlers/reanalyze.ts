@@ -143,7 +143,9 @@ async function contact(ctx: StepContext): Promise<StepOutcome> {
         ? `Contact trouvé : ${found.email}`
         : found.website
           ? "Site trouvé, aucune adresse publiée"
-          : "Aucun site prouvé pour cette entreprise",
+          : // Le détail (requêtes, domaines écartés, pages lues) est dans le
+            // compte rendu enregistré sur la fiche, affiché sous le bouton.
+            "Aucun site prouvé : voir « Recherches effectuées »",
       pct: 100,
       counts: { scanned: 1, signals: 0, sheets: 1 },
     },

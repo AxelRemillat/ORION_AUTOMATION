@@ -8,10 +8,18 @@ import type { Prospect } from "@/types";
 /** Ce que la fiche affiche du contact : lu en base, pas déduit à l'écran. */
 export type ContactFields = Pick<
   Prospect,
-  "website" | "email" | "email_type" | "email_source_url" | "contact_confidence" | "contact_found_by" | "contact_checked_at"
+  | "website"
+  | "email"
+  | "email_type"
+  | "email_source_url"
+  | "contact_confidence"
+  | "contact_found_by"
+  | "contact_checked_at"
+  | "contact_search"
 >;
 
-const COLUMNS = "website, email, email_type, email_source_url, contact_confidence, contact_found_by, contact_checked_at";
+const COLUMNS =
+  "website, email, email_type, email_source_url, contact_confidence, contact_found_by, contact_checked_at, contact_search";
 
 /**
  * Lance le module contact en tâche de fond (job `reanalyze`, scope contact)

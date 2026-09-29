@@ -1,0 +1,33 @@
+{
+  "recordedAt": "reconstitué 2026-09-28 (environnement cloud sans réseau) — à remplacer par : npx tsx scripts/record-contact-fixtures.ts 833040736",
+  "identity": {
+    "prospectId": "record",
+    "legalName": "GLOBAL 2F",
+    "tradeNames": [],
+    "siren": "833040736",
+    "city": null,
+    "postalCode": null,
+    "leader": null,
+    "activity": null,
+    "knownWebsite": null,
+    "pappersWebsite": null,
+    "knownEmail": null
+  },
+  "searches": [
+    {
+      "query": "\"833040736\" mentions légales",
+      "results": [
+        { "url": "https://www.pappers.fr/entreprise/global-2f-833040736", "title": "GLOBAL 2F (833040736) - Pappers", "snippet": "GLOBAL 2F, société immatriculée sous le SIREN 833040736." },
+        { "url": "https://www.societe.com/societe/global-2f-833040736.html", "title": "GLOBAL 2F - societe.com", "snippet": "GLOBAL 2F (SIREN 833040736)." },
+        { "url": "https://annuaire-entreprises.data.gouv.fr/entreprise/833040736", "title": "GLOBAL 2F - Annuaire des entreprises", "snippet": "Informations légales de GLOBAL 2F." }
+      ]
+    },
+    {
+      "query": "\"GLOBAL 2F\" mentions légales",
+      "results": [
+        { "url": "https://www.verif.com/societe/GLOBAL-2F-833040736/", "title": "GLOBAL 2F - Verif", "snippet": "Chiffre d'affaires et bilans de GLOBAL 2F." },
+        { "url": "https://fr.linkedin.com/company/global-2f", "title": "GLOBAL 2F | LinkedIn", "snippet": "GLOBAL 2F sur LinkedIn." }
+      ]
+    }
+  ]
+}

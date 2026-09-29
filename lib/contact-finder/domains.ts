@@ -6,24 +6,50 @@
  * AVANT, par liste — c'est précisément sur eux que la validation se tromperait.
  */
 
-const EXCLUDED = [
-  // Annuaires légaux et financiers
-  "pappers", "societe.com", "infogreffe", "verif.com", "manageo", "infonet", "annuaire-entreprises",
-  "data.gouv", "bodacc", "kompass", "corporama", "entreprises.lefigaro", "score3", "insee",
-  "lagazettefrance", "ellisphere", "creditsafe", "dnb.com", "b-reputation", "annuaire",
-  // Vus en direct sur BRIOL DIFFUSION et ARTFLEX : republieurs de donnees
-  // legales, indiscernables d'un site officiel pour la validation.
-  "inpi", "contract-factory", "prodestravaux", "mil.wf", "trabajo", "bilansgratuits", "dirigeant.com",
-  "rubypayeur", "firmania", "energierecrute", "altigoo",
-  "entreprise.pro", "hoodspot", "yelp", "tripadvisor", "justacote", "118000", "118712", "cylex",
-  "pagesjaunes", "pages-jaunes", "mappy", "waze", "google", "bing", "apple.com",
-  // Réseaux et petites annonces
-  "linkedin", "facebook", "instagram", "twitter", "x.com", "youtube", "tiktok", "pinterest",
-  "leboncoin", "viadeo", "indeed", "welcometothejungle", "hellowork", "francetravail", "pole-emploi",
-  "wikipedia", "doctolib", "ubereats", "deliveroo", "just-eat",
-  // Annuaires sectoriels
-  "habitatpresto", "travaux.com", "houzz", "batiweb", "123devis", "quotatis", "artisans-du-batiment",
-  "boulangerie.org", "infobel", "europages", "usinenouvelle", "annuaire-mairie",
+/*
+ * Groupes NOMMÉS : le compte rendu de recherche dit POURQUOI un domaine a été
+ * écarté sans être lu (« annuaire », « réseau social »…). La liste à plat reste
+ * la même.
+ */
+const EXCLUDED_GROUPS: { reason: string; entries: string[] }[] = [
+  {
+    reason: "annuaire d'entreprises",
+    entries: [
+      "pappers", "societe.com", "infogreffe", "verif.com", "manageo", "infonet", "annuaire-entreprises",
+      "data.gouv", "bodacc", "kompass", "corporama", "entreprises.lefigaro", "score3", "insee",
+      "lagazettefrance", "ellisphere", "creditsafe", "dnb.com", "b-reputation", "annuaire",
+      // Vus en direct sur BRIOL DIFFUSION et ARTFLEX : republieurs de donnees
+      // legales, indiscernables d'un site officiel pour la validation.
+      "inpi", "contract-factory", "prodestravaux", "mil.wf", "trabajo", "bilansgratuits", "dirigeant.com",
+      "rubypayeur", "firmania", "energierecrute", "altigoo",
+    ],
+  },
+  {
+    reason: "annuaire local ou carte",
+    entries: [
+      "entreprise.pro", "hoodspot", "yelp", "tripadvisor", "justacote", "118000", "118712", "cylex",
+      "pagesjaunes", "pages-jaunes", "mappy", "waze", "google", "bing", "apple.com",
+    ],
+  },
+  {
+    reason: "réseau social",
+    entries: ["linkedin", "facebook", "instagram", "twitter", "x.com", "youtube", "tiktok", "pinterest", "viadeo"],
+  },
+  {
+    reason: "petites annonces ou emploi",
+    entries: ["leboncoin", "indeed", "welcometothejungle", "hellowork", "francetravail", "pole-emploi"],
+  },
+  {
+    reason: "plateforme tierce",
+    entries: ["wikipedia", "doctolib", "ubereats", "deliveroo", "just-eat"],
+  },
+  {
+    reason: "annuaire sectoriel",
+    entries: [
+      "habitatpresto", "travaux.com", "houzz", "batiweb", "123devis", "quotatis", "artisans-du-batiment",
+      "boulangerie.org", "infobel", "europages", "usinenouvelle", "annuaire-mairie",
+    ],
+  },
 ];
 
 /**
@@ -32,14 +58,21 @@ const EXCLUDED = [
  * domaine et ses sous-domaines ; une entrée simple (« pappers ») pour tout
  * libellé qui commence par elle (pappers.fr, annuaire-mairie.fr).
  */
-export function isExcludedDomain(domain: string): boolean {
+function matchesEntry(host: string, labels: string[], entry: string): boolean {
+  return entry.includes(".")
+    ? host === entry || host.endsWith(`.${entry}`) || host.startsWith(`${entry}.`) || host.includes(`.${entry}.`)
+    : labels.some((label) => label === entry || label.startsWith(`${entry}-`) || (label.startsWith(entry) && entry.length >= 6));
+}
+
+/** Pourquoi ce domaine n'est jamais un site officiel, ou `null` s'il peut l'être. */
+export function exclusionReason(domain: string): string | null {
   const host = domain.toLowerCase().replace(/^www\./, "");
   const labels = host.split(".");
-  return EXCLUDED.some((entry) =>
-    entry.includes(".")
-      ? host === entry || host.endsWith(`.${entry}`) || host.startsWith(`${entry}.`) || host.includes(`.${entry}.`)
-      : labels.some((label) => label === entry || label.startsWith(`${entry}-`) || (label.startsWith(entry) && entry.length >= 6)),
-  );
+  return EXCLUDED_GROUPS.find((group) => group.entries.some((entry) => matchesEntry(host, labels, entry)))?.reason ?? null;
+}
+
+export function isExcludedDomain(domain: string): boolean {
+  return exclusionReason(domain) !== null;
 }
 
 /**

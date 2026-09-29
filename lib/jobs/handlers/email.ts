@@ -1,3 +1,4 @@
+import { singleCompanyName } from "@/lib/company-name";
 import { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
 import { AiCallError, chatJson, type AskFn } from "@/lib/ai/chat";
@@ -551,7 +552,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       tone: coerceTone(params.tone),
       contact,
       prospectId: prospect.id,
-      registryName: prospect.company_name,
+      registryName: singleCompanyName(prospect.company_name),
       avoid,
       leaderPerson,
       // Un dirigeant qui vient d'arriver est interpellé par son prénom : c'est

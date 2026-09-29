@@ -5,6 +5,7 @@ import { ExternalLink, Globe, Mail, SearchCheck } from "lucide-react";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Input } from "@/components/ui";
 import type { Prospect } from "@/types";
 import { useContactFinder, type ContactFields } from "./use-contact-finder";
+import { SearchReport } from "./search-report";
 
 /** Libellé lisible du chemin qui a produit l'adresse. */
 function foundByLabel(value: string | null | undefined): string {
@@ -77,6 +78,7 @@ export function ContactCard({ prospect }: { prospect: Pick<Prospect, "id" | "com
           {step && <span className="text-[12px] text-muted">{step}</span>}
         </div>
         {error && <p role="alert" className="text-[12px] text-lost-ink">{error}</p>}
+        {!running && <SearchReport key={fields.contact_checked_at ?? "none"} search={fields.contact_search} />}
       </CardContent>
     </Card>
   );

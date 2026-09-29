@@ -1,4 +1,4 @@
-import { domainOfEmail, isExcludedDomain, isFreeMailbox, isServiceProvider, toDomain } from "./domains";
+import { domainOfEmail, exclusionReason, isFreeMailbox, isServiceProvider, toDomain } from "./domains";
 import { classifyEmail, emailDomains, extractEmails, namesSomeone, type EmailKind } from "./extract";
 import { pagesToVisit, textOf } from "./links";
 import { coreName, judgePage } from "./validate";
@@ -57,6 +57,14 @@ interface Checked {
   reason: string;
   emails: SiteEmail[];
   excerpt: string;
+  pages: { url: string; ok: boolean }[];
+}
+
+/** Motif pour lequel un domaine n'est jamais lu, ou `null` s'il peut l'être. */
+function skipReason(domain: string): string | null {
+  if (isFreeMailbox(domain)) return "messagerie grand public";
+  if (isServiceProvider(domain)) return "hébergeur ou prestataire technique";
+  return exclusionReason(domain);
 }
 
 const EMPTY_SPENT = (): ContactBudget => ({
@@ -111,7 +119,10 @@ export async function runContactSearch(
   budget: ContactBudget = DEFAULT_BUDGET,
 ): Promise<{ result: ContactResult; trace: ContactTrace }> {
   const spent = EMPTY_SPENT();
-  const trace: ContactTrace = { spent, candidates: [], emailDomains: [], steps: [] };
+  const trace: ContactTrace = { spent, candidates: [], emailDomains: [], steps: [], queries: [], skipped: [], hunter: [] };
+  const skip = (domain: string, reason: string) => {
+    if (!trace.skipped!.some((item) => item.domain === domain)) trace.skipped!.push({ domain, reason });
+  };
   const can = (key: keyof ContactBudget) => spent[key] < budget[key];
   const use = (key: keyof ContactBudget) => {
     spent[key] += 1;
@@ -120,7 +131,9 @@ export async function runContactSearch(
   // --- 1. Candidats gratuits ----------------------------------------------
   const candidates: Candidate[] = [];
   const add = (domain: string | null, by: string) => {
-    if (!domain || isExcludedDomain(domain) || isFreeMailbox(domain) || isServiceProvider(domain)) return;
+    if (!domain) return;
+    const reason = skipReason(domain);
+    if (reason) return skip(domain, reason);
     if (!candidates.some((item) => item.domain === domain)) candidates.push({ domain, by });
   };
   add(toDomain(company.knownWebsite), "site connu");
@@ -133,6 +146,7 @@ export async function runContactSearch(
     checked.push(result);
     trace.candidates.push({
       domain: result.domain, by: result.by, confidence: result.confidence, validated: result.validated, reason: result.reason,
+      pages: result.pages,
     });
     trace.steps.push(`${result.domain} (${result.by}) : ${result.reason}`);
     return result;
@@ -168,14 +182,16 @@ export async function runContactSearch(
     use("linkup");
     const results = (await deps.webSearch(query)) ?? [];
     trace.steps.push(`recherche « ${query} » : ${results.length} résultat(s)`);
+    trace.queries!.push({ query, results: results.length });
     const fresh: Candidate[] = [];
     for (const item of results) {
       for (const email of extractEmails(`${item.title} ${item.snippet}`)) snippetEmails.push({ email, url: item.url });
       const domain = toDomain(item.url);
+      const excluded = domain ? exclusionReason(domain) ?? (isServiceProvider(domain) ? "hébergeur ou prestataire technique" : null) : null;
+      if (domain && excluded) skip(domain, excluded);
       if (
         domain &&
-        !isExcludedDomain(domain) &&
-        !isServiceProvider(domain) &&
+        !excluded &&
         !candidates.some((c) => c.domain === domain) &&
         !fresh.some((c) => c.domain === domain)
       ) {
@@ -233,6 +249,7 @@ export async function runContactSearch(
     use("hunterDomainSearch");
     const hits = (await deps.hunterDomainSearch(domain)) ?? [];
     trace.steps.push(`Hunter domain-search ${domain} : ${hits.length} adresse(s)`);
+    trace.hunter!.push({ call: "domain-search", target: domain, result: `${hits.length} adresse(s)` });
     for (const hit of hits) {
       // « personal » de Hunter n'est cru que si le libelle peut nommer quelqu'un.
       const kind: EmailKind =
@@ -250,6 +267,7 @@ export async function runContactSearch(
     use("hunterFinder");
     const found = await deps.hunterFinder(domains[0], person.firstName, person.lastName);
     trace.steps.push(`Hunter email-finder ${person.firstName} ${person.lastName} @${domains[0]} : ${found?.email ?? "rien"}`);
+    trace.hunter!.push({ call: "email-finder", target: `${person.firstName} ${person.lastName} @${domains[0]}`, result: found?.email ?? "rien" });
     if (found) nominals.unshift({ email: found.email, url: siteUrl ?? `https://${domains[0]}`, by: "hunter:email-finder", verified: null, guessed: true });
   }
   // Le dirigeant d'abord : c'est à lui qu'on écrit.
@@ -259,6 +277,7 @@ export async function runContactSearch(
     use("hunterVerifier");
     item.verified = await deps.hunterVerify(item.email);
     trace.steps.push(`Hunter email-verifier ${item.email} : ${item.verified ?? "sans réponse"}`);
+    trace.hunter!.push({ call: "email-verifier", target: item.email, result: item.verified ?? "sans réponse" });
   }
 
   // --- 5. Priorité : nominatif valide > nominatif accept_all > générique ----
@@ -349,23 +368,24 @@ async function inspect(
   spend: () => void,
 ): Promise<Checked> {
   const origin = `https://${candidate.domain}`;
-  const out: Checked = { ...candidate, confidence: 0, validated: false, reason: "site injoignable", emails: [], excerpt: "" };
+  const out: Checked = { ...candidate, confidence: 0, validated: false, reason: "site injoignable", emails: [], excerpt: "", pages: [] };
   if (!canRead()) return { ...out, reason: "budget de pages épuisé" };
-
-  spend();
-  let home = await deps.fetchHtml(origin);
-  // Certains domaines ne répondent qu'en « www. » (pas d'enregistrement DNS nu).
-  if (!home && canRead()) {
+  const read = async (url: string) => {
     spend();
-    home = await deps.fetchHtml(`https://www.${candidate.domain}`);
-  }
+    const page = await deps.fetchHtml(url);
+    out.pages.push({ url, ok: Boolean(page) });
+    return page;
+  };
+
+  let home = await read(origin);
+  // Certains domaines ne répondent qu'en « www. » (pas d'enregistrement DNS nu).
+  if (!home && canRead()) home = await read(`https://www.${candidate.domain}`);
   if (!home) return out;
   const queue = pagesToVisit(home.html, home.url || origin);
   const pages = [home];
   for (const url of queue) {
     if (pages.length >= 4 || !canRead()) break;
-    spend();
-    const page = await deps.fetchHtml(url);
+    const page = await read(url);
     if (page) pages.push(page);
   }
 
