@@ -15,7 +15,7 @@ import {
   type ProfilePage,
   type RawBusinessProfile,
 } from "../lib/emails/business-profile";
-import { MAX_BODY_WORDS, bodyWordCount, exceedsWordLimit } from "../lib/emails/word-count";
+import { MAX_BODY_WORDS, bodyWordCount, exceedsWordLimit } from "../lib/mail-preflight/words";
 import { civilityFor, salutationFor, usagePerson } from "../lib/emails/salutation";
 import { hollowParaphrase, oldFactAsRecent, opensOnJobOffer, validateSubject } from "../lib/emails/validate";
 import { isPartnerProspect, painGroundedInProfile } from "../lib/emails/strategist";

@@ -17,7 +17,7 @@ import { BusinessProfileCard } from "../_components/business-profile-card";
 import { ContactCard } from "@/components/prospect/contact-card";
 import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
-import { guessEmail } from "../_lib/contact";
+import { defaultRecipient, foundAddresses } from "../_lib/contact";
 import { dealValue } from "../_lib/estimates";
 import { prospectSendState } from "../_lib/rows";
 import { nextAction } from "../_lib/next-action";
@@ -160,7 +160,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
             <h2 className="mb-3 font-display text-[15px] font-semibold tracking-tight text-text">
               Fil de l&apos;affaire
             </h2>
-            <DealTimeline events={events} prospectId={typed.id} defaultTo={guessEmail(typed)} />
+            <DealTimeline events={events} prospectId={typed.id} defaultTo={defaultRecipient(typed)} suggestions={foundAddresses(typed)} />
           </div>
         </div>
 

@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/trash/scope";
+import { inSendWindow, MIN_GAP_MIN, spacedSlot } from "@/lib/mail-preflight/schedule";
 import { scheduleError } from "./paris-time";
 import { checkSendRules, deliver, isEmail, MESSAGE_COLUMNS, type OutboxMessage, type SendDeps } from "./send";
 
@@ -25,12 +26,18 @@ const BATCH = 10;
 
 export type OutboxResult = { ok: true } | { ok: false; error: string };
 
-/** Programme (ou reprogramme) un brouillon. */
+/**
+ * Programme (ou reprogramme) un brouillon. L'heure RÉELLE peut différer de
+ * l'heure demandée : 2 à 7 min après un envoi déjà prévu sur le même créneau,
+ * et jamais hors de la fenêtre 8 h – 18 h des jours ouvrés (Paris). Les envois
+ * déjà programmés ne bougent pas. `scheduledAt` rend l'heure retenue.
+ */
 export async function scheduleMessage(
   db: Db,
   input: { userId: string; messageId: string; to: unknown; at: Date | null },
   now = new Date(),
-): Promise<OutboxResult> {
+  random: () => number = Math.random,
+): Promise<OutboxResult & { scheduledAt?: string }> {
   const invalid = scheduleError(input.at, now);
   if (invalid) return { ok: false, error: invalid };
   if (!isEmail(input.to)) return { ok: false, error: "Destinataire invalide." };
@@ -50,11 +57,22 @@ export async function scheduleMessage(
   const refused = await checkSendRules(db, message, input.to, now);
   if (refused && !refused.ok && refused.status !== 429) return { ok: false, error: refused.error };
 
+  const { data: planned } = await db
+    .from("messages")
+    .select("id, scheduled_at")
+    .eq("user_id", input.userId)
+    .in("send_status", ["scheduled", "sending"])
+    .is("deleted_at", null);
+  const taken = ((planned ?? []) as { id: string; scheduled_at: string | null }[])
+    .filter((row) => row.id !== input.messageId && row.scheduled_at)
+    .map((row) => new Date(row.scheduled_at as string));
+  const at = spacedSlot(input.at as Date, taken, random);
+
   const { data: updated } = await db
     .from("messages")
     .update({
       send_status: "scheduled",
-      scheduled_at: (input.at as Date).toISOString(),
+      scheduled_at: at.toISOString(),
       scheduled_to: input.to as string,
       send_error: null,
       send_attempts: 0,
@@ -64,10 +82,10 @@ export async function scheduleMessage(
     .eq("user_id", input.userId)
     .eq("status", "draft")
     .is("deleted_at", null)
-    .in("send_status", ["draft", "scheduled", "failed"])
+    .in("send_status", ["draft", "scheduled", "failed", "blocked"])
     .select("id");
   return updated?.length
-    ? { ok: true }
+    ? { ok: true, scheduledAt: at.toISOString() }
     : { ok: false, error: "Ce mail ne peut plus être programmé : envoyé, en cours d'envoi ou à la corbeille." };
 }
 
@@ -78,7 +96,7 @@ export async function cancelSchedule(db: Db, input: { userId: string; messageId:
     .update({ send_status: "draft", scheduled_at: null, send_error: null, send_attempts: 0 })
     .eq("id", input.messageId)
     .eq("user_id", input.userId)
-    .in("send_status", ["scheduled", "failed"])
+    .in("send_status", ["scheduled", "failed", "blocked"])
     .select("id");
   return data?.length
     ? { ok: true }
@@ -92,12 +110,18 @@ export interface TickReport {
   /** Pris par un autre tick entre la lecture et le verrou. */
   skipped: number;
   stuck: number;
+  /** Refusés par le contrôle avant envoi : `blocked`, rien n'est parti. */
+  blocked: number;
+  /** Échus mais retenus au tick suivant : un autre mail est parti il y a moins de 2 min. */
+  spaced: number;
+  /** Hors fenêtre d'envoi (8 h – 18 h, jours ouvrés, Paris) : rien n'est tenté. */
+  outsideWindow: boolean;
 }
 
 /** Fait partir les mails programmés échus. Appelé à chaque tick du cron. */
 export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = {}): Promise<TickReport> {
   const now = deps.now ?? new Date();
-  const report: TickReport = { sent: 0, failed: 0, retried: 0, skipped: 0, stuck: 0 };
+  const report: TickReport = { sent: 0, failed: 0, retried: 0, skipped: 0, stuck: 0, blocked: 0, spaced: 0, outsideWindow: false };
 
   // 1. Envois interrompus : déclarés échoués, jamais renvoyés.
   const stuckBefore = new Date(now.getTime() - STUCK_SENDING_MIN * 60_000).toISOString();
@@ -113,19 +137,44 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = 
     .select("id");
   report.stuck = stuck?.length ?? 0;
 
-  // 2. Mails échus.
+  // 2. Hors fenêtre d'envoi : les mails échus attendent, sans être déplacés.
+  if (!inSendWindow(now)) {
+    report.outsideWindow = true;
+    return report;
+  }
+
+  // 3. Mails échus.
   const { data: due } = await db
     .from("messages")
-    .select("id, send_attempts")
+    .select("id, user_id, send_attempts")
     .eq("send_status", "scheduled")
     .is("deleted_at", null)
     .lte("scheduled_at", now.toISOString())
     .order("scheduled_at", { ascending: true })
     .limit(deps.limit ?? BATCH);
 
-  for (const candidate of (due ?? []) as { id: string; send_attempts?: number }[]) {
+  // Filet anti-rafale, SANS déplacer les mails : au plus un départ toutes les
+  // 2 min par compte. Des mails programmés avant l'espacement (même heure)
+  // partent ainsi à un tick d'écart ou plus, au lieu de la même minute.
+  const lastSent = new Map<string, number>();
+  for (const candidate of (due ?? []) as { id: string; user_id?: string; send_attempts?: number }[]) {
+    const owner = candidate.user_id ?? "";
+    if (!lastSent.has(owner)) {
+      const { data: recent } = await db
+        .from("messages")
+        .select("sent_at")
+        .eq("user_id", owner)
+        .eq("status", "sent")
+        .gte("sent_at", new Date(now.getTime() - MIN_GAP_MIN * 60_000).toISOString())
+        .limit(1);
+      lastSent.set(owner, recent?.length ? now.getTime() : 0);
+    }
+    if (now.getTime() - (lastSent.get(owner) ?? 0) < MIN_GAP_MIN * 60_000) {
+      report.spaced += 1;
+      continue;
+    }
     const attempt = (candidate.send_attempts ?? 0) + 1;
-    // 3. Verrou : seul le tick qui fait passer la ligne à `sending` l'envoie.
+    // 4. Verrou : seul le tick qui fait passer la ligne à `sending` l'envoie.
     const { data: locked } = await db
       .from("messages")
       .update({ send_status: "sending", send_started_at: now.toISOString(), send_attempts: attempt })
@@ -142,6 +191,15 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = 
     const result = await deliver(db, message, message.scheduled_to ?? "", { ...deps, now });
     if (result.ok) {
       report.sent += 1;
+      lastSent.set(owner, now.getTime());
+      continue;
+    }
+    if (result.kind === "preflight") {
+      // Contrôle avant envoi refusé : rien n'est parti, rien ne sera retenté.
+      // Base pas encore migrée (`blocked` refusé par la contrainte) : `failed`, même motif.
+      const written = await settle(db, message.id, { send_status: "blocked", send_error: result.error });
+      if (!written) await settle(db, message.id, { send_status: "failed", send_error: result.error });
+      report.blocked += 1;
       continue;
     }
     if (result.kind === "unrecorded") {
@@ -171,10 +229,11 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = 
 }
 
 /** Rend un message verrouillé, dans l'état décidé par le tick. */
-async function settle(db: Db, id: string, patch: Record<string, unknown>): Promise<void> {
-  await db
+async function settle(db: Db, id: string, patch: Record<string, unknown>): Promise<boolean> {
+  const { error } = await db
     .from("messages")
     .update({ ...patch, send_started_at: null, send_seen_at: null })
     .eq("id", id)
     .eq("send_status", "sending");
+  return !error;
 }

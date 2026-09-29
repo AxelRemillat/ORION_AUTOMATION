@@ -29,9 +29,18 @@ export function MailActions({
   label,
   onTrashed,
   onChanged,
+  suggestions,
+  refusesProspecting = false,
 }: {
   state: MailSendState;
   defaultTo: string;
+  suggestions?: { email: string; source: string }[];
+  /**
+   * L'entreprise s'est OPPOSÉE à l'usage commercial de ses données au registre.
+   * Programmer un envoi n'est alors pas une question de tri : le bouton est
+   * retiré, et l'écran dit pourquoi.
+   */
+  refusesProspecting?: boolean;
   /** Nom du mail dans les toasts (« le brouillon pour ACME »). */
   label?: string;
   onTrashed?: () => void;
@@ -60,19 +69,26 @@ export function MailActions({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <SendStateBadge sendStatus={status} scheduledAt={state.scheduledAt} sendError={state.sendError} />
-      {status === "failed" && state.sendError && (
+      {(status === "failed" || status === "blocked") && state.sendError && (
         <span className="max-w-[320px] truncate text-[12px] text-lost-ink" title={state.sendError}>
           {state.sendError}
         </span>
       )}
+      {refusesProspecting ? (
+        <span className="rounded-full border border-lost/25 bg-lost/10 px-2 py-0.5 text-[12px] text-lost-ink">
+          opposé à la prospection : envoi désactivé
+        </span>
+      ) : (
       <ScheduleDialog
         messageId={state.messageId}
         defaultTo={defaultTo}
         scheduledAt={scheduled ? state.scheduledAt : null}
         scheduledTo={state.scheduledTo}
         onScheduled={onChanged}
+        suggestions={suggestions}
       />
-      {scheduled && (
+      )}
+      {(scheduled || status === "blocked") && (
         <Button size="sm" variant="ghost" onClick={unschedule} loading={pending}>
           <CalendarX className="h-3.5 w-3.5" aria-hidden />
           Annuler l&apos;envoi programmé

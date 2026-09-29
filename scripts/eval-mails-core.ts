@@ -2,7 +2,7 @@
  * Cœur PUR de `npm run eval:mails` : cas de référence, juge aveugle, rapport.
  * Aucun appel réseau ici — c'est ce que les tests couvrent avec des fixtures.
  */
-import { bodyWordCount, MAX_BODY_WORDS, withoutSignature } from "@/lib/emails/word-count";
+import { bodyWordCount, MAX_BODY_WORDS, withoutSignature } from "@/lib/mail-preflight/words";
 
 export interface MailText {
   subject: string;

@@ -17,6 +17,7 @@ import { DNC_CANCEL_REASON, setDoNotContact } from "../lib/outbox/do-not-contact
 import { inboxEntries } from "../app/(app)/cockpit/_lib/compute";
 import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
 import type { InboundMessage, Prospect } from "../types";
+import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -49,7 +50,7 @@ const prospect = (id: string, over: Record<string, unknown> = {}) => ({
   status_before_dnc: null, ...over,
 });
 const message = (id: string, prospectId: string, over: Record<string, unknown> = {}) => ({
-  id, prospect_id: prospectId, user_id: "u1", type: "intro", subject: `Objet ${id}`, body: `Corps ${id}`,
+  id, prospect_id: prospectId, user_id: "u1", type: "intro", subject: `Objet ${id}`, body: `Bonjour,\n\nCorps ${id}.\n\n${OPT_OUT_SENTENCE}\n\nAxel Remillat`,
   status: "sent", sent_at: iso(-3000), thread_id: "t-" + prospectId, created_at: iso(-3000), deleted_at: null,
   send_status: "sent", scheduled_at: null, scheduled_to: null, send_error: null, send_attempts: 0,
   send_started_at: null, send_seen_at: null, sent_to: `${prospectId}@${prospectId}.fr`, ...over,

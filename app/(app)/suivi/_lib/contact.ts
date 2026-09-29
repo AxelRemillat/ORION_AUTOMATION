@@ -1,40 +1,39 @@
 import type { Prospect } from "@/types";
 
 /**
- * Destinataire proposé à l'envoi, par ordre de fiabilité décroissante :
- *   1. `prospects.email` — adresse trouvée par l'enrichissement (Pappers/Hunter)
- *      ou corrigée à la main, donc la plus sûre ;
- *   2. une adresse déposée dans `key_figures` par un enrichissement antérieur
- *      à la colonne `email` (compatibilité des fiches existantes) ;
- *   3. `contact@<domaine du site>` — devinette, à vérifier avant d'envoyer.
- * L'adresse reste modifiable dans la modale : rien n'est envoyé sans relecture.
+ * Destinataires PROPOSÉS à l'envoi : uniquement des adresses trouvées, avec
+ * leur source, par ordre de fiabilité décroissante :
+ *   1. `prospects.email` — adresse trouvée par l'enrichissement ou saisie ;
+ *   2. une adresse déposée dans `key_figures` par un enrichissement antérieur.
+ * L'ancienne devinette `contact@<domaine du site>` a disparu : elle partait
+ * comme une donnée alors que personne ne l'avait vérifiée (28/09). Le contrôle
+ * avant envoi la refuse désormais (lib/mail-preflight/recipient.ts).
  */
 
-const EMAIL_KEYS = ["email", "contact_email", "hunter_email", "contact"] as const;
+const EMAIL_KEYS: [string, string][] = [
+  ["email", "enrichissement"],
+  ["contact_email", "enrichissement"],
+  ["hunter_email", "Hunter"],
+  ["contact", "enrichissement"],
+];
 const isEmail = (value: unknown): value is string =>
   typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-/** Domaine nu extrait du site web (sans protocole ni www). */
-function domainOf(website: string | null): string | null {
-  if (!website) return null;
-  try {
-    const url = new URL(website.startsWith("http") ? website : `https://${website}`);
-    return url.hostname.replace(/^www\./, "") || null;
-  } catch {
-    return null;
-  }
+export interface FoundAddress {
+  email: string;
+  source: string;
 }
 
-/** Meilleure proposition d'adresse pour ce prospect, ou "" si rien de crédible. */
-export function guessEmail(
-  prospect: Pick<Prospect, "email" | "key_figures" | "website">,
-): string {
-  if (isEmail(prospect.email)) return prospect.email;
-
-  for (const key of EMAIL_KEYS) {
+export function foundAddresses(prospect: Pick<Prospect, "email" | "key_figures">): FoundAddress[] {
+  const found: FoundAddress[] = [];
+  if (isEmail(prospect.email)) found.push({ email: prospect.email, source: "fiche" });
+  for (const [key, source] of EMAIL_KEYS) {
     const candidate = prospect.key_figures?.[key];
-    if (isEmail(candidate)) return candidate;
+    if (isEmail(candidate) && !found.some((item) => item.email === candidate)) found.push({ email: candidate, source });
   }
-  const domain = domainOf(prospect.website);
-  return domain ? `contact@${domain}` : "";
+  return found;
 }
+
+/** Première adresse trouvée, ou "" : rien n'est deviné. */
+export const defaultRecipient = (prospect: Pick<Prospect, "email" | "key_figures">): string =>
+  foundAddresses(prospect)[0]?.email ?? "";

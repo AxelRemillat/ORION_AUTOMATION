@@ -39,7 +39,7 @@ export async function setDoNotContact(db: Db, prospectId: string, on: boolean): 
       .from("messages")
       .update({ send_status: "draft", scheduled_at: null, send_error: DNC_CANCEL_REASON, send_attempts: 0 })
       .eq("prospect_id", prospectId)
-      .in("send_status", ["scheduled", "failed"])
+      .in("send_status", ["scheduled", "failed", "blocked"])
       .select("id");
     if (cancelError) return { ok: false, error: cancelError.message };
     return { ok: true, cancelled: cancelled?.length ?? 0 };

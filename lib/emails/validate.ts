@@ -2,7 +2,7 @@ import type { DecisionMakerContact } from "@/lib/enrichment/types";
 import type { ToneKey } from "@/lib/tones";
 import { knownNumbers, type DerivedFact } from "./derived-facts";
 import { sentenceProblems } from "./sentences";
-import { MAX_BODY_WORDS, wordCount as sharedWordCount, withoutSignature as sharedWithoutSignature } from "./word-count";
+import { MAX_BODY_WORDS, countedText, wordCount as sharedWordCount } from "@/lib/mail-preflight/words";
 
 /**
  * Garde-fous déterministes, appliqués AVANT d'afficher un brouillon.
@@ -380,10 +380,9 @@ export function echoesSlogan(body: string): string[] {
   return SLOGAN_ECHO.filter((term) => haystack.includes(normalize(term)));
 }
 
-/** Corps sans la signature ajoutee par le code. */
-/** Même fonction que l'écran (lib/emails/word-count.ts). */
+/** Même corps compté que l'écran et le contrôle avant envoi (lib/mail-preflight/words.ts) : sans signature ni phrase d'opposition. */
 export function withoutSignature(body: string, signature?: string): string {
-  return sharedWithoutSignature(body, signature);
+  return countedText(body, signature);
 }
 
 /**

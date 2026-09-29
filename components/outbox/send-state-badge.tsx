@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, Loader2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, Loader2, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { formatScheduled } from "@/lib/outbox/paris-time";
 import type { SendStatus } from "@/types";
@@ -31,6 +31,14 @@ export function SendStateBadge({
       <Badge tone="info" className={className}>
         <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden />
         Envoi en cours
+      </Badge>
+    );
+  }
+  if (sendStatus === "blocked") {
+    return (
+      <Badge tone="danger" className={className} title={sendError ?? undefined}>
+        <ShieldAlert className="h-3 w-3" aria-hidden />
+        Bloqué avant envoi
       </Badge>
     );
   }

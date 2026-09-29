@@ -17,6 +17,7 @@ import {
   parseCritique,
   type Critique,
 } from "./critic";
+import { cleanDraft, withOptOut } from "@/lib/mail-preflight";
 import { buildGreeting, buildWritingPrompt, parseEmail, planFor, type GeneratedEmail, type PlanKey } from "./prompt";
 
 /**
@@ -117,7 +118,20 @@ export function stripSignature(body: string): string {
   return lines.join("\n").trimEnd();
 }
 
+/**
+ * LA PHRASE D'OPPOSITION EST POSÉE PAR LE CODE, APRÈS la rédaction, le juge et
+ * le validateur — comme la signature. Le modèle ne l'écrit pas et ne la voit
+ * pas : elle ne peut ni être reformulée ni peser sur la note. Sans elle, le
+ * contrôle avant envoi bloquait chaque mail généré.
+ */
 export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | { error: string }> {
+  const outcome = await writeDraft(input);
+  if ("error" in outcome) return outcome;
+  const body = withOptOut(outcome.email.body, signatureFor(input.offer));
+  return { ...outcome, email: { ...outcome.email, body } };
+}
+
+async function writeDraft(input: DraftInput): Promise<DraftOutcome | { error: string }> {
   const { ask, brief, tone } = input;
   const writingInput = {
     tone,
@@ -154,10 +168,13 @@ export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | 
     greeting: buildGreeting(tone, input.contact, input.leaderPerson, input.addressee),
   };
 
-  const sign = (email: GeneratedEmail | null): GeneratedEmail | null =>
-    email ? { ...email, body: `${stripSignature(email.body)}
-
-${signature}` } : null;
+  // Objet normalisé, ligne « Objet : » sortie du corps, une seule salutation
+  // (lib/mail-preflight) : le 28/09, ces trois défauts sont partis tels quels.
+  const sign = (email: GeneratedEmail | null): GeneratedEmail | null => {
+    if (!email) return null;
+    const clean = cleanDraft({ subject: email.subject, body: stripSignature(email.body) });
+    return { ...email, subject: clean.subject, body: `${clean.body}\n\n${signature}` };
+  };
 
   const write = (critique?: string) =>
     ask(

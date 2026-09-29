@@ -34,8 +34,18 @@ export const MESSAGE_STATUSES = ["draft", "sent"] as const;
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
 /** Cycle d'envoi d'un message, à côté de `status` (draft | sent). */
-export const SEND_STATUSES = ["draft", "scheduled", "sending", "sent", "failed", "cancelled"] as const;
+/** `blocked` : refusé par le contrôle avant envoi au moment de partir (migration 20260928084920). */
+export const SEND_STATUSES = ["draft", "scheduled", "sending", "sent", "failed", "cancelled", "blocked"] as const;
 export type SendStatus = (typeof SEND_STATUSES)[number];
+
+/** Cache du verdict « objet cohérent avec le corps » (LLM), par empreinte. */
+export type MailSubjectCheck = {
+  user_id: string;
+  hash: string;
+  coherent: boolean;
+  reason: string;
+  created_at: string;
+};
 
 export const DEAL_STATUSES = ["ouvert", "gagne", "perdu"] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
@@ -748,6 +758,12 @@ export type Database = {
         Row: Favorite;
         Insert: FavoriteInsert;
         Update: FavoriteUpdate;
+        Relationships: [];
+      };
+      mail_subject_checks: {
+        Row: MailSubjectCheck;
+        Insert: Omit<MailSubjectCheck, "user_id" | "created_at"> & Partial<Pick<MailSubjectCheck, "user_id" | "created_at">>;
+        Update: Partial<MailSubjectCheck>;
         Relationships: [];
       };
       inbound_messages: {

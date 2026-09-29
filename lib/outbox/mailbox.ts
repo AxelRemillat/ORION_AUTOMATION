@@ -51,6 +51,9 @@ export interface ScheduledItem {
   scheduledAt: string;
   sendError: string | null;
   sendStatus: SendStatus;
+  /** Texte complet : relisible et modifiable avant le départ. */
+  body: string;
+  type: MessageType;
 }
 
 export const excerptOf = (body: string, max = 160): string => {
@@ -96,7 +99,7 @@ export function scheduledItems(messages: Message[], prospects: Pick<Prospect, "i
       (message) =>
         !message.deleted_at &&
         message.status === "draft" &&
-        (message.send_status === "scheduled" || message.send_status === "sending") &&
+        (message.send_status === "scheduled" || message.send_status === "sending" || message.send_status === "blocked") &&
         message.scheduled_at &&
         byId.has(message.prospect_id),
     )
@@ -109,6 +112,8 @@ export function scheduledItems(messages: Message[], prospects: Pick<Prospect, "i
       scheduledAt: message.scheduled_at as string,
       sendError: message.send_error ?? null,
       sendStatus: message.send_status as SendStatus,
+      body: message.body,
+      type: message.type,
     }))
     .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
 }

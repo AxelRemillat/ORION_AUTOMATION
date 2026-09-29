@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { INBOUND_SECRET_HEADER, secretMatches } from "@/lib/inbound/secret";
 import { createAdminClient } from "@/lib/supabase/server";
+import { cancelRelancesOnReply } from "@/lib/outbox/relances";
+import { setDoNotContact } from "@/lib/outbox/do-not-contact";
 import { advanceStatus } from "@/lib/constants";
 import { INBOUND_CATEGORIES, type InboundCategory, type ProspectStatus } from "@/types";
 
@@ -117,6 +119,7 @@ export async function POST(request: Request) {
 
   // --- Enregistrement ------------------------------------------------------
   const receivedAt = parseDate(payload?.received_at);
+  const category = parseCategory(payload?.category);
   const { data: inserted, error } = await supabase
     .from("inbound_messages")
     .insert({
@@ -125,7 +128,7 @@ export async function POST(request: Request) {
       from_email: fromEmail,
       subject: asText(payload?.subject, 500),
       body,
-      category: parseCategory(payload?.category),
+      category,
       thread_id: asText(payload?.thread_id, 200),
       gmail_message_id: asText(payload?.gmail_message_id ?? payload?.message_id, 200),
       received_at: receivedAt,
@@ -143,16 +146,37 @@ export async function POST(request: Request) {
     );
   }
 
+  /*
+   * UN « STOP » EST UN REFUS, ET IL S'HONORE TOUT DE SUITE.
+   *
+   * Chaque mail porte la phrase « un simple stop en réponse et je ne vous
+   * relancerai pas » (lib/mail-preflight/opt-out.ts). La tenir ne peut pas
+   * dépendre d'un geste manuel : la catégorie « refus », posée par le
+   * classifieur n8n, coche « ne plus contacter » — ce qui annule au passage
+   * tous les envois programmés (lib/outbox/do-not-contact.ts).
+   */
+  let doNotContact = false;
+  if (prospect && !prospect.deleted_at && category === "refus") {
+    const outcome = await setDoNotContact(supabase as never, prospect.id, true);
+    doNotContact = outcome.ok;
+  }
+
   // --- Le prospect a répondu : on fait avancer son statut ------------------
   let newStatus: ProspectStatus | null = null;
   // Prospect à la corbeille : l'email reste rattaché (il réapparaît à la
   // restauration) mais le statut ne bouge pas — il sera restauré tel quel.
-  if (prospect && !prospect.deleted_at) {
+  // « Ne plus contacter » a déjà posé le statut « perdu » : on n'y touche plus.
+  if (prospect && !prospect.deleted_at && !doNotContact) {
     newStatus = advanceStatus(prospect.status as ProspectStatus, "repondu");
     if (newStatus) {
       await supabase.from("prospects").update({ status: newStatus }).eq("id", prospect.id);
     }
   }
+
+  // Une réponse annule les relances programmées de ce prospect.
+  const cancelledRelances = prospect
+    ? await cancelRelancesOnReply(supabase, { userId: ownerId, prospectId: prospect.id, receivedAt })
+    : 0;
 
   return NextResponse.json({
     ok: true,
@@ -160,5 +184,7 @@ export async function POST(request: Request) {
     inbound_id: inserted.id,
     matched_prospect_id: prospect?.id ?? null,
     prospect_status: newStatus,
+    cancelled_relances: cancelledRelances,
+    do_not_contact: doNotContact,
   });
 }
