@@ -16,12 +16,18 @@
 import type { EntryOfferType, OfferProof, UserOffer } from "@/types";
 
 /**
- * Lien de la signature : la page d'atterrissage des prospects, avec les UTM que
- * lit Umami sur le site (source, support, campagne). Un clic depuis un mail
- * ORION s'y distingue donc des visites directes.
+ * Lien de la signature : la page d'atterrissage des prospects, SANS paramètres.
+ * /pme ne sert qu'à la prospection : ses visites suffisent comme mesure, et un
+ * lien court se lit mieux dans un mail en texte brut.
  */
-export const SIGNATURE_URL =
-  "https://axelremillat.com/pme?utm_source=orion&utm_medium=email&utm_campaign=prospection";
+export const SIGNATURE_URL = "https://axelremillat.com/pme";
+
+/**
+ * Réservation de la démo de 15 min : le lien Cal.eu « appel découverte » du site.
+ * Source : PORTFOLIO_V2, lib/site-config.ts (CALENDAR_URL), utilisé par /contact
+ * et la FAQ de /offres.
+ */
+export const CALENDAR_URL = "https://cal.eu/axel-remillat/appel-decouverte";
 
 /**
  * Préremplissage, tiré du portfolio public.
@@ -40,7 +46,7 @@ export const OFFER_DEFAULTS: Omit<UserOffer, "user_id" | "created_at" | "updated
   entry_type: "demo",
   entry_duration: "15 min",
   entry_pitch: "Je peux vous montrer à quoi ça ressemblerait chez vous en 15 minutes.",
-  entry_url: "https://axelremillat.com/contact",
+  entry_url: CALENDAR_URL,
 
   lead_time: "2 à 3 semaines",
   no_tool_change: true,
