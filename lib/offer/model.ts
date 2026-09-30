@@ -23,11 +23,11 @@ import type { EntryOfferType, OfferProof, UserOffer } from "@/types";
 export const SIGNATURE_URL = "https://axelremillat.com/pme";
 
 /**
- * Réservation de la démo de 15 min : le lien Cal.eu « appel découverte » du site.
- * Source : PORTFOLIO_V2, lib/site-config.ts (CALENDAR_URL), utilisé par /contact
- * et la FAQ de /offres.
+ * Réservation de la démo de 15 min : le lien Google Agenda du site (prise de
+ * rendez-vous). Source : PORTFOLIO_V2, lib/site-config.ts (CALENDAR_URL), utilisé
+ * par les boutons « Réserver 15 min ».
  */
-export const CALENDAR_URL = "https://cal.eu/axel-remillat/appel-decouverte";
+export const CALENDAR_URL = "https://calendar.app.google/dwAR7ea7tgAehwv48";
 
 /**
  * Préremplissage, tiré du portfolio public.

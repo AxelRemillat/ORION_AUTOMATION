@@ -368,8 +368,8 @@ console.log("\n15. Aligné sur le site refondu pour les PME");
   check("lien de signature → /pme", signatureFor(offer).includes(SIGNATURE_URL), signatureFor(offer));
   check("sans paramètres UTM", SIGNATURE_URL === "https://axelremillat.com/pme" && !signatureFor(offer).includes("utm_"));
 
-  // Démo de 15 min : le lien Cal.eu « appel découverte » du site, plus /contact.
-  check("démo 15 min → Cal.eu appel découverte", offer.entry_url === CALENDAR_URL && CALENDAR_URL === "https://cal.eu/axel-remillat/appel-decouverte");
+  // Démo de 15 min : le lien Google Agenda du site (plus Cal.eu, plus /contact).
+  check("démo 15 min → Google Agenda", offer.entry_url === CALENDAR_URL && CALENDAR_URL === "https://calendar.app.google/dwAR7ea7tgAehwv48");
 
   // Preuves : URLs et descriptions du site.
   const byId = (id: string) => offer.proofs.find((proof) => proof.id === id);
