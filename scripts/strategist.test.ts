@@ -283,7 +283,7 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     // Les preuves viennent desormais de /offre, choisies par recoupement de
     // tags avec le pain — plus de `persona.proofs` en dur.
     check("l'identité vient de /offre", prompt.includes("Axel Remillat"));
-    check("le titre de /offre est transmis", prompt.includes("Automatisation & IA en production pour PME"));
+    check("le titre de /offre est transmis", prompt.includes("Automatisation & IA pour PME"));
     check("l'offre d'entrée est transmise", prompt.includes("une démo de 15 min"));
     check("la promesse est transmise", prompt.includes("sans changer d'outil"));
     check(
@@ -299,6 +299,8 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
       tone: "direct", brief: negoceBrief, facts: blueFacts.facts, contact: null, prospectId: "p1", avoid: [],
       sector: "Commerce de gros de fournitures pour la plomberie et le chauffage",
     });
+    // BOUVET CARTIER : syndic + gestion locative + transaction → le syndic, pas la liste.
+    check("plusieurs activités : le rédacteur en nomme une seule", /PLUSIEURS ACTIVITES : nomme UNE seule/.test(negocePrompt) && /syndic/.test(negocePrompt));
     check("négoce : le métier de l'agent est imposé au rédacteur", /exemple de LEUR metier \(négoce B2B\)/.test(negocePrompt), negocePrompt.match(/PREUVE[^\n]*\n[^\n]*/)?.[0] ?? "");
 
     const numbers = validateEmail(

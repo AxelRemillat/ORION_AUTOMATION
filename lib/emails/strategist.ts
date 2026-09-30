@@ -247,6 +247,12 @@ ${jobRolesBlock()}
    d'expeditions. Un fait d'implantation (« trois showrooms et douze
    commerciaux », « un laboratoire qui alimente toutes les boutiques ») est une
    excellente accroche structurelle.
+   PLUSIEURS ACTIVITES (profil, site ou offre d'emploi) : l'accroche et le pain
+   portent sur UNE seule, celle qui genere le PLUS de demandes variees, avec
+   ces demandes nommees. Un cabinet immobilier qui fait syndic, gestion
+   locative et transaction : le SYNDIC (sinistres, appels de charges,
+   assemblees generales), jamais la liste « entre le syndic, la gestion
+   locative et la transaction ».
 11. OFFRE D'EMPLOI : c'est un INDICE du pain, pas le sujet du mail — sauf si le
    poste EST le pain (une assistante devis recrutee = les devis debordent).${
      isPartnerProspect(input.nafCode)

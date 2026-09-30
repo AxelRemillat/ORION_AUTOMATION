@@ -37,7 +37,7 @@ export const CALENDAR_URL = "https://calendar.app.google/dwAR7ea7tgAehwv48";
  */
 export const OFFER_DEFAULTS: Omit<UserOffer, "user_id" | "created_at" | "updated_at"> = {
   full_name: "Axel Remillat",
-  title: "Automatisation & IA en production pour PME",
+  title: "Automatisation & IA pour PME",
   portfolio_url: SIGNATURE_URL,
   // Saisi à la main : on ne devine pas un numéro de téléphone.
   phone: null,
@@ -120,7 +120,10 @@ export const N8N_DEMOS: { key: string; label: string; tags: string[] }[] = [
   // 28/09/2026 : BRIOL (bons de livraison) et HUMAN SIGHT (onboarding) ont recu
   // « le tri d'e-mails », SELECTION HABITAT (estimations) « les comptes rendus »
   // via « visite » — trois demos hors sujet que le juge a sanctionnees.
-  { key: "emails", label: "le tri d'e-mails", tags: ["tri des e-mails", "trier les e-mails", "trier les mails", "boîte de réception", "e-mails entrants", "mails entrants", "courrier entrant"] },
+  // « Demandes entrantes » en fait partie (BOUVET CARTIER, 30/09/2026) : le pain
+  // « qualifier les demandes entrantes et les orienter » EST un tri, et la preuve
+  // retombait sur l'énumération des cinq démos faute de mot reconnu.
+  { key: "emails", label: "le tri d'e-mails", tags: ["tri des e-mails", "trier les e-mails", "trier les mails", "boîte de réception", "e-mails entrants", "mails entrants", "courrier entrant", "demandes entrantes", "tri des demandes", "trier les demandes", "qualifier les demandes", "orienter les demandes"] },
   { key: "factures", label: "le traitement des factures", tags: ["facture", "facturation", "comptab", "règlement", "impayé"] },
   { key: "sav", label: "le SAV", tags: ["sav", "réclamation", "support", "litige", "après-vente", "service client"] },
   { key: "comptes-rendus", label: "les comptes rendus", tags: ["compte rendu", "compte-rendu", "réunion", "procès-verbal"] },
@@ -442,6 +445,17 @@ export function chooseProof(
     (proof) => proof.id !== "agent-devis" && proof.tags.some((tag) => tagMatches(tag, painText)),
   );
   if (matched) {
+    /*
+     * UNE SEULE DÉMO, JAMAIS L'ÉNUMÉRATION.
+     *
+     * La phrase de la preuve n8n liste les cinq démos (« tri d'e-mails,
+     * factures, comptes rendus… ») : citée telle quelle, elle faisait de la
+     * preuve un catalogue (BOUVET CARTIER). Sans démo précise pour ce pain, on
+     * s'en tient aux exemples du site.
+     */
+    if (matched.id === "n8n") {
+      return genericProof("tags recoupés sans démo précise : les exemples du site, jamais l'énumération des cinq démos");
+    }
     return {
       proof: matched,
       sentence: matched.sentence,

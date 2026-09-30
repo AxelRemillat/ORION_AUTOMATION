@@ -44,7 +44,7 @@ console.log("\n1. Signature : plus jamais « Axel » seul");
 {
   const signature = signatureFor(offer);
   check("le nom complet y est", signature.startsWith("Axel Remillat"));
-  check("le titre y est", signature.includes("Automatisation & IA en production pour PME"));
+  check("le titre y est", signature.includes("Automatisation & IA pour PME") && !signature.includes("en production"));
   check("le portfolio y est", signature.includes("https://axelremillat.com"));
   check("le téléphone est masqué par défaut", !signature.includes("06") && !signature.includes("+33"));
 
@@ -420,6 +420,19 @@ console.log("\n15. Aligné sur le site refondu pour les PME");
     sector: "Boulangerie et boulangerie-pâtisserie",
   });
   check("boulangerie SANS devis : toujours les exemples du site", fournil.proof === null, String(fournil.proof?.id));
+}
+
+console.log("\n17. BOUVET CARTIER : une seule démo, celle du pain");
+{
+  const bouvet = chooseProof(
+    offer,
+    "Qualifier les demandes entrantes sur les biens et les orienter vers le bon interlocuteur avant la reprise par l'équipe d'accueil.",
+    { sector: "Administration d'immeubles et autres biens immobiliers" },
+  );
+  check("tri de demandes → démo « tri d'e-mails »", bouvet.demo?.key === "emails" && /tri d'e-mails/.test(bouvet.sentence ?? ""), `${bouvet.demo?.key} ${bouvet.sentence}`);
+  check("jamais l'énumération des cinq démos", !/factures, comptes rendus/.test(bouvet.sentence ?? ""), bouvet.sentence ?? "");
+  const vague = chooseProof(offer, "constituer les dossiers administratifs");
+  check("sans démo précise : les exemples du site, pas le catalogue", vague.proof === null || !/factures, comptes rendus/.test(vague.sentence ?? ""), vague.sentence ?? "");
 }
 
 console.log("\n16. ARTFLEX : négoce B2B et synonymes de la demande client");
