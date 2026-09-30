@@ -735,7 +735,9 @@ async function main(): Promise<void> {
     check("le métier prime sur le mot « commande »", tricky.proof?.id === "n8n", String(tricky.proof?.id));
 
     const rh = chooseProof(offer, "constituer les dossiers du personnel", { sector: "Conseil en ressources humaines" });
-    check("RH → démo n8n", rh.proof?.id === "n8n", String(rh.proof?.id));
+    // Aucune démo ne correspond à « dossiers du personnel » : les exemples du site,
+    // jamais l'agent devis, et jamais l'énumération des cinq démos (BOUVET, 30/09).
+    check("RH → ni l'agent devis ni l'énumération", rh.proof?.id !== "agent-devis" && !/tri d'e-mails, factures/.test(rh.sentence ?? ""), `${rh.proof?.id} ${rh.sentence}`);
 
     const formation = chooseProof(offer, "préparer les conventions de stage", { sector: "Formation continue d'adultes" });
     check("formation → démo n8n", formation.proof?.id === "n8n", String(formation.proof?.id));

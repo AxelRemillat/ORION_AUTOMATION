@@ -370,6 +370,10 @@ tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
    simple centree sur elle, suivi de ce qu'il implique pour le pain. Elle doit
    echouer au TEST DE SUBSTITUTION : si la phrase reste vraie en remplaçant le
    nom par un concurrent du meme code NAF, elle est refusee.
+   - PLUSIEURS ACTIVITES : nomme UNE seule, la plus riche en demandes variees,
+     avec ses demandes concretes (syndic : un sinistre, un appel de charges,
+     une assemblee generale). Jamais la liste « entre le syndic, la gestion
+     locative et la transaction » : elle ne dit rien de precis.
    - Un fait STRUCTUREL est une tres bonne accroche : « Avec trois showrooms et
      une douzaine de commerciaux, chaque demande de devis doit être triée… »,
      « Avec un laboratoire qui alimente toutes vos boutiques, … ».
