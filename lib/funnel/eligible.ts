@@ -107,13 +107,24 @@ export const B2C_NAF_PREFIXES = ["47", "96", "9313", "561", "9521", "9522", "952
 const B2B_CATERING = ["5621"] as const;
 
 /** Au-dessus de ce seuil, un commerce a un back-office et des salariés à soulager. */
-export const B2C_MIN_HEADCOUNT_CODE = "21";
+export const B2C_MIN_HEADCOUNT_CODE = "12";
 
 /**
  * Codes de tranche INSEE représentant au moins 20 salariés.
- * 21 = 20-49, 22 = 50-99, 31 = 100-199, 32 = 200-249, 41, 42, 51, 52, 53.
+ * 12 = 20-49, 21 = 50-99, 22 = 100-199, 31 = 200-249, 32 = 250-499, 41, 42, 51, 52, 53
+ * (cf. effectifFloor, lib/enrichment/naf.ts).
+ *
+ * Corrigé le 30/09/2026 : la liste commençait à « 21 », présenté à tort comme
+ * 20-49. Une boulangerie de 20-49 salariés (tranche 12, SARL BONNIN FRERES)
+ * sortait « moins de 20 salariés ».
  */
-const AT_LEAST_TWENTY = new Set(["21", "22", "31", "32", "41", "42", "51", "52", "53"]);
+export const AT_LEAST_TWENTY = new Set(["12", "21", "22", "31", "32", "41", "42", "51", "52", "53"]);
+
+/**
+ * Codes de tranche INSEE représentant au moins 10 salariés (11 = 10-19 et au-delà).
+ * `NN` (non déclaré) n'y est pas : un effectif inconnu n'est pas un effectif connu.
+ */
+export const AT_LEAST_TEN = new Set(["11", ...AT_LEAST_TWENTY]);
 
 export function isSmallB2C(naf: string | null | undefined, effectifCode: string | null | undefined): boolean {
   if (!naf) return false;
