@@ -53,6 +53,7 @@ export function FunnelCard({ card }: { card: Card_ }) {
 
         <div className="flex flex-wrap gap-2">
           {contact && <Badge tone={contact.tone}>{contact.label}</Badge>}
+          {card.emailDoubtful && <Badge tone="warning">email douteux : domaine hors site</Badge>}
           {card.statut === "retenu" && <Badge tone="info">en attente de creusage</Badge>}
           {card.badges.map((badge) => (
             <Badge key={badge} tone={badge.startsWith("décision au siège") ? "warning" : "neutral"}>
@@ -60,6 +61,15 @@ export function FunnelCard({ card }: { card: Card_ }) {
             </Badge>
           ))}
         </div>
+
+        {card.phone && (
+          <p className="text-[13px] text-muted">
+            Téléphone (site) :{" "}
+            <a href={`tel:${card.phone.replace(/\s/g, "")}`} className="font-data text-primary-ink hover:underline">
+              {card.phone}
+            </a>
+          </p>
+        )}
 
         {card.prospectId && (
           <Link href={`/suivi/${card.prospectId}`} className="text-[13px] text-primary-ink hover:underline">

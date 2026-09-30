@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, SignalCandidateRow } from "@/types";
-import { examinationPlan } from "./budget";
+import { examinationPlan, MAX_EXAMINED } from "./budget";
 import { clampDigLimit, contactBadge, digOne, digOrder, type DigDeps } from "./dig";
 import { filterSignal, NO_PAIN_TITLE } from "./filter";
 import { painForJob } from "./pain-map";
@@ -27,7 +27,15 @@ import type { Identity, Triage } from "./types";
 type Db = SupabaseClient<Database>;
 
 /** Identités annuaire au plus par run (gratuites, mais limitées en débit). */
-export const MAX_LOOKUPS = 250;
+export const MAX_LOOKUPS = MAX_EXAMINED;
+
+/**
+ * Annonces de GOUVERNANCE pure : qui contrôle les comptes ou siège au conseil.
+ * Rejeu du 30/09/2026 : toutes notées 0 ou 1 par le tri. Écartées gratuitement,
+ * avant le budget d'examen.
+ */
+export const GOVERNANCE_ONLY = "annonce de gouvernance sans portée opérationnelle";
+const GOVERNANCE = /commissaire aux comptes|administrateur|membre du (conseil|directoire|comit)|conseil de surveillance|censeur/i;
 
 const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
 const strengthOf = (row: SignalCandidateRow) => STRENGTH[String((row.facts as { strength?: string }).strength)] ?? 0;
@@ -40,7 +48,8 @@ const examined = (row: SignalCandidateRow) =>
   (row.statut !== "brut" &&
     !(row.motif_rejet ?? "").startsWith(NOT_EXAMINED) &&
     !/^déjà en portefeuille/.test(row.motif_rejet ?? "") &&
-    row.motif_rejet !== NO_PAIN_TITLE) ||
+    row.motif_rejet !== NO_PAIN_TITLE &&
+    row.motif_rejet !== GOVERNANCE_ONLY) ||
   (row.statut === "brut" && /^annuaire saturé/.test(row.motif_rejet ?? ""));
 
 export interface FilterStageOptions {
@@ -84,12 +93,27 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
     pending = pending.filter((row) => !noPain.includes(row));
   }
 
+  const governance = pending.filter(
+    (row) => row.source === "bodacc" && !row.motif_rejet && GOVERNANCE.test(String((row.facts as { label?: string }).label ?? "")),
+  );
+  if (governance.length) {
+    await updateCandidates(db, governance.map((row) => row.id), { statut: "rejeté", motif_rejet: GOVERNANCE_ONLY });
+    pending = pending.filter((row) => !governance.includes(row));
+  }
+
   // Budget : ce qui reste du plafond du run, réparti par source.
   const budget = Math.max(0, cap - all.filter(examined).length);
   const fresh = pending.filter((row) => !row.motif_rejet);
   const replay = pending.filter((row) => row.motif_rejet); // annuaire saturé : prioritaire
   const plan = examinationPlan(
-    fresh.map((row) => ({ id: row.id, source: row.source, date: String(row.date_signal ?? ""), strength: strengthOf(row), row })),
+    fresh.map((row) => ({
+      id: row.id,
+      source: row.source,
+      date: String(row.date_signal ?? ""),
+      strength: strengthOf(row),
+      label: String((row.facts as { label?: string }).label ?? ""),
+      row,
+    })),
     Math.max(0, budget - replay.length),
   );
   if (plan.skip.length) {
@@ -235,5 +259,40 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
           },
     );
   }
-  return { dug: pending.length, resumed: resumed.length, remaining: Math.max(0, budget - pending.length) };
+  /*
+   * FICHES « À COMPLÉTER » DES RUNS PRÉCÉDENTS : une seconde recherche de
+   * contact, UNE fois par fiche, avec le module corrigé (adresses masquées par
+   * Joomla, domaine de confiance, téléphone du site). Rejeu du 30/09 : C.T.A.,
+   * ACTUEL VÉRANDA, G. PERRIER INDUSTRIE, LE PAIN DE BELLEDONNE creusées sans
+   * email — perdues jusque-là. Au plus 3 par étape, dans le temps qui reste.
+   */
+  const room = Math.max(0, options.perStep - pending.length);
+  let retried = 0;
+  if (room > 0) {
+    const { data } = await db
+      .from("signal_candidates")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("statut", "creusé")
+      .eq("publication", "a_completer")
+      .not("prospect_id", "is", null)
+      .limit(30);
+    const stale = ((data ?? []) as SignalCandidateRow[])
+      .filter((row) => !(row.contact as { retried_at?: string } | null)?.retried_at)
+      .slice(0, Math.min(3, room));
+    for (const row of stale) {
+      const contact = await options.deps.findContact(row.prospect_id!).catch(() => null);
+      retried += 1;
+      await updateCandidate(db, row.id, {
+        publication: contact?.email ? "pret" : "a_completer",
+        contact: {
+          ...((row.contact as Record<string, unknown> | null) ?? {}),
+          ...(contact ?? {}),
+          badge: contactBadge(contact),
+          retried_at: (options.now ?? new Date()).toISOString(),
+        },
+      });
+    }
+  }
+  return { dug: pending.length, resumed: resumed.length, retried, remaining: Math.max(0, budget - pending.length) };
 }

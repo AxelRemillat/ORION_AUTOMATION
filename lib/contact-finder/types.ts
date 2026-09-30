@@ -14,6 +14,14 @@ export interface ContactResult {
   confidence: number;
   /** Chemin qui a produit le résultat, lisible : « site:mentions-legales », « hunter:email-finder+verifier »… */
   found_by: string;
+  /**
+   * Adresse gardée alors que son domaine n'est ni celui du site ni un domaine
+   * cité dans les mentions légales — seulement parce que Hunter la dit
+   * « valid ». Le doute subsiste : l'écran affiche « email douteux ».
+   */
+  doubtful?: boolean;
+  /** Téléphone lu sur le site : sans email, la fiche part « à appeler ». */
+  phone?: string;
 }
 
 /** Ce que l'on sait de l'entreprise avant de chercher. */

@@ -65,7 +65,7 @@ export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: b
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!split(text.zones).length) return toast.error("Indiquez au moins un département.");
+    // Aucun département : toute la France (moisson nationale).
     if (await save()) onStart();
   }
 
@@ -75,10 +75,14 @@ export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: b
         <Label htmlFor="funnel-zones">Départements</Label>
         <Input
           id="funnel-zones"
-          placeholder="69, 31"
+          placeholder="69, 31 — vide : toute la France"
           value={text.zones}
           onChange={(event) => setText({ ...text, zones: event.target.value })}
+          aria-describedby="funnel-zones-hint"
         />
+        <p id="funnel-zones-hint" className="mt-1 text-[12px] text-faint">
+          {split(text.zones).length ? `${split(text.zones).length} département(s)` : "Toute la France : moisson nationale, plus longue"}
+        </p>
       </div>
       <div>
         <Label htmlFor="funnel-days">Fenêtre (jours)</Label>

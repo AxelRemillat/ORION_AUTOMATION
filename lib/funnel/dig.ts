@@ -93,11 +93,26 @@ export async function digOne(deps: DigDeps, candidate: DigCandidate): Promise<Di
      * ICI, avant de créer la fiche et avant de dépenser la recherche de contact.
      */
     const figures = company.key_figures ?? {};
+    /*
+     * SANS PAPPERS, ON NE PUBLIE PAS.
+     *
+     * 30/09/2026 : crédits Pappers épuisés (HTTP 401). L'enrichissement
+     * continuait sans le registre — ni opposition à la prospection, ni groupe,
+     * ni effectif réel — et la fiche pouvait sortir « prête » pour une
+     * entreprise opposée. Erreur passagère : reprise au run suivant.
+     */
+    if (figures.pappers_read !== true) {
+      const why = company.warnings?.find((warning) => warning.source === "pappers")?.message ?? "registre non lu";
+      return { ...base, error: `Pappers indisponible (${why}) : opposition et groupe non vérifiables` };
+    }
     const verdict = disqualify({
       refusesProspecting: figures.refuses_prospecting === true,
       noStaff: figures.no_staff === true,
       capitalEur: typeof figures.capital_eur === "number" ? figures.capital_eur : null,
       equityEur: typeof figures.equity_eur === "number" ? figures.equity_eur : null,
+      headcount: typeof figures.headcount === "number" ? figures.headcount : null,
+      largeGroup: figures.is_large_group_subsidiary === true,
+      foreignParent: figures.parent_foreign === true,
     });
     if (verdict) return { ...base, skipped: verdict.reason, error: null };
 

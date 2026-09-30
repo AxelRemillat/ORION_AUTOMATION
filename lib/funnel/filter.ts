@@ -25,13 +25,17 @@ export const DEFAULT_PREFERRED_SECTORS = [
  *
  *   47   commerce de détail           55, 56  hébergement, restauration
  *   96   services aux particuliers     93      sports et loisirs
- *   8891 garde d'enfants               862, 869 cabinets médicaux et paramédicaux
+ *   88   action sociale (aide à domicile, garde d'enfants…)
+ *   862, 869 cabinets médicaux et paramédicaux
  *   812  nettoyage
  *
  * Réglable dans « Signaux » (secteurs exclus). La boulangerie (10.71) est
  * traitée à part : exclue seulement sous 20 salariés CONNUS.
  */
-export const DEFAULT_EXCLUDED_SECTORS = ["47", "55", "56", "96", "93", "8891", "862", "869", "812"] as const;
+export const DEFAULT_EXCLUDED_SECTORS = ["47", "55", "56", "96", "93", "88", "862", "869", "812"] as const;
+
+/** Défauts du 30/09/2026 (PR #47), pour la migration des réglages enregistrés. */
+export const PREVIOUS_EXCLUDED_SECTORS = ["47", "55", "56", "96", "93", "8891", "862", "869", "812"] as const;
 
 /** Anciens défauts, pour la migration des réglages enregistrés. */
 export const LEGACY_EXCLUDED_SECTORS = ["4711", "4729", "812", "4742"] as const;
@@ -54,6 +58,8 @@ const FONDS_DE_COMMERCE = /fonds de commerce|reprise d.un fonds|achat d.un fonds
 const BUILDING = ["41", "43"];
 /** Tranches INSEE sous 10 salariés : 0, 1-2, 3-5, 6-9. */
 const UNDER_TEN = new Set(["00", "01", "02", "03"]);
+/** Tranches de 250 salariés et plus : hors cible (PME de 10 à 249 salariés). */
+const TWO_HUNDRED_FIFTY_PLUS = new Set(["32", "41", "42", "51", "52", "53"]);
 /** Tranches 20 salariés et plus. */
 const TWENTY_PLUS = new Set(["12", "21", "22", "31", "32", "41", "42", "51", "52", "53"]);
 
@@ -182,6 +188,9 @@ export function filterSignal(
   }
   if (identity.effectifCode && UNDER_TEN.has(identity.effectifCode)) {
     return reject(identity.effectifCode === "00" ? "0 salarié" : "effectif inférieur à 10 salariés");
+  }
+  if (identity.effectifCode && TWO_HUNDRED_FIFTY_PLUS.has(identity.effectifCode)) {
+    return reject("trop grande structure : 250 salariés ou plus (cible 10-249)");
   }
 
   // Effectif NON DÉCLARÉ : ce n'est pas « on ne sait pas », c'est presque

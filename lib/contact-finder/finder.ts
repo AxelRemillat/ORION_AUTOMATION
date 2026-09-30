@@ -1,5 +1,5 @@
 import { domainOfEmail, exclusionReason, isFreeMailbox, isServiceProvider, toDomain } from "./domains";
-import { classifyEmail, emailDomains, extractEmails, namesSomeone, type EmailKind } from "./extract";
+import { classifyEmail, emailDomains, extractEmails, extractPhones, namesSomeone, type EmailKind } from "./extract";
 import { pagesToVisit, textOf } from "./links";
 import { coreName, judgePage } from "./validate";
 import {
@@ -56,6 +56,8 @@ interface Checked {
   validated: boolean;
   reason: string;
   emails: SiteEmail[];
+  /** Téléphones lus sur le site, avec leur page. */
+  phones: { phone: string; url: string }[];
   excerpt: string;
   pages: { url: string; ok: boolean }[];
 }
@@ -280,25 +282,68 @@ export async function runContactSearch(
     trace.hunter!.push({ call: "email-verifier", target: item.email, result: item.verified ?? "sans réponse" });
   }
 
-  // --- 5. Priorité : nominatif valide > nominatif accept_all > générique ----
+  /*
+   * --- 5. DOMAINE DE CONFIANCE -------------------------------------------
+   *
+   * Une adresse n'est gardée que si son domaine est celui du site (ou un
+   * sous-domaine), ou un domaine d'adresse publiée dans les MENTIONS LÉGALES
+   * — l'entreprise y déclare où on la joint. Sinon, seule une vérification
+   * Hunter « valid » la sauve, avec le drapeau « douteux ».
+   *
+   * Cas réel (30/09/2026) : HÖRMANN FRANCE sortait « contactable » avec
+   * louis@louis.info — une adresse vue sur le site, d'un domaine sans rapport,
+   * interrogée chez Hunter comme un « second domaine ».
+   */
+  /*
+   * Les mentions légales citent AUSSI des tiers : l'hébergeur (obligatoire),
+   * l'agence web, le photographe. Rejeu du 30/09 : support@ovhcloud.com pour
+   * BOUVET CARTIER, contact@lamobylettejaune.com (agence) pour ACTES ALLIANCES.
+   * Un domaine autre que celui du site n'est donc de confiance que s'il PORTE
+   * LE NOM de l'entreprise (briol-diffusion.fr, belledonnebio.shop) et n'est
+   * pas un prestataire technique.
+   */
+  const trusted = (email: string) => {
+    const domain = domainOfEmail(email);
+    if (!domain || !site) return false;
+    if (domain === site.domain || domain.endsWith(`.${site.domain}`)) return true;
+    return !isServiceProvider(domain) && carriesName(domain, company);
+  };
+
+  // --- 6. Priorité : nominatif valide > nominatif accept_all > générique ----
   const base = site?.confidence ?? 0;
   const valid = nominals.find((item) => item.verified === "valid");
   // Une adresse DEVINÉE (email-finder) ne passe qu'avec « valid » : jamais sur
   // un simple accept_all, qui accepte n'importe quelle adresse du domaine.
-  const acceptAll = nominals.find((item) => item.verified === "accept_all" && !item.guessed);
-  const generic = pickGeneric(siteEmails) ?? pickGeneric(hunterGeneric);
+  // Et un accept_all ne prouve rien d'un domaine étranger au site.
+  const acceptAll = nominals.find((item) => item.verified === "accept_all" && !item.guessed && trusted(item.email));
+  // Générique hors domaine de confiance : JAMAIS gardé, même « valid » chez
+  // Hunter — une boîte valide d'un tiers (support@ovhcloud.com) reste celle
+  // d'un tiers. L'exception « valid » ne vaut que pour une adresse NOMINATIVE.
+  const generic = pickGeneric(siteEmails.filter((item) => trusted(item.email))) ?? pickGeneric(hunterGeneric.filter((item) => trusted(item.email)));
+  const genericDoubtful = false;
+  if (!valid && !acceptAll && !generic) {
+    const outsider = pickGeneric(siteEmails) ?? pickGeneric(hunterGeneric);
+    if (outsider) trace.steps.push(`adresse écartée, domaine étranger au site et à l'entreprise : ${outsider.email}`);
+  }
 
   let result: ContactResult;
   if (valid) {
     result = contact(valid.email, "nominatif", valid.url, Math.max(85, Math.min(98, 70 + Math.round(base / 4))), `${valid.by}+verifier:valid`, siteUrl);
+    if (!trusted(valid.email)) result.doubtful = true;
   } else if (acceptAll) {
     result = contact(acceptAll.email, "nominatif", acceptAll.url, 65, `${acceptAll.by}+verifier:accept_all`, siteUrl);
   } else if (generic) {
-    const fromSite = siteEmails.some((item) => item.email === generic.email);
+    const fromSite = siteEmails.some((item) => item.email === generic!.email);
     result = contact(generic.email, "generique", generic.url, fromSite ? Math.min(85, Math.max(50, base)) : 45, fromSite ? `site:${pageKind(generic.url)}` : "hunter:domain-search", siteUrl);
+    if (genericDoubtful) result.doubtful = true;
   } else {
     result = { ...(siteUrl ? { website: siteUrl } : {}), confidence: site ? Math.round(base / 2) : 0, found_by: site ? `site:${site.by}` : "aucun" };
   }
+  // Le téléphone du site : sans email, c'est lui qui permet de joindre l'entreprise.
+  // Les mentions légales et la page contact d'abord, l'accueil ensuite.
+  const phones = site?.phones ?? [];
+  const phone = phones.find((item) => /contact|mention|legal/.test(item.url)) ?? phones[0];
+  if (phone) result.phone = phone.phone;
   if (!site && snippetEmails.length) trace.steps.push(`adresses vues dans la recherche, non retenues (site non prouvé) : ${snippetEmails.map((item) => item.email).join(", ")}`);
   return { result, trace };
 }
@@ -368,7 +413,7 @@ async function inspect(
   spend: () => void,
 ): Promise<Checked> {
   const origin = `https://${candidate.domain}`;
-  const out: Checked = { ...candidate, confidence: 0, validated: false, reason: "site injoignable", emails: [], excerpt: "", pages: [] };
+  const out: Checked = { ...candidate, confidence: 0, validated: false, reason: "site injoignable", emails: [], phones: [], excerpt: "", pages: [] };
   if (!canRead()) return { ...out, reason: "budget de pages épuisé" };
   const read = async (url: string) => {
     spend();
@@ -408,6 +453,9 @@ async function inspect(
     if (evidence.confidence > out.confidence) Object.assign(out, { confidence: evidence.confidence, validated: evidence.validated, reason: evidence.reason });
     for (const email of extractEmails(page.html)) {
       if (!out.emails.some((item) => item.email === email)) out.emails.push({ email, url: page.url });
+    }
+    for (const phone of extractPhones(page.html)) {
+      if (!out.phones.some((item) => item.phone === phone)) out.phones.push({ phone, url: page.url });
     }
   }
   if (out.validated) out.confidence = Math.min(100, out.confidence + prior);

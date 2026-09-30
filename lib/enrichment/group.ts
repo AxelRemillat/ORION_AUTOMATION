@@ -44,6 +44,8 @@ export interface GroupAssessment {
   parentGroupUrl: string | null;
   /** Vrai dès qu'un indice sérieux rattache l'entreprise à un grand groupe. */
   isLargeGroupSubsidiary: boolean;
+  /** Dirigeant-propriétaire personne morale SANS SIREN : une société étrangère. */
+  parentForeign: boolean;
   /** Ce qui fonde le drapeau, en clair, source par source. */
   evidence: string[];
   /** Dirigeant personne physique, y compris retrouvé derrière la holding. */
@@ -61,6 +63,7 @@ const EMPTY: GroupAssessment = {
   parentGroupQuote: null,
   parentGroupUrl: null,
   isLargeGroupSubsidiary: false,
+  parentForeign: false,
   evidence: [],
   leaderPerson: null,
   leaderRole: null,
@@ -98,6 +101,8 @@ export async function assessGroup(input: GroupInput): Promise<GroupAssessment> {
   result.leaderPerson = physical?.name ?? input.knownLeaderPerson ?? null;
   result.leaderRole = physical?.role ?? null;
   result.parentCompany = moral?.name ?? null;
+  // Une société française a un SIREN ; sans SIREN, le propriétaire est étranger.
+  result.parentForeign = Boolean(moral && !moral.siren);
 
   // --- Indice WEB ---------------------------------------------------------
   if (input.parentGroup) {

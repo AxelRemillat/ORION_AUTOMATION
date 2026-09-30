@@ -108,12 +108,38 @@ export function parseVerdict(raw: string, generatedA: boolean): Verdict | null {
   return { outcome: toOutcome(global), criteria, reasons: typeof json.raisons === "string" ? json.raisons : "" };
 }
 
+/**
+ * VERDICT MAJORITAIRE sur plusieurs passages (génération + jugement).
+ *
+ * Le 30/09/2026, BRIOL gagnait puis perdait d'un passage à l'autre : deux mails
+ * générés différents, un juge (gpt-6-sol) qui n'accepte pas `temperature: 0`.
+ * Un seul passage ne permet pas de conclure. Majorité stricte (2 sur 3), sinon
+ * égalité ; chaque critère est tranché de la même façon.
+ */
+export function majorityVerdict(verdicts: readonly Verdict[]): Verdict | null {
+  if (!verdicts.length) return null;
+  const pick = (outcomes: Outcome[]): Outcome => {
+    const counts = new Map<Outcome, number>();
+    for (const outcome of outcomes) counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
+    const [best, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    return count * 2 > outcomes.length ? best : "egalite";
+  };
+  const outcome = pick(verdicts.map((verdict) => verdict.outcome));
+  const criteria = Object.fromEntries(
+    (Object.keys(verdicts[0].criteria) as JudgeCriterion[]).map((key) => [key, pick(verdicts.map((verdict) => verdict.criteria[key]))]),
+  ) as Record<JudgeCriterion, Outcome>;
+  const representative = verdicts.find((verdict) => verdict.outcome === outcome) ?? verdicts[0];
+  return { outcome, criteria, reasons: representative.reasons };
+}
+
 export interface CaseResult {
   id: string;
   company: string;
   generated: MailText | null;
   reference: MailText | null;
   verdict: Verdict | null;
+  /** Verdict de chaque passage, dans l'ordre (le verdict retenu est majoritaire). */
+  passes?: Outcome[];
   error?: string;
   /** Cas négatif : attendu et obtenu. Un refus y vaut une victoire. */
   negative?: { expected: boolean; refused: boolean };
@@ -169,6 +195,7 @@ export function renderReport(
     if (result.error) lines.push(`> ${result.error}`, "");
     if (result.diagnostics?.length) lines.push(...result.diagnostics.map((line) => `- ${line}`), "");
     if (result.verdict) lines.push(`**${LABEL[result.verdict.outcome]}** — ${result.verdict.reasons}`, "");
+    if (result.passes?.length) lines.push(`Passages : ${result.passes.map((outcome) => LABEL[outcome]).join(" · ")} (verdict majoritaire)`, "");
     for (const [title, mail] of [["Généré", result.generated], ["Référence", result.reference]] as const) {
       if (!mail) continue;
       const over = count(mail) > MAX_BODY_WORDS ? ` ⚠️ > ${MAX_BODY_WORDS} mots` : "";

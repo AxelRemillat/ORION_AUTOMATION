@@ -7,7 +7,7 @@ import { runDigStage, runFilterStage, runTriageStage } from "@/lib/funnel/stages
 import { candidatesOf, countFunnel, insertHarvest, yieldBySource } from "@/lib/funnel/store";
 import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
-import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
+import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
 
 /** Variante de `search_signals` qui porte l'entonnoir (voir handlers/index.ts). */
@@ -16,7 +16,7 @@ export const FUNNEL_KIND = "funnel";
 /**
  * Job `search_signals` + `params.kind = "funnel"` — l'entonnoir « signaux d'abord » en 4 étages.
  *
- *   préparation → moisson → filtre ×3 → tri LLM → creusage ×5 → bilan
+ *   préparation → moisson → filtre ×8 → tri LLM → creusage ×5 → bilan
  *
  * Le filtre et le creusage sont découpés en étapes : une étape de job doit
  * tenir dans les 300 s d'une fonction. Le 30/09/2026, le filtre en UNE étape
@@ -25,7 +25,8 @@ export const FUNNEL_KIND = "funnel";
  * reprend que les lignes au bon statut dans `signal_candidates`.
  */
 
-const FILTER_STEPS = 3;
+/** 600 identités à ~1 par seconde (avec les 429 de l'annuaire) : 8 étapes de 240 s. */
+const FILTER_STEPS = 8;
 const DIG_PER_STEP = 4;
 const DIG_STEPS = 5;
 /** Marge avant la coupure d'une fonction (300 s). */
@@ -42,10 +43,9 @@ const progress = (step: string, pct: number, counts = { scanned: 0, signals: 0, 
 async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const prefs = await prefsOf(ctx);
-  if (!prefs.departements.length) {
-    throw new JobError("Aucune zone : indiquez au moins un département dans les réglages Signaux.", false, 422);
-  }
-  await ctx.progress(progress(`Moisson BODACC et France Travail · ${prefs.departements.join(", ")}`, 10));
+  // Aucun département : toute la France.
+  const zone = prefs.departements.length ? prefs.departements.join(", ") : "toute la France";
+  await ctx.progress(progress(`Moisson France Travail et BODACC · ${zone}`, 10));
   const collected = await harvest({ departements: prefs.departements, days: prefs.days });
   const inserted = await insertHarvest(ctx.db, ctx.userId, runId, collected.signals);
   return {

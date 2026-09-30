@@ -14,6 +14,32 @@ export interface DigFacts {
   capitalEur: number | null;
   /** Capitaux propres du dernier exercice publié. `null` = comptes confidentiels. */
   equityEur: number | null;
+  /** Effectif connu (Pappers). Au-delà de 249 : trop grande structure. */
+  headcount?: number | null;
+  /** Filiale d'un groupe de plus de 250 salariés ou 50 M€ (lib/enrichment/group.ts). */
+  largeGroup?: boolean;
+  /** Contrôlée par une société étrangère. */
+  foreignParent?: boolean;
+}
+
+/**
+ * CIBLE : PME de 10 à 249 salariés, qui décident chez elles.
+ *
+ * Rejeu du 30/09/2026 : TÉRÉVA (plus de 1 000 salariés) et HÖRMANN FRANCE
+ * (filiale d'Hörmann KG, Allemagne) sortaient « contactables ». Une grande
+ * structure a sa DSI et ses achats centraux ; une filiale de groupe étranger
+ * décide au siège. Ni l'une ni l'autre n'achète une automatisation à un
+ * indépendant.
+ */
+export const MAX_TARGET_HEADCOUNT = 249;
+
+export function tooLarge(facts: DigFacts): Disqualification {
+  if (facts.headcount != null && facts.headcount > MAX_TARGET_HEADCOUNT) {
+    return { reason: `trop grande structure (${facts.headcount} salariés, cible 10-249)` };
+  }
+  if (facts.foreignParent) return { reason: "trop grande structure : filiale d'un groupe étranger" };
+  if (facts.largeGroup) return { reason: "trop grande structure : filiale d'un groupe de plus de 250 salariés" };
+  return null;
 }
 
 export type Disqualification = { reason: string } | null;
@@ -74,7 +100,7 @@ export function noStaff(facts: DigFacts): Disqualification {
 
 /** Premier motif de renoncement, ou `null` si la fiche peut être publiée. */
 export function disqualify(facts: DigFacts): Disqualification {
-  return opposesProspecting(facts) ?? noStaff(facts) ?? equityTooLow(facts);
+  return opposesProspecting(facts) ?? noStaff(facts) ?? tooLarge(facts) ?? equityTooLow(facts);
 }
 
 /** `prefixMatch` local : le module doit rester SANS dépendance (client compris). */

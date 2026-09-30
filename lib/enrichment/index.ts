@@ -203,6 +203,9 @@ export async function deepEnrich(
     const pappers = await fetchPappers(base.siren);
     if (pappers.ok) {
       const data = pappers.data;
+      // Preuve que le registre a été lu : sans elle, l'opposition à la
+      // prospection et les groupes sont INCONNUS (cf. lib/funnel/dig.ts).
+      keyFigures.pappers_read = true;
       pappersWebsite = data.website;
       legalRepresentatives = data.representatives;
       company.email = company.email ?? data.email;
@@ -342,6 +345,7 @@ export async function deepEnrich(
     if (group.parentGroupUrl) keyFigures.parent_group_url = group.parentGroupUrl;
   }
   keyFigures.is_large_group_subsidiary = group.isLargeGroupSubsidiary;
+  keyFigures.parent_foreign = group.parentForeign;
   if (group.evidence.length) keyFigures.group_evidence = group.evidence;
 
   // --- 5. Verification des offres d'emploi --------------------------------
