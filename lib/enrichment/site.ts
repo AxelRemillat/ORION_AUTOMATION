@@ -278,7 +278,14 @@ export function pageConfirmsCompany(text: string, company: SiteIdentity): boolea
   const named = aliases.some((alias) => haystack.includes(alias));
   if (!named) return false;
 
-  const markers = [company.siren?.replace(/\s/g, ""), company.city, company.postalCode]
+  // SIREN tel qu'on l'écrit dans des mentions légales : « 520 644 386 »,
+  // « 520.644.386 » ou collé. Cherché avec ses séparateurs possibles : ARTFLEX
+  // (520644386) était écarté, son SIREN n'apparaissant qu'espacé, et son profil
+  // métier n'était jamais lu.
+  const siren = company.siren?.replace(/\D/g, "") ?? "";
+  if (siren.length === 9 && new RegExp(`(^|\\D)${siren.split("").join("[\\s.\\u00a0\\u202f]?")}(\\D|$)`).test(text)) return true;
+
+  const markers = [company.city, company.postalCode]
     .filter((value): value is string => Boolean(value && value.length >= 3))
     .map(normalizeForMatch);
 
@@ -384,6 +391,47 @@ async function readPage(
   };
 }
 
+/** Le nom de l'entreprise (ou un de ses alias) figure-t-il dans le texte ? */
+function namesCompany(text: string, company: SiteIdentity): boolean {
+  const haystack = normalizeForMatch(text);
+  return companyAliases(company.name).filter((alias) => alias.length >= 4).some((alias) => haystack.includes(alias));
+}
+
+const LEGAL_LINK = /mentions?[-_ ]?l[eé]gales?|legal|informations[-_ ]l[eé]gales/i;
+const LEGAL_PATHS = ["/mentions-legales", "/mentions-legales.html", "/mentions-legales/", "/legal"];
+
+/**
+ * SECONDE PREUVE PAR LES MENTIONS LÉGALES.
+ *
+ * Un nom court (« ARTFLEX », 7 lettres) ne vaut pas preuve à lui seul, et les
+ * pages lues (accueil, services, recrutement) ne portent souvent ni le SIREN ni
+ * la ville. Les mentions légales, elles, portent le SIREN : c'est là que la
+ * recherche de contact l'avait trouvé pour ARTFLEX (520644386), alors que la
+ * lecture du site l'écartait — et le profil métier n'était jamais lu.
+ *
+ * Deux pages au plus, lecture directe gratuite (pas de Linkup), robots.txt respecté.
+ */
+async function legalNoticeConfirms(
+  origin: string,
+  homeHtml: string | null,
+  alreadyRead: string,
+  company: SiteIdentity,
+  prospectId: string | null,
+): Promise<boolean> {
+  const robots = await loadRobots(origin);
+  const linked = homeHtml
+    ? internalLinks(homeHtml, origin)
+        .filter((link) => LEGAL_LINK.test(link.href) || LEGAL_LINK.test(link.label))
+        .map((link) => link.href)
+    : [];
+  const urls = [...new Set([...linked, ...LEGAL_PATHS.map((path) => `${origin}${path}`)])].slice(0, 2);
+  for (const url of urls) {
+    const read = await readPage(url, robots, prospectId, false);
+    if (read.page && pageConfirmsCompany(`${alreadyRead}\n${read.page.text}`, company)) return true;
+  }
+  return false;
+}
+
 /** Accueil + jusqu'à deux pages internes détectées depuis ses liens. */
 async function readSite(
   origin: string,
@@ -473,7 +521,10 @@ export async function coverSite(
     }
 
     const joined = read.pages.map((page) => page.text).join("\n");
-    if (!pageConfirmsCompany(joined, input)) {
+    const confirmed =
+      pageConfirmsCompany(joined, input) ||
+      (namesCompany(joined, input) && (await legalNoticeConfirms(origin, read.html, joined, input, prospectId)));
+    if (!confirmed) {
       base.note = `Site ${candidate.domain} écarté : la page ne mentionne ni le nom, ni le SIREN, ni la ville`;
       continue;
     }

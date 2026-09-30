@@ -292,6 +292,15 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     );
     check("le nom exact est imposé", prompt.includes(`« ${brief.companyName} »`));
 
+    // ARTFLEX : négoce + pain de commande → agent devis, métier cité explicitement.
+    const negoceBrief = { ...brief, pain: { ...brief.pain, task: "confirmer les commandes des installateurs", automationIdea: "préparer la confirmation de commande" } };
+    const negocePrompt = buildWritingPrompt({
+      offer: defaultOffer(),
+      tone: "direct", brief: negoceBrief, facts: blueFacts.facts, contact: null, prospectId: "p1", avoid: [],
+      sector: "Commerce de gros de fournitures pour la plomberie et le chauffage",
+    });
+    check("négoce : le métier de l'agent est imposé au rédacteur", /exemple de LEUR metier \(négoce B2B\)/.test(negocePrompt), negocePrompt.match(/PREUVE[^\n]*\n[^\n]*/)?.[0] ?? "");
+
     const numbers = validateEmail(
       { subject: "alarmes et interventions", body: "Bonjour,\n\nAvec 50 M€ de CA, vous traitez beaucoup d'alarmes.\n\nJe relie les alarmes aux ordres.\n\nC'est un sujet ?\n\nAxel" },
       { facts: briefFacts(brief, blueFacts.facts), tone: "direct", companyName: "BLUE ENERFREEZE" },

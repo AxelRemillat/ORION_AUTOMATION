@@ -101,10 +101,24 @@ async function reanalyze(ctx: StepContext): Promise<StepOutcome> {
     .eq("id", prospect.id);
   if (error) throw new Error(`fiche non mise à jour : ${error.message}`);
 
+  // Profil métier : relu dès qu'un site est connu et que le profil manque (ou a
+  // plus de 30 jours). Avant, seule l'étape contact le lisait, et seulement si
+  // elle « retrouvait » le site : ARTFLEX (520644386) avait un site et aucun
+  // profil, et ses mails repartaient du libellé NAF. L'échec est DIT, pas avalé.
+  const website = enriched.website ?? prospect.website;
+  let profileNote = "";
+  if (website && process.env.OPENAI_API_KEY) {
+    await ctx.progress({ step: "Lecture du profil métier sur le site", pct: 60, counts: { scanned: 1, signals: 0, sheets: 0 } });
+    const run = await ensureBusinessProfile(ctx.db, { ...prospect, website }, profileAsk(prospect.id)).catch(
+      (failure: unknown) => ({ profile: null, refreshed: false, note: failure instanceof Error ? failure.message : "lecture impossible" }),
+    );
+    profileNote = run.profile ? " · profil métier lu" : ` · profil métier non lu (${run.note ?? "raison inconnue"})`;
+  }
+
   return {
     result: { prospectIds: [prospect.id] },
     progress: {
-      step: "Fiche réanalysée",
+      step: `Fiche réanalysée${profileNote}`,
       pct: 100,
       counts: { scanned: 1, signals: enriched.signals.length, sheets: 1 },
     },

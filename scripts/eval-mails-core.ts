@@ -2,7 +2,7 @@
  * Cœur PUR de `npm run eval:mails` : cas de référence, juge aveugle, rapport.
  * Aucun appel réseau ici — c'est ce que les tests couvrent avec des fixtures.
  */
-import { bodyWordCount, MAX_BODY_WORDS, withoutSignature } from "@/lib/mail-preflight/words";
+import { bodyWordCount, countedText, MAX_BODY_WORDS } from "@/lib/mail-preflight/words";
 
 export interface MailText {
   subject: string;
@@ -72,9 +72,12 @@ Reponds UNIQUEMENT en JSON :
 { "criteres": { "accroche": "A", "pain": "egalite", "preuve": "B", "longueur": "A", "ton": "A", "salutation": "egalite" },
   "global": "A" | "B" | "egalite",
   "raisons": "3 phrases au plus, concretes" }`;
+  // Sans signature NI phrase d'opposition : la mention légale est obligatoire
+  // dans le mail généré, absente des références écrites à la main. Le juge la
+  // comptait contre le généré (« la phrase de désinscription alourdit »).
   const show = (label: string, mail: MailText) =>
     `=== EMAIL ${label} (${bodyWordCount(mail.body, signature)} mots hors signature) ===\n` +
-    `Objet : ${mail.subject}\n\n${withoutSignature(mail.body, signature).trim()}`;
+    `Objet : ${mail.subject}\n\n${countedText(mail.body, signature).trim()}`;
   return { system, user: `Entreprise : ${companyName}\n\n${show("A", a)}\n\n${show("B", b)}` };
 }
 

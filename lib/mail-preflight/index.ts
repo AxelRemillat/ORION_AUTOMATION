@@ -90,15 +90,29 @@ const PLACEHOLDERS: [RegExp, string][] = [
   [/adresse à confirmer/i, "« adresse à confirmer »"],
 ];
 
+/**
+ * Signature : présente, et UNE fois.
+ *
+ * Seul le BLOC de signature compte : une ligne qui EST le nom, ou la ligne de
+ * détail (titre · site · téléphone). Le nom cité dans une phrase n'est pas une
+ * signature — ARTFLEX (520644386), le 30/09/2026 : « Je suis Axel Remillat… »
+ * dans le corps + la signature en bas sortait « Signature en double ».
+ */
 function signatureProblem(body: string, signature?: string | null): string | null {
-  const name = signature?.split(/\r?\n/)[0]?.trim() || null;
+  const [nameLine, ...detailLines] = (signature ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const name = nameLine || null;
   const lines = body.trimEnd().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const last = lines[lines.length - 1] ?? "";
   if (name) {
-    const occurrences = body.split(name).length - 1;
-    if (occurrences > 1) return `Signature en double (« ${name} » apparaît ${occurrences} fois).`;
+    const bare = (line: string) => line.replace(/[.,;]+$/, "").trim();
+    const nameBlocks = lines.filter((line) => bare(line) === name).length;
+    const detail = detailLines[0] ?? null;
+    const detailBlocks = detail ? lines.filter((line) => line === detail).length : 0;
+    if (nameBlocks > 1 || detailBlocks > 1) {
+      return `Signature en double (le bloc « ${name} » apparaît ${Math.max(nameBlocks, detailBlocks)} fois).`;
+    }
     const firstName = name.split(/\s+/)[0];
-    if (occurrences === 0 && last.replace(/[.,]$/, "") !== firstName) return "Signature absente en fin de mail.";
+    if (nameBlocks === 0 && bare(last) !== firstName) return "Signature absente en fin de mail.";
     return null;
   }
   // Sans signature connue : la dernière ligne doit ressembler à un nom.

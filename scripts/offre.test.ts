@@ -422,5 +422,35 @@ console.log("\n15. Aligné sur le site refondu pour les PME");
   check("boulangerie SANS devis : toujours les exemples du site", fournil.proof === null, String(fournil.proof?.id));
 }
 
+console.log("\n16. ARTFLEX : négoce B2B et synonymes de la demande client");
+{
+  // Cas réel du 30/09/2026 (520644386) : pain et secteur tels qu'en base.
+  const artflex = chooseProof(
+    offer,
+    "Vérifier les références et les quantités demandées, puis préparer la confirmation de commande et du délai.",
+    { sector: "Commerce de gros (commerce interentreprises) de fournitures pour la plomberie et le chauffage" },
+  );
+  check("ARTFLEX → agent devis, exemple de son métier", artflex.proof?.id === "agent-devis" && artflex.sentence === AGENT_METIER_SENTENCE, String(artflex.sentence));
+  check("ARTFLEX → démo nommée « négoce B2B »", /négoce B2B/.test(artflex.demo?.label ?? ""), String(artflex.demo?.label));
+  for (const pain of ["traiter les demandes de prix reçues par e-mail", "chiffrer les demandes des installateurs", "envoyer les confirmations de commande", "répondre aux demandes de cotation"]) {
+    check(`« ${pain} » → agent devis`, chooseProof(offer, pain).proof?.id === "agent-devis", String(chooseProof(offer, pain).proof?.id));
+  }
+  const grossiste = { sector: "Commerce de gros de matériaux" };
+  check("négoce : « saisir les commandes des clients » → agent devis", chooseProof(offer, "saisir les commandes reçues des installateurs", grossiste).proof?.id === "agent-devis");
+  check("négoce : préparer les commandes du jour (picking) → pas l'agent", chooseProof(offer, "préparer les commandes du jour", grossiste).proof?.id !== "agent-devis");
+  // Pain choisi par le stratège pendant l'eval du 30/09 : le stock y est consulté pour une commande CLIENT.
+  const stocks = chooseProof(
+    offer,
+    "vérifier la disponibilité des articles dans les deux stocks avant de confirmer la commande ou la livraison",
+    { sector: "Commerce de gros (commerce interentreprises) de fournitures pour la plomberie et le chauffage" },
+  );
+  check("négoce : stock vérifié avant confirmation → agent devis négoce", stocks.proof?.id === "agent-devis" && /négoce B2B/.test(stocks.demo?.label ?? ""), `${stocks.proof?.id} ${stocks.reason}`);
+  check(
+    "négoce : réassort et commande fournisseur → jamais l'agent",
+    chooseProof(offer, "transmettre les besoins de réassort et suivre leur passage en commande fournisseur", grossiste).proof?.id !== "agent-devis",
+  );
+  check("hors négoce : « commande » seule → pas l'agent", chooseProof(offer, "regrouper les commandes des boutiques").proof?.id !== "agent-devis");
+}
+
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
 process.exit(failures === 0 ? 0 : 1);

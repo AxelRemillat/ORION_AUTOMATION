@@ -17,7 +17,8 @@ import {
 } from "../lib/emails/business-profile";
 import { MAX_BODY_WORDS, bodyWordCount, exceedsWordLimit } from "../lib/mail-preflight/words";
 import { civilityFor, salutationFor, usagePerson } from "../lib/emails/salutation";
-import { hollowParaphrase, oldFactAsRecent, opensOnJobOffer, validateSubject } from "../lib/emails/validate";
+import { hollowParaphrase, oldFactAsRecent, opensOnJobOffer, opensOnRegistryFact, validateSubject } from "../lib/emails/validate";
+import { pageConfirmsCompany } from "../lib/enrichment/site";
 import { isPartnerProspect, painGroundedInProfile } from "../lib/emails/strategist";
 import { chooseProof, GENERIC_PROOF_SENTENCE, signatureFor } from "../lib/offer/model";
 import { defaultOffer } from "../lib/offer/read";
@@ -231,6 +232,39 @@ void (async () => {
   }));
   check("3 sur 4 → objectif atteint", goalReached(results));
   check("rapport rendu", renderReport(results, { date: "2026-09-27", judgeModel: "gpt-6-sol" }).includes("atteint"));
+
+  console.log("\nSite officiel : seconde preuve par le SIREN, même espacé (ARTFLEX, 30/09/2026)");
+  {
+    const artflex = { name: "ARTFLEX", siren: "520644386", city: null };
+    check("« ARTFLEX » seul (nom court) : pas une preuve", !pageConfirmsCompany("Artflex - Robinetterie industrielle", artflex));
+    check("nom + SIREN espacé « 520 644 386 » : confirmé", pageConfirmsCompany("Artflex SAS — SIRET 520 644 386 00021", artflex));
+    check("nom + SIREN pointé : confirmé", pageConfirmsCompany("ARTFLEX, RCS Lyon 520.644.386", artflex));
+    check("SIREN d'une autre société : refusé", !pageConfirmsCompany("Artflex — SIREN 520 644 387", artflex));
+  }
+
+  console.log("\nAccroche : jamais un fait brut du registre (ARTFLEX, 30/09/2026)");
+  {
+    const mail = (hook: string, offer = "Offre.") => `Bonjour Monsieur Romeo,\n\n${hook}\n\nJe suis Axel.\n\n${offer}\n\nQuestion ?`;
+    const cases: [string, string | null][] = [
+      ["Avec 20 à 49 salariés, Artflex traite chaque jour des demandes de prix.", "effectif"],
+      ["Artflex réalise un chiffre d'affaires de 8 M€ en robinetterie.", "chiffre d'affaires"],
+      ["Fondée en 2011, Artflex distribue de la robinetterie industrielle.", "ancienneté"],
+      ["Artflex, code NAF 46.74B, distribue des fournitures de plomberie.", "code NAF"],
+      ["Artflex, au capital de 50 000 €, distribue de la robinetterie.", "capital"],
+      [
+        "Chez un distributeur de robinetterie industrielle, chaque demande de prix arrive avec ses références, diamètres et pressions, puis doit être ressaisie avant d'être chiffrée.",
+        null,
+      ],
+    ];
+    for (const [hook, expected] of cases) {
+      const found = opensOnRegistryFact(mail(hook));
+      check(`${expected ? `refusé (${expected})` : "accepté"} : « ${hook.slice(0, 50)}… »`, found === expected, String(found));
+    }
+    check(
+      "un fait de registre HORS accroche reste permis",
+      opensOnRegistryFact(mail("Chez un distributeur, chaque demande de prix est ressaisie.", "Pour une équipe de 20 à 49 salariés.")) === null,
+    );
+  }
 
   console.log(failures ? `\n${failures} test(s) en echec.` : "\nTous les tests passent.");
   process.exit(failures ? 1 : 0);
