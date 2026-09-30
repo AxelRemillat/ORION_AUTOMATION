@@ -99,3 +99,21 @@ export function formatParisDateTime(iso: string | null | undefined): string {
     new Date(iso),
   );
 }
+
+/**
+ * Relance qui tombe un samedi ou un dimanche à Paris : repoussée au lundi, à
+ * la même heure locale (recalculée à Paris, changement d'heure compris).
+ */
+export function offWeekend(at: Date): Date {
+  const { weekday, time } = utcToParis(at);
+  const shift = weekday === 6 ? 2 : weekday === 0 ? 1 : 0;
+  if (!shift) return at;
+  const monday = parisToUtc(parisDay(at, shift), time);
+  return monday ? new Date(monday.getTime() + (at.getTime() % 60_000)) : new Date(at.getTime() + shift * 86_400_000);
+}
+
+/** « lun. 05/10 » : le jour, à Paris. */
+export function formatParisDay(iso: string): string {
+  const { date, weekday } = utcToParis(new Date(iso));
+  return `${DAYS[weekday]} ${date.slice(8, 10)}/${date.slice(5, 7)}`;
+}

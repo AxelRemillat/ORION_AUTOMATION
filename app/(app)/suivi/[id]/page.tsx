@@ -19,7 +19,7 @@ import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
 import { defaultRecipient, foundAddresses } from "../_lib/contact";
 import { dealValue } from "../_lib/estimates";
-import { prospectSendState } from "../_lib/rows";
+import { actionFacts, prospectSendState } from "../_lib/rows";
 import { nextAction } from "../_lib/next-action";
 import { STAGE_TONE_VARS, stageOf } from "../_lib/stages";
 import { buildTimeline } from "../_lib/timeline";
@@ -63,8 +63,8 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
   const openReminder = reminders.find((reminder) => !reminder.done);
   const action = nextAction({
     status: typed.status,
-    draftsCount: messages.filter((message) => message.status === "draft").length,
     nextDueAt: openReminder?.due_at ?? null,
+    ...actionFacts(typed, messages),
   });
   const events = buildTimeline(messages, reminders, deals);
   const followUp = nextFollowUp(messages);

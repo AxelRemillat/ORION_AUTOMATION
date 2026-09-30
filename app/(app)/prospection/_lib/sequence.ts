@@ -1,3 +1,4 @@
+import { offWeekend } from "@/lib/outbox/paris-time";
 import type { Message, ProspectStatus, Reminder } from "@/types";
 
 /**
@@ -6,7 +7,8 @@ import type { Message, ProspectStatus, Reminder } from "@/types";
  * inchangée (rédaction ici, envoi et relances depuis le Suivi via n8n).
  *
  * Les délais reproduisent ceux réellement appliqués par
- * `/api/emails/send` : +4 jours après l'intro, +7 après la première relance.
+ * `/api/emails/send` : +4 jours après l'intro, +7 après la première relance,
+ * repoussés au lundi quand ils tombent un week-end.
  */
 
 export const SEQUENCE_DELAYS = { relance_1: 4, relance_2: 7 } as const;
@@ -65,7 +67,10 @@ export function buildSequence(
   const pending = (previousSent: boolean): { state: StepState; at?: string } => {
     if (answered) return { state: "skipped" };
     if (!previousSent) return { state: "todo" };
-    return openReminder ? { state: "planned", at: openReminder.due_at } : { state: "todo" };
+    // Une relance du samedi ou du dimanche part le lundi.
+    return openReminder
+      ? { state: "planned", at: offWeekend(new Date(openReminder.due_at)).toISOString() }
+      : { state: "todo" };
   };
 
   const introSent = intro.state === "sent";

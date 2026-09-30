@@ -20,7 +20,7 @@ export function withStatus(row: ProspectRow, status: ProspectStatus): ProspectRo
     status,
     stageKey: stageOf(status).key,
     nextDueAt,
-    action: nextAction({ status, draftsCount: row.draftsCount, nextDueAt }),
+    action: nextAction({ status, nextDueAt, ...row.actionFacts }),
   };
 }
 
