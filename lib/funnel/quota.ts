@@ -1,105 +1,110 @@
 import type { TriageOutcome } from "./triage";
+import { painForJob } from "./pain-map";
+import type { HarvestedSignal } from "./types";
 
 /**
- * QUOTA PAR TYPE DE SIGNAL.
+ * QUOTA PAR TYPE DE SIGNAL — appliqué à la LISTE FINALE des retenus.
  *
  * Mesuré le 28/09/2026 sur le run 69+31 : les DIX fiches retenues étaient des
- * « reprise de fonds de commerce ». Ce n'est pas une préférence du marché, c'est
- * un effet du tri : ce type coche toutes les cases du prompt (changement récent,
- * engageant, sujet clair), donc il rafle tout, et une journée de prospection se
- * résume à des rachats de commerces.
+ * « reprise de fonds de commerce ». Le 30/09 (69, 38, 42, 01, 73, 74), encore
+ * 11 sur 13. La première version ne retirait que ce qu'elle savait remplacer :
+ * sans remplaçant, rien ne bougeait, et le plafond restait théorique.
  *
- * On plafonne donc chaque type à 40 % des retenus. Au-delà, les signaux
- * excédentaires du type dominant sont écartés — avec leur raison, pour qu'on
- * puisse la relire — et la place revient aux autres types, par score décroissant.
+ * Désormais :
+ *   1. on promeut d'abord les meilleurs signaux des AUTRES types (score ≥ 3,
+ *      un cran sous le seuil normal), pour ne pas raccourcir la liste pour rien ;
+ *   2. puis on applique le plafond POUR DE BON : aucun type ne dépasse 40 % des
+ *      retenus finaux. Les surnuméraires les moins bien notés sont écartés, avec
+ *      leur raison, même si la liste raccourcit.
  *
- * Le plafond ne s'applique pas quand il n'y a rien d'autre : un run qui ne
- * trouve que trois signaux du même type les garde tous les trois. Un quota qui
- * viderait la liste ne rendrait service à personne.
+ * Le type est celui du SIGNAL (reprise, direction, capital, recrutement…), pas
+ * l'étiquette libre du modèle : « reprise », « croissance » ou « implantation »
+ * pour la même reprise de fonds de commerce échappaient au plafond.
+ *
+ * Sous 5 retenus au départ, le quota ne s'applique pas : trois signaux du même
+ * type restent trois signaux. Et un type garde toujours au moins UNE fiche :
+ * sans cette borne, une liste d'un seul type fondrait jusqu'à zéro.
  */
 
 export const MAX_SHARE_PER_TYPE = 0.4;
 
-/** Au-dessous de ce nombre de retenus, le quota ne s'applique pas. */
+/** Au-dessous de ce nombre de retenus (avant quota), le quota ne s'applique pas. */
 export const QUOTA_FLOOR = 5;
 
 /** Score plancher d'un signal promu pour la variété (le seuil normal est 4). */
 export const PROMOTE_SCORE = 3;
 
-const typeOf = (outcome: TriageOutcome) => outcome.triage?.type?.trim().toLowerCase() || "autre";
+/** Famille d'un signal, pour le quota : stable d'une source et d'un libellé à l'autre. */
+export function signalFamily(signal: Pick<HarvestedSignal, "source" | "facts">): string {
+  // Une offre ADV et une offre de comptable ne sont pas « le même type » : le
+  // poste distingue les offres entre elles.
+  if (signal.source === "france-travail") return `recrutement · ${painForJob(signal.facts.jobTitle ?? "") ?? "autre poste"}`;
+  const label = `${signal.facts.label ?? ""}`.toLowerCase();
+  if (/fonds de commerce|reprise|cession/.test(label)) return "reprise de fonds";
+  if (/capital/.test(label)) return "capital";
+  if (/devient|nomm|dirigeant|g[ée]rant|pr[ée]sident|directeur/.test(label)) return "direction";
+  if (/cr[ée]ation|immatriculation|[ée]tablissement|transfert|si[èe]ge/.test(label)) return "implantation";
+  return signal.facts.signalType || "autre";
+}
+
+type FamilyOf = (outcome: TriageOutcome) => string;
+
+const byScore = (a: TriageOutcome, b: TriageOutcome) => (b.triage?.score ?? 0) - (a.triage?.score ?? 0);
 
 /**
- * Applique le quota aux signaux retenus, du meilleur score au moins bon.
- *
- * Rend les MÊMES éléments, certains basculés en `retained: false` avec leur
- * raison. Rien n'est supprimé : l'écran du run montre ce qui a été écarté et
- * pourquoi.
+ * Applique le quota. Rend les MÊMES éléments, certains basculés : promus
+ * (`retained: true` + `note`), ou écartés (`retained: false` + `reason`).
+ * Rien n'est supprimé : l'écran du run montre ce qui a été écarté et pourquoi.
  */
-export function applyTypeQuota(outcomes: readonly TriageOutcome[]): TriageOutcome[] {
-  const retained = outcomes.filter((item) => item.retained);
-  if (retained.length < QUOTA_FLOOR) return [...outcomes];
+export function applyTypeQuota(outcomes: readonly TriageOutcome[], familyOf: FamilyOf): TriageOutcome[] {
+  const initial = outcomes.filter((item) => item.retained);
+  if (initial.length < QUOTA_FLOOR) return [...outcomes];
 
-  const cap = Math.max(1, Math.floor(retained.length * MAX_SHARE_PER_TYPE));
-  const byScore = (a: TriageOutcome, b: TriageOutcome) => (b.triage?.score ?? 0) - (a.triage?.score ?? 0);
+  const state = new Map(outcomes.map((outcome) => [outcome.id, { ...outcome }]));
+  const retained = () => [...state.values()].filter((item) => item.retained);
+  const share = (family: string) => {
+    const list = retained();
+    return list.length ? list.filter((item) => familyOf(item) === family).length / list.length : 0;
+  };
 
-  // Qui dépasse le plafond, du meilleur score au moins bon.
-  const counts = new Map<string, number>();
-  const kept = new Set<string>();
-  const surplus: TriageOutcome[] = [];
-  for (const outcome of [...retained].sort(byScore)) {
-    const type = typeOf(outcome);
-    const seen = counts.get(type) ?? 0;
-    if (seen >= cap) {
-      surplus.push(outcome);
-      continue;
-    }
-    counts.set(type, seen + 1);
-    kept.add(outcome.id);
-  }
-  if (!surplus.length) return [...outcomes];
-
-  /*
-   * ON NE RETIRE QUE CE QU'ON PEUT REMPLACER.
-   *
-   * Plafonner sans promouvoir ne crée pas de variété : ça raccourcit la liste.
-   * Le 28/09/2026, les six retenus étaient tous des « reprise de fonds de
-   * commerce » ; appliquer le plafond seul aurait rendu deux fiches au lieu de
-   * six, sans rien diversifier.
-   *
-   * On cherche donc d'abord les remplaçants — les meilleurs signaux des AUTRES
-   * types, jusqu'à un score de 3, un cran sous le seuil normal — puis on ne
-   * retire du type dominant que le nombre qu'on sait remplacer.
-   */
-  const replacements = outcomes
-    .filter((item) => !item.retained && !kept.has(item.id))
-    .filter((item) => item.triage?.utilisable && item.triage.sujet_est_l_entreprise)
-    .filter((item) => (item.triage?.score ?? 0) >= PROMOTE_SCORE)
+  // 1. Promotions : les meilleurs des autres types, tant qu'un type dépasse le plafond.
+  const candidates = [...state.values()]
+    .filter((item) => !item.retained && item.triage?.utilisable && item.triage.sujet_est_l_entreprise)
+    .filter((item) => (item.triage?.score ?? 0) >= PROMOTE_SCORE && !/pain générique/.test(item.reason ?? ""))
     .sort(byScore);
-
-  const promoted: TriageOutcome[] = [];
-  for (const candidate of replacements) {
-    if (promoted.length >= surplus.length) break;
-    const type = typeOf(candidate);
-    if ((counts.get(type) ?? 0) >= cap) continue;
-    counts.set(type, (counts.get(type) ?? 0) + 1);
-    promoted.push(candidate);
+  for (const candidate of candidates) {
+    const counts = new Map<string, number>();
+    for (const item of retained()) counts.set(familyOf(item), (counts.get(familyOf(item)) ?? 0) + 1);
+    const dominant = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!dominant || dominant[1] / retained().length <= MAX_SHARE_PER_TYPE) break;
+    const family = familyOf(candidate);
+    if (family === dominant[0]) continue;
+    // Promouvoir ne doit pas faire dépasser le plafond à SON propre type.
+    if (((counts.get(family) ?? 0) + 1) / (retained().length + 1) > MAX_SHARE_PER_TYPE) continue;
+    state.set(candidate.id, {
+      ...candidate,
+      retained: true,
+      reason: null,
+      note: `retenu pour la variété : type « ${family} » sous-représenté`,
+    });
   }
 
-  // Aucun remplaçant : on ne retire rien. `slice(-0)` rendrait TOUT le tableau —
-  // le premier essai vidait la liste de 45 à 18 sur un run mono-type.
-  if (!promoted.length) return [...outcomes];
+  // 2. Plafond STRICT : le type dominant perd ses moins bien notés jusqu'à 40 %.
+  for (;;) {
+    const list = retained();
+    const counts = new Map<string, TriageOutcome[]>();
+    for (const item of list) counts.set(familyOf(item), [...(counts.get(familyOf(item)) ?? []), item]);
+    const over = [...counts.entries()].find(([family, items]) => items.length > 1 && share(family) > MAX_SHARE_PER_TYPE);
+    if (!over) break;
+    const [family, items] = over;
+    const weakest = [...items].sort(byScore).at(-1)!;
+    state.set(weakest.id, {
+      ...weakest,
+      retained: false,
+      note: undefined,
+      reason: `quota de variété : type « ${family} » limité à ${Math.round(MAX_SHARE_PER_TYPE * 100)} % des retenus`,
+    });
+  }
 
-  // Les surnuméraires les moins bien notés cèdent leur place, et seulement eux.
-  const removed = new Set(surplus.slice(-promoted.length).map((item) => item.id));
-  const promotedIds = new Set(promoted.map((item) => item.id));
-
-  return outcomes.map((outcome) => {
-    if (promotedIds.has(outcome.id)) {
-      return { ...outcome, retained: true, reason: `retenu pour la variété : type « ${typeOf(outcome)} » absent des premiers` };
-    }
-    if (removed.has(outcome.id)) {
-      return { ...outcome, retained: false, reason: `quota de variété : déjà ${cap} signaux « ${typeOf(outcome)} » sur ce run` };
-    }
-    return outcome;
-  });
+  return outcomes.map((outcome) => state.get(outcome.id)!);
 }

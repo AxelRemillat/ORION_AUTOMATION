@@ -43,9 +43,17 @@ const verdictOf = (key: keyof typeof CASES) => {
     check("ARTFLEX : le montant est cité", /959,76/.test(artflex.reason ?? ""), artflex.reason ?? "");
     const sunr = verdictOf("sunr");
     check("SUN'R +2 000 € : rejeté (bruit)", sunr.status === "rejeté", sunr.reason ?? "");
+    // DEVESA est une boulangerie (10.71C) de 10-19 salariés : écartée depuis le
+    // 30/09/2026 (boulangerie sous 20 salariés connus).
     const devesa = verdictOf("devesa");
-    check("DEVESA SAS→EURL : gardé mais purement juridique", devesa.status === "filtré" && devesa.legalOnly);
-    check("DEVESA : poids faible", devesa.weight <= 0.2, String(devesa.weight));
+    check("DEVESA : boulangerie de 10-19 salariés écartée", devesa.status === "rejeté" && /boulangerie de moins de 20/.test(devesa.reason ?? ""), devesa.reason ?? "");
+    // La règle « purement juridique » se teste sur une entreprise hors cible B2C :
+    // la même annonce SAS → EURL, portée par DBP MEDICAL (métallurgie, 10-19 sal.).
+    const legal = filterSignal(CASES.devesa.signal, toIdentity(CASES.devesa.signal, CASES.dbp.company!), { now: TODAY });
+    check("SAS→EURL : gardé mais purement juridique", legal.status === "filtré" && legal.legalOnly, legal.reason ?? "");
+    // Poids plafonné à 0,2 avant le bonus de secteur : toujours sous un vrai signal de la même entreprise.
+    const real = verdictOf("dbp");
+    check("SAS→EURL : poids plus faible qu'un vrai signal", legal.weight < real.weight && legal.weight <= 0.35, `${legal.weight} vs ${real.weight}`);
     // DBP MEDICAL et GLOBAL 2F passent le FILTRE : l'annuaire ne porte ni
     // l'opposition à la prospection (il rend « O ») ni l'effectif zéro (il rend
     // « NN »). Les deux sont écartés à l'étage 4, sur les données Pappers —
@@ -56,7 +64,8 @@ const verdictOf = (key: keyof typeof CASES) => {
     // déclaré : la nouvelle règle B2C l'écarte dès le filtre. Son effectif zéro,
     // lui, reste invisible à l'annuaire — c'est l'étage 4 qui le voit.
     const global = verdictOf("global2f");
-    check("GLOBAL 2F : écarté, commerce de détail sous 20 salariés", global.status === "rejeté" && /commerce de détail/.test(global.reason ?? ""), global.reason ?? "");
+    // Depuis le 30/09/2026, tout le commerce de détail (NAF 47) est exclu d'office.
+    check("GLOBAL 2F : écarté, commerce de détail (NAF 47)", global.status === "rejeté" && /secteur exclu \(NAF 47/.test(global.reason ?? ""), global.reason ?? "");
     const adviso = verdictOf("adviso");
     check("ADVISO / Groupe Échelle : rejeté (client)", adviso.status === "rejeté" && /client/.test(adviso.reason ?? ""), adviso.reason ?? "");
     const delica = verdictOf("delica");
@@ -104,12 +113,16 @@ const verdictOf = (key: keyof typeof CASES) => {
       const identity = toIdentity(signal, company!);
       return { id, signal, identity, verdict: filterSignal(signal, identity, { now: TODAY }) };
     };
-    const devesa = settle(make("devesa", "d"), { id: "d", utilisable: true, sujet_est_l_entreprise: true, type: "autre", pain_probable: "x", accroche_possible: "y", score: 5, raison: "r" });
-    check("DEVESA : score plafonné à 3, non retenu", devesa.triage?.score === 3 && !devesa.retained);
+    const legalSignal = CASES.devesa.signal;
+    const legalIdentity = toIdentity(legalSignal, CASES.dbp.company!);
+    const legalInput: TriageInput = { id: "d", signal: legalSignal, identity: legalIdentity, verdict: filterSignal(legalSignal, legalIdentity, { now: TODAY }) };
+    const devesa = settle(legalInput, { id: "d", utilisable: true, sujet_est_l_entreprise: true, type: "autre", pain_probable: "x", accroche_possible: "y", score: 5, raison: "r" });
+    check("modification juridique : score plafonné à 3, non retenu", devesa.triage?.score === 3 && !devesa.retained);
     const client = settle(make("growth", "c"), { id: "c", utilisable: true, sujet_est_l_entreprise: false, type: "croissance", pain_probable: "x", accroche_possible: "y", score: 5, raison: "parle de KLARSEN" });
     check("sujet ≠ l'entreprise (CHAMPEIL → KLARSEN) : rejeté", !client.retained && /client/.test(client.reason ?? ""));
     const job = settle(make("humanSight", "h"), { id: "h", utilisable: true, sujet_est_l_entreprise: true, type: "recrutement", pain_probable: "recrutement", accroche_possible: "Vous recrutez un ADV.", score: 4, raison: "r" });
-    check("offre : pain imposé par la table", job.triage?.pain_probable === "saisie des commandes et des devis");
+    // La table dicte la nature du pain ; le modèle y ajoute le contexte propre à l'entreprise.
+    check("offre : pain imposé par la table", job.triage?.pain_probable.startsWith("saisie des commandes et des devis") === true, job.triage?.pain_probable ?? "");
     check("offre : jamais le sujet de l'accroche", job.triage?.accroche_possible === "" && job.retained);
     check("item absent de la réponse : rejeté", settle(make("growth", "z"), undefined).reason === "tri indisponible pour ce signal");
 
@@ -119,11 +132,12 @@ const verdictOf = (key: keyof typeof CASES) => {
       calls += 1;
       if (calls === 1) return "pas du JSON";
       const ids = user.split("\n").map((line) => JSON.parse(line).id as string);
-      return JSON.stringify({ items: ids.map((id) => ({ id, utilisable: true, sujet_est_l_entreprise: true, type: "croissance", pain_probable: "p", accroche_possible: "a", score: 4, raison: "r" })) });
+      return JSON.stringify({ items: ids.map((id) => ({ id, utilisable: true, sujet_est_l_entreprise: true, type: "croissance", pain_probable: `pain propre à ${id}`, accroche_possible: "a", score: 4, raison: "r" })) });
     };
     const out = await triage(ask, inputs);
     check(`lots de ${TRIAGE_BATCH} : 45 signaux → 3 lots (+1 reprise)`, calls === 4, String(calls));
-    check("tous triés", out.length === 45 && out.every((item) => item.retained));
+    // Tous ont un verdict ; le quota de variété (45 signaux du même type) en écarte ensuite.
+    check("tous triés", out.length === 45 && out.every((item) => item.triage !== null));
   }
 
   console.log("\n5. Entonnoir complet sur faux Supabase");
@@ -152,7 +166,7 @@ const verdictOf = (key: keyof typeof CASES) => {
       JSON.stringify({
         items: user.split("\n").map((line) => {
           const item = JSON.parse(line) as { id: string; entreprise: string };
-          return { id: item.id, utilisable: true, sujet_est_l_entreprise: true, type: "croissance", pain_probable: "p", accroche_possible: "a", score: scores[item.entreprise] ?? 2, raison: "r" };
+          return { id: item.id, utilisable: true, sujet_est_l_entreprise: true, type: "croissance", pain_probable: `pain de ${item.entreprise}`, accroche_possible: "a", score: scores[item.entreprise] ?? 2, raison: "r" };
         }),
       });
     await runTriageStage(db, "u1", "run1", ask);

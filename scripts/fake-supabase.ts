@@ -43,6 +43,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
   private ignoreDuplicates = false;
   private sort: { column: string; ascending: boolean } | null = null;
   private max: number | null = null;
+  private offset = 0;
   private one: "single" | "maybe" | null = null;
 
   constructor(private db: FakeDb, private table: string) {}
@@ -80,13 +81,14 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
       const value = row[base];
       return key ? (value as Row | null | undefined)?.[key] : value;
     };
-    const tests = [...expression.matchAll(/([\w>-]+)\.(is|eq|lt|in)\.(\([^)]*\)|[^,]+)/g)].map(
+    const tests = [...expression.matchAll(/([\w>-]+)\.(is|eq|lt|in|like)\.(\([^)]*\)|[^,]+)/g)].map(
       ([, column, op, raw]) =>
         (row: Row) => {
           const value = read(row, column);
           if (op === "is") return (value ?? null) === null;
           if (op === "eq") return String(value) === raw;
           if (op === "lt") return value != null && String(value) < raw;
+          if (op === "like") return value != null && String(value).startsWith(raw.replace(/%$/, ""));
           return raw.slice(1, -1).split(",").includes(String(value));
         },
     );
@@ -96,11 +98,13 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
   lte(column: string, value: string) { return this.where((row) => String(row[column]) <= value); }
   gt(column: string, value: string) { return this.where((row) => String(row[column]) > value); }
   gte(column: string, value: string) { return this.where((row) => String(row[column]) >= value); }
+  /** Seul le PREMIER ordre compte (les suivants départagent : sans effet ici). */
   order(column: string, options: { ascending?: boolean } = {}) {
-    this.sort = { column, ascending: options.ascending !== false };
+    if (!this.sort) this.sort = { column, ascending: options.ascending !== false };
     return this;
   }
   limit(count: number) { this.max = count; return this; }
+  range(from: number, to: number) { this.offset = from; this.max = to - from + 1; return this; }
   single() { this.one = "single"; return this; }
   maybeSingle() { this.one = "maybe"; return this; }
 
@@ -134,7 +138,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
         const { column, ascending } = this.sort;
         result.sort((a, b) => (String(a[column]) < String(b[column]) ? -1 : 1) * (ascending ? 1 : -1));
       }
-      if (this.max !== null) result = result.slice(0, this.max);
+      if (this.max !== null) result = result.slice(this.offset, this.offset + this.max);
       if (this.head) return { data: null, error: null, count: matches.length };
       return this.finish(this.project(result), this.counted ? matches.length : null);
     }

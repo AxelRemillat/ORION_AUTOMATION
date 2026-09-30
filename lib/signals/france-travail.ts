@@ -55,6 +55,30 @@ export const FT_ROME_CODES = [
 ] as const;
 
 /**
+ * Familles de métiers de l'ENTONNOIR « signaux d'abord » : le BACK-OFFICE.
+ *
+ * L'entonnoir vend l'automatisation des tâches répétitives d'une PME ; sa
+ * table des pains (lib/funnel/pain-map.ts) reconnaît ADV, commerciaux
+ * sédentaires, comptables, acheteurs, magasiniers, secrétariat, RH, qualité,
+ * planification. Avec les codes ci-dessus (informatique, R&D), le run du
+ * 30/09/2026 ne ramenait que 4 offres utiles sur 139 : des développeurs et des
+ * ingénieurs, dont l'intitulé ne révèle aucune tâche à automatiser.
+ */
+export const FUNNEL_ROME_CODES = [
+  "D1401", // Assistanat commercial (ADV)
+  "D1407", // Relation technico-commerciale (devis)
+  "M1607", // Secrétariat
+  "M1602", // Opérations administratives
+  "M1203", // Comptabilité
+  "M1101", // Achats
+  "N1103", // Magasinage et préparation de commandes
+  "N1301", // Conception et organisation de la chaîne logistique (approvisionnement)
+  "H1401", // Management et ingénierie gestion industrielle et logistique (planification)
+  "M1501", // Assistanat en ressources humaines
+  "H1502", // Management et ingénierie qualité industrielle
+] as const;
+
+/**
  * Ce qu'il faut vraiment pour decider : deux cles, pas tout l'environnement.
  * Typer `NodeJS.ProcessEnv` obligeait les tests a fabriquer un faux `NODE_ENV`
  * pour une fonction qui ne le lit pas.
@@ -204,6 +228,8 @@ export interface JobQuery {
   max: number;
   today?: Date;
   env?: EnvLike;
+  /** Codes ROME demandés (défaut : FT_ROME_CODES, informatique et ingénierie). */
+  romeCodes?: readonly string[];
 }
 
 /** L'API attend un ISO complet en UTC, pas une date seule. */
@@ -270,7 +296,7 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
       departement: query.departement,
       minCreationDate: window.min,
       maxCreationDate: window.max,
-      codeROME: FT_ROME_CODES.join(","),
+      codeROME: (query.romeCodes ?? FT_ROME_CODES).join(","),
       range: `${start}-${end}`,
       sort: "1",
     });
@@ -279,7 +305,9 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
     const page = await cached<SearchResponse>(
       // La borne haute bouge à chaque appel : elle est volontairement HORS de
       // la clé, sinon le cache d'un jour ne servirait jamais.
-      `france-travail:v2:${query.departement}:${query.days}:${start}-${end}:${window.min.slice(0, 10)}`,
+      // Des codes ROME différents = des offres différentes : ils entrent dans la
+      // clé (la clé par défaut ne change pas, pour garder le cache existant).
+      `france-travail:v2:${query.romeCodes ? `${query.romeCodes.join("+")}:` : ""}${query.departement}:${query.days}:${start}-${end}:${window.min.slice(0, 10)}`,
       async () => {
         await spacerFor("france-travail", FT_RATE_PER_SECOND).wait();
         const response = await fetchJson<SearchResponse>(
