@@ -5,6 +5,7 @@ import { loadOffer } from "@/lib/offer/read";
 import { signatureFor } from "@/lib/offer/model";
 import { blockReason, normalizeSubject, preflight, type PreflightResult } from "@/lib/mail-preflight";
 import { buildDeliverability } from "./deliverability";
+import { offWeekend } from "./paris-time";
 import { RELANCE_TYPES, replySinceLastSend } from "./relances";
 
 /**
@@ -261,7 +262,8 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
   const delay = NEXT_REMINDER_DAYS[message.type];
   let reminderDueAt: string | null = null;
   if (delay) {
-    reminderDueAt = new Date(now.getTime() + delay * 86_400_000).toISOString();
+    // Une relance ne tombe jamais un samedi ou un dimanche : repoussée au lundi.
+    reminderDueAt = offWeekend(new Date(now.getTime() + delay * 86_400_000)).toISOString();
     await db
       .from("reminders")
       .insert({ prospect_id: message.prospect_id, user_id: message.user_id, due_at: reminderDueAt, done: false });

@@ -17,7 +17,10 @@ import {
   trashMessage,
 } from "../lib/outbox/trash";
 import { markResultsSeen, unseenResults, upcomingSends } from "../lib/outbox/feed";
-import { formatScheduled, parisToUtc, scheduleError, scheduleShortcuts } from "../lib/outbox/paris-time";
+import { formatParisDay, formatScheduled, offWeekend, parisToUtc, scheduleError, scheduleShortcuts } from "../lib/outbox/paris-time";
+import { nextAction } from "../app/(app)/suivi/_lib/next-action";
+import { buildRows } from "../app/(app)/suivi/_lib/rows";
+import type { Message, Prospect, Reminder } from "../types";
 import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 
@@ -280,6 +283,98 @@ async function main() {
     const [, nextMonday] = scheduleShortcuts(new Date("2026-09-28T10:00:00Z"));
     check("« Lundi 9h » un lundi = lundi suivant", nextMonday.at.toISOString() === "2026-10-05T07:00:00.000Z", nextMonday.at);
     check("libellé « lun. 9h00 »", formatScheduled("2026-09-28T07:00:00Z", saturday) === "lun. 9h00", formatScheduled("2026-09-28T07:00:00Z", saturday));
+  }
+
+  // -------------------------------------------------------------------------
+  console.log("\nRelance hors week-end");
+  {
+    const iso = (at: Date) => at.toISOString();
+    check("samedi → lundi, même heure", iso(offWeekend(new Date("2026-10-03T13:14:08.947Z"))) === "2026-10-05T13:14:08.947Z", offWeekend(new Date("2026-10-03T13:14:08.947Z")));
+    check("dimanche → lundi, même heure", iso(offWeekend(new Date("2026-10-04T13:14:08.947Z"))) === "2026-10-05T13:14:08.947Z");
+    check("vendredi inchangé", iso(offWeekend(new Date("2026-10-02T07:00:03Z"))) === "2026-10-02T07:00:03.000Z");
+    // Dimanche 25/10 : passage à l'heure d'hiver, 11h à Paris reste 11h le lundi.
+    check("changement d'heure : 11h reste 11h", iso(offWeekend(new Date("2026-10-25T10:00:00Z"))) === "2026-10-26T10:00:00.000Z", offWeekend(new Date("2026-10-25T10:00:00Z")));
+    check("libellé du jour « lun. 05/10 »", formatParisDay("2026-10-05T13:14:08Z") === "lun. 05/10", formatParisDay("2026-10-05T13:14:08Z"));
+  }
+  {
+    // Intro partie un mercredi : J+4 tombe un dimanche, la relance est posée au lundi.
+    const { fake, db } = seed();
+    const web = n8n();
+    const wednesday = new Date("2026-09-30T13:14:08Z");
+    const sent = await sendNow(db, { userId: "u1", messageId: "m1", prospectId: "acme", to: "a@acme.fr" }, { ...web.deps, now: wednesday });
+    const reminder = fake.rows("reminders").find((row) => row.prospect_id === "acme" && row.done === false);
+    check("envoi du mercredi : relance J+4 posée au lundi", sent.ok && reminder?.due_at === "2026-10-05T13:14:08.000Z", reminder?.due_at);
+    const { fake: fake2, db: db2 } = seed();
+    const monday = await sendNow(db2, { userId: "u1", messageId: "m1", prospectId: "acme", to: "a@acme.fr" }, { ...n8n().deps, now: T0 });
+    const reminder2 = fake2.rows("reminders").find((row) => row.prospect_id === "acme" && row.done === false);
+    check("envoi du lundi : relance le vendredi, inchangée", monday.ok && reminder2?.due_at === new Date(T0.getTime() + 4 * DAY).toISOString(), reminder2?.due_at);
+  }
+
+  // -------------------------------------------------------------------------
+  console.log("\nProchaine action (Suivi)");
+  {
+    const now = new Date("2026-09-30T16:00:00Z"); // mercredi 18h à Paris
+    const row = (p: Record<string, unknown>, messages: Record<string, unknown>[], reminders: Record<string, unknown>[] = []) =>
+      buildRows(
+        [prospect(String(p.id), p) as unknown as Prospect],
+        messages as unknown as Message[],
+        reminders as unknown as Reminder[],
+        [],
+      )[0];
+    const realNow = Date.now;
+    Date.now = () => now.getTime();
+    const RealDate = Date;
+    // buildRows prend « maintenant » par défaut : on fige l'horloge pour les libellés.
+    globalThis.Date = class extends RealDate {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) super(now.getTime());
+        else super(...(args as [string]));
+      }
+      static now() { return now.getTime(); }
+    } as DateConstructor;
+    try {
+      // ARTFLEX : intro partie mercredi, brouillon d'évaluation réécrit ensuite, relance au dimanche.
+      const artflex = row({ id: "artflex", status: "contacte" }, [
+        draft("a-sent", "artflex", { status: "sent", send_status: "sent", sent_at: "2026-09-30T13:14:08.947Z" }),
+        draft("a-draft", "artflex", { created_at: "2026-09-30T14:43:03Z" }),
+      ], [{ id: "r1", prospect_id: "artflex", user_id: "u1", due_at: "2026-10-04T13:14:08.947Z", done: false }]);
+      check("ARTFLEX : « Relance J+4 le lun. 05/10 »", artflex.action.label === "Relance J+4 le lun. 05/10", artflex.action);
+      check("ARTFLEX : le brouillon d'une intro déjà partie n'est pas « à envoyer »", artflex.draftsCount === 0);
+
+      // HUMAN SIGHT : contacté, mais opposé à la prospection (Pappers).
+      const human = row({ id: "human", status: "contacte", key_figures: { refuses_prospecting: true } }, [
+        draft("h-sent", "human", { status: "sent", send_status: "sent", sent_at: "2026-09-28T07:00:03Z" }),
+        draft("h-draft", "human"),
+      ], [{ id: "r2", prospect_id: "human", user_id: "u1", due_at: "2026-10-02T07:00:03Z", done: false }]);
+      check("HUMAN SIGHT : « Aucune relance : opposé à la prospection »", human.action.label === "Aucune relance : opposé à la prospection", human.action);
+
+      // BOUVET CARTIER : intro programmée jeudi 9h.
+      const bouvet = row({ id: "bouvet", status: "a_contacter" }, [
+        draft("b-sched", "bouvet", { send_status: "scheduled", scheduled_at: "2026-10-01T07:00:00Z" }),
+      ]);
+      check("BOUVET : « Envoi programmé jeu. 9h00 »", bouvet.action.label === "Envoi programmé jeu. 9h00", bouvet.action);
+
+      // Témoins : un vrai brouillon à envoyer, une relance du jour, un prospect sans rien.
+      const fresh = row({ id: "fresh", status: "a_contacter" }, [draft("f-draft", "fresh")]);
+      check("pas encore contacté + brouillon : « Envoyer le brouillon prêt »", fresh.action.label === "Envoyer le brouillon prêt");
+      const relanceDraft = row({ id: "rd", status: "contacte" }, [
+        draft("rd-sent", "rd", { status: "sent", send_status: "sent", sent_at: "2026-09-26T07:00:00Z" }),
+        draft("rd-draft", "rd", { type: "relance_1" }),
+      ]);
+      check("relance rédigée : « Envoyer le brouillon prêt »", relanceDraft.action.label === "Envoyer le brouillon prêt");
+      const today = nextAction({ status: "contacte", draftsCount: 0, nextDueAt: "2026-09-30T07:00:00Z", lastSentType: "intro", now });
+      check("relance échue : « Relancer aujourd'hui »", today.label === "Relancer aujourd'hui" && today.urgency === "due");
+      const second = nextAction({ status: "relance_1", draftsCount: 0, nextDueAt: "2026-10-07T07:00:00Z", lastSentType: "relance_1", now });
+      check("après la 1re relance : « Relance J+7 le mer. 07/10 »", second.label === "Relance J+7 le mer. 07/10", second);
+      const blocked = nextAction({ status: "contacte", draftsCount: 1, nextDueAt: null, lastSentType: "intro", opposition: "do_not_contact", now });
+      check("ne plus contacter : aucune relance", blocked.label === "Aucune relance : ne plus contacter");
+      const won = nextAction({ status: "gagne", draftsCount: 1, nextDueAt: null, scheduledAt: "2026-10-01T07:00:00Z", now });
+      check("gagné : « Contrat signé » quoi qu'il reste", won.label === "Contrat signé");
+      check("nouveau sans rien : « Préparer l'email d'approche »", row({ id: "n", status: "nouveau" }, []).action.label === "Préparer l'email d'approche");
+    } finally {
+      globalThis.Date = RealDate;
+      Date.now = realNow;
+    }
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en échec.\n`);

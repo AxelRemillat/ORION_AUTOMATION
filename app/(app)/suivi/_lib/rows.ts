@@ -1,6 +1,6 @@
 import type { Deal, Message, Prospect, ProspectStatus, Reminder } from "@/types";
 import { dealValue, type DealValue } from "./estimates";
-import { nextAction, type NextAction } from "./next-action";
+import { nextAction, type NextAction, type Opposition } from "./next-action";
 import { stageOf } from "./stages";
 
 /** Formes aplaties passées du serveur aux composants clients (props sérialisables). */
@@ -21,6 +21,8 @@ export interface ProspectRow {
   nextDueAt: string | null;
   value: DealValue;
   action: NextAction;
+  /** Faits dont dépend la prochaine action, gardés pour la recalculer côté client. */
+  actionFacts: ActionFacts;
   /** Prochain envoi programmé (ISO), ou le dernier échec d'envoi. */
   sendState: ProspectSendState | null;
 }
@@ -44,6 +46,45 @@ export function prospectSendState(own: Message[]): ProspectSendState | null {
   }
   const failed = own.find((message) => message.send_status === "failed" && !message.deleted_at);
   return failed ? { sendStatus: "failed", scheduledAt: null, sendError: failed.send_error ?? null } : null;
+}
+
+export interface ActionFacts {
+  draftsCount: number;
+  scheduledAt: string | null;
+  lastSentType: Message["type"] | null;
+  opposition: Opposition | null;
+}
+
+/**
+ * Faits d'un prospect pour `nextAction`. Un brouillon d'une étape déjà partie
+ * (réécriture, brouillon d'évaluation) n'est pas « à envoyer » : c'est la
+ * relance qui compte. Un programmé partira seul : ce n'est plus un brouillon.
+ */
+export function actionFacts(prospect: Prospect, own: Message[]): ActionFacts {
+  const live = own.filter((message) => !message.deleted_at);
+  const sent = live
+    .filter((message) => message.status === "sent")
+    .sort((a, b) => (a.sent_at ?? a.created_at).localeCompare(b.sent_at ?? b.created_at));
+  const sentTypes = new Set(sent.map((message) => message.type));
+  const draftsCount = live.filter(
+    (message) =>
+      message.status === "draft" &&
+      message.send_status !== "scheduled" &&
+      message.send_status !== "sending" &&
+      !sentTypes.has(message.type),
+  ).length;
+  const scheduled = prospectSendState(live);
+  const opposition: Opposition | null = prospect.do_not_contact
+    ? "do_not_contact"
+    : prospect.key_figures?.refuses_prospecting === true
+      ? "refuses_prospecting"
+      : null;
+  return {
+    draftsCount,
+    scheduledAt: scheduled?.sendStatus === "scheduled" ? scheduled.scheduledAt : null,
+    lastSentType: sent.at(-1)?.type ?? null,
+    opposition,
+  };
 }
 
 export interface DueReminderRow {
@@ -88,11 +129,7 @@ export function buildRows(
       .filter((message) => message.status === "sent" && message.sent_at)
       .map((message) => message.sent_at as string)
       .sort();
-    // Un programmé partira seul : ce n'est plus un brouillon « à envoyer ».
-    const draftsCount = own.filter(
-      (message) =>
-        message.status === "draft" && message.send_status !== "scheduled" && message.send_status !== "sending",
-    ).length;
+    const facts = actionFacts(prospect, own);
     const nextDueAt = nextDue.get(prospect.id) ?? null;
 
     return {
@@ -103,11 +140,12 @@ export function buildRows(
       status: prospect.status,
       stageKey: stageOf(prospect.status).key,
       messagesCount: own.length,
-      draftsCount,
+      draftsCount: facts.draftsCount,
       lastActivity: sentDates.at(-1) ?? prospect.created_at,
       nextDueAt,
       value: dealValue(dealsByProspect.get(prospect.id) ?? []),
-      action: nextAction({ status: prospect.status, draftsCount, nextDueAt }),
+      action: nextAction({ status: prospect.status, nextDueAt, ...facts }),
+      actionFacts: facts,
       sendState: prospectSendState(own),
     };
   });
