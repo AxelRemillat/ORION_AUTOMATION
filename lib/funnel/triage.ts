@@ -215,8 +215,32 @@ export async function triage(ask: TriageAsk, inputs: readonly TriageInput[]): Pr
     const byId = new Map(items.map((item) => [item.id, item]));
     outcomes.push(...batch.map((input) => settle(input, byId.get(input.id))));
   }
-  // Pains passe-partout plafonnés, puis variété : un seul type de signal ne
-  // peut pas rafler les retenus (cf. quota.ts).
+  // Pains passe-partout plafonnés, une offre par entreprise, puis variété : un
+  // seul type de signal ne peut pas rafler les retenus (cf. quota.ts).
   const familyOf = new Map(inputs.map((input) => [input.id, signalFamily(input.signal)]));
-  return applyTypeQuota(capGenericPains(outcomes), (outcome) => familyOf.get(outcome.id) ?? "autre");
+  const sirenOf = new Map(inputs.map((input) => [input.id, input.identity.siren]));
+  return applyTypeQuota(onePerCompany(capGenericPains(outcomes), sirenOf), (outcome) => familyOf.get(outcome.id) ?? "autre");
+}
+
+/**
+ * UNE ENTREPRISE, UN RETENU.
+ *
+ * Rejeu national du 30/09/2026 : AJASSOCIES retenue trois fois (trois offres de
+ * comptable copropriété), TYLS LAVAL deux fois. Le creusage refusait les
+ * suivantes (« déjà en portefeuille »), mais elles prenaient des places dans
+ * la liste et dans le quota. La mieux notée reste ; les autres sont écartées.
+ */
+export function onePerCompany(outcomes: readonly TriageOutcome[], sirenOf: ReadonlyMap<string, string | null | undefined>): TriageOutcome[] {
+  const best = new Map<string, TriageOutcome>();
+  for (const outcome of outcomes) {
+    const siren = sirenOf.get(outcome.id);
+    if (!outcome.retained || !siren) continue;
+    const current = best.get(siren);
+    if (!current || (outcome.triage?.score ?? 0) > (current.triage?.score ?? 0)) best.set(siren, outcome);
+  }
+  return outcomes.map((outcome) => {
+    const siren = sirenOf.get(outcome.id);
+    if (!outcome.retained || !siren || best.get(siren)?.id === outcome.id) return outcome;
+    return { ...outcome, retained: false, reason: "doublon : une autre offre de la même entreprise est déjà retenue" };
+  });
 }

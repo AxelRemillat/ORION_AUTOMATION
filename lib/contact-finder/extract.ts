@@ -10,9 +10,37 @@ import { domainOfEmail, isServiceProvider } from "./domains";
 
 const ENTITY: Record<string, string> = { "&#64;": "@", "&#x40;": "@", "&commat;": "@", "&#46;": ".", "&period;": "." };
 
+/** Entités numériques (`&#99;`, `&#x63;`) → caractère. */
+const decodeEntities = (value: string) =>
+  value
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(Number(dec)));
+
+/**
+ * ADRESSES MASQUÉES PAR JOOMLA (« email cloaking »).
+ *
+ * Joomla n'écrit jamais l'adresse dans la page : un script la reconstruit
+ * morceau par morceau, entités HTML comprises :
+ *   var addy8f2 = 'c&#111;nt&#97;ct' + '&#64;';
+ *   addy8f2 = addy8f2 + 'exemple' + '&#46;' + 'fr';
+ * Une lecture du texte ne voyait AUCUNE adresse, et la fiche partait « à
+ * compléter » alors que le site en publiait une. On recolle les littéraux de
+ * chaque variable `addy…`, dans l'ordre, puis on décode les entités.
+ */
+export function decodeJoomlaCloak(html: string): string[] {
+  const parts = new Map<string, string>();
+  for (const match of html.matchAll(/(?:var\s+)?(addy[\w]+)\s*=\s*((?:\1\s*\+\s*)?(?:'[^']*'|"[^"]*")(?:\s*\+\s*(?:'[^']*'|"[^"]*"))*)\s*;/g)) {
+    const [, name, expression] = match;
+    const literals = [...expression.matchAll(/'([^']*)'|"([^"]*)"/g)].map((item) => item[1] ?? item[2] ?? "").join("");
+    parts.set(name, (expression.trim().startsWith(name) ? parts.get(name) ?? "" : "") + literals);
+  }
+  return [...parts.values()].map((value) => decodeEntities(value).trim()).filter((value) => value.includes("@"));
+}
+
 /** Remet en clair les formes masquées courantes. */
 export function deobfuscate(text: string): string {
-  let out = text;
+  const cloaked = /addy[\w]+\s*=/.test(text) ? decodeJoomlaCloak(text) : [];
+  let out = cloaked.length ? `${text}\n${cloaked.join("\n")}` : text;
   for (const [entity, char] of Object.entries(ENTITY)) out = out.split(entity).join(char);
   return out
     .replace(/\s*[[({]\s*(?:at|arobase|@)\s*[\])}]\s*/gi, "@")
@@ -36,6 +64,28 @@ export function extractEmails(content: string): string[] {
     found.add(email);
   }
   return [...found];
+}
+
+/**
+ * Téléphones français d'une page : liens `tel:` d'abord (explicites), puis
+ * numéros écrits (01 23 45 67 89, 01.23.45.67.89, +33 1 23 45 67 89).
+ * Rendus au format « 01 23 45 67 89 ». Les numéros surtaxés (08 9x) sont écartés.
+ */
+export function extractPhones(html: string): string[] {
+  const found: string[] = [];
+  const add = (raw: string) => {
+    let digits = raw.replace(/[^\d+]/g, "");
+    if (digits.startsWith("+33")) digits = `0${digits.slice(3)}`;
+    else if (digits.startsWith("0033")) digits = `0${digits.slice(4)}`;
+    digits = digits.replace(/^0\(0\)/, "0");
+    if (!/^0[1-9]\d{8}$/.test(digits) || /^089/.test(digits)) return;
+    const pretty = digits.replace(/(\d{2})(?=\d)/g, "$1 ");
+    if (!found.includes(pretty)) found.push(pretty);
+  };
+  for (const match of html.matchAll(/href=["']tel:([^"']+)["']/gi)) add(match[1]);
+  const text = html.replace(/<[^>]+>/g, " ");
+  for (const match of text.matchAll(/(?:\+33\s?(?:\(0\)\s?)?|0)[1-9](?:[\s.-]?\d{2}){4}/g)) add(match[0]);
+  return found;
 }
 
 /** Adresses de service : on les garde, mais elles ne désignent personne. */

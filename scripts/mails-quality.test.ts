@@ -26,7 +26,7 @@ import { suggestSendTime } from "../lib/emails/send-time";
 import { buildGreeting } from "../app/api/emails/generate/prompt";
 import { latestIntroDraft } from "../lib/jobs/handlers/email";
 import { toDomain } from "../lib/contact-finder/domains";
-import { buildJudgePrompt, generatedIsA, goalReached, parseVerdict, renderReport } from "./eval-mails-core";
+import { buildJudgePrompt, generatedIsA, goalReached, majorityVerdict, parseVerdict, renderReport } from "./eval-mails-core";
 import type { DerivedFact } from "../lib/emails/derived-facts";
 import type { Db } from "../lib/jobs/runner";
 
@@ -232,6 +232,14 @@ void (async () => {
   }));
   check("3 sur 4 → objectif atteint", goalReached(results));
   check("rapport rendu", renderReport(results, { date: "2026-09-27", judgeModel: "gpt-6-sol" }).includes("atteint"));
+
+  console.log("\nÉval : verdict majoritaire sur 3 passages (BRIOL gagnait puis perdait)");
+  {
+    const v = (outcome: "gagne" | "perd" | "egalite") => ({ ...parseVerdict('{"global":"A"}', true)!, outcome });
+    check("gagne, perd, gagne → gagne", majorityVerdict([v("gagne"), v("perd"), v("gagne")])?.outcome === "gagne");
+    check("gagne, perd, égalité → égalité (pas de majorité)", majorityVerdict([v("gagne"), v("perd"), v("egalite")])?.outcome === "egalite");
+    check("aucun verdict → null", majorityVerdict([]) === null);
+  }
 
   console.log("\nSite officiel : seconde preuve par le SIREN, même espacé (ARTFLEX, 30/09/2026)");
   {

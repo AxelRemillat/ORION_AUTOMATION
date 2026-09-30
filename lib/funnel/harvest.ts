@@ -95,7 +95,9 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
   // dont l'intitulé révèle un pain est le signal le plus direct, et c'est lui
   // qui doit passer si une source vient à manquer de temps ou de débit.
   for (const only of ["france-travail", "bodacc"] as const) {
-    for (const departement of criteria.departements) {
+    // Aucun département : UNE moisson nationale (« Toute la France »).
+    const zones = criteria.departements.length ? criteria.departements : [""];
+    for (const departement of zones) {
       const collected = await collectSignals({
         departement,
         tranches: [],

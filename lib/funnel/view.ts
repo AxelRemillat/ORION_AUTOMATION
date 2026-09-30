@@ -30,6 +30,10 @@ export interface FunnelCard {
   revenue: string | null;
   contact: ContactBadge | null;
   email: string | null;
+  /** Adresse gardée hors du domaine du site, sur la seule foi de Hunter « valid ». */
+  emailDoubtful: boolean;
+  /** Téléphone du site : sans email, la carte part dans « À appeler ». */
+  phone: string | null;
   prospectId: string | null;
   publication: "pret" | "a_completer" | null;
   statut: SignalCandidateRow["statut"];
@@ -72,7 +76,7 @@ export function toCard(row: SignalCandidateRow, now = new Date()): FunnelCard {
   const facts = (row.facts ?? {}) as unknown as SignalFacts;
   const identity = row.identity as unknown as Partial<Identity> | null;
   const triage = row.triage as unknown as Triage | null;
-  const contact = row.contact as { email?: string; badge?: ContactBadge } | null;
+  const contact = row.contact as { email?: string; badge?: ContactBadge; doubtful?: boolean; phone?: string } | null;
   return {
     id: row.id,
     companyName: identity?.name || row.company_name || "Entreprise",
@@ -92,6 +96,8 @@ export function toCard(row: SignalCandidateRow, now = new Date()): FunnelCard {
     revenue: identity ? revenueLabel(identity.revenue, identity.revenueYear, now) : null,
     contact: contact?.badge ?? null,
     email: contact?.email ?? null,
+    emailDoubtful: contact?.doubtful === true,
+    phone: contact?.phone ?? null,
     prospectId: row.prospect_id,
     publication: row.publication,
     statut: row.statut,

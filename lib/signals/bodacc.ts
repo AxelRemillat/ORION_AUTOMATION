@@ -146,11 +146,14 @@ export function sinceDate(days: number, today = new Date()): string {
  */
 export function whereClause(departement: string, days: number, today?: Date): string {
   const families = BODACC_FAMILIES.map((family) => `"${family}"`).join(", ");
+  // Département vide : toute la France (option de l'entonnoir).
   return [
-    `numerodepartement="${departement}"`,
+    departement ? `numerodepartement="${departement}"` : null,
     `dateparution>=date'${sinceDate(days, today)}'`,
     `familleavis_lib in (${families})`,
-  ].join(" AND ");
+  ]
+    .filter(Boolean)
+    .join(" AND ");
 }
 
 export interface BodaccQuery {

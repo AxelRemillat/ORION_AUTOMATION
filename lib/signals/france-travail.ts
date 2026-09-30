@@ -300,6 +300,8 @@ export async function recentJobSignals(query: JobQuery): Promise<Result<JobSigna
       range: `${start}-${end}`,
       sort: "1",
     });
+    // Département vide : toute la France (option de l'entonnoir).
+    if (!query.departement) params.delete("departement");
     const url = `${SEARCH_URL}?${params.toString()}`;
 
     const page = await cached<SearchResponse>(

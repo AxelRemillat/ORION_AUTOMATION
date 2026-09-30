@@ -28,6 +28,9 @@ export function offTargetReason(prospect: Pick<Prospect, "key_figures" | "size_r
     noStaff: figures.no_staff === true,
     capitalEur: num(figures.capital_eur),
     equityEur: num(figures.equity_eur),
+    headcount: num(figures.headcount),
+    largeGroup: figures.is_large_group_subsidiary === true,
+    foreignParent: figures.parent_foreign === true,
   };
   const verdict = disqualify(facts);
   if (verdict) return verdict.reason;

@@ -22,11 +22,13 @@ import {
   buildJudgePrompt,
   generatedIsA,
   goalReached,
+  majorityVerdict,
   parseVerdict,
   renderReport,
   type CaseResult,
   type EvalCase,
   type MailText,
+  type Verdict,
 } from "./eval-mails-core";
 
 function loadEnv(file = ".env.local"): void {
@@ -163,10 +165,18 @@ async function diagnose(prospectId: string): Promise<string[]> {
   ];
 }
 
-async function judge(caseId: string, company: string, generated: MailText, reference: MailText, signature: string) {
+/**
+ * Passages par cas (génération + jugement), verdict majoritaire. Le juge
+ * gpt-6-sol refuse `temperature: 0` (lib/ai/params.ts) : la majorité est ce
+ * qui stabilise l'évaluation. EVAL_MAILS_PASSES=1 pour un tour rapide.
+ */
+const PASSES = Math.max(1, Math.min(5, Number(process.env.EVAL_MAILS_PASSES) || 3));
+
+async function judge(caseId: string, company: string, generated: MailText, reference: MailText, signature: string, pass = 0) {
   const { chatJson } = await import("@/lib/ai/chat");
   const { getOpenAI } = await import("@/lib/openai");
-  const generatedA = generatedIsA(caseId);
+  // La position alterne d'un passage à l'autre : un biais « A » s'annule.
+  const generatedA = generatedIsA(caseId) !== (pass % 2 === 1);
   const [a, b] = generatedA ? [generated, reference] : [reference, generated];
   const { system, user } = buildJudgePrompt(a, b, company, signature);
   const raw = await chatJson({
@@ -234,17 +244,40 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if ("error" in generated) {
-      results.push({ ...base, generated: null, verdict: null, error: generated.error });
-      continue;
-    }
     if (!reference) {
-      results.push({ ...base, generated, verdict: null, error: "aucune référence (ni JSON, ni mail programmé)" });
+      results.push({ ...base, generated: "error" in generated ? null : generated, verdict: null, error: "aucune référence (ni JSON, ni mail programmé)" });
       continue;
     }
-    const verdict = await judge(item.id, prospect.company_name, generated, reference, signature);
-    results.push({ ...base, generated, verdict, error: verdict ? undefined : "verdict du juge illisible" });
-    console.log(`  → ${verdict?.outcome ?? "?"} : ${verdict?.reasons ?? ""}`);
+    // PASSES passages : le premier mail est déjà généré, les suivants sont régénérés.
+    // Un premier refus ne clôt plus le cas (BRIOL, 30/09 : aucun verdict alors
+    // que les passages suivants pouvaient aboutir). Les refus sont comptés.
+    const runs: { generated: MailText; verdict: Verdict }[] = [];
+    const refusals: string[] = [];
+    for (let pass = 0; pass < PASSES; pass += 1) {
+      const mail = pass === 0 ? generated : await generate(prospect);
+      if ("error" in mail) {
+        refusals.push(mail.error);
+        console.log(`  passage ${pass + 1} : génération refusée (${mail.error.slice(0, 80)})`);
+        continue;
+      }
+      const passVerdict = await judge(item.id, prospect.company_name, mail, reference, signature, pass);
+      if (passVerdict) runs.push({ generated: mail, verdict: passVerdict });
+      console.log(`  passage ${pass + 1} : ${passVerdict?.outcome ?? "verdict illisible"}`);
+    }
+    const verdict = majorityVerdict(runs.map((run) => run.verdict));
+    const shown = runs.find((run) => run.verdict.outcome === verdict?.outcome)?.generated ?? null;
+    results.push({
+      ...base,
+      generated: shown,
+      verdict,
+      passes: runs.map((run) => run.verdict.outcome),
+      error: verdict
+        ? refusals.length
+          ? `${refusals.length} génération(s) refusée(s) sur ${PASSES} : ${refusals[0].slice(0, 120)}`
+          : undefined
+        : refusals[0] ?? "aucun verdict exploitable",
+    });
+    console.log(`  → ${verdict?.outcome ?? "?"} (majorité sur ${runs.length}) : ${verdict?.reasons ?? ""}`);
   }
 
   const date = new Date().toISOString().slice(0, 10);

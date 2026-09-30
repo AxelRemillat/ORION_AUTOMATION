@@ -150,6 +150,20 @@ async function persist(
     });
   }
 
+  // Téléphone du site et doute sur l'adresse : dans key_figures (pas de
+  // colonne dédiée). Un téléphone déjà connu n'est pas remplacé.
+  const figures = { ...(prospect.key_figures ?? {}) } as Record<string, unknown>;
+  let figuresChanged = false;
+  if (result.phone && !figures.phone) {
+    figures.phone = result.phone;
+    figuresChanged = true;
+  }
+  if (result.email && better && Boolean(figures.email_doubtful) !== Boolean(result.doubtful)) {
+    figures.email_doubtful = Boolean(result.doubtful);
+    figuresChanged = true;
+  }
+  if (figuresChanged) patch.key_figures = figures as Prospect["key_figures"];
+
   const { error } = await db.from("prospects").update(patch).eq("id", prospect.id);
   if (error) throw new Error(`fiche non mise à jour : ${error.message}`);
 }

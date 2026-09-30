@@ -142,6 +142,17 @@ export interface ProspectKeyFigures {
   parent_group_url?: string;
   /** Vrai quand un indice sérieux rattache l'entreprise à un grand groupe. */
   is_large_group_subsidiary?: boolean;
+  /**
+   * Dirigeant personne morale SANS SIREN : une société étrangère la contrôle
+   * (HÖRMANN FRANCE, filiale d'Hörmann KG). Hors cible : la décision est ailleurs.
+   */
+  parent_foreign?: boolean;
+  /** Téléphone lu sur le site (module contact) : sans email, la fiche est « à appeler ». */
+  phone?: string;
+  /** Adresse gardée hors du domaine du site, sur la seule foi de Hunter « valid ». */
+  email_doubtful?: boolean;
+  /** Pappers a répondu lors de l'enrichissement (opposition, groupe, effectif lus). */
+  pappers_read?: boolean;
   /** Ce qui a déclenché le drapeau ci-dessus, en clair. */
   group_evidence?: string[];
   /** Dirigeant personne physique retrouvé derrière une holding. */

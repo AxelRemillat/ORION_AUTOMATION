@@ -7,14 +7,17 @@
  * Exécution : `npm run test:funnel-qualite`.
  */
 import { FakeDb } from "./fake-supabase";
-import { examinationPlan } from "../lib/funnel/budget";
-import type { DigDeps } from "../lib/funnel/dig";
+import { bodaccRank, examinationPlan } from "../lib/funnel/budget";
+import { disqualify } from "../lib/funnel/eligible";
+import { offTargetReason } from "../lib/funnel/off-target";
+import { extractPhones } from "../lib/contact-finder/extract";
+import { digOne, type DigDeps } from "../lib/funnel/dig";
 import { DEFAULT_EXCLUDED_SECTORS, filterSignal } from "../lib/funnel/filter";
 import { applyTypeQuota, MAX_SHARE_PER_TYPE, signalFamily } from "../lib/funnel/quota";
 import { DEFAULT_PREFS } from "../lib/funnel/settings";
-import { MAX_LOOKUPS, runDigStage, runFilterStage } from "../lib/funnel/stages";
+import { GOVERNANCE_ONLY, MAX_LOOKUPS, runDigStage, runFilterStage } from "../lib/funnel/stages";
 import { NOT_EXAMINED, yieldBySource } from "../lib/funnel/store";
-import { capGenericPains, GENERIC_PAIN_MAX_SCORE, settle, userPrompt, type TriageInput, type TriageOutcome } from "../lib/funnel/triage";
+import { capGenericPains, GENERIC_PAIN_MAX_SCORE, onePerCompany, settle, userPrompt, type TriageInput, type TriageOutcome } from "../lib/funnel/triage";
 import type { HarvestedSignal, Identity, Triage } from "../lib/funnel/types";
 import type { SignalCandidateRow } from "../types";
 
@@ -91,7 +94,7 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
 
   console.log("\n2. Exclusion B2C par NAF, quelle que soit la taille");
   {
-    for (const code of ["47", "55", "56", "96", "93", "8891", "862", "869"]) {
+    for (const code of ["47", "55", "56", "96", "93", "88", "862", "869"]) {
       check(`défaut : ${code} exclu`, (DEFAULT_EXCLUDED_SECTORS as readonly string[]).includes(code));
     }
     const restaurant = verdict(signal("Nomination d'un directeur"), identity({ naf: "56.30Z", effectifCode: "21" }));
@@ -194,11 +197,12 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
       ...Array.from({ length: 138 }, (_, i) => ({ id: `f${i}`, source: "france-travail", date: "2026-09-21", strength: 1 })),
     ];
     const plan = examinationPlan(rows, MAX_LOOKUPS);
-    check("run du 30/09 : 250 examinés, France Travail ≥ 50 %", plan.examine.length === 250 && (plan.bySource["france-travail"] ?? 0) >= 125, JSON.stringify(plan.bySource));
+    // Budget de 600 : TOUTES les offres (138), BODACC plafonné à 20 % (120).
+    check("run du 30/09 : toutes les offres, BODACC à 20 %", plan.bySource["france-travail"] === 138 && plan.bySource.bodacc === 120, JSON.stringify(plan.bySource));
     check("France Travail passe en premier", plan.examine[0].source === "france-travail");
-    check("le reste est marqué, pas laissé brut", plan.skip.length === rows.length - 250);
+    check("le reste est marqué, pas laissé brut", plan.skip.length === rows.length - plan.examine.length && plan.examine.length === 258);
     const fewOffers = examinationPlan([...rows.slice(0, 2515), ...rows.slice(2515, 2515 + 40)], MAX_LOOKUPS);
-    check("peu d'offres : toutes prises, BODACC complète", fewOffers.bySource["france-travail"] === 40 && fewOffers.bySource.bodacc === 210, JSON.stringify(fewOffers.bySource));
+    check("peu d'offres : toutes prises, BODACC ne comble pas (20 % max)", fewOffers.bySource["france-travail"] === 40 && fewOffers.bySource.bodacc === 120, JSON.stringify(fewOffers.bySource));
 
     // Étage 2 sur un faux Supabase : les hors-budget sont « non examiné », les autres filtrés.
     const now = "2026-09-30T10:00:00Z";
@@ -229,7 +233,8 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
     });
     const stored = fake.rows("signal_candidates") as unknown as SignalCandidateRow[];
     check("plafond respecté : 12 identités", lookedUp.length === 12, String(lookedUp.length));
-    check("France Travail : 6 des 12 (50 %), lus en premier", lookedUp.filter((s) => s === "france-travail").length === 6 && lookedUp[0] === "france-travail", lookedUp.join(","));
+    // Plafond de 12 : BODACC ≤ 20 % (2), France Travail tout le reste (ses 10 offres).
+    check("France Travail : toutes ses offres, lues en premier ; BODACC 2", lookedUp.filter((s) => s === "france-travail").length === 10 && lookedUp.filter((s) => s === "bodacc").length === 2 && lookedUp[0] === "france-travail", lookedUp.join(","));
     check("hors budget : « non examiné », plus aucun brut", stored.filter((r) => r.motif_rejet?.startsWith(NOT_EXAMINED)).length === 28 && !stored.some((r) => r.statut === "brut"));
     check(
       "intitulé sans pain : écarté sans identité, hors budget",
@@ -237,7 +242,7 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
     );
     const yields = yieldBySource(stored);
     const ft = yields.find((y) => y.source === "france-travail")!;
-    check("rendement par source : bruts et examinés", ft.bruts === 15 && ft.examines === 11, JSON.stringify(yields));
+    check("rendement par source : bruts et examinés", ft.bruts === 15 && ft.examines === 15, JSON.stringify(yields));
   }
 
   console.log("\n7. Creusage : issue explicite, reprise au run suivant");
@@ -263,7 +268,7 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
       prospects: [],
     });
     const deps: DigDeps = {
-      enrich: async (c) => ({ ...c.base, key_figures: c.id === "OPPOSE" ? { refuses_prospecting: true } : {}, signals: [], warnings: [] }),
+      enrich: async (c) => ({ ...c.base, key_figures: c.id === "OPPOSE" ? { refuses_prospecting: true, pappers_read: true } : { pappers_read: true }, signals: [], warnings: [] }),
       createProspect: async (_company, c) => ({ id: `p-${c.id}` }),
       findContact: async () => ({ email: "contact@x.fr", email_type: "generique", confidence: 60, found_by: "site" }),
       brief: async () => undefined,
@@ -275,6 +280,94 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
     check("retenu d'un run précédent : repris et creusé dans ce run", byId.get("ANCIEN_OK")?.statut === "creusé" && byId.get("ANCIEN_OK")?.run_id === "run2");
     check("retenu d'un run précédent devenu hors cible : re-filtré", byId.get("ANCIEN_B2C")?.statut === "rejeté" && /^re-filtré/.test(byId.get("ANCIEN_B2C")?.motif_rejet ?? ""), byId.get("ANCIEN_B2C")?.motif_rejet ?? "");
     check("erreur passagère d'un run précédent : reprise", byId.get("ERREUR_PASSEE")?.statut === "creusé");
+  }
+
+  console.log("\n8. Cible PME 10-249 salariés, groupes, action sociale, gouvernance");
+  {
+    const tereva = verdict(signal("Recrutement", { source: "france-travail", jobTitle: "Technico-commercial sédentaire H/F", text: "Technico-commercial sédentaire H/F" }), identity({ name: "TEREVA", naf: "46.74B", effectifCode: "42" }));
+    check("TÉRÉVA (1 000-1 999 sal.) : trop grande structure au filtre", tereva.status === "rejeté" && /trop grande structure/.test(tereva.reason ?? ""), tereva.reason ?? "");
+    const mid = verdict(signal("Nomination"), identity({ effectifCode: "31" }));
+    check("200-249 salariés : dans la cible", mid.status === "filtré", mid.reason ?? "");
+    const aide = verdict(signal("Recrutement", { source: "france-travail", jobTitle: "Gestionnaire de planification (H/F)", text: "Gestionnaire de planification (H/F)" }), identity({ name: "AIN DOMICILE SERVICES", naf: "88.10A", effectifCode: "31" }));
+    check("AIN DOMICILE (88.10A) : action sociale exclue", aide.status === "rejeté" && /secteur exclu/.test(aide.reason ?? ""), aide.reason ?? "");
+
+    const base = { refusesProspecting: false, noStaff: false, capitalEur: null, equityEur: null };
+    check("creusage : 1 200 salariés → trop grande structure", /trop grande structure \(1200/.test(disqualify({ ...base, headcount: 1200 })?.reason ?? ""));
+    check("creusage : filiale d'un groupe étranger (HÖRMANN)", /groupe étranger/.test(disqualify({ ...base, headcount: 150, foreignParent: true })?.reason ?? ""));
+    check("creusage : filiale d'un groupe de plus de 250 salariés", /plus de 250/.test(disqualify({ ...base, headcount: 80, largeGroup: true })?.reason ?? ""));
+    check("creusage : PME autonome de 150 salariés → gardée", disqualify({ ...base, headcount: 150 }) === null);
+    check(
+      "fiche existante filiale étrangère : « hors cible »",
+      /groupe étranger/.test(offTargetReason({ key_figures: { parent_foreign: true, headcount: 150, naf_code: "46.73A" }, size_range: null }) ?? ""),
+    );
+
+    check("BODACC : établissement avant capital avant nomination", bodaccRank("Création d'établissement") < bodaccRank("Modification du capital") && bodaccRank("Modification du capital") < bodaccRank("Jean DUPONT devient président"));
+
+    const now = "2026-09-30T10:00:00Z";
+    const notice = (id: string, label: string): Record<string, unknown> => ({
+      id, user_id: "u1", run_id: "run9", source: "bodacc", statut: "brut", motif_rejet: null, date_signal: "2026-09-25", texte_brut: label,
+      url_source: null, siren: `6${id.padStart(8, "0")}`, company_name: `CO ${id}`, hash: `g${id}`, facts: { label, strength: "fort", signalType: "direction" },
+      badges: [], created_at: now, updated_at: now,
+    });
+    const fake = new FakeDb({ signal_candidates: [notice("1", "Jean DUPONT devient commissaire aux comptes titulaire"), notice("2", "Marie DURAND devient administrateur"), notice("3", "Paul MARTIN devient président")] });
+    const looked: string[] = [];
+    await runFilterStage(fake as never, "u1", "run9", {
+      prefs: DEFAULT_PREFS,
+      lookup: async (s) => {
+        looked.push(s.companyName);
+        return { ok: true, company: null };
+      },
+      known: new Set(),
+      now: NOW,
+    });
+    const rows = fake.rows("signal_candidates") as unknown as SignalCandidateRow[];
+    check("gouvernance (CAC, administrateur) : écartée sans identité", looked.join() === "CO 3" && rows.filter((r) => r.motif_rejet === GOVERNANCE_ONLY).length === 2, looked.join());
+  }
+
+  console.log("\n8 bis. Sans Pappers, rien n'est publié (crédits épuisés le 30/09/2026)");
+  {
+    const created: string[] = [];
+    const outcome = await digOne(
+      {
+        enrich: async (c) => ({ ...c.base, key_figures: {}, signals: [], warnings: [{ source: "pappers", message: "HTTP 401 Unauthorized" }] }),
+        createProspect: async (company) => {
+          created.push(company.company_name);
+          return { id: "p" };
+        },
+        findContact: async () => ({ confidence: 0, found_by: "aucun" }),
+        brief: async () => undefined,
+      },
+      {
+        id: "c1",
+        signal: signal("Recrutement", { source: "france-travail", jobTitle: "Assistant(e) ADV H/F", text: "Assistant(e) ADV H/F" }),
+        base: { company_name: "X", siren: "123456789", naf_code: "46.69B", figures: {} } as never,
+        triage: { utilisable: true, sujet_est_l_entreprise: true, type: "recrutement", pain_probable: "p", accroche_possible: "", score: 5, raison: "r" },
+        weight: 0.5,
+      },
+    );
+    check("registre non lu : aucune fiche créée, erreur passagère", created.length === 0 && /Pappers indisponible/.test(outcome.error ?? ""), JSON.stringify(outcome));
+  }
+
+  console.log("\n8 ter. Une entreprise, un retenu (AJASSOCIES : trois offres)");
+  {
+    const t = (score: number): Triage => ({ utilisable: true, sujet_est_l_entreprise: true, type: "recrutement", pain_probable: `p${score}`, accroche_possible: "", score, raison: "r" });
+    const outs: TriageOutcome[] = [
+      { id: "a1", triage: t(4), retained: true, reason: null },
+      { id: "a2", triage: t(5), retained: true, reason: null },
+      { id: "a3", triage: t(4), retained: true, reason: null },
+      { id: "b1", triage: t(4), retained: true, reason: null },
+    ];
+    const sirens = new Map([["a1", "111"], ["a2", "111"], ["a3", "111"], ["b1", "222"]]);
+    const kept = onePerCompany(outs, sirens).filter((o) => o.retained).map((o) => o.id);
+    check("la mieux notée par SIREN, les autres écartées", kept.join() === "a2,b1", kept.join());
+    check("motif « doublon »", /doublon/.test(onePerCompany(outs, sirens).find((o) => o.id === "a1")?.reason ?? ""));
+  }
+
+  console.log("\n9. Téléphones lus sur le site");
+  {
+    check("tel: +33", extractPhones('<a href="tel:+33478123456">x</a>').join() === "04 78 12 34 56");
+    check("écrit avec des points", extractPhones("<p>Tél. 04.78.12.34.56</p>").join() === "04 78 12 34 56");
+    check("surtaxé écarté", extractPhones("<p>08 92 12 34 56</p>").length === 0);
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

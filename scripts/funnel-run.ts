@@ -23,7 +23,7 @@ import { DEFAULT_EXCLUDED_SECTORS, DEFAULT_PREFERRED_SECTORS, filterSignal, NO_P
 import { painForJob } from "../lib/funnel/pain-map";
 import { harvest } from "../lib/funnel/harvest";
 import { annuaireLookup, toIdentity } from "../lib/funnel/identify";
-import { MAX_LOOKUPS } from "../lib/funnel/stages";
+import { GOVERNANCE_ONLY, MAX_LOOKUPS } from "../lib/funnel/stages";
 import { KEEP_SCORE, triage, triageModel, type TriageInput } from "../lib/funnel/triage";
 import type { HarvestedSignal } from "../lib/funnel/types";
 import { getOpenAI } from "../lib/openai";
@@ -56,7 +56,9 @@ const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
 
 (async () => {
   loadEnv();
-  const departements = arg("deps", "69,31").split(",").map((item) => item.trim());
+  // « --deps all » : toute la France (aucun département), comme l'option de l'écran.
+  const rawDeps = arg("deps", "69,31");
+  const departements = rawDeps === "all" ? [] : rawDeps.split(",").map((item) => item.trim()).filter(Boolean);
   const days = Number(arg("days", "14"));
   const now = new Date();
   const perSource: Record<string, { bruts: number; examines: number; filtres: number; retenus: number; contactables: number }> = {};
@@ -73,8 +75,13 @@ const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
   // Offres sans pain dans l'intitulé : écartées avant le budget (comme le job).
   const precheck = collected.signals.filter((signal) => signal.source === "france-travail" && !painForJob(signal.facts.jobTitle ?? signal.text));
   console.log(`  ${precheck.length} offres écartées sans examen : ${NO_PAIN_TITLE}`);
+  const governance = collected.signals.filter(
+    (signal) => signal.source === "bodacc" && /commissaire aux comptes|administrateur|membre du (conseil|directoire|comit)|conseil de surveillance|censeur/i.test(signal.facts.label),
+  );
+  console.log(`  ${governance.length} annonces écartées sans examen : ${GOVERNANCE_ONLY}`);
+  precheck.push(...governance);
   const plan = examinationPlan(
-    collected.signals.filter((signal) => !precheck.includes(signal)).map((signal) => ({ id: signal.hash, source: signal.source, date: signal.date, strength: STRENGTH[signal.facts.strength] ?? 0, signal })),
+    collected.signals.filter((signal) => !precheck.includes(signal)).map((signal) => ({ id: signal.hash, source: signal.source, date: signal.date, strength: STRENGTH[signal.facts.strength] ?? 0, label: signal.facts.label, signal })),
     MAX_LOOKUPS,
   );
   console.log(`  budget d'examen : ${plan.examine.length} (${JSON.stringify(plan.bySource)}), ${plan.skip.length} non examinés`);
@@ -175,26 +182,37 @@ const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
       try {
         const company = await deepEnrich(base, [], [], { attachedSignals: [toProspectSignal(input.signal)] });
         const figures = company.key_figures ?? {};
+        // Le job ne publierait pas sans Pappers (lib/funnel/dig.ts). Le rejeu
+        // cherche quand même le contact, pour mesurer, et le signale.
+        entry.pappers = figures.pappers_read === true ? "lu" : "NON LU (opposition et groupe non vérifiés)";
         const verdict = disqualify({
           refusesProspecting: figures.refuses_prospecting === true,
           noStaff: figures.no_staff === true,
           capitalEur: typeof figures.capital_eur === "number" ? figures.capital_eur : null,
           equityEur: typeof figures.equity_eur === "number" ? figures.equity_eur : null,
+          headcount: typeof figures.headcount === "number" ? figures.headcount : null,
+          largeGroup: figures.is_large_group_subsidiary === true,
+          foreignParent: figures.parent_foreign === true,
         });
         if (verdict) {
           entry.creusage = `écarté : ${verdict.reason}`;
+          console.log(`  ${entry.nom} → ${entry.creusage}`);
           continue;
         }
         const prospect = { id: "dry", company_name: company.company_name, siren: company.siren, website: company.website ?? null, email: null, city: company.city ?? null, key_figures: figures } as unknown as Prospect;
         const identity = await identityOf(prospect);
         const { result } = await runContactSearch(identity, realDeps(null));
-        entry.contact = result.email ? `${result.email} (${result.email_type})` : "aucun email";
-        entry.creusage = result.email ? "contactable" : "à compléter (pas d'email)";
+        entry.contact = result.email
+          ? `${result.email} (${result.email_type}${result.doubtful ? ", DOUTEUX" : ""})`
+          : result.phone
+            ? `aucun email · tél. ${result.phone}`
+            : "aucun email, aucun téléphone";
+        entry.creusage = result.email ? "contactable" : result.phone ? "à appeler" : "à compléter (ni email ni téléphone)";
         if (result.email) bump(input.signal.source, "contactables");
       } catch (error) {
         entry.creusage = `erreur : ${error instanceof Error ? error.message : String(error)}`;
       }
-      console.log(`  ${entry.nom} → ${entry.creusage}${entry.contact ? ` · ${entry.contact}` : ""}`);
+      console.log(`  ${entry.nom} → ${entry.creusage}${entry.contact ? ` · ${entry.contact}` : ""}${entry.pappers && entry.pappers !== "lu" ? " · Pappers NON LU" : ""}`);
     }
   }
 

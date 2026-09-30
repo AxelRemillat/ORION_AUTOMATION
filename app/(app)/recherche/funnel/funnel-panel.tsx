@@ -45,7 +45,9 @@ export function FunnelResults({ funnel }: { funnel: ReturnType<typeof useFunnel>
       {error && <ErrorBanner message={error} />}
       {snapshot?.job && <FunnelBanner snapshot={snapshot} />}
       <Section title="Prospects prêts" cards={cards.filter((card) => card.publication === "pret")} />
-      <Section title="À compléter (pas d'email)" cards={cards.filter((card) => card.publication === "a_completer")} />
+      {/* Pas d'email mais un téléphone sur le site : on appelle, on ne perd pas la fiche. */}
+      <Section title="À appeler (pas d'email, téléphone du site)" cards={cards.filter((card) => card.publication === "a_completer" && card.phone)} />
+      <Section title="À compléter (ni email ni téléphone)" cards={cards.filter((card) => card.publication === "a_completer" && !card.phone)} />
       <Section title="Retenus, en attente de creusage" cards={cards.filter((card) => card.statut === "retenu")} />
       {snapshot && !snapshot.job && (
         <EmptyState

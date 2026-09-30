@@ -175,7 +175,7 @@ const verdictOf = (key: keyof typeof CASES) => {
 
     const created: string[] = [];
     const deps: DigDeps = {
-      enrich: async (candidate) => ({ ...candidate.base, key_figures: {}, signals: [], warnings: [] }),
+      enrich: async (candidate) => ({ ...candidate.base, key_figures: { pappers_read: true }, signals: [], warnings: [] }),
       createProspect: async (company) => {
         created.push(company.company_name);
         return { id: `p-${company.company_name}` };

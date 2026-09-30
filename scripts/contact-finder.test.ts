@@ -261,7 +261,15 @@ async function main() {
       trace.candidates.some((item) => item.domain === "robinetterieindustrielle.fr" && item.reason === "SIREN présent sur la page"),
       JSON.stringify(trace.candidates),
     );
-    check("aucune adresse publiée sur ce site", !result.email, JSON.stringify(result));
+    // Le site PUBLIE une adresse, masquée par Joomla (variables « addy… ») :
+    // l'ancien test figeait le bug (« aucune adresse »). Son domaine porte le
+    // nom de l'entreprise : il est de confiance.
+    check(
+      "adresse masquée par Joomla retrouvée sur le site",
+      result.email === "info@artflex-robinetterie.fr" && result.email_type === "generique" && !result.doubtful,
+      JSON.stringify(result),
+    );
+    check("téléphone du site relevé", result.phone === "04 72 71 20 80", String(result.phone));
     check("Hunter interrogé sur le site trouvé", calls.domainSearch.includes("robinetterieindustrielle.fr"), calls.domainSearch.join(","));
   }
 
@@ -328,6 +336,49 @@ async function main() {
     const dry = new FakeDb({ prospects: [row({ website: site })] });
     await findContact("p1", { db: dry as never, deps: fakeDeps({ pages }).deps, persist: false });
     check("persist: false n'écrit rien", dry.rows("prospects")[0].email === null);
+  }
+
+  console.log("cas — domaine de confiance, Joomla, téléphone (30/09/2026)");
+  {
+    // HÖRMANN FRANCE : une adresse d'un domaine sans rapport (louis@louis.info)
+    // vue sur le site sortait « contactable ».
+    const identity: CompanyIdentity = {
+      prospectId: null, legalName: "PORTES MARTIN", tradeNames: [], siren: "123456789", city: "Lyon", postalCode: "69003",
+      leader: null, activity: null, knownWebsite: "https://portes-martin.fr", pappersWebsite: null, knownEmail: null,
+    };
+    const home = `<html><body><h1>Portes Martin</h1><p>Portes Martin, SIREN 123 456 789, Lyon.</p>
+      <p>Site réalisé par Louis — louis@louis.info</p><a href="tel:+33478123456">Appelez-nous</a>
+      <a href="/contact">Contact</a></body></html>`;
+    const pages = { "https://portes-martin.fr": home };
+    const outsider = fakeDeps({
+      pages,
+      domainSearch: { "louis.info": [{ email: "louis@louis.info", type: "personal", firstName: "Louis", lastName: null, sources: [] }] },
+      verify: { "louis@louis.info": "accept_all" },
+    });
+    const kept = await runContactSearch(identity, outsider.deps);
+    check("adresse hors domaine, non « valid » : écartée", !kept.result.email, JSON.stringify(kept.result));
+    check("le téléphone du site est gardé (« à appeler »)", kept.result.phone === "04 78 12 34 56", String(kept.result.phone));
+
+    const validOutsider = fakeDeps({
+      pages,
+      domainSearch: { "louis.info": [{ email: "louis@louis.info", type: "personal", firstName: "Louis", lastName: null, sources: [] }] },
+      verify: { "louis@louis.info": "valid" },
+    });
+    const doubtful = await runContactSearch(identity, validOutsider.deps);
+    check("hors domaine mais Hunter « valid » : gardée, marquée douteuse", doubtful.result.email === "louis@louis.info" && doubtful.result.doubtful === true, JSON.stringify(doubtful.result));
+
+    // Joomla : l'adresse n'est jamais écrite en clair dans la page.
+    const cloaked = `<span id="cloak4f1">Cette adresse est protégée</span><script type="text/javascript">
+      document.getElementById('cloak4f1').innerHTML = '';
+      var prefix = '&#109;a' + 'i&#108;' + '&#116;o';
+      var addy4f1 = 'c&#111;nt&#97;ct' + '&#64;';
+      addy4f1 = addy4f1 + 'p&#111;rtes-m&#97;rtin' + '&#46;' + 'fr';
+      document.getElementById('cloak4f1').innerHTML += '<a ' + path + '\\'' + prefix + ':' + addy4f1 + '\\'>'+addy4f1+'<\\/a>';
+      </script>`;
+    check("adresse masquée par Joomla retrouvée", extractEmails(cloaked).includes("contact@portes-martin.fr"), extractEmails(cloaked).join(","));
+    const joomla = fakeDeps({ pages: { "https://portes-martin.fr": home.replace("louis@louis.info", "") + cloaked } });
+    const found = await runContactSearch(identity, joomla.deps);
+    check("… et retenue sur le domaine du site", found.result.email === "contact@portes-martin.fr" && !found.result.doubtful, JSON.stringify(found.result));
   }
 
   if (failures) {
