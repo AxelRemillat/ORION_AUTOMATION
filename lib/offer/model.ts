@@ -351,11 +351,52 @@ export function chooseProof(
    * à sortir l'agent devis, qui transforme une demande CLIENT en devis. Deux
    * métiers différents, et ça se voit à la lecture.
    */
-  const STOCK_TAGS = ["reassort", "réassort", "stock", "approvisionnement", "inventaire", "commande fournisseur"];
-  const aboutStock = STOCK_TAGS.some((tag) => tagMatches(tag, painText));
+  // Approvisionnement : jamais l'agent devis, quel que soit le métier.
+  const SUPPLY_TAGS = [
+    "reassort",
+    "réassort",
+    "approvisionnement",
+    "inventaire",
+    "commande fournisseur",
+    // Préparer PHYSIQUEMENT les commandes (picking) n'est pas traiter une demande client.
+    "préparation de commande",
+    "préparation des commandes",
+    "préparer les commandes",
+  ];
+  const aboutSupply = SUPPLY_TAGS.some((tag) => tagMatches(tag, painText));
+  const aboutStock = aboutSupply || tagMatches("stock", painText);
 
-  const ORDER_TAGS = ["devis", "demande client", "commande client", "demande de prix", "chiffrage", "prise de rdv", "rendez-vous"];
-  if (!aboutStock && ORDER_TAGS.some((tag) => tagMatches(tag, painText))) {
+  /*
+   * Synonymes d'une demande client à chiffrer ou à confirmer. ARTFLEX
+   * (520644386, négoce de robinetterie) : « préparer la confirmation de
+   * commande et du délai » ne contenait aucun des mots attendus, et la preuve
+   * n'était pas l'agent devis.
+   */
+  const ORDER_TAGS = [
+    "devis",
+    "pré-devis",
+    "demande client",
+    "commande client",
+    "confirmation de commande",
+    "demande de prix",
+    "demande de cotation",
+    "cotation",
+    "offre de prix",
+    "chiffrage",
+    "chiffrer",
+    "prise de rdv",
+    "rendez-vous",
+  ];
+  // Négoce B2B : une COMMANDE y est une demande client (référence, quantité,
+  // délai, prix) — exactement ce que montre l'agent, métier « Négoce B2B »,
+  // qui vérifie aussi le STOCK avant de confirmer. ARTFLEX, eval du 30/09 :
+  // « vérifier la disponibilité dans les deux stocks avant de confirmer la
+  // commande » excluait l'agent au mot « stock », et la preuve devenait un
+  // scoring de leads hors sujet. Seul l'APPROVISIONNEMENT l'exclut ici.
+  const negoce = agentMetier(options.sector)?.id === "negoce";
+  const tradeOrder =
+    negoce && !aboutSupply && (tagMatches("commande", painText) || tagMatches("confirmation", painText));
+  if (tradeOrder || (!aboutStock && ORDER_TAGS.some((tag) => tagMatches(tag, painText)))) {
     const agent = usable.find((proof) => proof.id === "agent-devis");
     if (agent) {
       // Métier du prospect parmi les 5 de l'agent : la démo se teste sur SON métier.

@@ -89,6 +89,34 @@ export function opensOnStructure(body: string, signature?: string): string | nul
   return STRUCTURE_HOOK.find((term) => haystack.includes(normalize(term))) ?? null;
 }
 
+/**
+ * FAITS BRUTS DU REGISTRE, interdits en ACCROCHE.
+ *
+ * Effectif, chiffre d'affaires, code NAF, capital, ancienneté : ils servent à
+ * CIBLER, pas à ouvrir un mail. « Avec 20 à 49 salariés et 8 M€ de CA… » se lit
+ * comme une fiche Pappers recopiée, et reste vrai pour mille entreprises. Vu sur
+ * ARTFLEX (520644386) le 30/09/2026. L'accroche décrit une réalité MÉTIER
+ * observée : ce que dit leur site, un signal daté, leur activité concrète.
+ */
+const REGISTRY_HOOK: readonly { label: string; pattern: RegExp }[] = [
+  { label: "effectif", pattern: /\b\d+\s*(?:à|a|-)\s*\d+\s*salari|\b\d+\s*salari|\beffectif\b/ },
+  // Le capital AVANT le chiffre d'affaires : « au capital de 50 000 € » est un montant en euros.
+  { label: "capital", pattern: /capital social|au capital|capital de\s+\d/ },
+  { label: "chiffre d'affaires", pattern: /chiffre d.affaires|\bca de\b|\d\s*(?:m|k)?\s*€|millions? d.euros|\bm€/ },
+  { label: "code NAF", pattern: /\bnaf\b|\bcode ape\b|\bape\b/ },
+  {
+    label: "ancienneté",
+    pattern: /(?:fond|cre)ee? en (?:19|20)\d{2}|depuis (?:19|20)\d{2}|\d+ ans d.(?:existence|activite|anciennete)|immatricul/,
+  },
+];
+
+export function opensOnRegistryFact(body: string, signature?: string): string | null {
+  const first = bodyParagraphs(body, signature)[0] ?? "";
+  if (!first) return null;
+  const haystack = normalize(first);
+  return REGISTRY_HOOK.find((rule) => rule.pattern.test(haystack))?.label ?? null;
+}
+
 /** Le créneau de 30 minutes est un élément de CTA, pas une donnée chiffrée. */
 const CTA_NUMBERS = new Set([30]);
 
@@ -843,6 +871,16 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
     failures.push(
       `L'accroche s'appuie sur la structure juridique (« ${structure} ») : c'est un fait de ` +
         "ciblage, pas une accroche. Pars d'un signal daté ou de ce que dit leur site.",
+    );
+  }
+
+  // --- Accroche fondee sur un fait brut du registre -------------------------
+  const registry = opensOnRegistryFact(body, context.signature);
+  if (registry) {
+    failures.push(
+      `L'accroche ouvre sur un fait brut du registre (${registry}) : c'est une donnee de ciblage, ` +
+        "vraie pour mille entreprises. Decris une realite METIER observee : ce que dit leur site, " +
+        "un signal date, leur activite concrete (ce qu'ils vendent, a qui, comment arrivent les demandes).",
     );
   }
 

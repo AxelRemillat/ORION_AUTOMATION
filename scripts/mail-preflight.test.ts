@@ -127,6 +127,20 @@ const rule = (result: ReturnType<typeof preflight>, id: string) => result.checks
     const noSign = SENT_0928.selection.body.replace(`\n\n${SIGNATURE}`, "");
     check("signature absente → erreur", rule(preflight(input(SENT_0928.selection, { body: noSign })), "signature")?.status === "error");
     check("signature en double → erreur", rule(preflight(input(SENT_0928.selection, { body: `${SENT_0928.selection.body}\n\n${SIGNATURE}` })), "signature")?.status === "error");
+    // ARTFLEX (520644386), 30/09/2026 : le nom dans une phrase n'est pas une signature.
+    const artflex =
+      "Bonjour Monsieur Romeo,\n\nJe suis Axel Remillat, j'automatise les demandes de prix des distributeurs.\n\n" +
+      "Auriez-vous 15 minutes ?\n\n" + "Si le sujet ne vous concerne pas, un simple « stop » en réponse et je ne vous relancerai pas.\n\n" + SIGNATURE;
+    const artflexCheck = rule(preflight(input(SENT_0928.selection, { body: artflex })), "signature");
+    check("ARTFLEX : « Je suis Axel Remillat » + signature → pas de doublon", artflexCheck?.status === "ok", artflexCheck?.message ?? "");
+    check(
+      "bloc de détail (titre · site) répété → doublon",
+      rule(preflight(input(SENT_0928.selection, { body: `${artflex}\n\nAutomatisation & IA pour PME · axelremillat.com` })), "signature")?.status === "error",
+    );
+    check(
+      "nom seul dans une phrase, sans bloc → signature absente",
+      rule(preflight(input(SENT_0928.selection, { body: "Bonjour,\n\nJe suis Axel Remillat et j'automatise vos devis.\n\nÇa vous parle ?" })), "signature")?.status === "error",
+    );
     check("relance signée « Axel » seul → ok", rule(preflight(input(SENT_0928.selection, { body: "Bonjour,\n\nJe reviens vers vous.\n\nBien à vous,\nAxel" })), "signature")?.status === "ok");
     check("SELECTION HABITAT (sain) → passe", preflight(input(SENT_0928.selection)).ok, preflight(input(SENT_0928.selection)).errors.join(" | "));
   }

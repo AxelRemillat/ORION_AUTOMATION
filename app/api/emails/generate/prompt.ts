@@ -313,7 +313,12 @@ export function buildWritingPrompt(input: WritingInput): string {
   ne la mets pas entre guillemets : une phrase citee au milieu d'un mail sonne
   comme une plaquette. Ce qui ne doit pas changer : ce que tu as construit, et ce
   que ca fait.` +
-      (choice.demo ? "\n  C'est une demo NOMMEE : dis laquelle, c'est ce qui la rend verifiable." : "")
+      (choice.demo ? "\n  C'est une demo NOMMEE : dis laquelle, c'est ce qui la rend verifiable." : "") +
+      // Agent devis sur LEUR métier : la mention du métier est ce qui rend la
+      // preuve personnelle (ARTFLEX, 30/09 : « testable sur mon site » seul).
+      (choice.demo?.key.startsWith("agent-")
+        ? `\n  Dis EXPLICITEMENT qu'elle est testable sur ton site avec un exemple de LEUR metier (${choice.demo.label.replace(/^l'agent devis, métier /, "")}).`
+        : "")
     : "AUCUNE PREUVE ne recoupe ce pain : n'en cite aucune. Decris ce que tu construis, au present.";
 
   const promise = promiseLines(offer);
@@ -375,7 +380,13 @@ tient la longueur bien mieux qu'un total : c'est toujours le bloc 3 qui deborde.
      ni « vient de », ni « nouvelle agence ».
    - Pas de commentaire du fait : « rappelle l'importance de », « souligne »,
      « temoigne de » sont refuses par du code. Dis le fait, c'est tout.
-   QUATRE OUVERTURES INTERDITES, verifiees par du code :
+   CINQ OUVERTURES INTERDITES, verifiees par du code :
+   - un FAIT BRUT DU REGISTRE : effectif (« 20 a 49 salaries »), chiffre
+     d'affaires, code NAF, capital, anciennete (« fondee en 2008 »). Ce sont des
+     donnees de ciblage, vraies pour mille entreprises. L'accroche decrit une
+     realite METIER observee : ce qu'ils vendent, a qui, comment arrivent les
+     demandes (« Chez un distributeur de robinetterie industrielle, chaque
+     demande de prix arrive avec ses references, diametres et pressions… ») ;
    - « Dans le/la <secteur> » : c'est le contraire d'une accroche ;
    - « Sur votre site, on lit que… », « d'apres votre site » : citer le site
      comme source prouve qu'on les a lus, ca ne leur apprend rien. Dis le FAIT,

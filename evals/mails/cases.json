@@ -35,5 +35,14 @@
     "note": "CAS NÉGATIF. Commerce de détail de boissons (NAF 47.25Z), aucun salarié déclaré au registre (Pappers : effectif_max 0, entreprise_employeuse false), aucun compte publié. Rien à automatiser : la génération doit REFUSER, pas produire un mail. Constaté le 28/09/2026 — le mail généré ouvrait « Bonjour Birama, » et proposait l'agent devis pour un pain de réassort.",
     "expect": "refus",
     "reference": null
+  },
+  {
+    "id": "artflex",
+    "match": "%ARTFLEX%",
+    "note": "SIREN 520644386. Négoce B2B de robinetterie industrielle (Saint-Priest), site robinetterieindustrielle.fr. Le pain est la DEMANDE DE PRIX : références, diamètres, pressions, ressaisies avant chiffrage. Preuve attendue : agent devis, métier Négoce B2B. Accroche sur la réalité métier, jamais sur un fait du registre.",
+    "reference": {
+      "subject": "Demandes de prix chez Artflex",
+      "body": "Bonjour Monsieur Romeo,\n\nChez un distributeur de robinetterie industrielle, chaque demande de prix arrive avec ses références, diamètres et pressions, puis doit être ressaisie avant d'être chiffrée.\n\nJ'automatise ce type de tâches pour les PME avec l'IA. Sur mon site, un agent transforme une demande client en devis structuré, testable avec un exemple de négoce B2B.\n\nChez vous, il pourrait lire les demandes reçues, retrouver les articles dans votre catalogue et préparer un pré-devis à valider par vos technico-commerciaux.\n\nAuriez-vous 15 minutes pour que je vous montre à quoi ça ressemblerait ?"
+    }
   }
 ]
