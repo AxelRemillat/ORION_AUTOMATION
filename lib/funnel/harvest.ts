@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { collectSignals, type OfficialSignal } from "@/lib/signals";
-import type { EnvLike } from "@/lib/signals/france-travail";
+import { FUNNEL_ROME_CODES, type EnvLike } from "@/lib/signals/france-travail";
 import type { EnrichmentWarning } from "@/lib/enrichment/types";
 import type { FunnelSource, HarvestedSignal, Strength } from "./types";
 
@@ -91,13 +91,27 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
   const warnings: EnrichmentWarning[] = [];
   const bySource: Record<string, number> = {};
 
-  for (const departement of criteria.departements) {
-    const collected = await collectSignals({ departement, tranches: [], limit: 0, days, today: criteria.today, env: criteria.env });
-    warnings.push(...collected.warnings);
-    for (const official of collected.signals) {
-      const signal = fromOfficial(official);
-      bySource[signal.source] = (bySource[signal.source] ?? 0) + 1;
-      if (!seen.has(signal.hash)) seen.set(signal.hash, signal);
+  // France Travail EN PREMIER, sur toutes les zones, puis BODACC : une offre
+  // dont l'intitulé révèle un pain est le signal le plus direct, et c'est lui
+  // qui doit passer si une source vient à manquer de temps ou de débit.
+  for (const only of ["france-travail", "bodacc"] as const) {
+    for (const departement of criteria.departements) {
+      const collected = await collectSignals({
+        departement,
+        tranches: [],
+        limit: 0,
+        days,
+        today: criteria.today,
+        env: criteria.env,
+        only,
+        romeCodes: FUNNEL_ROME_CODES,
+      });
+      warnings.push(...collected.warnings);
+      for (const official of collected.signals) {
+        const signal = fromOfficial(official);
+        bySource[signal.source] = (bySource[signal.source] ?? 0) + 1;
+        if (!seen.has(signal.hash)) seen.set(signal.hash, signal);
+      }
     }
   }
   return { signals: [...seen.values()], warnings, bySource };

@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { PUBLIC_COLUMNS, type Job } from "@/lib/jobs/types";
 import type { Database } from "@/types";
 import { runCost } from "./cost";
-import { candidatesOf, countFunnel } from "./store";
+import { candidatesOf, countFunnel, yieldBySource, type SourceYield } from "./store";
 import type { FunnelCost, FunnelCounts } from "./types";
 import { cardsOf, rejectsOf, type FunnelCard, type FunnelReject } from "./view";
 
@@ -18,6 +18,8 @@ export interface FunnelSnapshot {
   job: Pick<Job, "id" | "status" | "progress" | "error" | "created_at" | "finished_at"> | null;
   runId: string | null;
   counts: FunnelCounts;
+  /** Rendement par source : bruts → examinés → filtrés → retenus → contactables. */
+  bySource: SourceYield[];
   cost: FunnelCost | null;
   /** Part des cartes affichées qui ont un signal daté ET un email (objectif ≥ 60 %). */
   readyShare: number | null;
@@ -38,7 +40,7 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
     .maybeSingle();
   const job = (data as Job | null) ?? null;
   const runId = typeof job?.result?.runId === "string" ? job.result.runId : null;
-  if (!job || !runId) return { job, runId, counts: EMPTY, cost: null, readyShare: null, cards: [], rejects: [] };
+  if (!job || !runId) return { job, runId, counts: EMPTY, bySource: [], cost: null, readyShare: null, cards: [], rejects: [] };
 
   const rows = await candidatesOf(db, userId, runId);
   const cards = cardsOf(rows);
@@ -48,6 +50,7 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
     job,
     runId,
     counts: countFunnel(rows),
+    bySource: yieldBySource(rows),
     cost: await runCost(db, userId, job.started_at ?? job.created_at).catch(() => null),
     readyShare: dug.length ? ready / dug.length : null,
     cards,

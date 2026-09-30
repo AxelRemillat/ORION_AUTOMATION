@@ -4,7 +4,7 @@ import { harvest } from "@/lib/funnel/harvest";
 import { liveDigDeps, liveTriageAsk } from "@/lib/funnel/live";
 import { cleanPrefs, readPrefs, type FunnelPrefs } from "@/lib/funnel/settings";
 import { runDigStage, runFilterStage, runTriageStage } from "@/lib/funnel/stages";
-import { candidatesOf, countFunnel, insertHarvest } from "@/lib/funnel/store";
+import { candidatesOf, countFunnel, insertHarvest, yieldBySource } from "@/lib/funnel/store";
 import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
@@ -16,13 +16,16 @@ export const FUNNEL_KIND = "funnel";
 /**
  * Job `search_signals` + `params.kind = "funnel"` — l'entonnoir « signaux d'abord » en 4 étages.
  *
- *   préparation → moisson → filtre → tri LLM → creusage ×5 → bilan
+ *   préparation → moisson → filtre ×3 → tri LLM → creusage ×5 → bilan
  *
- * Le creusage est découpé en 5 étapes de 4 fiches au plus : une étape de job
- * doit tenir dans les 300 s d'une fonction. Chaque étape est idempotente — elle
- * ne reprend que les lignes au bon statut dans `signal_candidates`.
+ * Le filtre et le creusage sont découpés en étapes : une étape de job doit
+ * tenir dans les 300 s d'une fonction. Le 30/09/2026, le filtre en UNE étape
+ * s'arrêtait après 263 signaux (identités annuaire limitées en débit) et le
+ * reste du run n'était jamais examiné. Chaque étape est idempotente — elle ne
+ * reprend que les lignes au bon statut dans `signal_candidates`.
  */
 
+const FILTER_STEPS = 3;
 const DIG_PER_STEP = 4;
 const DIG_STEPS = 5;
 /** Marge avant la coupure d'une fonction (300 s). */
@@ -55,18 +58,26 @@ async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   };
 }
 
-async function filterStep(ctx: StepContext): Promise<StepOutcome> {
-  const runId = runIdOf(ctx);
-  const prefs = await prefsOf(ctx);
-  const known = await knownSirens(ctx.db).catch(() => new Set<string>());
-  const { lookups } = await runFilterStage(ctx.db, ctx.userId, runId, {
-    prefs,
-    lookup: annuaireLookup,
-    known,
-    deadline: Date.now() + STEP_BUDGET_MS,
-  });
-  return { progress: progress(`Filtre déterministe · ${lookups} identités annuaire`, 40) };
-}
+const filterStep = (index: number) =>
+  async function filter(ctx: StepContext): Promise<StepOutcome> {
+    const runId = runIdOf(ctx);
+    const prefs = await prefsOf(ctx);
+    const known = await knownSirens(ctx.db).catch(() => new Set<string>());
+    const { lookups, remaining, bySource } = await runFilterStage(ctx.db, ctx.userId, runId, {
+      prefs,
+      lookup: annuaireLookup,
+      known,
+      deadline: Date.now() + STEP_BUDGET_MS,
+    });
+    const quota = Object.entries(bySource).map(([source, count]) => `${source} ${count}`).join(", ");
+    const pct = 20 + Math.round(((index + 1) / FILTER_STEPS) * 20);
+    return {
+      progress: progress(
+        `Filtre déterministe · ${lookups} identités annuaire${quota ? ` (budget : ${quota})` : ""}${remaining ? ` · ${remaining} à examiner` : ""}`,
+        pct,
+      ),
+    };
+  };
 
 async function triageStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
@@ -82,6 +93,7 @@ const digStep = (index: number) =>
       deps: liveDigDeps(ctx.db, ctx.userId, runId),
       limit: prefs.digLimit,
       perStep: DIG_PER_STEP,
+      prefs,
     });
     const pct = 55 + Math.round(((index + 1) / DIG_STEPS) * 40);
     return { progress: progress(dug ? `Creusage : ${dug} fiche(s) de plus` : "Creusage terminé", remaining ? pct : 95) };
@@ -91,12 +103,13 @@ async function finishStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const rows = await candidatesOf(ctx.db, ctx.userId, runId);
   const counts = countFunnel(rows);
+  const bySource = yieldBySource(rows);
   const since = String(ctx.job.state.startedAt ?? ctx.job.created_at);
   const cost = await runCost(ctx.db, ctx.userId, since);
   const prospectIds = rows.map((row) => row.prospect_id).filter((id): id is string => Boolean(id));
 
   // Journal du coût par run : visible dans les logs Vercel.
-  console.log(`[entonnoir] run ${runId} ${JSON.stringify({ counts, cost })}`);
+  console.log(`[entonnoir] run ${runId} ${JSON.stringify({ counts, bySource, cost })}`);
   await finishRun(ctx.db, runId, {
     status: "done",
     results: [],
@@ -111,6 +124,7 @@ async function finishStep(ctx: StepContext): Promise<StepOutcome> {
       analysedPlanned: counts.creuses,
       step: "Entonnoir terminé",
       funnel: counts,
+      bySource,
       cost,
     },
   });
@@ -125,6 +139,13 @@ async function finishStep(ctx: StepContext): Promise<StepOutcome> {
 }
 
 export const signalFunnelHandler: JobHandler = {
-  steps: [prepareRun, harvestStep, filterStep, triageStep, ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i)), finishStep],
+  steps: [
+    prepareRun,
+    harvestStep,
+    ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
+    triageStep,
+    ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i)),
+    finishStep,
+  ],
   onFailed: closeRunOnFailure,
 };

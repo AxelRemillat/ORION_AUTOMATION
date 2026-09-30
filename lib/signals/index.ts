@@ -261,6 +261,8 @@ export interface SignalSearchCriteria {
    * fiche sur un departement dense. Non expose dans l'ecran de recherche.
    */
   only?: "bodacc" | "france-travail";
+  /** Codes ROME de France Travail (l'entonnoir vise le back-office, cf. FUNNEL_ROME_CODES). */
+  romeCodes?: readonly string[];
 }
 
 export interface CollectedSignals {
@@ -344,6 +346,7 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
       max: MAX_NOTICES_PER_SOURCE,
       today: criteria.today,
       env,
+      romeCodes: criteria.romeCodes,
     });
     if (jobs.ok) {
       for (const job of jobs.data) signals.push(jobToOfficialSignal(job));

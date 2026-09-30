@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { effectifLabel } from "@/lib/enrichment/naf";
+import { ageInMonths } from "./filter";
 import { painForJob, painMapBlock } from "./pain-map";
-import { applyTypeQuota } from "./quota";
+import { applyTypeQuota, signalFamily } from "./quota";
 import type { FilterVerdict, HarvestedSignal, Identity, Triage } from "./types";
 
 /**
@@ -42,7 +44,15 @@ export interface TriageOutcome {
   id: string;
   triage: Triage | null;
   retained: boolean;
+  /** Motif de REJET : vide pour un signal retenu. */
   reason: string | null;
+  /**
+   * Information sur un signal retenu (« retenu pour la variété… »). Elle ne va
+   * JAMAIS dans `motif_rejet` : le 30/09, deux fiches promues y portaient leur
+   * note, et le creusage — qui ne prend que les fiches sans motif — les a
+   * sautées pour toujours.
+   */
+  note?: string;
 }
 
 export type TriageAsk = (system: string, user: string) => Promise<string>;
@@ -54,8 +64,25 @@ Pour CHAQUE signal, réponds :
 - type : direction | croissance | recrutement | implantation | reprise | autre
 - pain_probable : la tâche répétitive probable, en vocabulaire métier.
 - accroche_possible : UNE phrase simple, factuelle. Jamais « vous recrutez » : une offre d'emploi est un INDICE du pain, pas le sujet.
-- score 0 à 5 : 5 = changement récent et engageant, sujet clair ; 0 = bruit.
+- score 0 à 5 : 5 = changement récent et engageant, sujet clair, dans une entreprise qui a un back-office ; 0 = bruit.
 - raison : une phrase.
+
+CE QUE L'ON VEND : automatiser le back-office (devis, commandes, factures, relances, documents) d'une PME
+de 10 salariés et plus. Un micro-commerce qui vend au grand public (restaurant, kebab, fleuriste, garderie,
+coiffeur) n'a pas de back-office à automatiser : il vaut au plus 1, même si l'événement est récent.
+Lis TOUJOURS naf, effectif, age_ans et ca : ils pèsent autant que l'événement.
+
+pain_probable doit être SPÉCIFIQUE à ce signal et à cette activité (ce qu'ils vendent, à qui, comment).
+Jamais une formule passe-partout comme « gestion des commandes et suivi des factures fournisseurs » :
+deux entreprises différentes n'ont pas le même pain mot pour mot.
+
+EXEMPLES NOTÉS (calibre-toi dessus) :
+1. KEBAB DES ALPES — reprise d'un fonds de commerce, NAF 56.30Z, effectif non déclaré, créée il y a 3 mois, pas de CA → score 1 : micro-commerce B2C qui s'installe, aucun back-office.
+2. GARDERIE PITCHOUN — nouveau gérant, NAF 88.91A (garde d'enfants), 10-19 salariés → score 1 : service aux familles, le changement de gérant ne crée pas de pain automatisable.
+3. SARL BONNIN FRERES — boulangerie, 5 boutiques, 20-49 salariés, offre d'emploi → score 3 : vraie structure multi-sites, mais pain surtout de production ; accroche possible sur les commandes des boutiques.
+4. ARTFLEX — grossiste, 21 salariés, CA en croissance → score 4 : négoce B2B en croissance, commandes et devis clients à absorber.
+5. Entreprise de 30 salariés qui recrute un(e) assistant(e) ADV → score 5 : le poste EST le pain (saisie des commandes et des devis), sujet clair.
+6. BRIOL DIFFUSION — menuiserie, 40 salariés, 3 showrooms, recrute → score 4 : devis et métrés multi-sites, pain concret.
 Postes → pain :
 ${painMapBlock()}
 Une modification purement juridique (forme, dénomination, transfert à une holding) vaut au plus 2.
@@ -68,7 +95,13 @@ Réponds UNIQUEMENT avec cet objet JSON, sans commentaire :
  * 145 sur 145 — et l'erreur était avalée par le `catch` du lot.
  */
 
-function userPrompt(batch: readonly TriageInput[]): string {
+/** Âge en années (une décimale), à partir de la date de création. */
+const ageYears = (createdOn: string | null, now: Date) => {
+  const months = ageInMonths(createdOn, now);
+  return months === null ? null : Math.round((months / 12) * 10) / 10;
+};
+
+export function userPrompt(batch: readonly TriageInput[], now = new Date()): string {
   return batch
     .map(({ id, signal, identity }) =>
       JSON.stringify({
@@ -77,13 +110,52 @@ function userPrompt(batch: readonly TriageInput[]): string {
         date: signal.date,
         entreprise: identity.name,
         naf: identity.naf,
-        effectif: identity.effectifCode,
+        effectif: effectifLabel(identity.effectifCode) ?? "non déclaré",
+        age_ans: ageYears(identity.createdOn, now),
+        ca: identity.revenue != null ? `${Math.round(identity.revenue)} € (${identity.revenueYear ?? "année inconnue"})` : "non publié",
         evenement: signal.facts.label,
         texte: signal.text.slice(0, 500),
         poste: signal.facts.jobTitle ?? undefined,
       }),
     )
     .join("\n");
+}
+
+/** Pain comparé « mot pour mot » : casse, accents, ponctuation et espaces ignorés. */
+export const normalizePain = (pain: string) =>
+  pain
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+/** Score maximal d'un signal dont le pain est identique, mot pour mot, à celui d'un autre. */
+export const GENERIC_PAIN_MAX_SCORE = 3;
+
+/**
+ * Pain passe-partout : si deux fiches du run ont le même pain mot pour mot, le
+ * modèle n'a rien lu de spécifique — leur score est plafonné à 3, donc sous le
+ * seuil de rétention. Le 30/09, les 11 reprises retenues portaient toutes
+ * « Suivi des commandes fournisseurs et des factures… » à quelques mots près.
+ */
+export function capGenericPains(outcomes: readonly TriageOutcome[]): TriageOutcome[] {
+  const counts = new Map<string, number>();
+  for (const outcome of outcomes) {
+    const key = outcome.triage ? normalizePain(outcome.triage.pain_probable) : "";
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return outcomes.map((outcome) => {
+    const triage = outcome.triage;
+    if (!triage || triage.score <= GENERIC_PAIN_MAX_SCORE) return outcome;
+    if ((counts.get(normalizePain(triage.pain_probable)) ?? 0) < 2) return outcome;
+    return {
+      ...outcome,
+      triage: { ...triage, score: GENERIC_PAIN_MAX_SCORE },
+      retained: false,
+      reason: `pain générique (identique mot pour mot à une autre fiche) : score plafonné à ${GENERIC_PAIN_MAX_SCORE}/5`,
+    };
+  });
 }
 
 /** Le code tranche après le modèle. */
@@ -93,7 +165,14 @@ export function settle(input: TriageInput, raw: z.infer<typeof ITEM> | undefined
 
   if (input.verdict.legalOnly) triage.score = Math.min(triage.score, 3);
   const jobPain = input.signal.source === "france-travail" ? painForJob(input.signal.facts.jobTitle ?? input.signal.text) : null;
-  if (jobPain) triage.pain_probable = jobPain;
+  // Offre d'emploi : le poste dicte la NATURE du pain (table), le modèle en
+  // donne le contexte propre à l'entreprise. Deux ADV dans deux métiers
+  // différents n'ont pas le même pain mot pour mot.
+  if (jobPain) {
+    const detail = raw.pain_probable.trim();
+    triage.pain_probable =
+      detail && !normalizePain(detail).includes(normalizePain(jobPain)) ? `${jobPain} : ${detail}` : jobPain;
+  }
   if (/recrut|embauch|offre d'emploi|vous cherchez un/i.test(triage.accroche_possible)) {
     // L'offre est l'indice, pas le sujet : l'accroche est écartée, pas le signal.
     triage.accroche_possible = "";
@@ -136,6 +215,8 @@ export async function triage(ask: TriageAsk, inputs: readonly TriageInput[]): Pr
     const byId = new Map(items.map((item) => [item.id, item]));
     outcomes.push(...batch.map((input) => settle(input, byId.get(input.id))));
   }
-  // Variété : un seul type ne peut pas rafler tous les retenus (cf. quota.ts).
-  return applyTypeQuota(outcomes);
+  // Pains passe-partout plafonnés, puis variété : un seul type de signal ne
+  // peut pas rafler les retenus (cf. quota.ts).
+  const familyOf = new Map(inputs.map((input) => [input.id, signalFamily(input.signal)]));
+  return applyTypeQuota(capGenericPains(outcomes), (outcome) => familyOf.get(outcome.id) ?? "autre");
 }

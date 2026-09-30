@@ -1,4 +1,4 @@
-import { isSmallB2C } from "./eligible";
+import { AT_LEAST_TEN, AT_LEAST_TWENTY, isSmallB2C } from "./eligible";
 import { isStaffingNaf } from "@/lib/signals";
 import { painForJob } from "./pain-map";
 import type { FilterVerdict, HarvestedSignal, Identity } from "./types";
@@ -16,8 +16,39 @@ export const DEFAULT_PREFERRED_SECTORS = [
   "62", "69", "70", "71", "73", "74", "82", "46", "49", "52", "68",
   "13", "14", "16", "17", "18", "22", "25", "27", "28", "31", "32", "33", "41", "43",
 ] as const;
-/** Épicerie, nettoyage, commerce de détail télécom. */
-export const DEFAULT_EXCLUDED_SECTORS = ["4711", "4729", "812", "4742"] as const;
+/**
+ * Secteurs exclus par défaut, QUELLE QUE SOIT la taille (connue ou non).
+ *
+ * Run du 30/09/2026 (69, 38, 42, 01, 73, 74 · 14 j) : 11 retenus sur 13 étaient
+ * des micro-commerces B2C (kebab, restaurant, fleuriste, garderie…). Ils
+ * n'ont pas de back-office à automatiser et n'achètent pas d'automatisation.
+ *
+ *   47   commerce de détail           55, 56  hébergement, restauration
+ *   96   services aux particuliers     93      sports et loisirs
+ *   8891 garde d'enfants               862, 869 cabinets médicaux et paramédicaux
+ *   812  nettoyage
+ *
+ * Réglable dans « Signaux » (secteurs exclus). La boulangerie (10.71) est
+ * traitée à part : exclue seulement sous 20 salariés CONNUS.
+ */
+export const DEFAULT_EXCLUDED_SECTORS = ["47", "55", "56", "96", "93", "8891", "862", "869", "812"] as const;
+
+/** Anciens défauts, pour la migration des réglages enregistrés. */
+export const LEGACY_EXCLUDED_SECTORS = ["4711", "4729", "812", "4742"] as const;
+
+/** Boulangerie-pâtisserie : écartée sous 20 salariés connus (une chaîne de 20+ a un back-office). */
+const BAKERY = ["1071"];
+
+/**
+ * Micro-structure probable : effectif non déclaré ET société de moins de
+ * 24 mois OU sans chiffre d'affaires publié. Les 11 reprises du 30/09 étaient
+ * toutes « effectif non déclaré », SIREN créés en 2026, 0 contactable.
+ */
+export const YOUNG_COMPANY_MONTHS = 24;
+
+/** Reprise de fonds de commerce : seulement par une entreprise établie. */
+export const ESTABLISHED_MONTHS = 24;
+const FONDS_DE_COMMERCE = /fonds de commerce|reprise d.un fonds|achat d.un fonds|vente d.un fonds|cession d.un fonds/i;
 
 /** Bâtiment : préféré seulement à partir de 20 salariés. */
 const BUILDING = ["41", "43"];
@@ -50,6 +81,23 @@ const prefixMatch = (naf: string | null, prefixes: readonly string[]) => {
 
 const euros = (value: number) =>
   `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(value)} €`;
+
+/** Motif d'une offre dont l'intitulé ne révèle aucun pain (décidé sans identité). */
+export const NO_PAIN_TITLE = "intitulé de poste qui ne révèle aucun pain automatisable";
+
+/** Âge en mois de la société à `now`, ou `null` si la date de création manque. */
+export function ageInMonths(createdOn: string | null | undefined, now: Date): number | null {
+  if (!createdOn) return null;
+  const created = new Date(createdOn);
+  if (Number.isNaN(created.getTime())) return null;
+  return (now.getFullYear() - created.getFullYear()) * 12 + (now.getMonth() - created.getMonth());
+}
+
+const unknownHeadcount = (code: string | null | undefined) => !code || code === "NN";
+
+/** Une offre d'emploi dont l'intitulé révèle un pain : la preuve qu'ils embauchent. */
+const revealingJobOffer = (signal: HarvestedSignal) =>
+  signal.source === "france-travail" && Boolean(painForJob(signal.facts.jobTitle ?? signal.text));
 
 export interface FilterOptions {
   preferredSectors?: readonly string[];
@@ -129,8 +177,37 @@ export function filterSignal(
   if (isSmallB2C(identity.naf, identity.effectifCode)) {
     return reject(`commerce de détail ou service aux particuliers de moins de 20 salariés (NAF ${identity.naf})`);
   }
+  if (prefixMatch(identity.naf, BAKERY) && identity.effectifCode && !unknownHeadcount(identity.effectifCode) && !AT_LEAST_TWENTY.has(identity.effectifCode)) {
+    return reject(`boulangerie de moins de 20 salariés (NAF ${identity.naf})`);
+  }
   if (identity.effectifCode && UNDER_TEN.has(identity.effectifCode)) {
     return reject(identity.effectifCode === "00" ? "0 salarié" : "effectif inférieur à 10 salariés");
+  }
+
+  // Effectif NON DÉCLARÉ : ce n'est pas « on ne sait pas », c'est presque
+  // toujours une toute petite structure — sauf si une offre d'emploi prouve
+  // qu'elle embauche.
+  const now = options.now ?? new Date();
+  const months = ageInMonths(identity.createdOn, now);
+  if (unknownHeadcount(identity.effectifCode) && !revealingJobOffer(signal)) {
+    const young = months !== null && months < YOUNG_COMPANY_MONTHS;
+    const noRevenue = identity.revenue == null;
+    if (young || noRevenue) {
+      return reject(
+        `micro-structure probable : effectif non déclaré et ${young ? `société créée il y a ${Math.max(0, months ?? 0)} mois` : "aucun chiffre d'affaires publié"}`,
+      );
+    }
+  }
+
+  // Reprise de fonds de commerce : un signal seulement si le repreneur est une
+  // entreprise établie (≥ 10 salariés ET ≥ 2 ans). Sinon, c'est un commerçant
+  // qui s'installe, pas un back-office qui grossit.
+  if (FONDS_DE_COMMERCE.test(text)) {
+    const established =
+      AT_LEAST_TEN.has(identity.effectifCode ?? "") && months !== null && months >= ESTABLISHED_MONTHS;
+    if (!established) {
+      return reject("micro-reprise : repreneur de moins de 10 salariés ou de moins de 2 ans");
+    }
   }
 
   // --- Signal faible ou faux -------------------------------------------------
@@ -140,7 +217,7 @@ export function filterSignal(
   if (isReviewSite(signal.url)) return reject("avis/forum : une note de salariés n'est pas un signal d'entreprise");
   if (ABOUT_CLIENT.test(text)) return reject("le signal parle d'un client de l'entreprise, pas d'elle");
   if (signal.source === "france-travail" && !painForJob(signal.facts.jobTitle ?? signal.text)) {
-    return reject("intitulé de poste qui ne révèle aucun pain automatisable");
+    return reject(NO_PAIN_TITLE);
   }
 
   let weight = signal.facts.strength === "fort" ? 0.7 : signal.facts.strength === "moyen" ? 0.5 : 0.25;
@@ -173,7 +250,7 @@ export function filterSignal(
   }
   if (identity.isBranch) badges.push(`décision au siège${identity.headOfficeCity ? ` (${identity.headOfficeCity})` : ""}`);
 
-  const age = ((options.now ?? new Date()).getTime() - new Date(signal.date).getTime()) / 86_400_000;
+  const age = (now.getTime() - new Date(signal.date).getTime()) / 86_400_000;
   if (age <= 7) weight += 0.05;
 
   return {

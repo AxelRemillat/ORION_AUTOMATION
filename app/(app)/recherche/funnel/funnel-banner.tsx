@@ -12,10 +12,13 @@ const STEPS = [
   ["contactables", "contactables"],
 ] as const;
 
+const SOURCE_LABELS: Record<string, string> = { "france-travail": "France Travail", bodacc: "BODACC", linkup: "Presse" };
+
 const euros = (value: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(value);
 
 export function FunnelBanner({ snapshot }: { snapshot: FunnelSnapshot }) {
   const { job, counts, cost, readyShare } = snapshot;
+  const bySource = snapshot.bySource ?? [];
   if (!job) return null;
   const running = job.status === "queued" || job.status === "running";
   const pct = Math.max(0, Math.min(100, job.progress?.pct ?? 0));
@@ -34,6 +37,16 @@ export function FunnelBanner({ snapshot }: { snapshot: FunnelSnapshot }) {
           {cost ? `coût ${euros(cost.eur)} · ${cost.pappers} Pappers · ${cost.hunter} Hunter` : "coût en cours de calcul"}
         </span>
       </div>
+      {bySource.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-0.5 font-data text-[12px] text-muted" aria-label="Rendement par source">
+          {bySource.map((item) => (
+            <li key={item.source}>
+              <span className="text-text">{SOURCE_LABELS[item.source] ?? item.source}</span>
+              {` · ${item.bruts} bruts → ${item.examines} examinés → ${item.filtres} filtrés → ${item.retenus} retenus → ${item.contactables} contactables`}
+            </li>
+          ))}
+        </ul>
+      )}
       {running && (
         <div className="mt-3">
           <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
