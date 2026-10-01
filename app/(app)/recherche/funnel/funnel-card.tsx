@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { Badge, Card, CardContent } from "@/components/ui";
 import type { FunnelCard as Card_ } from "@/lib/funnel/view";
+import { HUNTER_EPUISE } from "@/lib/hunter/gate";
 
 /**
  * Une carte de l'entonnoir : le signal daté et sa source, le pain probable,
@@ -68,6 +69,14 @@ export function FunnelCard({ card }: { card: Card_ }) {
             <a href={`tel:${card.phone.replace(/\s/g, "")}`} className="font-data text-primary-ink hover:underline">
               {card.phone}
             </a>
+          </p>
+        )}
+
+        {card.publication === "a_completer" && card.hunterSkipped && (
+          <p className={card.hunterSkipped.startsWith(HUNTER_EPUISE) ? "text-[12px] text-warn-ink" : "text-[12px] text-muted"}>
+            {card.hunterSkipped.startsWith(HUNTER_EPUISE)
+              ? `À compléter (${HUNTER_EPUISE})`
+              : `Hunter non appelé : ${card.hunterSkipped}`}
           </p>
         )}
 

@@ -18,7 +18,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { chatJson } from "../lib/ai/chat";
 import { effectifLabel } from "../lib/enrichment/naf";
 import { examinationPlan } from "../lib/funnel/budget";
-import { disqualify } from "../lib/funnel/eligible";
+import { digFactsOf, disqualify } from "../lib/funnel/eligible";
+import { hunterPolicy } from "../lib/contact-finder/policy";
 import { DEFAULT_EXCLUDED_SECTORS, DEFAULT_PREFERRED_SECTORS, filterSignal, NO_PAIN_TITLE } from "../lib/funnel/filter";
 import { painForJob } from "../lib/funnel/pain-map";
 import { harvest } from "../lib/funnel/harvest";
@@ -185,15 +186,7 @@ const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
         // Le job ne publierait pas sans Pappers (lib/funnel/dig.ts). Le rejeu
         // cherche quand même le contact, pour mesurer, et le signale.
         entry.pappers = figures.pappers_read === true ? "lu" : "NON LU (opposition et groupe non vérifiés)";
-        const verdict = disqualify({
-          refusesProspecting: figures.refuses_prospecting === true,
-          noStaff: figures.no_staff === true,
-          capitalEur: typeof figures.capital_eur === "number" ? figures.capital_eur : null,
-          equityEur: typeof figures.equity_eur === "number" ? figures.equity_eur : null,
-          headcount: typeof figures.headcount === "number" ? figures.headcount : null,
-          largeGroup: figures.is_large_group_subsidiary === true,
-          foreignParent: figures.parent_foreign === true,
-        });
+        const verdict = disqualify(digFactsOf(figures));
         if (verdict) {
           entry.creusage = `écarté : ${verdict.reason}`;
           console.log(`  ${entry.nom} → ${entry.creusage}`);
@@ -201,7 +194,11 @@ const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
         }
         const prospect = { id: "dry", company_name: company.company_name, siren: company.siren, website: company.website ?? null, email: null, city: company.city ?? null, key_figures: figures } as unknown as Prospect;
         const identity = await identityOf(prospect);
-        const { result } = await runContactSearch(identity, realDeps(null));
+        // Même feu vert Hunter que le job : sans Pappers lu, ou sous le score 4,
+        // la mesure se fait en gratuit seulement — le rejeu ne dépense plus de
+        // crédit sur une fiche que le job aurait écartée.
+        const hunter = hunterPolicy({ ...figures, funnel_run_id: "rejeu", funnel_score: entry.score });
+        const { result } = await runContactSearch(identity, realDeps(null), undefined, { hunter });
         entry.contact = result.email
           ? `${result.email} (${result.email_type}${result.doubtful ? ", DOUTEUX" : ""})`
           : result.phone

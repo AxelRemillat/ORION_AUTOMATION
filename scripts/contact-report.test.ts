@@ -119,17 +119,19 @@ async function main() {
     const search = storedSearch(trace, result, company, { contact_search: null });
     const report = searchReport(search)!;
     check("succès → bloc replié", !report.failed);
-    check("conclusion : adresse nominative", report.conclusion.startsWith("Adresse nominative trouvée : j.benes@briol-diffusion.fr"), report.conclusion);
+    // Économie Hunter (01/10/2026) : l'adresse publiée sur le site suffit.
+    check("conclusion : adresse du site", report.conclusion.startsWith("Adresse générique trouvée : contact@briol-diffusion.fr"), report.conclusion);
     check("requête SIREN citée", report.lines[0] === 'Recherche web « "421882440" mentions légales » : ' + `${trace.queries![0].results} résultat${trace.queries![0].results > 1 ? "s" : ""}.`, report.lines[0]);
     const read = report.lines.find((line) => line.startsWith("Lu : menuiseriebriol-diffusion.com")) ?? "";
     check("le site lu, ses pages et le verdict", read.includes("/mentions-légales") && read.includes("retenu, SIREN présent sur la page"), read);
     check("ce qui a été cherché est dit", read.includes("Cherché : SIREN, raison sociale, ville, dirigeant, adresses e-mail"), read);
     check("annuaires écartés nommés", report.lines.some((line) => line.startsWith("Écartés sans lecture") && line.includes("annuaire")), report.lines.join("\n"));
-    const hunter = report.lines.find((line) => line.startsWith("Hunter :")) ?? "";
-    check("appels Hunter et résultats", hunter.includes("domain-search briol-diffusion.fr → 1 adresse(s)") && hunter.includes("email-verifier j.benes@briol-diffusion.fr → valid"), hunter);
+    check("aucun appel Hunter : le site a suffi", !report.lines.some((line) => line.startsWith("Hunter :")) && trace.hunter!.length === 0, report.lines.join("\n"));
     check(`${MAX_REPORT_LINES} lignes au plus`, report.lines.length <= MAX_REPORT_LINES, String(report.lines.length));
     check("cherché : dérivé de l'identité", lookedFor(company).includes("dirigeant"));
-    const cost = report.lines.at(-1) ?? "";
+    // Une recherche AVEC appel Hunter, sans HUNTER_SEARCH_EUR : le total le dit.
+    const withHunter = storedSearch({ ...trace, spent: { ...trace.spent, hunterDomainSearch: 1 } }, result, company, { contact_search: null });
+    const cost = searchReport(withHunter)!.lines.at(-1) ?? "";
     check("Hunter sans prix : le total le dit", cost.includes("hors Hunter (prix non configuré)"), cost);
   }
 

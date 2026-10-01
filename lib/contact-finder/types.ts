@@ -22,6 +22,12 @@ export interface ContactResult {
   doubtful?: boolean;
   /** Téléphone lu sur le site : sans email, la fiche part « à appeler ». */
   phone?: string;
+  /**
+   * Hunter n'a PAS été appelé alors que le gratuit n'a rien donné : crédits ou
+   * budget du jour épuisés, score insuffisant, fiche à écarter. Le motif est
+   * affiché : la fiche part « à compléter (Hunter épuisé) », pas en échec.
+   */
+  hunter_skipped?: string;
 }
 
 /** Ce que l'on sait de l'entreprise avant de chercher. */

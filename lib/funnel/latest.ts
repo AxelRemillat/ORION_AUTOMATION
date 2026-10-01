@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { PUBLIC_COLUMNS, type Job } from "@/lib/jobs/types";
 import type { Database } from "@/types";
 import { runCost } from "./cost";
+import { hunterStatus, type HunterStatus } from "@/lib/hunter/gate";
 import { candidatesOf, countFunnel, yieldBySource, type SourceYield } from "./store";
 import type { FunnelCost, FunnelCounts } from "./types";
 import { cardsOf, rejectsOf, type FunnelCard, type FunnelReject } from "./view";
@@ -25,6 +26,21 @@ export interface FunnelSnapshot {
   readyShare: number | null;
   cards: FunnelCard[];
   rejects: FunnelReject[];
+  /** Hunter aujourd'hui : recherches facturées, budget du jour, blocage éventuel. */
+  hunter: HunterStatus | null;
+}
+
+/** Recherches Hunter facturées aujourd'hui, lues avec la session de l'écran. */
+async function hunterToday(db: Db): Promise<HunterStatus | null> {
+  return hunterStatus({
+    read: async () => null,
+    write: async () => undefined,
+    async usedSince(since) {
+      const { data, error } = await db.from("api_usage").select("units").eq("service", "hunter").gte("created_at", since.toISOString());
+      if (error) throw new Error(error.message);
+      return (data ?? []).reduce((total, row) => total + (Number(row.units) || 0), 0);
+    },
+  }).catch(() => null);
 }
 
 const EMPTY: FunnelCounts = { bruts: 0, filtres: 0, retenus: 0, creuses: 0, contactables: 0 };
@@ -40,7 +56,9 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
     .maybeSingle();
   const job = (data as Job | null) ?? null;
   const runId = typeof job?.result?.runId === "string" ? job.result.runId : null;
-  if (!job || !runId) return { job, runId, counts: EMPTY, bySource: [], cost: null, readyShare: null, cards: [], rejects: [] };
+  if (!job || !runId) {
+    return { job, runId, counts: EMPTY, bySource: [], cost: null, readyShare: null, cards: [], rejects: [], hunter: null };
+  }
 
   const rows = await candidatesOf(db, userId, runId);
   const cards = cardsOf(rows);
@@ -55,5 +73,6 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
     readyShare: dug.length ? ready / dug.length : null,
     cards,
     rejects: rejectsOf(rows),
+    hunter: await hunterToday(db),
   };
 }

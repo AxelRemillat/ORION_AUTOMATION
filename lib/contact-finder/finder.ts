@@ -44,6 +44,15 @@ interface Candidate {
   by: string;
 }
 
+/**
+ * Réglage de l'appel Hunter, décidé AVANT la recherche par l'appelant
+ * (`hunterPolicy` + garde-fou du jour, lib/contact-finder/index.ts).
+ * Absent : Hunter autorisé (tests, script de mesure).
+ */
+export interface ContactSearchOptions {
+  hunter?: { allowed: boolean; reason?: string };
+}
+
 interface SiteEmail {
   email: string;
   url: string;
@@ -119,6 +128,7 @@ export async function runContactSearch(
   company: CompanyIdentity,
   deps: ContactDeps,
   budget: ContactBudget = DEFAULT_BUDGET,
+  options: ContactSearchOptions = {},
 ): Promise<{ result: ContactResult; trace: ContactTrace }> {
   const spent = EMPTY_SPENT();
   const trace: ContactTrace = { spent, candidates: [], emailDomains: [], steps: [], queries: [], skipped: [], hunter: [] };
@@ -242,11 +252,55 @@ export async function runContactSearch(
   if (site && !domains.includes(site.domain)) domains.push(site.domain);
   trace.emailDomains = domains;
 
-  // --- 4. Hunter : sur les domaines d'ADRESSE, pas seulement celui du site --
+  /*
+   * --- 4. DOMAINE DE CONFIANCE -------------------------------------------
+   *
+   * Une adresse n'est gardée que si son domaine est celui du site (ou un
+   * sous-domaine), ou un domaine d'adresse publiée dans les MENTIONS LÉGALES
+   * — l'entreprise y déclare où on la joint. Sinon, seule une vérification
+   * Hunter « valid » la sauve, avec le drapeau « douteux ».
+   *
+   * Cas réel (30/09/2026) : HÖRMANN FRANCE sortait « contactable » avec
+   * louis@louis.info — une adresse vue sur le site, d'un domaine sans rapport,
+   * interrogée chez Hunter comme un « second domaine ».
+   *
+   * Les mentions légales citent AUSSI des tiers : l'hébergeur (obligatoire),
+   * l'agence web, le photographe. Rejeu du 30/09 : support@ovhcloud.com pour
+   * BOUVET CARTIER, contact@lamobylettejaune.com (agence) pour ACTES ALLIANCES.
+   * Un domaine autre que celui du site n'est donc de confiance que s'il PORTE
+   * LE NOM de l'entreprise (briol-diffusion.fr, belledonnebio.shop) et n'est
+   * pas un prestataire technique.
+   */
+  const trusted = (email: string) => {
+    const domain = domainOfEmail(email);
+    if (!domain || !site) return false;
+    if (domain === site.domain || domain.endsWith(`.${site.domain}`)) return true;
+    return !isServiceProvider(domain) && carriesName(domain, company);
+  };
+
+  /*
+   * --- 5. Hunter : SEULEMENT SI LE GRATUIT N'A RIEN DONNÉ ------------------
+   *
+   * 01/10/2026 : un run a épuisé les crédits d'un coup. Hunter partait sur
+   * chaque fiche, même quand le site (accueil, mentions légales, adresse
+   * masquée par Joomla, second domaine) avait déjà donné une adresse de
+   * confiance. Désormais : une adresse de confiance lue sur le site → pas
+   * d'appel. Et rien sans le feu vert de l'appelant (score ≥ 4, opposition,
+   * taille, budget du jour — cf. `hunterPolicy`).
+   */
+  const freeFound = siteEmails.some((item) => trusted(item.email));
+  const policy = options.hunter ?? { allowed: true };
+  const hunterSkip = freeFound
+    ? "adresse de confiance trouvée sur le site"
+    : policy.allowed
+      ? null
+      : policy.reason ?? "Hunter non autorisé";
+  if (hunterSkip) trace.steps.push(`Hunter non appelé : ${hunterSkip}`);
+
   type Nominal = { email: string; url: string; by: string; verified: VerifierStatus | null; guessed: boolean };
   const nominals: Nominal[] = [];
   const hunterGeneric: SiteEmail[] = [];
-  for (const domain of domains) {
+  for (const domain of hunterSkip ? [] : domains) {
     if (!can("hunterDomainSearch")) break;
     use("hunterDomainSearch");
     const hits = (await deps.hunterDomainSearch(domain)) ?? [];
@@ -265,7 +319,7 @@ export async function runContactSearch(
       else hunterGeneric.push({ email: hit.email, url });
     }
   }
-  if (person && domains[0] && can("hunterFinder") && !nominals.some((item) => matchesPerson(item.email, person))) {
+  if (!hunterSkip && person && domains[0] && can("hunterFinder") && !nominals.some((item) => matchesPerson(item.email, person))) {
     use("hunterFinder");
     const found = await deps.hunterFinder(domains[0], person.firstName, person.lastName);
     trace.steps.push(`Hunter email-finder ${person.firstName} ${person.lastName} @${domains[0]} : ${found?.email ?? "rien"}`);
@@ -276,38 +330,13 @@ export async function runContactSearch(
   nominals.sort((a, b) => Number(matchesPerson(b.email, person)) - Number(matchesPerson(a.email, person)));
   for (const item of nominals) {
     if (!can("hunterVerifier")) break;
+    // Seules les adresses NOMINATIVES passent ici : une adresse générique (lue
+    // sur le site ou rendue par Hunter) n'est jamais soumise à l'email-verifier.
     use("hunterVerifier");
     item.verified = await deps.hunterVerify(item.email);
     trace.steps.push(`Hunter email-verifier ${item.email} : ${item.verified ?? "sans réponse"}`);
     trace.hunter!.push({ call: "email-verifier", target: item.email, result: item.verified ?? "sans réponse" });
   }
-
-  /*
-   * --- 5. DOMAINE DE CONFIANCE -------------------------------------------
-   *
-   * Une adresse n'est gardée que si son domaine est celui du site (ou un
-   * sous-domaine), ou un domaine d'adresse publiée dans les MENTIONS LÉGALES
-   * — l'entreprise y déclare où on la joint. Sinon, seule une vérification
-   * Hunter « valid » la sauve, avec le drapeau « douteux ».
-   *
-   * Cas réel (30/09/2026) : HÖRMANN FRANCE sortait « contactable » avec
-   * louis@louis.info — une adresse vue sur le site, d'un domaine sans rapport,
-   * interrogée chez Hunter comme un « second domaine ».
-   */
-  /*
-   * Les mentions légales citent AUSSI des tiers : l'hébergeur (obligatoire),
-   * l'agence web, le photographe. Rejeu du 30/09 : support@ovhcloud.com pour
-   * BOUVET CARTIER, contact@lamobylettejaune.com (agence) pour ACTES ALLIANCES.
-   * Un domaine autre que celui du site n'est donc de confiance que s'il PORTE
-   * LE NOM de l'entreprise (briol-diffusion.fr, belledonnebio.shop) et n'est
-   * pas un prestataire technique.
-   */
-  const trusted = (email: string) => {
-    const domain = domainOfEmail(email);
-    if (!domain || !site) return false;
-    if (domain === site.domain || domain.endsWith(`.${site.domain}`)) return true;
-    return !isServiceProvider(domain) && carriesName(domain, company);
-  };
 
   // --- 6. Priorité : nominatif valide > nominatif accept_all > générique ----
   const base = site?.confidence ?? 0;
@@ -344,6 +373,8 @@ export async function runContactSearch(
   const phones = site?.phones ?? [];
   const phone = phones.find((item) => /contact|mention|legal/.test(item.url)) ?? phones[0];
   if (phone) result.phone = phone.phone;
+  // Rien trouvé, et Hunter retenu faute de feu vert : on dit pourquoi.
+  if (!result.email && hunterSkip && !freeFound) result.hunter_skipped = hunterSkip;
   if (!site && snippetEmails.length) trace.steps.push(`adresses vues dans la recherche, non retenues (site non prouvé) : ${snippetEmails.map((item) => item.email).join(", ")}`);
   return { result, trace };
 }

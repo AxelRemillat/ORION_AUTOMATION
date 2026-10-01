@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { HUNTER_EPUISE } from "@/lib/hunter/gate";
 import type { Database, SignalCandidateRow } from "@/types";
 import { examinationPlan, MAX_EXAMINED } from "./budget";
 import { clampDigLimit, contactBadge, digOne, digOrder, type DigDeps } from "./dig";
@@ -268,7 +269,10 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
    */
   const room = Math.max(0, options.perStep - pending.length);
   let retried = 0;
-  if (room > 0) {
+  // Hunter bloqué (crédits ou budget du jour) : ces fiches ont déjà eu leur
+  // recherche gratuite, les reprendre ne ferait que repayer Linkup pour rien.
+  const hunterBlocked = room > 0 ? await (options.deps.hunterBlocked?.() ?? Promise.resolve(null)) : null;
+  if (room > 0 && !hunterBlocked) {
     const { data } = await db
       .from("signal_candidates")
       .select("*")
@@ -281,6 +285,19 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
       .filter((row) => !(row.contact as { retried_at?: string } | null)?.retried_at)
       .slice(0, Math.min(3, room));
     for (const row of stale) {
+      // Re-filtrée avec les règles du jour AVANT toute recherche : une fiche
+      // creusée sous d'anciennes règles (TÉRÉVA avant le plafond de 249
+      // salariés) ne doit plus coûter un crédit. Le feu vert Hunter de la
+      // fiche (opposition, taille, groupe, score) est ensuite revérifié par
+      // `findContact` lui-même (lib/contact-finder/policy.ts).
+      const verdict = filterSignal(rowToSignal(row), row.identity as unknown as Identity | null, {
+        ...options.prefs,
+        now: options.now,
+      });
+      if (verdict.status === "rejeté") {
+        await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: `re-filtré : ${verdict.reason}` });
+        continue;
+      }
       const contact = await options.deps.findContact(row.prospect_id!).catch(() => null);
       retried += 1;
       await updateCandidate(db, row.id, {
@@ -289,7 +306,10 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
           ...((row.contact as Record<string, unknown> | null) ?? {}),
           ...(contact ?? {}),
           badge: contactBadge(contact),
-          retried_at: (options.now ?? new Date()).toISOString(),
+          // Hunter retenu faute de crédit : pas « reprise », elle le sera quand ils reviennent.
+          ...(contact?.hunter_skipped?.startsWith(HUNTER_EPUISE)
+            ? {}
+            : { retried_at: (options.now ?? new Date()).toISOString() }),
         },
       });
     }

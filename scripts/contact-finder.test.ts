@@ -3,8 +3,9 @@
  *
  * Trois cas réels, résultat attendu EXACT :
  *   - BRIOL DIFFUSION : le site (menuiseriebriol-diffusion.com) et l'adresse
- *     (contact@briol-diffusion.fr) n'ont pas le même domaine ; Hunter doit
- *     chercher sur le domaine de l'ADRESSE, avec le nom d'usage « Briol ».
+ *     (contact@briol-diffusion.fr) n'ont pas le même domaine ; l'adresse,
+ *     publiée sur le site et au nom de l'entreprise, suffit : Hunter n'est
+ *     plus appelé (économie Hunter, 01/10/2026).
  *   - SARL BONNIN FRERES : trouvée par son nom commercial, adresse masquée
  *     « contact [at] … » dans les informations légales.
  *   - ARTFLEX : site sans lien avec la raison sociale, retrouvé par le SIREN.
@@ -213,9 +214,11 @@ async function main() {
     );
     check("domaine d'adresse ≠ domaine du site, cherché en premier", trace.emailDomains[0] === "briol-diffusion.fr", trace.emailDomains.join(","));
     check("le dirigeant éponyme est retenu", `${company.leader?.firstName} ${company.leader?.lastName}` === "Xavier Briol", JSON.stringify(company.leader));
-    check("adresse nominative vérifiée retenue", result.email === "j.benes@briol-diffusion.fr" && result.email_type === "nominatif", JSON.stringify(result));
-    // « xbr » ne nomme personne : Hunter le dit « personal », on ne le croit pas.
-    check("l'alias opaque n'est pas présenté comme nominatif", result.email !== "xbr@briol-diffusion.fr");
+    // Économie Hunter (01/10/2026) : le site publie déjà une adresse de confiance
+    // (contact@briol-diffusion.fr, domaine au nom de l'entreprise) — Hunter
+    // n'est plus appelé pour chercher mieux.
+    check("adresse publiée sur le site retenue", result.email === "contact@briol-diffusion.fr" && result.email_type === "generique", JSON.stringify(result));
+    check("Hunter non appelé : le site a suffi", calls.domainSearch.length === 0 && calls.finder.length === 0 && calls.verify.length === 0, JSON.stringify(calls));
     check("aucun annuaire lu", !calls.pages.some((url) => /societe\.com|verif\.com|data\.inpi/.test(url)), calls.pages.join(" "));
   }
 
@@ -270,23 +273,43 @@ async function main() {
       JSON.stringify(result),
     );
     check("téléphone du site relevé", result.phone === "04 72 71 20 80", String(result.phone));
-    check("Hunter interrogé sur le site trouvé", calls.domainSearch.includes("robinetterieindustrielle.fr"), calls.domainSearch.join(","));
+    // L'adresse Joomla suffit : plus aucun crédit Hunter dépensé ici.
+    check("Hunter non appelé : l'adresse masquée du site suffit", calls.domainSearch.length === 0, calls.domainSearch.join(","));
   }
 
   console.log("règles");
   {
     const site = "https://pme-bois.fr";
     const legal = `<a href="/mentions-legales">Mentions légales</a>`;
-    const { deps } = fakeDeps({
+    const company = identity({
+      legalName: "PME BOIS", siren: "111222333", knownWebsite: site, leader: { firstName: "Paul", lastName: "Durand" },
+    });
+    const setup = {
       pages: { [site]: `<h1>PME BOIS</h1>${legal}`, [`${site}/mentions-legales`]: "PME BOIS SIREN 111222333 contact@pme-bois.fr" },
       finder: { "Paul Durand@pme-bois.fr": "paul.durand@pme-bois.fr" },
-      verify: { "paul.durand@pme-bois.fr": "valid" },
-    });
-    const { result } = await runContactSearch(identity({
-      legalName: "PME BOIS", siren: "111222333", knownWebsite: site, leader: { firstName: "Paul", lastName: "Durand" },
-    }), deps);
-    check("nominatif vérifié « valid » > générique du site", result.email === "paul.durand@pme-bois.fr" && result.email_type === "nominatif");
-    check("found_by explicite", result.found_by === "hunter:email-finder+verifier:valid", result.found_by);
+      verify: { "paul.durand@pme-bois.fr": "valid" as VerifierStatus },
+    };
+    // Économie Hunter (01/10/2026) : le gratuit d'abord — une adresse de
+    // confiance sur le site, et Hunter n'est pas appelé du tout.
+    const free = fakeDeps(setup);
+    const { result } = await runContactSearch(company, free.deps);
+    check("adresse du site gardée, Hunter non appelé", result.email === "contact@pme-bois.fr" && free.calls.finder.length === 0 && free.calls.domainSearch.length === 0, JSON.stringify(free.calls));
+    check("found_by explicite", result.found_by === "site:mentions-legales", result.found_by);
+    // La générique du site n'est JAMAIS soumise à l'email-verifier.
+    check("pas d'email-verifier sur la générique du site", !free.calls.verify.includes("contact@pme-bois.fr"), free.calls.verify.join(","));
+
+    // Rien sur le site : Hunter reprend la main (email-finder + verifier).
+    const sansAdresse = { [site]: `<h1>PME BOIS</h1>${legal}`, [`${site}/mentions-legales`]: "PME BOIS SIREN 111222333" };
+    const empty = fakeDeps({ ...setup, pages: sansAdresse });
+    const viaHunter = await runContactSearch(company, empty.deps);
+    check("rien sur le site → Hunter : nominatif « valid »", viaHunter.result.email === "paul.durand@pme-bois.fr" && viaHunter.result.found_by === "hunter:email-finder+verifier:valid", JSON.stringify(viaHunter.result));
+
+    // Rien sur le site, mais Hunter refusé (crédits, score, fiche à écarter) :
+    // aucun appel, motif rendu pour « à compléter (Hunter épuisé) ».
+    const blocked = fakeDeps({ ...setup, pages: sansAdresse });
+    const refused = await runContactSearch(company, blocked.deps, undefined, { hunter: { allowed: false, reason: "Hunter épuisé : budget du jour atteint (10/10)" } });
+    check("Hunter refusé : aucun appel", blocked.calls.finder.length + blocked.calls.domainSearch.length + blocked.calls.verify.length === 0, JSON.stringify(blocked.calls));
+    check("… et le motif est rendu", !refused.result.email && refused.result.hunter_skipped === "Hunter épuisé : budget du jour atteint (10/10)", JSON.stringify(refused.result));
   }
   {
     const pages: Record<string, string> = {};
