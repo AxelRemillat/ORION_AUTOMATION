@@ -19,6 +19,8 @@
  * clair, jamais en exception.
  */
 import { recordUnitUsage } from "@/lib/usage/record";
+import { gatedHunterCall, hunterCacheKey } from "@/lib/hunter/gate";
+import { supabaseHunterStore } from "@/lib/hunter/store";
 import type { Result } from "./http";
 import type { DecisionMakerContact } from "./types";
 
@@ -59,13 +61,42 @@ export interface HunterFailure {
   quotaExceeded: boolean;
 }
 
-type HunterResult<T> = { ok: true; data: T } | ({ ok: false } & HunterFailure);
+/**
+ * `cached` : réponse relue dans le cache 90 jours, AUCUNE recherche facturée.
+ * `blocked` : appel non fait (budget du jour, crédits épuisés) — pas une panne.
+ */
+type HunterResult<T> = { ok: true; data: T; cached?: boolean } | ({ ok: false; blocked?: boolean } & HunterFailure);
 
 /**
- * GET Hunter : lit le corps JSON même en erreur, pour restituer le message du
- * fournisseur plutôt qu'un « HTTP 429 » opaque.
+ * GET Hunter, derrière le garde-fou (lib/hunter/gate.ts) : cache 90 jours par
+ * requête, budget quotidien, arrêt sur crédits épuisés. `account` (gratuit, et
+ * qui sert à lire le quota) passe directement.
  */
 async function hunterGet<T>(path: string, params: URLSearchParams): Promise<HunterResult<T>> {
+  if (path === "account") return rawHunterGet<T>(path, params);
+  if (!process.env.HUNTER_API_KEY) return { ok: false, error: "HUNTER_API_KEY absente", quotaExceeded: false };
+  const box: { failure?: HunterFailure } = {};
+  const gated = await gatedHunterCall<T>(
+    supabaseHunterStore(),
+    hunterCacheKey(path, Object.fromEntries(params)),
+    async () => {
+      const response = await rawHunterGet<T>(path, new URLSearchParams(params));
+      if (response.ok) return { data: response.data, quotaExceeded: false };
+      box.failure = { error: response.error, quotaExceeded: response.quotaExceeded };
+      return { data: null, quotaExceeded: response.quotaExceeded };
+    },
+  );
+  if (gated.status === "cache") return { ok: true, data: gated.data, cached: true };
+  if (gated.status === "bloque") return { ok: false, error: gated.reason, quotaExceeded: false, blocked: true };
+  if (gated.data !== null) return { ok: true, data: gated.data };
+  return { ok: false, ...(box.failure ?? { error: "Hunter injoignable", quotaExceeded: false }) };
+}
+
+/**
+ * GET Hunter brut : lit le corps JSON même en erreur, pour restituer le message du
+ * fournisseur plutôt qu'un « HTTP 429 » opaque.
+ */
+async function rawHunterGet<T>(path: string, params: URLSearchParams): Promise<HunterResult<T>> {
   const key = process.env.HUNTER_API_KEY;
   if (!key) return { ok: false, error: "HUNTER_API_KEY absente", quotaExceeded: false };
   params.set("api_key", key);
@@ -235,13 +266,14 @@ export async function findDecisionMaker(
   );
 
   if (!response.ok) {
-    await trace("domain-search", "erreur", prospectId, false);
+    if (!response.blocked) await trace("domain-search", "erreur", prospectId, false);
     return { ok: false, error: response.error, quotaExceeded: response.quotaExceeded };
   }
 
   const emails = (response.data.emails ?? []).filter((email) => email.value);
-  // Hunter decompte une recherche de domaine, qu'elle trouve un email ou non.
-  await trace("domain-search", emails.length ? "trouve" : "vide", prospectId, true);
+  // Hunter decompte une recherche de domaine, qu'elle trouve un email ou non ;
+  // une reponse relue dans le cache, elle, ne coute rien.
+  await trace("domain-search", emails.length ? "trouve" : "vide", prospectId, !response.cached);
   if (!emails.length) return { ok: true, data: { contact: null, candidates: [] } };
 
   const leaderLastName = leaderName?.trim().split(/\s+/).pop()?.toLowerCase() ?? null;
@@ -283,10 +315,10 @@ export async function findEmailByName(
   }>("email-finder", new URLSearchParams({ domain, first_name: firstName, last_name: lastName }));
 
   if (!response.ok) {
-    await trace("email-finder", "erreur", prospectId, false);
+    if (!response.blocked) await trace("email-finder", "erreur", prospectId, false);
     return { ok: false, error: response.error, quotaExceeded: response.quotaExceeded };
   }
-  await trace("email-finder", response.data.email ? "trouve" : "vide", prospectId, true);
+  await trace("email-finder", response.data.email ? "trouve" : "vide", prospectId, !response.cached);
   if (!response.data.email) return { ok: true, data: null };
 
   return {

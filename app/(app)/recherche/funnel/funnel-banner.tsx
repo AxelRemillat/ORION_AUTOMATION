@@ -37,6 +37,14 @@ export function FunnelBanner({ snapshot }: { snapshot: FunnelSnapshot }) {
           {cost ? `coût ${euros(cost.eur)} · ${cost.pappers} Pappers · ${cost.hunter} Hunter` : "coût en cours de calcul"}
         </span>
       </div>
+      {snapshot.hunter && (
+        <p className="mt-1 font-data text-[12px] text-muted" aria-label="Budget Hunter du jour">
+          {`Hunter aujourd'hui : ${snapshot.hunter.usedToday} / ${snapshot.hunter.budget} recherches`}
+          {snapshot.hunter.blocked && (
+            <span className="text-warn-ink">{` · ${snapshot.hunter.blocked} — creusage en mode gratuit`}</span>
+          )}
+        </p>
+      )}
       {bySource.length > 0 && (
         <ul className="mt-2 flex flex-col gap-0.5 font-data text-[12px] text-muted" aria-label="Rendement par source">
           {bySource.map((item) => (

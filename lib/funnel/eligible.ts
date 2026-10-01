@@ -103,6 +103,23 @@ export function disqualify(facts: DigFacts): Disqualification {
   return opposesProspecting(facts) ?? noStaff(facts) ?? tooLarge(facts) ?? equityTooLow(facts);
 }
 
+/**
+ * Les faits du registre tels que l'enrichissement les range dans
+ * `key_figures` — UNE lecture, partagée par le creusage, le rejeu et le
+ * feu vert Hunter (lib/contact-finder/policy.ts).
+ */
+export function digFactsOf(figures: Record<string, unknown>): DigFacts {
+  return {
+    refusesProspecting: figures.refuses_prospecting === true,
+    noStaff: figures.no_staff === true,
+    capitalEur: typeof figures.capital_eur === "number" ? figures.capital_eur : null,
+    equityEur: typeof figures.equity_eur === "number" ? figures.equity_eur : null,
+    headcount: typeof figures.headcount === "number" ? figures.headcount : null,
+    largeGroup: figures.is_large_group_subsidiary === true,
+    foreignParent: figures.parent_foreign === true,
+  };
+}
+
 /** `prefixMatch` local : le module doit rester SANS dépendance (client compris). */
 const prefixMatch = (naf: string | null | undefined, prefixes: readonly string[]): boolean => {
   const code = (naf ?? "").replace(/\D/g, "");

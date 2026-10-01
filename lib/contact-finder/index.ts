@@ -7,6 +7,9 @@ import { identityOf } from "./sources";
 import { toDomain } from "./domains";
 import { serviceUnit } from "@/lib/usage/pricing";
 import { conclusionOf, type PastSearch, type StoredSearch } from "./report";
+import { hunterPolicy } from "./policy";
+import { hunterStatus, type HunterGateStore } from "@/lib/hunter/gate";
+import { supabaseHunterStore } from "@/lib/hunter/store";
 import type { CompanyIdentity, ContactBudget, ContactResult, ContactTrace } from "./types";
 
 export type { ContactResult } from "./types";
@@ -34,6 +37,20 @@ export interface FindContactOptions {
   persist?: boolean;
   /** Injecté par les tests. */
   deps?: ContactDeps;
+  /** Compteur et cache Hunter ; injecté par les tests (aucun budget lu sinon). */
+  hunterStore?: HunterGateStore;
+}
+
+/**
+ * Hunter pour CETTE fiche : feu vert de la fiche (score, registre, exclusions —
+ * `hunterPolicy`), puis budget du jour et crédits restants (garde-fou).
+ * Le budget n'est lu que si la fiche y a droit : pas de requête pour rien.
+ */
+async function hunterFor(prospect: Prospect, store: HunterGateStore | null) {
+  const policy = hunterPolicy(prospect.key_figures as Record<string, unknown> | null);
+  if (!policy.allowed || !store) return policy;
+  const status = await hunterStatus(store);
+  return status.blocked ? { allowed: false as const, reason: status.blocked } : policy;
 }
 
 const TIER: Record<string, number> = { nominatif: 2, generique: 1 };
@@ -49,7 +66,9 @@ export async function findContact(prospectId: string, options: FindContactOption
 
   const website = normalizeWebsite(options.website);
   const company = await identityOf(prospect, website);
-  const { result, trace } = await runContactSearch(company, options.deps ?? realDeps(prospect.id));
+  const store = options.hunterStore ?? (options.deps ? null : supabaseHunterStore());
+  const hunter = await hunterFor(prospect, store);
+  const { result, trace } = await runContactSearch(company, options.deps ?? realDeps(prospect.id), undefined, { hunter });
   if (options.persist !== false) await persist(db, prospect, storedSearch(trace, result, company, prospect), result, website);
   return result;
 }

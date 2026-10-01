@@ -1,7 +1,7 @@
 import type { ContactResult } from "@/lib/contact-finder";
 import type { CompanyBase, EnrichedCompany } from "@/lib/enrichment/types";
 import type { ProspectSignal } from "@/types";
-import { disqualify } from "./eligible";
+import { digFactsOf, disqualify } from "./eligible";
 import type { HarvestedSignal, Triage } from "./types";
 
 /**
@@ -32,6 +32,11 @@ export interface DigDeps {
   findContact: (prospectId: string) => Promise<ContactResult>;
   /** Brief du stratège ; un échec n'empêche pas la publication. */
   brief: (prospectId: string) => Promise<void>;
+  /**
+   * Motif si Hunter est bloqué aujourd'hui (crédits épuisés, budget du jour
+   * atteint), `null` sinon. Absent (tests) : jamais bloqué.
+   */
+  hunterBlocked?: () => Promise<string | null>;
 }
 
 export interface DigOutcome {
@@ -105,15 +110,7 @@ export async function digOne(deps: DigDeps, candidate: DigCandidate): Promise<Di
       const why = company.warnings?.find((warning) => warning.source === "pappers")?.message ?? "registre non lu";
       return { ...base, error: `Pappers indisponible (${why}) : opposition et groupe non vérifiables` };
     }
-    const verdict = disqualify({
-      refusesProspecting: figures.refuses_prospecting === true,
-      noStaff: figures.no_staff === true,
-      capitalEur: typeof figures.capital_eur === "number" ? figures.capital_eur : null,
-      equityEur: typeof figures.equity_eur === "number" ? figures.equity_eur : null,
-      headcount: typeof figures.headcount === "number" ? figures.headcount : null,
-      largeGroup: figures.is_large_group_subsidiary === true,
-      foreignParent: figures.parent_foreign === true,
-    });
+    const verdict = disqualify(digFactsOf(figures));
     if (verdict) return { ...base, skipped: verdict.reason, error: null };
 
     const created = await deps.createProspect(company, candidate);

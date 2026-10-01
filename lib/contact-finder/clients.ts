@@ -6,6 +6,8 @@ import { getOpenAI } from "@/lib/openai";
 import { recordOpenAiUsage, recordUnitUsage } from "@/lib/usage/record";
 import type { ContactDeps, HunterHit, VerifierStatus } from "./finder";
 import type { CompanyIdentity } from "./types";
+import { gatedHunterCall, hunterCacheKey } from "@/lib/hunter/gate";
+import { supabaseHunterStore } from "@/lib/hunter/store";
 
 /**
  * Branchements réels de `ContactDeps`. Chaque appel payant laisse une ligne
@@ -112,14 +114,37 @@ async function webSearch(query: string) {
   }
 }
 
-async function hunter<T>(path: string, params: Record<string, string>): Promise<T | null> {
+/**
+ * Appel Hunter derrière le garde-fou (lib/hunter/gate.ts) : cache 90 jours,
+ * budget quotidien, arrêt sur crédits épuisés. `billed` : une recherche a
+ * réellement été facturée (ni cache, ni blocage, ni panne).
+ */
+async function hunter<T>(path: string, params: Record<string, string>): Promise<{ data: T | null; billed: boolean }> {
   const key = process.env.HUNTER_API_KEY;
-  if (!key) return null;
-  const query = new URLSearchParams({ ...params, api_key: key });
-  const response = await get(`https://api.hunter.io/v2/${path}?${query}`, "application/json", 15_000);
-  if (!response) return null;
-  const body = (await response.json().catch(() => ({}))) as { data?: T };
-  return body.data ?? null;
+  if (!key) return { data: null, billed: false };
+  const gated = await gatedHunterCall<T>(supabaseHunterStore(), hunterCacheKey(path, params), async () => {
+    const query = new URLSearchParams({ ...params, api_key: key });
+    // Pas `get()` : il rend `null` sur toute erreur, et un 429 (crédits
+    // épuisés) doit se voir pour couper Hunter jusqu'au lendemain.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(`https://api.hunter.io/v2/${path}?${query}`, {
+        signal: controller.signal,
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return { data: null, quotaExceeded: response.status === 429 };
+      const body = (await response.json().catch(() => ({}))) as { data?: T };
+      return { data: body.data ?? null, quotaExceeded: false };
+    } catch {
+      return { data: null, quotaExceeded: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  if (gated.status === "appel") return { data: gated.data, billed: gated.data !== null };
+  return { data: gated.status === "cache" ? gated.data : null, billed: false };
 }
 
 interface HunterDomainEmail {
@@ -135,9 +160,9 @@ export function realDeps(prospectId: string | null): ContactDeps {
     fetchHtml,
     webSearch,
     async hunterDomainSearch(domain) {
-      const data = await hunter<{ emails?: HunterDomainEmail[] }>("domain-search", { domain, limit: "10" });
+      const { data, billed } = await hunter<{ emails?: HunterDomainEmail[] }>("domain-search", { domain, limit: "10" });
       const emails = (data?.emails ?? []).filter((email) => email.value);
-      await recordUnitUsage({ service: "hunter", operation: `contact:domain-search:${emails.length ? "trouve" : "vide"}`, units: data ? 1 : 0, ...(data ? {} : { unitCost: 0 }), prospectId });
+      if (billed) await recordUnitUsage({ service: "hunter", operation: `contact:domain-search:${emails.length ? "trouve" : "vide"}`, units: 1, prospectId });
       return data
         ? emails.map<HunterHit>((email) => ({
             email: (email.value as string).toLowerCase(),
@@ -154,8 +179,8 @@ export function realDeps(prospectId: string | null): ContactDeps {
       return found.ok && found.data ? { email: found.data.email.toLowerCase() } : null;
     },
     async hunterVerify(email) {
-      const data = await hunter<{ status?: VerifierStatus }>("email-verifier", { email });
-      await recordUnitUsage({ service: "hunter", operation: `contact:email-verifier:${data?.status ?? "erreur"}`, units: data ? 1 : 0, ...(data ? {} : { unitCost: 0 }), prospectId });
+      const { data, billed } = await hunter<{ status?: VerifierStatus }>("email-verifier", { email });
+      if (billed) await recordUnitUsage({ service: "hunter", operation: `contact:email-verifier:${data?.status ?? "erreur"}`, units: 1, prospectId });
       return data?.status ?? null;
     },
     async pickDomain(company, options) {
