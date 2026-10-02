@@ -20,7 +20,7 @@ import type { ApiUsage } from "@/types";
 import { aggregate, perProspect, remainingProspects } from "./_lib/aggregate";
 import { ServiceTable } from "./_components/service-table";
 
-export const dynamic = "force-dynamic";
+
 
 /**
  * Couts et consommation.
@@ -30,7 +30,7 @@ export const dynamic = "force-dynamic";
  * (ce qu'il reste chez eux, exact quand l'endpoint existe). Les cles restent
  * cote serveur : cette page est un Server Component et n'expose rien.
  */
-export default async function CoutsPage() {
+export async function CostsView() {
   await requireUser();
   const supabase = createClient();
 

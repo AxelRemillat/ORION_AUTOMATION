@@ -13,7 +13,7 @@ import { loadPortfolio } from "@/lib/trash/portfolio";
 import type { Deal } from "@/types";
 import { requireUser } from "@/lib/auth";
 import { formatEur } from "@/lib/utils";
-import { countValued, dealValue, sumPipeline } from "../suivi/_lib/estimates";
+import { countValued, dealValue, sumPipeline } from "../../suivi/_lib/estimates";
 import { FunnelBars } from "./_charts/funnel-bars";
 import { MonthBars } from "./_charts/month-bars";
 import { AiInsightsSlot, WhatWorks } from "./_components/insights";
@@ -32,12 +32,13 @@ import {
   signedRevenue,
 } from "./_lib/metrics";
 
-export const metadata = { title: "Stats · ORION" };
+
 
 /** Prospects encore en jeu : ils composent la valeur de pipeline. */
 const OPEN_STATUSES = ["contacte", "relance_1", "relance_2", "repondu", "en_discussion"] as const;
 
-export default async function StatsPage() {
+/** Statistiques de prospection (ex-page /stats), reprises telles quelles dans Réglages › Données. */
+export async function StatsView() {
   await requireUser();
   const supabase = createClient();
 
@@ -47,7 +48,7 @@ export default async function StatsPage() {
   if (prospects.length === 0) {
     return (
       <>
-        <PageHeader title="Stats" description="Ce que la prospection produit vraiment." />
+        <PageHeader title="Données et performance" description="Ce que la prospection produit vraiment." />
         <EmptyState
           icon={<BarChart3 />}
           title="Rien à mesurer pour l'instant"
@@ -87,7 +88,7 @@ export default async function StatsPage() {
   return (
     <>
       <PageHeader
-        title="Stats"
+        title="Données et performance"
         description={`${prospects.length} prospect${prospects.length > 1 ? "s" : ""} suivis · ${contactedStage.count} contactés · ${revenue.count} contrat${revenue.count > 1 ? "s" : ""} signé${revenue.count > 1 ? "s" : ""}.`}
       />
 

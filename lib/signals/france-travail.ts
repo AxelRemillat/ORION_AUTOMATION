@@ -119,7 +119,7 @@ let token: { value: string; expiresAt: number } | null = null;
  * secret, il n'a rien à faire dans une table qu'on lit et qu'on exporte. La
  * marge de 60 s évite d'utiliser un jeton qui expire pendant l'appel.
  */
-async function accessToken(env: EnvLike = process.env): Promise<Result<string>> {
+export async function accessToken(env: EnvLike = process.env): Promise<Result<string>> {
   if (token && token.expiresAt > Date.now()) return { ok: true, data: token.value };
 
   const id = env.FRANCE_TRAVAIL_CLIENT_ID?.trim();

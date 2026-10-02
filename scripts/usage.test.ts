@@ -8,7 +8,7 @@
  *
  * Execution : `npm run test:usage`.
  */
-import { aggregate, perProspect, remainingProspects } from "../app/(app)/couts/_lib/aggregate";
+import { aggregate, perProspect, remainingProspects } from "../app/(app)/reglages/couts/_lib/aggregate";
 import type { ApiService, ApiUsage } from "../types";
 import type { ServiceBalance } from "../lib/usage/balances";
 import {

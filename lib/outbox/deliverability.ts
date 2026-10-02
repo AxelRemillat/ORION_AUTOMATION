@@ -12,7 +12,7 @@ import { utcToParis } from "./paris-time";
  */
 
 /** Montée en charge : plafond d'envois par jour selon l'ancienneté de l'adresse. */
-const WARMUP_STEPS: { untilDay: number; cap: number }[] = [
+export const WARMUP_STEPS: readonly { untilDay: number; cap: number }[] = [
   { untilDay: 3, cap: 10 },
   { untilDay: 7, cap: 15 },
   { untilDay: 14, cap: 25 },

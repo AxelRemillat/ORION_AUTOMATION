@@ -20,7 +20,7 @@ import { authorizeCron } from "../lib/trash/cron-auth";
 import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
 import { inboxEntries, topSignals } from "../app/(app)/cockpit/_lib/compute";
 import { buildRows } from "../app/(app)/suivi/_lib/rows";
-import { buildFunnel } from "../app/(app)/stats/_lib/metrics";
+import { buildFunnel } from "../app/(app)/reglages/donnees/_lib/metrics";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {

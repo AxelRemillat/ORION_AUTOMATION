@@ -113,7 +113,11 @@ export default async function CockpitPage({
         initialSeries={parseSeriesParam(searchParams.kpi)}
       />
 
-      {pilotage && <PilotageCard consumption={pilotage.consumption} credits={pilotage.credits} />}
+      {pilotage && (
+        <section id="pilotage" className="scroll-mt-24">
+          <PilotageCard consumption={pilotage.consumption} credits={pilotage.credits} />
+        </section>
+      )}
     </div>
   );
 }

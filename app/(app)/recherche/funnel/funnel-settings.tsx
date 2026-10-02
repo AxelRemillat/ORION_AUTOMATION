@@ -13,7 +13,11 @@ import type { FunnelPrefs } from "@/lib/funnel/settings";
 
 const split = (value: string) => value.split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean);
 
-export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: boolean }) {
+/**
+ * `onStart` absent (Réglages › Paramètres) : le formulaire enregistre seulement,
+ * sans bouton « Lancer l'entonnoir ».
+ */
+export function FunnelSettings({ onStart, busy = false }: { onStart?: () => void; busy?: boolean }) {
   const toast = useToast();
   const [prefs, setPrefs] = useState<FunnelPrefs | null>(null);
   const [saving, setSaving] = useState(false);
@@ -66,7 +70,9 @@ export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: b
   async function submit(event: FormEvent) {
     event.preventDefault();
     // Aucun département : toute la France (moisson nationale).
-    if (await save()) onStart();
+    if (!(await save())) return;
+    if (onStart) onStart();
+    else toast.success("Réglages enregistrés.");
   }
 
   return (
@@ -103,15 +109,17 @@ export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: b
       <div className="flex flex-wrap items-center gap-3 md:col-span-4">
         <label className="flex items-center gap-2 text-[13px] text-muted">
           <input type="checkbox" checked={prefs.daily} onChange={(event) => set({ daily: event.target.checked })} />
-          Préparer « Aujourd’hui » chaque jour à {prefs.autoHour} h (heure de Paris) avec ces réglages
+          Préparer « Aujourd’hui » du lundi au vendredi à {prefs.autoHour} h (heure de Paris) avec ces réglages
         </label>
         <div className="ml-auto flex gap-2">
           <Button type="button" variant="secondary" loading={saving} onClick={() => void save().then((ok) => ok && toast.success("Réglages enregistrés."))}>
             <Save className="h-4 w-4" /> Enregistrer
           </Button>
-          <Button type="submit" loading={busy}>
-            <Radar className="h-4 w-4" /> Lancer l’entonnoir
-          </Button>
+          {onStart && (
+            <Button type="submit" loading={busy}>
+              <Radar className="h-4 w-4" /> Lancer l’entonnoir
+            </Button>
+          )}
         </div>
       </div>
     </form>
