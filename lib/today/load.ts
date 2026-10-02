@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toCard } from "@/lib/funnel/view";
+import { readAll } from "@/lib/supabase/read-all";
 import { signatureFor } from "@/lib/offer/model";
 import { loadOffer } from "@/lib/offer/read";
 import { offWeekend, parisToUtc, utcToParis } from "@/lib/outbox/paris-time";
@@ -46,8 +47,11 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   const endOfDay = parisToUtc(today, "23:59")!;
 
   const [prospectsRes, messagesRes, candidatesRes, inboundRes, remindersRes, discardsRes, jobsRes, loaded] = await Promise.all([
-    db.from("prospects").select("*").eq("user_id", userId).is("deleted_at", null),
-    db.from("messages").select("*").eq("user_id", userId).is("deleted_at", null).order("created_at", { ascending: false }),
+    // Lectures complètes (pages de 1 000) : au-delà, PostgREST tronque en silence.
+    readAll<Prospect>(() => db.from("prospects").select("*").eq("user_id", userId).is("deleted_at", null).order("id")).then((data) => ({ data })),
+    readAll<Row>(() =>
+      db.from("messages").select("*").eq("user_id", userId).is("deleted_at", null).order("created_at", { ascending: false }).order("id"),
+    ).then((data) => ({ data })),
     db.from("signal_candidates").select("*").eq("user_id", userId).eq("statut", "creusé").not("prospect_id", "is", null).limit(500),
     db.from("inbound_messages").select("*").eq("user_id", userId).eq("handled", false).is("deleted_at", null),
     db.from("reminders").select("prospect_id, due_at").eq("user_id", userId).eq("done", false),

@@ -211,14 +211,28 @@ function openAiBalance(consumedEur: number): ServiceBalance {
  * Soldes des quatre services. Les appels partent en parallele et aucun ne peut
  * faire echouer la page : un fournisseur muet devient une ligne « inconnu ».
  */
+const BALANCE_CACHE_MS = 60 * 60_000;
+
+async function cachedBalance(key: string, fetcher: () => Promise<ServiceBalance>): Promise<ServiceBalance> {
+  const { readCache, writeCache } = await import("@/lib/enrichment/cache");
+  const hit = await readCache<ServiceBalance>(`balance:${key}`);
+  if (hit) return hit;
+  const fresh = await fetcher();
+  if (fresh.quality === "exact") await writeCache(`balance:${key}`, fresh, BALANCE_CACHE_MS);
+  return fresh;
+}
+
 export async function fetchBalances(consumed: {
   openaiEur: number;
   pappersCredits: number;
 }): Promise<ServiceBalance[]> {
+  // Soldes fournisseurs en cache 1 h (QA du 03/10 : la page Coûts les relisait
+  // à chaque affichage). Seuls les soldes EXACTS sont gardés : une estimation
+  // dépend de la consommation du moment et se recalcule.
   const [hunter, linkup, pappers] = await Promise.all([
-    hunterBalance().catch(() => UNKNOWN("hunter", "recherche", "Appel impossible.")),
-    linkupBalance().catch(() => UNKNOWN("linkup", "€", "Appel impossible.")),
-    pappersBalance(consumed.pappersCredits).catch(() =>
+    cachedBalance("hunter", () => hunterBalance()).catch(() => UNKNOWN("hunter", "recherche", "Appel impossible.")),
+    cachedBalance("linkup", () => linkupBalance()).catch(() => UNKNOWN("linkup", "€", "Appel impossible.")),
+    cachedBalance("pappers", () => pappersBalance(consumed.pappersCredits)).catch(() =>
       UNKNOWN("pappers", "crédit", "Appel impossible."),
     ),
   ]);
