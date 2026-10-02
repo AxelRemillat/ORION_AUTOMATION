@@ -98,6 +98,7 @@ export function prospectItem(input: {
     oppositionUnverified: !oppositionKnown(prospect.key_figures as Record<string, unknown> | undefined),
     website: prospect.website,
     hasBusinessProfile: Boolean(prospect.business_profile && Object.keys(prospect.business_profile).length),
+    profileReadFailed: typeof figures.profile_failed_at === "string",
     hasDraft: Boolean(draft),
     draftPending: input.draftPending,
     subsidiary,
@@ -133,6 +134,7 @@ export function prospectItem(input: {
     attempts: input.attempts,
     scheduledAt: draft?.scheduled_at ?? null,
     draftPending: input.draftPending,
+    profileReadFailed: typeof figures.profile_failed_at === "string",
     exclusion: exclusionOf(prospect),
     weight: input.weight,
   };

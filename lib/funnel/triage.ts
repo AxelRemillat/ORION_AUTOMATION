@@ -164,7 +164,8 @@ export function settle(input: TriageInput, raw: z.infer<typeof ITEM> | undefined
   const triage: Triage = { ...raw, score: Math.round(raw.score) };
 
   if (input.verdict.legalOnly) triage.score = Math.min(triage.score, 3);
-  const jobPain = input.signal.source === "france-travail" ? painForJob(input.signal.facts.jobTitle ?? input.signal.text) : null;
+  const jobPain =
+    input.signal.source === "france-travail" ? painForJob(input.signal.facts.jobTitle ?? input.signal.text, input.signal.text) : null;
   // Offre d'emploi : le poste dicte la NATURE du pain (table), le modèle en
   // donne le contexte propre à l'entreprise. Deux ADV dans deux métiers
   // différents n'ont pas le même pain mot pour mot.

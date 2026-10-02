@@ -1,3 +1,4 @@
+import { isClientAccounting } from "@/lib/funnel/pain-map";
 /**
  * Un dirigeant qui vient d'arriver, et ce qu'on lui écrit.
  *
@@ -173,7 +174,7 @@ export const FRESH_JOB_DAYS = 30;
 /** Tâche automatisable qui accompagne un poste, par famille de métier. */
 const ROLE_TO_TASK: { pattern: RegExp; task: string }[] = [
   { pattern: /assistant[e]?\s*adv|administration des ventes|gestionnaire adv/i, task: "la saisie et le suivi des commandes" },
-  { pattern: /comptab|facturation|credit manager/i, task: "le rapprochement des factures et les relances" },
+  { pattern: /comptab|facturation|credit manager/i, task: "le rapprochement des factures fournisseurs" },
   { pattern: /assistant[e]?\s*(administratif|de direction)|secretaire/i, task: "la production des documents et le classement" },
   { pattern: /planificateur|ordonnancement|methodes/i, task: "la planification et les ordres de fabrication" },
   { pattern: /logistique|approvisionn|magasinier|supply/i, task: "le suivi des expéditions et des stocks" },
@@ -198,6 +199,8 @@ export interface FreshJobHook {
 export function freshJobHook(
   signal: { label?: string; jobTitle?: unknown; date?: unknown },
   now = new Date(),
+  /** Texte de l'offre et profil métier : départagent un poste comptable (clients ou fournisseurs). */
+  context?: string | null,
 ): FreshJobHook | null {
   const date = typeof signal.date === "string" ? signal.date : null;
   if (!date) return null;
@@ -212,7 +215,9 @@ export function freshJobHook(
       : /^Poste ouvert\s*:\s*(.+?)\s+—/.exec(signal.label ?? "")?.[1]?.trim() ?? null;
   if (!title) return null;
 
-  const matched = ROLE_TO_TASK.find((entry) => entry.pattern.test(title));
+  const matched = isClientAccounting(title, context)
+    ? { task: "la facturation clients et les relances de paiement" }
+    : ROLE_TO_TASK.find((entry) => entry.pattern.test(title));
   return matched ? { title, task: matched.task, date } : null;
 }
 

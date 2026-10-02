@@ -18,6 +18,8 @@ export interface TagInput {
   website: string | null;
   /** Profil métier lu sur le site (lib/emails/business-profile.ts). */
   hasBusinessProfile: boolean;
+  /** La lecture du site a déjà échoué (`key_figures.profile_failed_at`). */
+  profileReadFailed?: boolean;
   hasDraft: boolean;
   /** Un job de brouillon tourne : pas encore « manquant ». */
   draftPending: boolean;
@@ -31,10 +33,33 @@ export function tagsOf(input: TagInput): TodayTag[] {
   else if (input.emailDoubtful) tags.push("Email non vérifié");
   if (input.oppositionUnverified) tags.push("Opposition non vérifiée");
   if (!input.website) tags.push("Site introuvable");
-  if (!input.hasBusinessProfile) tags.push("Profil métier vide");
+  // Site connu, profil vide : JAMAIS de brouillon sans l'avoir lu (bloquant).
+  // Sans site, le profil vide n'est qu'une information.
+  if (!input.hasBusinessProfile) tags.push(input.website ? "Profil à compléter" : "Profil métier vide");
   if (!input.hasDraft && !input.draftPending) tags.push("Brouillon manquant");
   if (input.subsidiary) tags.push("Filiale de groupe");
   return tags;
+}
+
+/**
+ * Fiche qui n'attend plus que son brouillon : contact sûr, opposition vérifiée.
+ * « Profil à compléter » n'empêche pas la génération : elle LIT le site
+ * d'abord et refuse de rédiger si la lecture échoue — sauf si cette lecture a
+ * déjà échoué (il faut alors corriger le site ou compléter le profil).
+ */
+export function needsIntroDraft(item: {
+  messageType: string;
+  status: string;
+  messageId: string | null;
+  draftPending: boolean;
+  contact: { email: string | null };
+  tags: readonly TodayTag[];
+  profileReadFailed?: boolean;
+}): boolean {
+  if (item.messageType !== "intro" || item.status !== "todo" || item.messageId || item.draftPending) return false;
+  if (!item.contact.email || !item.tags.includes("Brouillon manquant")) return false;
+  if (item.profileReadFailed && item.tags.includes("Profil à compléter")) return false;
+  return !item.tags.some((tag) => tag !== "Brouillon manquant" && tag !== "Profil à compléter" && BLOCKING_TAGS.has(tag));
 }
 
 /** La fiche peut-elle figurer dans « Nouveaux prospects » ? */

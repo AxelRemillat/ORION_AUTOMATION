@@ -7,7 +7,7 @@ import { draftReply } from "@/lib/outbox/reply-generate";
 import { runCompletionStage } from "@/lib/today/complete";
 import { loadToday } from "@/lib/today/load";
 import { flatten } from "@/lib/today/group";
-import { BLOCKING_TAGS, type TodayItem } from "@/lib/today/types";
+import { needsIntroDraft } from "@/lib/today/tags";
 import type { InboundMessage, Prospect } from "@/types";
 import { createJob } from "../store";
 import { EMPTY_PROGRESS } from "../types";
@@ -84,7 +84,7 @@ async function oppositionStep(ctx: StepContext): Promise<StepOutcome> {
 async function profilesStep(ctx: StepContext): Promise<StepOutcome> {
   const end = deadline();
   const items = flatten((await loadToday(ctx.db, ctx.userId)).groups).filter(
-    (item) => item.messageType === "intro" && item.prospectId && item.website && item.tags.includes("Profil métier vide"),
+    (item) => item.messageType === "intro" && item.prospectId && item.website && item.tags.includes("Profil à compléter"),
   );
   let read = 0;
   let failed = 0;
@@ -94,7 +94,15 @@ async function profilesStep(ctx: StepContext): Promise<StepOutcome> {
     if (!data) continue;
     const run = await ensureBusinessProfile(ctx.db, data as Prospect, profileAsk(item.prospectId!)).catch(() => null);
     if (run?.profile) read += 1;
-    else failed += 1;
+    else {
+      failed += 1;
+      const figures = ((data as Prospect).key_figures ?? {}) as Record<string, unknown>;
+      await ctx.db
+        .from("prospects")
+        .update({ key_figures: { ...figures, profile_failed_at: new Date().toISOString() } })
+        .eq("id", item.prospectId!)
+        .eq("user_id", ctx.userId);
+    }
   }
   return { progress: progress(`Profil métier : ${read} lu(s)${failed ? `, ${failed} illisible(s)` : ""}`, 96) };
 }
@@ -135,15 +143,8 @@ async function relancesStep(ctx: StepContext): Promise<StepOutcome> {
   return { progress: progress(`${written} relance(s) rédigée(s), dans le même fil`, 98) };
 }
 
-/** Fiche qui n'attend plus que son brouillon : contact sûr, opposition vérifiée. */
-export const needsIntroDraft = (item: TodayItem) =>
-  item.messageType === "intro" &&
-  item.status === "todo" &&
-  !item.messageId &&
-  !item.draftPending &&
-  Boolean(item.contact.email) &&
-  item.tags.includes("Brouillon manquant") &&
-  !item.tags.some((tag) => tag !== "Brouillon manquant" && BLOCKING_TAGS.has(tag));
+/** Ré-exporté : la règle vit dans lib/today/tags.ts (aussi utilisée hors préparation). */
+export { needsIntroDraft };
 
 async function draftsStep(ctx: StepContext): Promise<StepOutcome> {
   const prefs = await prefsOf(ctx);

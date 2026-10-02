@@ -8,6 +8,7 @@ import { discard, saveDraft, scheduleBatch, undoDiscard, type CoreResult, type D
 import { loadCapacity } from "@/lib/today/capacity";
 import { completeOne } from "@/lib/today/complete";
 import { exclusionOf } from "@/lib/today/items";
+import { draftIfReady } from "@/lib/today/auto-draft";
 import { draftReply } from "@/lib/outbox/reply-generate";
 import { DISCARD_REASONS, TODAY_KINDS, type DiscardReason, type InboundMessage, type Prospect, type SignalCandidateRow, type TodayKind } from "@/types";
 
@@ -79,9 +80,11 @@ export async function completeToday(input: { prospectId: string; candidateId: st
     const { data } = await ctx.db.from("signal_candidates").select("*").eq("id", input.candidateId).maybeSingle();
     if (!data) return { ok: false, error: "Fiche introuvable." };
     const outcome = await completeOne(ctx.db, data as SignalCandidateRow, { deps: { findContact: deps.findContact }, runId: `manuel-${Date.now()}` });
+    if (outcome.email) await draftIfReady(ctx.db, ctx.userId, input.prospectId).catch(() => null);
     return done({ ok: true, email: outcome.email });
   }
   const contact = await deps.findContact(input.prospectId).catch(() => null);
+  if (contact?.email) await draftIfReady(ctx.db, ctx.userId, input.prospectId).catch(() => null);
   return done({ ok: true, email: contact?.email ?? null });
 }
 
@@ -93,9 +96,19 @@ export async function setTodayContact(input: { prospectId: string; candidateId: 
   if (email !== undefined && !isEmail(email)) return { ok: false, error: "Adresse email invalide." };
   const site = input.website?.trim();
   const website = site ? (/^https?:\/\//i.test(site) ? site : `https://${site}`) : undefined;
+  // Nouveau site : l'échec de lecture du précédent ne compte plus.
+  let figuresPatch: Record<string, unknown> = {};
+  if (website) {
+    const { data: current } = await ctx.db.from("prospects").select("key_figures").eq("id", input.prospectId).maybeSingle();
+    const figures = ((current as { key_figures?: Record<string, unknown> | null } | null)?.key_figures ?? {}) as Record<string, unknown>;
+    if (typeof figures.profile_failed_at === "string") {
+      const { profile_failed_at: _cleared, ...rest } = figures;
+      figuresPatch = { key_figures: rest };
+    }
+  }
   const { error } = await ctx.db
     .from("prospects")
-    .update({ ...(email ? { email } : {}), ...(website ? { website } : {}) })
+    .update({ ...(email ? { email } : {}), ...(website ? { website } : {}), ...figuresPatch })
     .eq("id", input.prospectId);
   if (error) return { ok: false, error: error.message };
   if (email && input.candidateId) {
@@ -109,6 +122,8 @@ export async function setTodayContact(input: { prospectId: string; candidateId: 
       })
       .eq("id", input.candidateId);
   }
+  // Fiche complétée : le brouillon part tout seul (relit le site, puis rédige).
+  await draftIfReady(ctx.db, ctx.userId, input.prospectId).catch(() => null);
   return done({ ok: true });
 }
 
