@@ -21,6 +21,8 @@ export interface TagInput {
   hasDraft: boolean;
   /** Un job de brouillon tourne : pas encore « manquant ». */
   draftPending: boolean;
+  /** Filiale d'un groupe (lib/enrichment/subsidiary.ts) : signalée, non bloquante. */
+  subsidiary?: string | null;
 }
 
 export function tagsOf(input: TagInput): TodayTag[] {
@@ -31,6 +33,7 @@ export function tagsOf(input: TagInput): TodayTag[] {
   if (!input.website) tags.push("Site introuvable");
   if (!input.hasBusinessProfile) tags.push("Profil métier vide");
   if (!input.hasDraft && !input.draftPending) tags.push("Brouillon manquant");
+  if (input.subsidiary) tags.push("Filiale de groupe");
   return tags;
 }
 

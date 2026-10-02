@@ -41,6 +41,57 @@ export async function livePrepareJob(db: unknown, userId: string): Promise<strin
   return (data as { id: string } | null)?.id ?? null;
 }
 
+/** Dernière préparation, telle que l'en-tête la résume (erreur comprise). */
+export interface PrepareHealth {
+  status: string;
+  /** Erreur du job de préparation lui-même, s'il a échoué. */
+  error: string | null;
+  at: string;
+  /** Brouillons (`email_generate`) lancés par cette préparation et tombés en échec. */
+  failedDrafts: number;
+  firstDraftError: string | null;
+}
+
+/** Code pur : la ligne d'alerte de l'en-tête, `null` si tout va bien. */
+export function prepareAlert(health: PrepareHealth | null): string | null {
+  if (!health) return null;
+  if (health.status === "failed") return `Dernière préparation en échec : ${health.error ?? "erreur inconnue"}`;
+  if (health.failedDrafts > 0) {
+    return `${health.failedDrafts} brouillon(s) non rédigé(s)${health.firstDraftError ? ` : ${health.firstDraftError}` : ""}`;
+  }
+  return null;
+}
+
+export async function lastPrepareHealth(db: unknown, userId: string): Promise<PrepareHealth | null> {
+  const loose = db as Loose;
+  const { data } = await loose
+    .from("jobs")
+    .select("status, error, created_at, finished_at")
+    .eq("user_id", userId)
+    .eq("type", "search_signals")
+    .eq("params->>kind", "prepare")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const job = data as { status: string; error: string | null; created_at: string; finished_at: string | null } | null;
+  if (!job) return null;
+  const { data: drafts } = await loose
+    .from("jobs")
+    .select("error")
+    .eq("user_id", userId)
+    .eq("type", "email_generate")
+    .eq("status", "failed")
+    .gte("created_at", job.created_at);
+  const failed = (drafts ?? []) as { error: string | null }[];
+  return {
+    status: job.status,
+    error: job.error,
+    at: job.finished_at ?? job.created_at,
+    failedDrafts: failed.length,
+    firstDraftError: failed.find((row) => row.error)?.error ?? null,
+  };
+}
+
 /** Crée le job de préparation (client service_role : `userId` explicite). */
 export async function enqueuePrepare(db: unknown, userId: string, digLimit: number, trigger: "auto" | "manuel") {
   return createJob(

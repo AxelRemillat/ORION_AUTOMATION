@@ -346,7 +346,15 @@ export type Message = {
   reply_to_gmail_message_id?: string | null;
   /** Destinataire réel d'un mail parti. */
   sent_to?: string | null;
+  /**
+   * Brouillon écrit hors application (migration 20261002192831) : `eval`
+   * (eval:mails) ou `script`. Jamais dans « Aujourd'hui », jamais réécrit par
+   * une génération normale. NULL = application.
+   */
+  origin?: MessageOrigin | null;
 }
+
+export type MessageOrigin = "eval" | "script";
 
 /**
  * Email entrant, déjà trié par n8n comme lié à la prospection.

@@ -3,6 +3,8 @@ import type { FunnelCard } from "@/lib/funnel/view";
 import type { InboundMessage, Message, Prospect } from "@/types";
 import { splitBody } from "./body";
 import type { RawTodayItem } from "./group";
+import { cappedScore, subsidiaryOf } from "@/lib/enrichment/subsidiary";
+import { oppositionKnown } from "./opposition";
 import { tagsOf } from "./tags";
 import type { TodayContact, TodayFact, TodaySignal, TodayStatus } from "./types";
 
@@ -84,14 +86,21 @@ export function prospectItem(input: {
   const contact = contactOf(prospect, card);
   const signal = signalOf(prospect, card);
   const split = splitBody(draft?.body ?? "", input.signature);
+  const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
+  const subsidiary = subsidiaryOf(figures);
+  const rawScore = card?.score ?? (typeof figures.funnel_score === "number" ? figures.funnel_score : null);
+  const score = cappedScore(rawScore, subsidiary);
   const tags = tagsOf({
     email: contact.email,
     emailDoubtful: card?.emailDoubtful ?? false,
-    oppositionUnverified: card?.oppositionUnverified ?? prospect.key_figures?.opposition_checked === false,
+    // Connue seulement si Pappers l'a lue ou si elle a été vérifiée (Pappers,
+    // INPI, à la main) : une fiche ancienne sans ces marques n'est PAS sûre.
+    oppositionUnverified: !oppositionKnown(prospect.key_figures as Record<string, unknown> | undefined),
     website: prospect.website,
     hasBusinessProfile: Boolean(prospect.business_profile && Object.keys(prospect.business_profile).length),
     hasDraft: Boolean(draft),
     draftPending: input.draftPending,
+    subsidiary,
   });
   return {
     key: `prospect:${prospect.id}`,
@@ -103,7 +112,7 @@ export function prospectItem(input: {
     inboundId: null,
     companyName: prospect.company_name,
     subline: sublineOf(prospect.city ?? card?.city, card?.revenue, signal),
-    score: card?.score ?? null,
+    score,
     contact,
     messageType: "intro",
     received: null,
@@ -113,8 +122,12 @@ export function prospectItem(input: {
     body: split.core,
     optOut: split.optOut,
     signature: split.signature,
-    why: [card?.pain && `Pain : ${card.pain}`, card?.hook && `Accroche : ${card.hook}`, card?.score != null && `Score ${card.score}/5`]
-      .filter((line): line is string => Boolean(line)),
+    why: [
+      card?.pain && `Pain : ${card.pain}`,
+      card?.hook && `Accroche : ${card.hook}`,
+      score != null && `Score ${score}/5${subsidiary && rawScore !== score ? ` (plafonné : ${rawScore}/5)` : ""}`,
+      subsidiary && `Filiale de groupe : ${subsidiary} — la décision se prend au siège.`,
+    ].filter((line): line is string => Boolean(line)),
     tags,
     website: prospect.website,
     attempts: input.attempts,

@@ -1,4 +1,5 @@
 import type { Message } from "@/types";
+import { utcToParis } from "./paris-time";
 
 /**
  * Garde-fous de délivrabilité — affichés par /prospection, APPLIQUÉS par
@@ -22,6 +23,43 @@ const WARMUP_STEPS: { untilDay: number; cap: number }[] = [
 const WARMUP_DURATION_DAYS = 14;
 const DAY_MS = 86_400_000;
 
+/** Ligne lue pour les volumes ; `type` et `gmail_message_id` datent la montée en charge. */
+export type SentRow = Pick<Message, "status" | "sent_at"> & Partial<Pick<Message, "type" | "gmail_message_id">>;
+
+/** Colonnes à lire pour `buildDeliverability`. */
+export const DELIVERABILITY_COLUMNS = "status, sent_at, type, gmail_message_id";
+
+const PROSPECTING: ReadonlySet<string> = new Set(["intro", "relance_1", "relance_2"]);
+
+/**
+ * Premier envoi RÉEL de prospection : parti par Gmail (`gmail_message_id`),
+ * intro ou relance. 02/10/2026 : un message marqué « envoyé » à la main le
+ * 19/09 (JACQUET PARIS, sans envoi Gmail) faisait commencer la montée en
+ * charge 9 jours trop tôt — « jour 14, 25 envois » au lieu de « jour 5, 15 ».
+ */
+export function firstRealSend(rows: readonly SentRow[]): string | null {
+  const dates = rows
+    .filter((row) => row.status === "sent" && row.sent_at && row.gmail_message_id && PROSPECTING.has(String(row.type)))
+    .map((row) => row.sent_at as string)
+    .sort();
+  return dates[0] ?? null;
+}
+
+/** Jours ouvrés (lun.–ven., Paris) du premier envoi à aujourd'hui inclus — au moins 1. */
+export function businessDaysSince(firstIso: string, now: Date): number {
+  const start = utcToParis(new Date(firstIso)).date;
+  const end = utcToParis(now).date;
+  let cursor = new Date(`${start}T12:00:00Z`);
+  const last = new Date(`${end}T12:00:00Z`);
+  let days = 0;
+  while (cursor <= last) {
+    const weekday = cursor.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) days += 1;
+    cursor = new Date(cursor.getTime() + DAY_MS);
+  }
+  return Math.max(1, days);
+}
+
 export type DeliverabilityLevel = "ok" | "warn" | "blocked";
 
 export interface Deliverability {
@@ -40,26 +78,17 @@ export interface Deliverability {
   level: DeliverabilityLevel;
 }
 
-export function buildDeliverability(
-  messages: Pick<Message, "status" | "sent_at">[],
-  now = new Date(),
-): Deliverability {
-  const sentDates = messages
-    .filter((message) => message.status === "sent" && message.sent_at)
-    .map((message) => Date.parse(message.sent_at as string))
-    .filter((time) => Number.isFinite(time))
-    .sort((a, b) => a - b);
-
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
+export function buildDeliverability(messages: readonly SentRow[], now = new Date()): Deliverability {
+  const sent = messages.filter((message) => message.status === "sent" && message.sent_at);
   const sevenDaysAgo = now.getTime() - 7 * DAY_MS;
+  // « Aujourd'hui » à Paris, pas dans le fuseau du serveur (UTC sur Vercel).
+  const today = utcToParis(now).date;
 
-  const sentToday = sentDates.filter((time) => time >= startOfToday.getTime()).length;
-  const sentLast7 = sentDates.filter((time) => time >= sevenDaysAgo).length;
+  const sentToday = sent.filter((message) => utcToParis(new Date(message.sent_at as string)).date === today).length;
+  const sentLast7 = sent.filter((message) => Date.parse(message.sent_at as string) >= sevenDaysAgo).length;
 
-  const first = sentDates[0];
-  const warmupDay =
-    first === undefined ? null : Math.floor((now.getTime() - first) / DAY_MS) + 1;
+  const first = firstRealSend(messages);
+  const warmupDay = first === null ? null : businessDaysSince(first, now);
 
   const cap = (WARMUP_STEPS.find((step) => (warmupDay ?? 1) <= step.untilDay) ?? WARMUP_STEPS[0])
     .cap;

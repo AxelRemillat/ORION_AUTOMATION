@@ -14,6 +14,7 @@ export function TodayHeader({
   items,
   capacity,
   liveJobId,
+  alert = null,
   dailyTarget,
   onFinished,
 }: {
@@ -21,6 +22,8 @@ export function TodayHeader({
   items: TodayItem[];
   capacity: Capacity;
   liveJobId: string | null;
+  /** Échec de la dernière préparation : affiché tel quel, en rouge. */
+  alert?: string | null;
   dailyTarget: number;
   onFinished: () => void;
 }) {
@@ -51,6 +54,11 @@ export function TodayHeader({
           <RunNowButton liveJobId={liveJobId} dailyTarget={dailyTarget} onFinished={onFinished} />
         </div>
       </div>
+      {alert && (
+        <p role="alert" className="rounded-lg border border-lost/25 bg-lost/10 px-3 py-2 text-[13px] text-lost-ink">
+          {alert}
+        </p>
+      )}
       <div className="flex items-center gap-3">
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Avancement du tri">
           <div className="h-full rounded-full bg-brand-grad transition-[width]" style={{ width: `${pct}%` }} />

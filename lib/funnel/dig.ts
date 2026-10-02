@@ -2,6 +2,7 @@ import type { ContactResult } from "@/lib/contact-finder";
 import type { OppositionCheck } from "@/lib/enrichment/opposition";
 import type { CompanyBase, EnrichedCompany } from "@/lib/enrichment/types";
 import type { ProspectSignal } from "@/types";
+import { subsidiaryOf } from "@/lib/enrichment/subsidiary";
 import { digFactsOf, disqualify } from "./eligible";
 import type { HarvestedSignal, Triage } from "./types";
 
@@ -63,6 +64,8 @@ export interface DigOutcome {
   registry?: "pappers" | "gratuit";
   /** Aucune source n'a pu vérifier l'opposition : publiée, mais non programmable. */
   oppositionUnverified?: boolean;
+  /** Filiale de groupe (lib/enrichment/subsidiary.ts) : badge, score plafonné à 3. */
+  subsidiary?: string | null;
 }
 
 export const clampDigLimit = (value: unknown) => {
@@ -144,6 +147,7 @@ export async function digOne(deps: DigDeps, candidate: DigCandidate): Promise<Di
       error: null,
       registry,
       oppositionUnverified,
+      subsidiary: subsidiaryOf(figures),
     };
   } catch (error) {
     return { ...base, error: error instanceof Error ? error.message : "creusage impossible" };

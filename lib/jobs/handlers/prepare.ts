@@ -1,4 +1,7 @@
+import { verifyOpposition } from "@/lib/enrichment/opposition";
 import { liveDigDeps } from "@/lib/funnel/live";
+import { verifyQueueOppositions } from "@/lib/today/opposition";
+import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import { draftFollowUp } from "@/lib/outbox/follow-up";
 import { draftReply } from "@/lib/outbox/reply-generate";
 import { runCompletionStage } from "@/lib/today/complete";
@@ -18,8 +21,10 @@ export const PREPARE_KIND = "prepare";
 /**
  * Job `search_signals` + `params.kind = "prepare"` — la préparation du matin.
  *
- *   entonnoir (moisson → filtre ×8 → tri → creusage ×8)
+ *   opposition des fiches en attente jamais vérifiée (INPI, puis Pappers)
+ *   → entonnoir (moisson → filtre ×8 → tri → creusage ×8)
  *   → complétion des fiches « à compléter » (une tentative par run, 3 au plus)
+ *   → profil métier des fiches dont le site existe mais n'a pas été lu
  *   → brouillons de réponse aux mails reçus
  *   → relances J+4 / J+7 dues, dans le fil de l'envoi précédent
  *   → brouillons d'intro (jobs `email_generate`, contact de la fiche réutilisé)
@@ -31,6 +36,10 @@ export const PREPARE_KIND = "prepare";
 
 const DIG_STEPS = 8; // 8 × 4 = 32 fiches au plus, au-delà de l'objectif de 25.
 const COMPLETE_PER_STEP = 6;
+/** Vérifications d'opposition par run : l'INPI est gratuit, le temps d'étape est compté. */
+const OPPOSITIONS_PER_RUN = 40;
+/** Profils métier lus par run : un appel LLM léger chacun. */
+const PROFILES_PER_RUN = 12;
 
 const progress = (step: string, pct: number) => ({ step, pct, counts: { scanned: 0, signals: 0, sheets: 0 } });
 const deadline = () => Date.now() + STEP_BUDGET_MS;
@@ -46,6 +55,48 @@ async function completeStep(ctx: StepContext): Promise<StepOutcome> {
     deadline: deadline(),
   });
   return { progress: progress(`Complétion : ${report.found} email(s) trouvé(s) sur ${report.tried} fiche(s)`, 96) };
+}
+
+/**
+ * Opposition à la prospection des fiches en attente qui n'ont jamais été
+ * vérifiées (ADJUVOO, 02/10/2026) : AVANT tout le reste, pour qu'aucune
+ * complétion ni aucun brouillon ne soit dépensé sur une fiche opposée.
+ */
+async function oppositionStep(ctx: StepContext): Promise<StepOutcome> {
+  const report = await verifyQueueOppositions(ctx.db, ctx.userId, {
+    verify: (siren) => verifyOpposition(siren, "inpi-first"),
+    limit: OPPOSITIONS_PER_RUN,
+    deadline: deadline(),
+  });
+  return {
+    progress: progress(
+      `Opposition : ${report.checked} fiche(s) vérifiée(s), ${report.opposed} opposée(s) écartée(s)${report.failed ? `, ${report.failed} sans réponse` : ""}`,
+      2,
+    ),
+  };
+}
+
+/**
+ * Profil métier des fiches de la file dont le site existe mais n'a jamais été
+ * lu — les fiches DÉJÀ là comprises, pas seulement les nouvelles. Le brouillon
+ * qui suit s'appuie dessus.
+ */
+async function profilesStep(ctx: StepContext): Promise<StepOutcome> {
+  const end = deadline();
+  const items = flatten((await loadToday(ctx.db, ctx.userId)).groups).filter(
+    (item) => item.messageType === "intro" && item.prospectId && item.website && item.tags.includes("Profil métier vide"),
+  );
+  let read = 0;
+  let failed = 0;
+  for (const item of items.slice(0, PROFILES_PER_RUN)) {
+    if (Date.now() > end) break;
+    const { data } = await ctx.db.from("prospects").select("*").eq("id", item.prospectId!).maybeSingle();
+    if (!data) continue;
+    const run = await ensureBusinessProfile(ctx.db, data as Prospect, profileAsk(item.prospectId!)).catch(() => null);
+    if (run?.profile) read += 1;
+    else failed += 1;
+  }
+  return { progress: progress(`Profil métier : ${read} lu(s)${failed ? `, ${failed} illisible(s)` : ""}`, 96) };
 }
 
 async function repliesStep(ctx: StepContext): Promise<StepOutcome> {
@@ -133,11 +184,13 @@ async function summaryStep(ctx: StepContext): Promise<StepOutcome> {
 export const prepareHandler: JobHandler = {
   steps: [
     prepareRun,
+    oppositionStep,
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
     triageStep,
     ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i, DIG_STEPS)),
     completeStep,
+    profilesStep,
     repliesStep,
     relancesStep,
     draftsStep,

@@ -6,7 +6,8 @@ import { filterSignal } from "@/lib/funnel/filter";
 import type { FunnelPrefs } from "@/lib/funnel/settings";
 import { rowToSignal, updateCandidate } from "@/lib/funnel/store";
 import type { Identity } from "@/lib/funnel/types";
-import type { Database, SignalCandidateRow } from "@/types";
+import type { Database, Prospect, SignalCandidateRow } from "@/types";
+import { exclusionOf } from "./items";
 import { shouldRetryCompletion } from "./tags";
 
 /**
@@ -95,11 +96,25 @@ export async function runCompletionStage(
     return shouldRetryCompletion({ attempts: attemptsOf(contact), lastAttemptRun: contact?.last_attempt_run, runId });
   });
 
+  // Opposée, « ne plus contacter », hors cible : AUCUNE complétion (ni gratuite
+  // ni Hunter) — la fiche ne partira jamais (ADJUVOO, 02/10/2026).
+  const ids = due.map((row) => row.prospect_id as string);
+  const { data: owners } = ids.length
+    ? await db.from("prospects").select("*").eq("user_id", userId).in("id", ids)
+    : { data: [] };
+  const byId = new Map(((owners ?? []) as Prospect[]).map((prospect) => [prospect.id, prospect]));
+
   let tried = 0;
   let found = 0;
   let refiltered = 0;
+  let excluded = 0;
   for (const row of due) {
     if (tried >= options.limit || Date.now() > options.deadline) break;
+    const owner = byId.get(row.prospect_id as string) ?? null;
+    if (!owner || owner.deleted_at || exclusionOf(owner)) {
+      excluded += 1;
+      continue;
+    }
     // Re-filtrée avec les règles du jour AVANT toute recherche payante.
     const verdict =
       options.refilter?.(row) ??
@@ -114,5 +129,5 @@ export async function runCompletionStage(
     tried += 1;
     if ((await completeOne(db, row, { deps: options.deps, runId, now: options.now })).found) found += 1;
   }
-  return { due: due.length, tried, found, refiltered };
+  return { due: due.length, tried, found, refiltered, excluded };
 }

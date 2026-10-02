@@ -32,6 +32,7 @@ export function TodayClient({
   items: initial,
   capacity,
   liveJobId,
+  alert = null,
   dailyTarget,
   initialKey,
 }: {
@@ -39,6 +40,8 @@ export function TodayClient({
   items: TodayItem[];
   capacity: Capacity;
   liveJobId: string | null;
+  /** Échec de la dernière préparation (job ou brouillons), à afficher en tête. */
+  alert?: string | null;
   dailyTarget: number;
   /** `?item=` : élément ouvert d'emblée (lien depuis une fiche, une notification). */
   initialKey: string | null;
@@ -69,7 +72,7 @@ export function TodayClient({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <TodayHeader today={today} items={items} capacity={capacity} liveJobId={liveJobId} dailyTarget={dailyTarget} onFinished={onFinished} />
+      <TodayHeader today={today} items={items} capacity={capacity} liveJobId={liveJobId} alert={alert} dailyTarget={dailyTarget} onFinished={onFinished} />
       <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
         <TodayList items={items} selected={state.index} checked={state.checked} onSelect={(index) => (setDiscarding(false), state.setIndex(index))} onToggle={state.toggle} />
         {current && (

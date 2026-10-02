@@ -31,6 +31,11 @@ function liveToday(message: Row | null, today: string): boolean {
   return true;
 }
 
+/** Un message est déjà parti vers ce prospect (intro, relance ou réponse). */
+export function contactedProspect(messages: readonly Pick<Message, "prospect_id" | "status" | "sent_at">[], prospectId: string): boolean {
+  return messages.some((row) => row.prospect_id === prospectId && (row.status === "sent" || Boolean(row.sent_at)));
+}
+
 export interface TodayData {
   today: string;
   groups: TodayGroup[];
@@ -52,7 +57,9 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   ]);
 
   const prospects = new Map(((prospectsRes.data ?? []) as Prospect[]).map((row) => [row.id, row]));
-  const messages = (messagesRes.data ?? []) as Row[];
+  // Brouillons d'évaluation ou de script : jamais dans la file (filtre en
+  // mémoire, la colonne `origin` peut précéder ou suivre ce code).
+  const messages = ((messagesRes.data ?? []) as Row[]).filter((row) => !row.origin);
   const discards = (discardsRes.data ?? []) as ProspectDiscard[];
   const signature = signatureFor(loaded.offer);
 
@@ -65,6 +72,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   );
   const latest = (prospectId: string, type: string) => messages.find((row) => row.prospect_id === prospectId && row.type === type) ?? null;
   const lastSent = (prospectId: string) => messages.find((row) => row.prospect_id === prospectId && row.status === "sent") ?? null;
+  const alreadyContacted = (prospectId: string) => contactedProspect(messages, prospectId);
   // Un écart d'un jour précédent sort l'élément ; un écart du jour le laisse visible, barré.
   const classify = (discard: ProspectDiscard | null) => ({
     excluded: Boolean(discard && parisDay(discard.created_at) !== today),
@@ -102,6 +110,9 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   for (const prospectId of new Set([...candidates.keys(), ...withIntroDraft])) {
     const prospect = prospects.get(prospectId);
     if (!prospect) continue;
+    // DÉJÀ CONTACTÉ : jamais en intro. Il ne revient que par ses relances et
+    // ses réponses (ARTFLEX : intro partie le 30/09, brouillon d'éval ensuite).
+    if (alreadyContacted(prospectId)) continue;
     const intro = latest(prospectId, "intro");
     if (!liveToday(intro, today)) continue;
     if (!intro && !["nouveau", "a_contacter"].includes(prospect.status)) continue;

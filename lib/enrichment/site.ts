@@ -309,9 +309,15 @@ export function looksLikeDomain(host: string | null): host is string {
   return /\.[a-z]{2,}$/i.test(host);
 }
 
-/** Domaines qui ne sont jamais le site officiel d'une PME. */
-const NOT_OFFICIAL =
-  /(linkedin|facebook|instagram|twitter|x\.com|youtube|pappers|societe\.com|infogreffe|verif\.com|annuaire-entreprises|data\.gouv|indeed|welcometothejungle|google|wikipedia|pagesjaunes|kompass|manageo|bodacc)/i;
+/**
+ * Domaines qui ne sont jamais le site officiel d'une PME.
+ *
+ * Ancré sur les LIBELLÉS du domaine : la version précédente cherchait « x.com »
+ * n'importe où, et « maviflex.com » (MAVIFLEX, 02/10/2026) était écarté comme
+ * un réseau social — profil métier jamais lu.
+ */
+export const NOT_OFFICIAL =
+  /(^|[./])(linkedin|facebook|instagram|twitter|youtube|pappers|infogreffe|annuaire-entreprises|indeed|welcometothejungle|google|wikipedia|pagesjaunes|kompass|manageo|bodacc)\.|(^|[./])(x|societe|verif)\.com\b|(^|[./])data\.gouv\.fr\b/i;
 
 export interface DiscoveryInput extends SiteIdentity {
   /** Site donné par Pappers, le plus fiable quand il existe. */
@@ -476,7 +482,18 @@ async function readSite(
  */
 export async function coverSite(
   input: DiscoveryInput,
-  options: { prospectId?: string | null; allowLinkupSearch?: boolean } = {},
+  options: {
+    prospectId?: string | null;
+    allowLinkupSearch?: boolean;
+    /**
+     * Le site DÉJÀ ENREGISTRÉ sur la fiche (`knownWebsite`) est celui du
+     * prospect : il a été validé au creusage ou saisi à la main. On le lit sans
+     * repasser l'anti-homonymie — un site de marque (talents-handicap.com pour
+     * NEW NET 3D) ne cite pas toujours la raison sociale, et le profil métier
+     * restait vide alors que le site existe.
+     */
+    trustKnownWebsite?: boolean;
+  } = {},
 ): Promise<SiteCoverage> {
   const prospectId = options.prospectId ?? null;
   const base: SiteCoverage = {
@@ -522,6 +539,7 @@ export async function coverSite(
 
     const joined = read.pages.map((page) => page.text).join("\n");
     const confirmed =
+      (options.trustKnownWebsite === true && candidate.by === "annuaire") ||
       pageConfirmsCompany(joined, input) ||
       (namesCompany(joined, input) && (await legalNoticeConfirms(origin, read.html, joined, input, prospectId)));
     if (!confirmed) {

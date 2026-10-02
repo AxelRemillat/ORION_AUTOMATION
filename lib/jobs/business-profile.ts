@@ -49,7 +49,7 @@ export async function ensureBusinessProfile(
       city: prospect.city,
       knownWebsite: prospect.website,
     },
-    { prospectId: prospect.id, allowLinkupSearch: false },
+    { prospectId: prospect.id, allowLinkupSearch: false, trustKnownWebsite: true },
   );
   const pages = coverage.pages
     .filter((page) => !JOB_PAGE.test(new URL(page.url).pathname))

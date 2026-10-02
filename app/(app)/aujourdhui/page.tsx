@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { readPrefs } from "@/lib/funnel/settings";
-import { livePrepareJob } from "@/lib/today/auto-run";
+import { lastPrepareHealth, livePrepareJob, prepareAlert } from "@/lib/today/auto-run";
 import { loadCapacity } from "@/lib/today/capacity";
 import { flatten } from "@/lib/today/group";
 import { loadToday } from "@/lib/today/load";
@@ -18,11 +18,12 @@ export const metadata = { title: "Aujourd'hui" };
 export default async function AujourdhuiPage({ searchParams }: { searchParams: { item?: string } }) {
   const user = await requireUser();
   const db = createClient();
-  const [data, capacity, prefs, liveJobId] = await Promise.all([
+  const [data, capacity, prefs, liveJobId, health] = await Promise.all([
     loadToday(db, user.id),
     loadCapacity(db, user.id),
     readPrefs(db, user.id),
     livePrepareJob(db, user.id),
+    lastPrepareHealth(db, user.id).catch(() => null),
   ]);
   return (
     <TodayClient
@@ -30,6 +31,7 @@ export default async function AujourdhuiPage({ searchParams }: { searchParams: {
       items={flatten(data.groups)}
       capacity={capacity}
       liveJobId={liveJobId}
+      alert={liveJobId ? null : prepareAlert(health)}
       dailyTarget={prefs.dailyTarget}
       initialKey={typeof searchParams.item === "string" ? searchParams.item : null}
     />

@@ -100,7 +100,9 @@ async function generate(prospect: Prospect): Promise<MailText | { error: string 
       // généré (« violates check constraint »).
       type: "email_generate",
       target: { prospectId: prospect.id, label: `Éval · ${prospect.company_name}`.slice(0, 160) },
-      params: { prospectId: prospect.id, tone: "direct", mode: "full", force: true, saveDraft: true },
+      // origin « eval » : brouillon marqué, jamais dans « Aujourd'hui », jamais
+      // écrit par-dessus le brouillon de l'application.
+      params: { prospectId: prospect.id, tone: "direct", mode: "full", force: true, saveDraft: true, origin: "eval" },
       status: "queued",
       progress: EMPTY_PROGRESS,
     })
