@@ -71,7 +71,15 @@ export async function runCompletionStage(
   db: Db,
   userId: string,
   runId: string,
-  options: { deps: CompletionDeps; prefs?: Pick<FunnelPrefs, "preferredSectors" | "excludedSectors">; limit: number; deadline: number; now?: Date },
+  options: {
+    deps: CompletionDeps;
+    prefs?: Pick<FunnelPrefs, "preferredSectors" | "excludedSectors">;
+    limit: number;
+    deadline: number;
+    now?: Date;
+    /** Re-filtre (règles du jour) ; injecté par les tests, `filterSignal` sinon. */
+    refilter?: (row: SignalCandidateRow) => { status: string; reason?: string };
+  },
 ) {
   const blocked = await (options.deps.hunterBlocked?.() ?? Promise.resolve(null));
   const { data } = await db
@@ -93,7 +101,9 @@ export async function runCompletionStage(
   for (const row of due) {
     if (tried >= options.limit || Date.now() > options.deadline) break;
     // Re-filtrée avec les règles du jour AVANT toute recherche payante.
-    const verdict = filterSignal(rowToSignal(row), row.identity as unknown as Identity | null, { ...options.prefs, now: options.now });
+    const verdict =
+      options.refilter?.(row) ??
+      filterSignal(rowToSignal(row), row.identity as unknown as Identity | null, { ...options.prefs, now: options.now });
     if (verdict.status === "rejeté") {
       await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: `re-filtré : ${verdict.reason}` });
       refiltered += 1;

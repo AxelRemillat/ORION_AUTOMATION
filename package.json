@@ -44,7 +44,7 @@
     "test:registre": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/registre-repli.test.js",
     "test:funnel-qualite": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel-qualite.test.js",
     "test:contact-report": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-report.test.js",
-    "test:aujourdhui": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui.test.js",
+    "test:aujourdhui": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui.test.js && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui-flux.test.js",
     "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js",
     "check:site-offers": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/check-site-offers.js"
   },

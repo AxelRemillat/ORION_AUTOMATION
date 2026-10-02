@@ -10,7 +10,7 @@ import { PipelineBoard } from "./_components/pipeline-board";
 import { countValued, sumPipeline } from "./_lib/estimates";
 import { buildRows, type DueReminderRow } from "./_lib/rows";
 
-export const metadata = { title: "Suivi · ORION" };
+export const metadata = { title: "Pipeline · ORION" };
 
 /** Fin de journée : une relance due aujourd'hui doit apparaître dès le matin. */
 function endOfToday() {
@@ -71,7 +71,7 @@ export default async function SuiviPage() {
   return (
     <>
       <PageHeader
-        title="Suivi"
+        title="Pipeline"
         description={prospects.length === 0 ? "Pipeline, relances et contrats." : summary}
       />
       <DueReminders reminders={due} />

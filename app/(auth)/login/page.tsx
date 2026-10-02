@@ -14,7 +14,7 @@ export default function LoginPage({
   const next =
     searchParams.next?.startsWith("/") && !searchParams.next.startsWith("//")
       ? searchParams.next
-      : "/cockpit";
+      : "/aujourdhui";
 
   return (
     <>

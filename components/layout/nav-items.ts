@@ -1,4 +1,4 @@
-import { BarChart3, Gauge, ListChecks, Search, Send, Wallet, type LucideIcon } from "lucide-react";
+import { BarChart3, Gauge, KanbanSquare, Search, Sun, Wallet, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -9,32 +9,27 @@ export interface NavItem {
 }
 
 /**
- * Le Cockpit est traite a part.
+ * « Aujourd'hui » est traite a part.
  *
- * Ce n'est pas une etape du workflow mais le tableau de bord quotidien : la
- * barre de navigation l'affiche isole, a gauche d'un separateur, pour que la
- * distinction se voie sans avoir a lire les libelles.
+ * Ce n'est pas une etape du workflow mais l'ecran du matin : la file preparee
+ * pendant la nuit, a relire et programmer. La barre de navigation l'affiche
+ * isole, a gauche d'un separateur.
  */
 export const HOME_ITEM: NavItem = {
-  href: "/cockpit",
-  label: "Cockpit",
-  icon: Gauge,
-  hint: "Vue d'ensemble et priorités du jour",
+  href: "/aujourdhui",
+  label: "Aujourd'hui",
+  icon: Sun,
+  hint: "La file du jour : réponses, relances, nouveaux prospects",
 };
 
 /**
- * Les etapes du workflow, dans l'ordre ou on les traverse.
- * Ajouter une destination revient a inserer une entree ici, rien d'autre.
+ * Les autres destinations. Prospection n'y figure plus : on l'ouvre depuis une
+ * fiche. Stats et Coûts y restent jusqu'a l'arrivee de Reglages.
  */
 export const NAV_ITEMS: NavItem[] = [
+  { href: "/cockpit", label: "Cockpit", icon: Gauge, hint: "Vue d'ensemble, activité et consommation" },
   { href: "/recherche", label: "Recherche", icon: Search, hint: "Trouver de nouveaux prospects" },
-  {
-    href: "/prospection",
-    label: "Prospection",
-    icon: Send,
-    hint: "Rédiger et envoyer les messages",
-  },
-  { href: "/suivi", label: "Suivi", icon: ListChecks, hint: "Pipeline, relances et deals" },
+  { href: "/suivi", label: "Pipeline", icon: KanbanSquare, hint: "Pipeline, relances et deals" },
   { href: "/stats", label: "Stats", icon: BarChart3, hint: "Performance de la prospection" },
   {
     href: "/couts",
@@ -44,5 +39,5 @@ export const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-/** Toutes les destinations, Cockpit compris. */
+/** Toutes les destinations, « Aujourd'hui » compris. */
 export const ALL_NAV_ITEMS: NavItem[] = [HOME_ITEM, ...NAV_ITEMS];

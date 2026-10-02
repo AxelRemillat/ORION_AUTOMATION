@@ -7,7 +7,8 @@ import { isEmail } from "@/lib/mail-preflight/recipient";
 import { discard, saveDraft, scheduleBatch, undoDiscard, type CoreResult, type DraftEdit, type ScheduleRequest } from "@/lib/today/actions-core";
 import { loadCapacity } from "@/lib/today/capacity";
 import { completeOne } from "@/lib/today/complete";
-import { DISCARD_REASONS, TODAY_KINDS, type DiscardReason, type SignalCandidateRow, type TodayKind } from "@/types";
+import { draftReply } from "@/lib/outbox/reply-generate";
+import { DISCARD_REASONS, TODAY_KINDS, type DiscardReason, type InboundMessage, type SignalCandidateRow, type TodayKind } from "@/types";
 
 /**
  * Actions de l'écran « Aujourd'hui ». Client de session : la RLS limite tout
@@ -104,4 +105,14 @@ export async function setTodayContact(input: { prospectId: string; candidateId: 
       .eq("id", input.candidateId);
   }
   return done({ ok: true });
+}
+
+/** Brouillon de réponse manquant : même générateur que la préparation du matin. */
+export async function draftReplyToday(inboundId: string): Promise<CoreResult> {
+  const ctx = await session();
+  if (!ctx) return SESSION;
+  const { data } = await ctx.db.from("inbound_messages").select("*").eq("id", inboundId).is("deleted_at", null).maybeSingle();
+  if (!data) return { ok: false, error: "Mail reçu introuvable." };
+  const result = await draftReply(ctx.db, { userId: ctx.userId, inbound: data as InboundMessage });
+  return result.ok ? done({ ok: true }) : result;
 }
