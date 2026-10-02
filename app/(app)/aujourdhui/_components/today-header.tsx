@@ -30,7 +30,7 @@ export function TodayHeader({
   const date = new Date(`${today}T12:00:00Z`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <header className="flex flex-col gap-3">
+    <header className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-[26px] font-semibold capitalize tracking-tight text-text">{date}</h1>
@@ -55,7 +55,7 @@ export function TodayHeader({
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Avancement du tri">
           <div className="h-full rounded-full bg-brand-grad transition-[width]" style={{ width: `${pct}%` }} />
         </div>
-        <span className="shrink-0 font-data text-[12px] text-muted">
+        <span className="font-data text-[12px] text-muted sm:shrink-0">
           {treated} / {items.length} traités
           {items.length - treated > 0 && ` · ~${items.length - treated} min restantes`}
         </span>

@@ -39,7 +39,7 @@ export function TodayList({
     );
   }
   return (
-    <div className="scrollbar-thin flex max-h-[calc(100vh-15rem)] flex-col overflow-y-auto rounded-xl border border-line bg-surface shadow-mist">
+    <div className="scrollbar-thin flex min-w-0 max-h-[calc(100vh-15rem)] flex-col overflow-y-auto rounded-xl border border-line bg-surface shadow-mist">
       {TODAY_KINDS.map((kind) => {
         const group = items.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === kind);
         if (!group.length) return null;

@@ -21,13 +21,16 @@ export interface Draft {
   core: string;
 }
 
-export function useTodayState(initial: TodayItem[]) {
+export function useTodayState(initial: TodayItem[], initialKey: string | null = null) {
   const router = useRouter();
   const toast = useToast();
   const [statuses, setStatuses] = useState<Record<string, TodayStatus>>({});
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [index, setIndex] = useState(() => Math.max(0, initial.findIndex((item) => item.status === "todo")));
+  const [index, setIndex] = useState(() => {
+    const asked = initialKey ? initial.findIndex((item) => item.key === initialKey) : -1;
+    return asked >= 0 ? asked : Math.max(0, initial.findIndex((item) => item.status === "todo"));
+  });
 
   const items = useMemo(
     () => initial.map((item) => ({ ...item, status: statuses[item.key] ?? item.status })),

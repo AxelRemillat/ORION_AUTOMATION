@@ -33,14 +33,17 @@ export function TodayClient({
   capacity,
   liveJobId,
   dailyTarget,
+  initialKey,
 }: {
   today: string;
   items: TodayItem[];
   capacity: Capacity;
   liveJobId: string | null;
   dailyTarget: number;
+  /** `?item=` : élément ouvert d'emblée (lien depuis une fiche, une notification). */
+  initialKey: string | null;
 }) {
-  const state = useTodayState(initial);
+  const state = useTodayState(initial, initialKey);
   const { items, current } = state;
   const [discarding, setDiscarding] = useState(false);
   const [sheet, setSheet] = useState(false);
@@ -65,7 +68,7 @@ export function TodayClient({
   const validated = items.filter((item) => item.status === "valide" && item.messageId).length;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <TodayHeader today={today} items={items} capacity={capacity} liveJobId={liveJobId} dailyTarget={dailyTarget} onFinished={onFinished} />
       <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
         <TodayList items={items} selected={state.index} checked={state.checked} onSelect={(index) => (setDiscarding(false), state.setIndex(index))} onToggle={state.toggle} />

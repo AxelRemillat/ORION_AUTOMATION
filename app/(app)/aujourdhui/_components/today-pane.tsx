@@ -23,6 +23,10 @@ import type { Draft } from "./use-today-state";
 const TYPE_CHIP = { intro: "Intro", relance: "Relance, même fil", reponse: "Réponse" } as const;
 export const EDITOR_ID = "today-editor";
 
+/** Le panneau de complétion ne sert que s'il manque un contact ou un site — pas un simple brouillon. */
+const CONTACT_TAGS = new Set(["Email manquant", "Email non vérifié", "Site introuvable"]);
+const needsContact = (item: TodayItem) => item.tags.some((tag) => CONTACT_TAGS.has(tag));
+
 export function TodayPane({
   item,
   draft,
@@ -55,7 +59,7 @@ export function TodayPane({
   const blocked = !item.messageId || locked || (result !== null && !result.ok);
 
   return (
-    <article className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-4 shadow-mist" aria-label={item.companyName}>
+    <article className="flex min-w-0 flex-col gap-4 rounded-xl border border-line bg-surface p-4 shadow-mist" aria-label={item.companyName}>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-[18px] font-semibold text-text">{item.companyName}</h2>
@@ -89,7 +93,7 @@ export function TodayPane({
       </header>
 
       {discarding && <DiscardReasons onPick={onDiscard} onCancel={onCancelDiscard} />}
-      {item.kind === "a_completer" && <CompletionPanel key={item.key} item={item} onDone={onRefresh} />}
+      {item.kind === "a_completer" && needsContact(item) && <CompletionPanel key={item.key} item={item} onDone={onRefresh} />}
       <ReceivedMessage item={item} />
       <SignalFacts item={item} />
       {item.messageId ? (

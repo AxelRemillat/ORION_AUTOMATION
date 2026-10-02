@@ -15,7 +15,7 @@ export const metadata = { title: "Aujourd'hui" };
  * à chaque ouverture (lib/today/load.ts) : les fiches des runs précédents y
  * figurent d'office, rien n'est recopié.
  */
-export default async function AujourdhuiPage() {
+export default async function AujourdhuiPage({ searchParams }: { searchParams: { item?: string } }) {
   const user = await requireUser();
   const db = createClient();
   const [data, capacity, prefs, liveJobId] = await Promise.all([
@@ -31,6 +31,7 @@ export default async function AujourdhuiPage() {
       capacity={capacity}
       liveJobId={liveJobId}
       dailyTarget={prefs.dailyTarget}
+      initialKey={typeof searchParams.item === "string" ? searchParams.item : null}
     />
   );
 }
