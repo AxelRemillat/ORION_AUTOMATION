@@ -3,14 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { activeProspects } from "@/lib/trash/scope";
-import { completeText } from "@/lib/openai";
 import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
-import type { MessageType, ProspectStatus } from "@/types";
+import type { MessageType, Prospect, ProspectStatus } from "@/types";
+import { draftFollowUp } from "@/lib/outbox/follow-up";
 import { writeProspectStatus } from "./_lib/write-status";
-import { applyGreeting, cleanDraft, withOptOut } from "@/lib/mail-preflight";
-import { stripSignature } from "@/app/api/emails/generate/pipeline";
-import { loadOffer } from "@/lib/offer/read";
-import { signatureFor } from "@/lib/offer/model";
 
 /** Résultat uniforme : les composants clients en font un toast. */
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -120,24 +116,6 @@ export async function setReminderDone(reminderId: string, done: boolean): Promis
   return { ok: true };
 }
 
-/** Relance de secours si OpenAI n'est pas configuré ou indisponible. */
-function fallbackFollowUp(company: string, type: MessageType) {
-  const first = type === "relance_1";
-  return [
-    `Bonjour,`,
-    ``,
-    first
-      ? `Je me permets de revenir vers vous suite à mon message concernant ${company}.`
-      : `Dernier message de ma part au sujet de ${company} — je n'insisterai pas davantage.`,
-    ``,
-    first
-      ? `Est-ce un sujet sur lequel vous souhaitez qu'on échange 15 minutes ?`
-      : `Si le moment n'est pas le bon, dites-le moi simplement et je reviendrai plus tard.`,
-    ``,
-    `Bien à vous,`,
-    `Axel`,
-  ].join("\n");
-}
 
 /**
  * Génère puis enregistre une relance en brouillon (elle s'envoie ensuite via
@@ -148,58 +126,14 @@ export async function generateFollowUp(
   type: Extract<MessageType, "relance_1" | "relance_2">,
 ): Promise<ActionResult> {
   const supabase = createClient();
-
-  const { data: prospect, error: prospectError } = await activeProspects(supabase)
-    .eq("id", prospectId)
-    .maybeSingle();
+  const { data: prospect, error: prospectError } = await activeProspects(supabase).eq("id", prospectId).maybeSingle();
   if (prospectError) return { ok: false, error: prospectError.message };
   if (!prospect) return { ok: false, error: "Prospect introuvable." };
 
-  const { data: previous } = await supabase
-    .from("messages")
-    .select("type, subject, body, sent_at")
-    .eq("prospect_id", prospectId)
-    .eq("status", "sent")
-    .order("created_at", { ascending: true });
-
-  const intro = previous?.find((message) => message.type === "intro");
-
-  let body: string;
-  try {
-    body = await completeText({
-      system:
-        "Tu écris des relances commerciales en français pour un freelance data/IA. " +
-        "Ton direct, poli, 90 mots maximum, aucune formule pompeuse, une seule question claire. " +
-        "Réponds uniquement par le corps du mail, sans objet ni balise.",
-      user: [
-        `Entreprise : ${prospect.company_name}`,
-        prospect.sector ? `Secteur : ${prospect.sector}` : "",
-        prospect.pain_point ? `Problème identifié : ${prospect.pain_point}` : "",
-        intro ? `Message d'intro déjà envoyé :\n${intro.body}` : "",
-        `Type de relance : ${MESSAGE_TYPE_LABELS[type]}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      temperature: 0.6,
-    });
-  } catch {
-    body = fallbackFollowUp(prospect.company_name, type);
-  }
-  if (!body.trim()) body = fallbackFollowUp(prospect.company_name, type);
-
-  // Même nettoyage que l'intro : une seule salutation, pas de ligne « Objet »,
-  // la signature du compte (le contrôle avant envoi l'exige).
-  const { offer } = await loadOffer(supabase, prospect.user_id);
-  const clean = cleanDraft({ subject: intro?.subject ? `Re: ${intro.subject}` : `${prospect.company_name} — suite`, body });
-  // Et la phrase d'opposition, avant la signature : une relance est un mail de
-  // prospection comme un autre (lib/mail-preflight/opt-out.ts).
-  const signature = signatureFor(offer);
-  body = withOptOut(`${applyGreeting(stripSignature(clean.body), "Bonjour,")}\n\n${signature}`, signature);
-  const subject = clean.subject;
-  const { error } = await supabase
-    .from("messages")
-    .insert({ prospect_id: prospectId, type, subject, body, status: "draft", sent_at: null });
-  if (error) return { ok: false, error: error.message };
+  // Même générateur que la préparation automatique de « Aujourd'hui » : la
+  // relance part DANS LE FIL de l'envoi précédent (lib/outbox/follow-up.ts).
+  const result = await draftFollowUp(supabase, { userId: prospect.user_id, prospect: prospect as Prospect, type });
+  if (!result.ok) return { ok: false, error: result.error };
 
   refresh(prospectId);
   return { ok: true, message: `${MESSAGE_TYPE_LABELS[type]} enregistrée en brouillon.` };

@@ -26,13 +26,13 @@ export const FUNNEL_KIND = "funnel";
  */
 
 /** 600 identités à ~1 par seconde (avec les 429 de l'annuaire) : 8 étapes de 240 s. */
-const FILTER_STEPS = 8;
-const DIG_PER_STEP = 4;
+export const FILTER_STEPS = 8;
+export const DIG_PER_STEP = 4;
 const DIG_STEPS = 5;
 /** Marge avant la coupure d'une fonction (300 s). */
-const STEP_BUDGET_MS = 240_000;
+export const STEP_BUDGET_MS = 240_000;
 
-async function prefsOf(ctx: StepContext): Promise<FunnelPrefs> {
+export async function prefsOf(ctx: StepContext): Promise<FunnelPrefs> {
   const stored = await readPrefs(ctx.db, ctx.userId);
   // Un run manuel peut surcharger zones, fenêtre et plafond, sans toucher aux réglages.
   return cleanPrefs(ctx.job.params, stored);
@@ -40,7 +40,7 @@ async function prefsOf(ctx: StepContext): Promise<FunnelPrefs> {
 
 const progress = (step: string, pct: number, counts = { scanned: 0, signals: 0, sheets: 0 }) => ({ step, pct, counts });
 
-async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
+export async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const prefs = await prefsOf(ctx);
   // Aucun département : toute la France.
@@ -58,7 +58,7 @@ async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   };
 }
 
-const filterStep = (index: number) =>
+export const filterStep = (index: number) =>
   async function filter(ctx: StepContext): Promise<StepOutcome> {
     const runId = runIdOf(ctx);
     const prefs = await prefsOf(ctx);
@@ -79,13 +79,13 @@ const filterStep = (index: number) =>
     };
   };
 
-async function triageStep(ctx: StepContext): Promise<StepOutcome> {
+export async function triageStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const { triaged, retained } = await runTriageStage(ctx.db, ctx.userId, runId, liveTriageAsk);
   return { progress: progress(`Tri : ${retained} retenus sur ${triaged}`, 55) };
 }
 
-const digStep = (index: number) =>
+export const digStep = (index: number, total = DIG_STEPS) =>
   async function dig(ctx: StepContext): Promise<StepOutcome> {
     const runId = runIdOf(ctx);
     const prefs = await prefsOf(ctx);
@@ -95,11 +95,11 @@ const digStep = (index: number) =>
       perStep: DIG_PER_STEP,
       prefs,
     });
-    const pct = 55 + Math.round(((index + 1) / DIG_STEPS) * 40);
+    const pct = 55 + Math.round(((index + 1) / total) * 40);
     return { progress: progress(dug ? `Creusage : ${dug} fiche(s) de plus` : "Creusage terminé", remaining ? pct : 95) };
   };
 
-async function finishStep(ctx: StepContext): Promise<StepOutcome> {
+export async function finishStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const rows = await candidatesOf(ctx.db, ctx.userId, runId);
   const counts = countFunnel(rows);

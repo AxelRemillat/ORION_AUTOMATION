@@ -5,6 +5,7 @@ import { baseUrl, clampFanout, dispatchTick, waitUntil, type TickBody } from "@/
 import { drainJobs } from "@/lib/jobs/background";
 import { hasClaimableJob } from "@/lib/jobs/store";
 import { runDueSends } from "@/lib/outbox/scheduler";
+import { startDueAutoRuns } from "@/lib/today/auto-run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,16 @@ export async function POST(request: Request) {
         (error) => console.error(`[outbox] tick en échec : ${error instanceof Error ? error.message : error}`),
       ),
     );
-    waitUntil(Promise.all(Array.from({ length: fanout }, () => dispatchTick(base, {}))));
+    // Préparation automatique de « Aujourd'hui » à l'heure réglée (lib/today/auto-run.ts).
+    // Le job créé est pris par les ticks lancés juste après.
+    waitUntil(
+      startDueAutoRuns(createAdminClient())
+        .then((started) => {
+          if (started) console.log(`[aujourdhui] ${started} préparation(s) lancée(s)`);
+        })
+        .catch((error) => console.error(`[aujourdhui] déclenchement en échec : ${error instanceof Error ? error.message : error}`))
+        .then(() => Promise.all(Array.from({ length: fanout }, () => dispatchTick(base, {})))),
+    );
     return NextResponse.json({ dispatched: fanout }, { status: 202 });
   }
 

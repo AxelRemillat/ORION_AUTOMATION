@@ -336,6 +336,11 @@ export type Message = {
   /** Notification « parti / échoué » déjà vue. */
   send_seen_at?: string | null;
   gmail_message_id?: string | null;
+  /**
+   * Validé dans « Aujourd'hui », en attente de la programmation groupée.
+   * Un brouillon validé n'est jamais envoyé sans cette programmation.
+   */
+  validated_at?: string | null;
   /** Réponse à un mail reçu (migration 20260927131230) : même fil Gmail. */
   reply_to_inbound_id?: string | null;
   reply_to_gmail_message_id?: string | null;
@@ -692,9 +697,52 @@ export type FunnelSettings = {
   days: number;
   dig_limit: number;
   daily: boolean;
+  /** Heure (Paris) du run automatique, 0 à 23. */
+  auto_hour?: number;
+  /** Fiches prêtes visées par jour (« Aujourd'hui »). */
+  daily_target?: number;
+  /** Jour (AAAA-MM-JJ) du dernier run automatique : un seul par jour. */
+  last_auto_run_on?: string | null;
   created_at: string;
   updated_at: string;
 };
+
+/** Motifs d'écart proposés dans « Aujourd'hui ». */
+export const DISCARD_REASONS = ["hors_cible", "trop_grande", "oppose", "pas_de_besoin", "mauvais_contact"] as const;
+export type DiscardReason = (typeof DISCARD_REASONS)[number];
+
+export const DISCARD_REASON_LABELS: Record<DiscardReason, string> = {
+  hors_cible: "Hors cible",
+  trop_grande: "Trop grande structure",
+  oppose: "Opposé",
+  pas_de_besoin: "Pas de vrai besoin",
+  mauvais_contact: "Mauvais contact",
+};
+
+/** Groupes de « Aujourd'hui », dans l'ordre d'affichage. */
+export const TODAY_KINDS = ["reponse", "relance", "nouveau", "a_completer"] as const;
+export type TodayKind = (typeof TODAY_KINDS)[number];
+
+/**
+ * Un écart saisi dans « Aujourd'hui ». Rien n'est supprimé : la ligne sort
+ * l'élément de la file et nourrit les statistiques. « Annuler » renseigne
+ * `undone_at`.
+ */
+export type ProspectDiscard = {
+  id: string;
+  user_id: string;
+  prospect_id: string | null;
+  message_id: string | null;
+  inbound_id: string | null;
+  candidate_id: string | null;
+  kind: TodayKind;
+  reason: DiscardReason;
+  created_at: string;
+  undone_at: string | null;
+};
+
+export type ProspectDiscardInsert = Partial<ProspectDiscard> & Pick<ProspectDiscard, "kind" | "reason">;
+export type ProspectDiscardUpdate = Partial<ProspectDiscard>;
 
 export type FunnelSettingsInsert = Partial<FunnelSettings>;
 export type FunnelSettingsUpdate = Partial<FunnelSettings>;
@@ -812,6 +860,12 @@ export type Database = {
         Row: FunnelSettings;
         Insert: FunnelSettingsInsert;
         Update: FunnelSettingsUpdate;
+        Relationships: [];
+      };
+      prospect_discards: {
+        Row: ProspectDiscard;
+        Insert: ProspectDiscardInsert;
+        Update: ProspectDiscardUpdate;
         Relationships: [];
       };
       search_runs: {

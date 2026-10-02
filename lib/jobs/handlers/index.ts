@@ -5,6 +5,7 @@ import { reanalyzeHandler } from "./reanalyze";
 import { searchCriteriaHandler } from "./search";
 import { searchSignalsHandler } from "./signals";
 import { FUNNEL_KIND, signalFunnelHandler } from "./funnel";
+import { PREPARE_KIND, prepareHandler } from "./prepare";
 
 /**
  * Aiguillage de `search_signals` : l'entonnoir « signaux d'abord » en est une
@@ -31,7 +32,7 @@ export function byKind(base: JobHandler, variants: Record<string, JobHandler>): 
 /** Un exécuteur par type de job. */
 export const HANDLERS: Record<JobType, JobHandler> = {
   search_criteria: searchCriteriaHandler,
-  search_signals: byKind(searchSignalsHandler, { [FUNNEL_KIND]: signalFunnelHandler }),
+  search_signals: byKind(searchSignalsHandler, { [FUNNEL_KIND]: signalFunnelHandler, [PREPARE_KIND]: prepareHandler }),
   email_generate: emailHandler,
   email_rewrite: emailHandler,
   reanalyze: reanalyzeHandler,

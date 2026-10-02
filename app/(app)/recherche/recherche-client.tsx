@@ -25,7 +25,8 @@ import { SignalFilters } from "./signal-filters";
 import { FunnelResults, FunnelSettingsBlock, useFunnel } from "./funnel/funnel-panel";
 
 /** Scan ouvert par l'entonnoir (job `search_signals`, critères `kind: "funnel"`). */
-const isFunnelRun = (run: SearchRun) => (run.criteria as { kind?: unknown } | null)?.kind === "funnel";
+// La préparation de « Aujourd'hui » (`kind: "prepare"`) porte aussi l'entonnoir.
+const isFunnelRun = (run: SearchRun) => ["funnel", "prepare"].includes(String((run.criteria as { kind?: unknown } | null)?.kind));
 
 type Mode = "entonnoir" | "auto" | "signaux" | "manuel" | "favoris";
 
