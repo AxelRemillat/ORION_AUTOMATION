@@ -134,6 +134,23 @@ async function main() {
     check("/couts → /reglages/couts (permanent)", /source: "\/couts", destination: "\/reglages\/couts", permanent: true/.test(config));
   }
 
+
+  console.log("\n6. Au-delà de 1 000 lignes (QA du 03/10 : PostgREST tronque en silence)");
+  {
+    const { readAll } = await import("../lib/supabase/read-all");
+    const { loadPilotage } = await import("../lib/usage/pilotage");
+    const rows = Array.from({ length: 2_500 }, (_, index) => ({
+      id: `u${String(index).padStart(5, "0")}`, user_id: "u1", service: index % 2 ? "openai" : "linkup", operation: "x", units: 10, cost: 0.01,
+      created_at: new Date(Date.UTC(2026, 9, 1 + (index % 3), 9, 0, index % 60)).toISOString(),
+    }));
+    const db = new FakeDb({ api_usage: rows, free_api_calls: [] });
+    const all = await readAll(() => (db as never as { from: (t: string) => any }).from("api_usage").select("*").order("id"));
+    check("lecture page par page : les 2 500 lignes, sans doublon", all.length === 2_500 && new Set(all.map((row: any) => row.id)).size === 2_500, all.length);
+    for (const key of ["HUNTER_API_KEY", "PAPPERS_API_KEY"]) delete process.env[key];
+    const pilotage = await loadPilotage(db, new Date("2026-10-03T12:00:00Z"));
+    check("Cockpit : les 2 500 requêtes comptées (pas 1 000)", pilotage.consumption.window.calls.openai + pilotage.consumption.window.calls.linkup === 2_500, pilotage.consumption.window.calls);
+    check("Cockpit : dépense d'octobre = 2 500 × 0,01 €", pilotage.consumption.month.eur === 25, pilotage.consumption.month.eur);
+  }
   console.log(failures === 0 ? "\nTous les tests des Réglages passent.\n" : `\n${failures} test(s) en échec.\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

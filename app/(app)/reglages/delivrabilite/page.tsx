@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader }
 import { requireUser } from "@/lib/auth";
 import { checkDomain, SENDING_DOMAIN } from "@/lib/settings/dns";
 import { loadVolumes } from "@/lib/settings/volumes-server";
+import { readAll } from "@/lib/supabase/read-all";
 import { createClient } from "@/lib/supabase/server";
 import { loadCapacity } from "@/lib/today/capacity";
 import { DncCard } from "./dnc-card";
@@ -20,9 +21,11 @@ export default async function DelivrabilitePage() {
     checkDomain(SENDING_DOMAIN).catch(() => []),
     loadCapacity(db, user.id),
     loadVolumes(db, user.id),
-    db.from("prospects").select("id, company_name, city, do_not_contact").is("deleted_at", null).order("company_name").limit(5_000),
+    readAll<{ id: string; company_name: string; city: string | null; do_not_contact: boolean | null }>(() =>
+      db.from("prospects").select("id, company_name, city, do_not_contact").is("deleted_at", null).order("company_name").order("id"),
+    ),
   ]);
-  const rows = (prospects.data ?? []).map((row) => ({ id: row.id as string, name: row.company_name as string, city: (row.city as string | null) ?? null, dnc: Boolean(row.do_not_contact) }));
+  const rows = prospects.map((row) => ({ id: row.id, name: row.company_name, city: row.city ?? null, dnc: Boolean(row.do_not_contact) }));
   const highBounce = volumes.bounceRate !== null && volumes.bounceRate > 0.03;
 
   return (

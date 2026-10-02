@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parisToUtc } from "@/lib/outbox/paris-time";
+import { readAll } from "@/lib/supabase/read-all";
 import { buildConsumption, consumptionSince, type Consumption, type FreeRow, type UsageRow } from "./consumption";
 import {
   buildCreditTiles,
@@ -31,15 +32,18 @@ const PROVIDER_WAIT_MS = 700;
 export async function loadPilotage(db: unknown, now = new Date()): Promise<Pilotage> {
   const loose = db as Loose;
   const since = consumptionSince(now);
-  const [usageRes, freeRes, hunterExact, pappersExact] = await Promise.all([
-    loose.from("api_usage").select("service, units, cost, created_at").gte("created_at", since).limit(20_000),
+  // Lecture COMPLÈTE (pages de 1 000) : au-delà, PostgREST tronque en silence.
+  const [usage, free, hunterExact, pappersExact] = await Promise.all([
+    readAll<UsageRow>(() =>
+      loose.from("api_usage").select("service, units, cost, created_at").gte("created_at", since).order("created_at").order("id"),
+    ),
     // Table ajoutée par la migration 20261002221834 : absente, elle ne casse rien.
-    loose.from("free_api_calls").select("service, units, created_at").gte("created_at", since).limit(20_000),
+    readAll<FreeRow>(() =>
+      loose.from("free_api_calls").select("service, units, created_at").gte("created_at", since).order("created_at").order("id"),
+    ).catch(() => [] as FreeRow[]),
     withinMs(cachedExact("hunter", fetchHunterExact), PROVIDER_WAIT_MS, null),
     withinMs(cachedExact("pappers", fetchPappersExact), PROVIDER_WAIT_MS, null),
   ]);
-  const usage = (usageRes.data ?? []) as UsageRow[];
-  const free = (freeRes.error ? [] : freeRes.data ?? []) as FreeRow[];
   const consumption = buildConsumption(usage, free, now);
 
   // Bornes à minuit, heure de Paris (changement d'heure compris).

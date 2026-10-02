@@ -10,6 +10,7 @@ import {
   PageHeader,
   StatCard,
 } from "@/components/ui";
+import { readAll } from "@/lib/supabase/read-all";
 import { createClient } from "@/lib/supabase/server";
 import { activeProspectCount } from "@/lib/trash/scope";
 import { requireUser } from "@/lib/auth";
@@ -35,7 +36,10 @@ export async function CostsView() {
   const supabase = createClient();
 
   const [usageResult, prospectsResult] = await Promise.all([
-    supabase.from("api_usage").select("*").order("created_at", { ascending: false }),
+    // Toutes les lignes, page par page : le total ne doit pas s'arrêter à 1 000.
+    readAll<ApiUsage>(() => supabase.from("api_usage").select("*").order("created_at", { ascending: false }).order("id"))
+      .then((data) => ({ data }))
+      .catch(() => ({ data: [] as ApiUsage[] })),
     activeProspectCount(supabase),
   ]);
 
