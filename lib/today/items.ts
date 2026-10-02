@@ -132,6 +132,7 @@ export function relanceItem(input: {
   signature: string | null;
   dueAt: string;
   lastSent: { type: string; sent_at: string | null; subject: string | null };
+  followUpType: "relance_1" | "relance_2";
   discardedToday: boolean;
   draftPending: boolean;
 }): RawTodayItem {
@@ -146,6 +147,7 @@ export function relanceItem(input: {
     subline: `Relance ${step} · ${input.lastSent.type === "intro" ? "intro" : "relance"} du ${day} sans réponse`,
     why: [`Même fil que l'envoi du ${day}.`, step === "J+4" ? "Dernière relance prévue : J+7." : "Dernière relance de la séquence."],
     dueAt: input.dueAt,
+    followUpType: input.followUpType,
     // Une relance sans brouillon reste une relance : elle ne bascule pas en « à compléter ».
     tags: base.tags.filter((tag) => tag === "Brouillon manquant"),
   };

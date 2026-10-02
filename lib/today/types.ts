@@ -87,6 +87,8 @@ export interface TodayItem {
   scheduledAt: string | null;
   /** Un brouillon est en cours de génération pour cette fiche. */
   draftPending: boolean;
+  /** Relance : quelle relance rédiger si le brouillon manque. */
+  followUpType?: "relance_1" | "relance_2";
 }
 
 export interface TodayGroup {

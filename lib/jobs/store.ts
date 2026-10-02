@@ -26,9 +26,12 @@ const jobs = (db: unknown) => (db as Loose).from("jobs");
 export async function createJob(
   db: unknown,
   input: CreateJobInput,
+  /** Client service_role (préparation automatique) : `auth.uid()` y est nul. */
+  userId?: string,
 ): Promise<{ id: string } | { error: string }> {
   const { data, error } = await jobs(db)
     .insert({
+      ...(userId ? { user_id: userId } : {}),
       type: input.type,
       target: input.target,
       params: input.params,

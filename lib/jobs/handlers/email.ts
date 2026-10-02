@@ -96,6 +96,12 @@ export const EMAIL_PARAMS_SCHEMA = z.object({
    * mais on sait pourquoi il est faible.
    */
   force: z.boolean().optional(),
+  /**
+   * Contact déjà cherché au creusage (préparation de « Aujourd'hui ») : le
+   * mode `full` reprend l'adresse de la fiche au lieu de rappeler Hunter —
+   * un crédit par fiche, pas deux. Sans adresse sur la fiche, chaîne normale.
+   */
+  storedContact: z.boolean().optional(),
 });
 export type EmailParams = z.infer<typeof EMAIL_PARAMS_SCHEMA>;
 
@@ -336,7 +342,16 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
   let contact: DecisionMakerContact | null;
   // Gardes pour l'arbitrage d'apres le pain, a l'etape de redaction.
   let candidates: DecisionMakerContact[] = [];
-  if (params.mode === "full") {
+  const figures = prospect.key_figures ?? {};
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  if (params.mode === "full" && params.storedContact && prospect.email) {
+    contact = {
+      email: prospect.email,
+      full_name: text(figures.contact_name) ?? text(figures.leader_person),
+      position: text(figures.contact_position),
+      confidence: typeof figures.contact_confidence === "number" ? figures.contact_confidence : null,
+    };
+  } else if (params.mode === "full") {
     const outcome = await findContact(prospect).catch(() => ({ contact: null, warning: undefined, candidates: [] }));
     contact = outcome.contact;
     candidates = outcome.candidates ?? [];

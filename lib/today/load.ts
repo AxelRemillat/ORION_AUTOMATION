@@ -41,13 +41,13 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   const endOfDay = parisToUtc(today, "23:59")!;
 
   const [prospectsRes, messagesRes, candidatesRes, inboundRes, remindersRes, discardsRes, jobsRes, loaded] = await Promise.all([
-    db.from("prospects").select("*").is("deleted_at", null),
-    db.from("messages").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-    db.from("signal_candidates").select("*").eq("statut", "creusé").not("prospect_id", "is", null).limit(500),
-    db.from("inbound_messages").select("*").eq("handled", false).is("deleted_at", null),
-    db.from("reminders").select("prospect_id, due_at").eq("done", false),
-    db.from("prospect_discards").select("*").is("undone_at", null),
-    db.from("jobs").select("type, status, target").in("status", ["queued", "running"]),
+    db.from("prospects").select("*").eq("user_id", userId).is("deleted_at", null),
+    db.from("messages").select("*").eq("user_id", userId).is("deleted_at", null).order("created_at", { ascending: false }),
+    db.from("signal_candidates").select("*").eq("user_id", userId).eq("statut", "creusé").not("prospect_id", "is", null).limit(500),
+    db.from("inbound_messages").select("*").eq("user_id", userId).eq("handled", false).is("deleted_at", null),
+    db.from("reminders").select("prospect_id, due_at").eq("user_id", userId).eq("done", false),
+    db.from("prospect_discards").select("*").eq("user_id", userId).is("undone_at", null),
+    db.from("jobs").select("type, status, target").eq("user_id", userId).in("status", ["queued", "running"]),
     loadOffer(db, userId),
   ]);
 
@@ -93,7 +93,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     if (draft && !liveToday(draft, today)) continue;
     const state = classify(discardFor((row) => row.kind === "relance" && row.prospect_id === prospect.id && (!draft || row.message_id === draft.id)));
     if (state.excluded) continue;
-    raw.push(relanceItem({ prospect, draft, signature, dueAt: reminder.due_at, lastSent: sent, discardedToday: state.discardedToday, draftPending: draftPending.has(prospect.id) }));
+    raw.push(relanceItem({ prospect, draft, signature, dueAt: reminder.due_at, lastSent: sent, followUpType: type, discardedToday: state.discardedToday, draftPending: draftPending.has(prospect.id) }));
   }
 
   // 3 et 4. Nouvelles fiches : celles de l'entonnoir, et les intros en attente.

@@ -315,7 +315,12 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
           // Hunter retenu faute de crédit : pas « reprise », elle le sera quand ils reviennent.
           ...(contact?.hunter_skipped?.startsWith(HUNTER_EPUISE)
             ? {}
-            : { retried_at: (options.now ?? new Date()).toISOString() }),
+            : {
+                retried_at: (options.now ?? new Date()).toISOString(),
+                // Compte des tentatives de « Aujourd'hui » (lib/today/complete.ts).
+                attempts: ((row.contact as { attempts?: number } | null)?.attempts ?? 0) + 1,
+                last_attempt_run: runId,
+              }),
         },
       });
     }

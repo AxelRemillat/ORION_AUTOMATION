@@ -54,7 +54,8 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
     .from("jobs")
     .select(PUBLIC_COLUMNS)
     .eq("type", "search_signals")
-    .eq("params->>kind", "funnel")
+    // La préparation du matin est un run d'entonnoir comme un autre.
+    .in("params->>kind", ["funnel", "prepare"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

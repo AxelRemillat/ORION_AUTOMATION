@@ -16,7 +16,8 @@ import type { HarvestedSignal, Triage } from "./types";
  */
 
 export const DEFAULT_DIG_LIMIT = 15;
-export const MAX_DIG_LIMIT = 20;
+/** 30 : la préparation de « Aujourd'hui » vise 25 fiches prêtes par défaut. */
+export const MAX_DIG_LIMIT = 30;
 
 export interface DigCandidate {
   id: string;

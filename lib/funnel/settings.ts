@@ -11,8 +11,22 @@ export interface FunnelPrefs {
   excludedSectors: string[];
   days: number;
   digLimit: number;
+  /** Préparation automatique de « Aujourd'hui », chaque matin. */
   daily: boolean;
+  /** Heure de Paris (0–23) de la préparation automatique. */
+  autoHour: number;
+  /** Fiches prêtes visées par préparation. */
+  dailyTarget: number;
 }
+
+export const DEFAULT_AUTO_HOUR = 5;
+export const DEFAULT_DAILY_TARGET = 25;
+export const MAX_DAILY_TARGET = 30;
+
+const bounded = (value: unknown, min: number, max: number, fallback: number) => {
+  const parsed = Math.floor(Number(value));
+  return value === undefined || value === null || !Number.isFinite(parsed) ? fallback : Math.max(min, Math.min(max, parsed));
+};
 
 export const DEFAULT_PREFS: FunnelPrefs = {
   departements: [],
@@ -21,6 +35,8 @@ export const DEFAULT_PREFS: FunnelPrefs = {
   days: DEFAULT_FUNNEL_DAYS,
   digLimit: DEFAULT_DIG_LIMIT,
   daily: false,
+  autoHour: DEFAULT_AUTO_HOUR,
+  dailyTarget: DEFAULT_DAILY_TARGET,
 };
 
 const DEPARTEMENT = /^(?:0[1-9]|[1-8]\d|9[0-5]|2[AB]|97[1-6])$/i;
@@ -41,6 +57,8 @@ export function cleanPrefs(input: Record<string, unknown>, base: FunnelPrefs = D
     days: Number.isFinite(days) ? Math.max(1, Math.min(90, days)) : base.days,
     digLimit: input.digLimit === undefined ? base.digLimit : clampDigLimit(input.digLimit),
     daily: typeof input.daily === "boolean" ? input.daily : base.daily,
+    autoHour: bounded(input.autoHour, 0, 23, base.autoHour),
+    dailyTarget: bounded(input.dailyTarget, 1, MAX_DAILY_TARGET, base.dailyTarget),
   };
 }
 
@@ -54,6 +72,8 @@ export async function readPrefs(db: SupabaseClient<Database>, userId: string): P
     days: data.days,
     digLimit: data.dig_limit,
     daily: data.daily,
+    autoHour: data.auto_hour,
+    dailyTarget: data.daily_target,
   });
 }
 
@@ -67,6 +87,8 @@ export async function writePrefs(db: SupabaseClient<Database>, userId: string, p
       days: prefs.days,
       dig_limit: prefs.digLimit,
       daily: prefs.daily,
+      auto_hour: prefs.autoHour,
+      daily_target: prefs.dailyTarget,
     },
     { onConflict: "user_id" },
   );

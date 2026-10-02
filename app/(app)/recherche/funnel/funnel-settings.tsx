@@ -90,7 +90,7 @@ export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: b
       </div>
       <div>
         <Label htmlFor="funnel-limit">Fiches à creuser</Label>
-        <Input id="funnel-limit" type="number" min={1} max={20} value={prefs.digLimit} onChange={(event) => set({ digLimit: Number(event.target.value) || 15 })} />
+        <Input id="funnel-limit" type="number" min={1} max={30} value={prefs.digLimit} onChange={(event) => set({ digLimit: Number(event.target.value) || 15 })} />
       </div>
       <div className="md:col-span-2">
         <Label htmlFor="funnel-preferred">Secteurs préférés (préfixes NAF)</Label>
@@ -103,7 +103,7 @@ export function FunnelSettings({ onStart, busy }: { onStart: () => void; busy: b
       <div className="flex flex-wrap items-center gap-3 md:col-span-4">
         <label className="flex items-center gap-2 text-[13px] text-muted">
           <input type="checkbox" checked={prefs.daily} onChange={(event) => set({ daily: event.target.checked })} />
-          Lancer chaque jour à 6 h (heure de Paris) avec ces réglages
+          Préparer « Aujourd’hui » chaque jour à {prefs.autoHour} h (heure de Paris) avec ces réglages
         </label>
         <div className="ml-auto flex gap-2">
           <Button type="button" variant="secondary" loading={saving} onClick={() => void save().then((ok) => ok && toast.success("Réglages enregistrés."))}>
