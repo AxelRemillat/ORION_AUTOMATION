@@ -6,6 +6,7 @@ import { cancelSchedule, scheduleMessage } from "./scheduler";
 import { deleteMessageForever, restoreMessage, trashMessage } from "./trash";
 import { deleteInboundForever, restoreInbound, trashInbound } from "./inbound-trash";
 import { setDoNotContact } from "./do-not-contact";
+import { confirmOppositionManually } from "./opposition-check";
 import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
 
@@ -112,4 +113,11 @@ export async function setProspectDoNotContact(
   const result = await setDoNotContact(createClient(), prospectId, on);
   if (result.ok) revalidatePath("/", "layout");
   return result;
+}
+
+/** « J'ai vérifié manuellement » : l'opposition est levée, la fiche redevient programmable. */
+export async function confirmOppositionChecked(prospectId: string): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  return done(await confirmOppositionManually(createClient(), id, prospectId));
 }

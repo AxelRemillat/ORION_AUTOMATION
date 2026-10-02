@@ -8,7 +8,7 @@ import type { ProspectKeyFigures, ProspectSignal } from "@/types";
 
 /** Panne ou clé manquante sur une source : remontée à l'UI, jamais bloquante. */
 export interface EnrichmentWarning {
-  source: "gouv" | "pappers" | "linkup" | "hunter" | "openai";
+  source: "gouv" | "pappers" | "inpi" | "linkup" | "hunter" | "openai";
   message: string;
 }
 

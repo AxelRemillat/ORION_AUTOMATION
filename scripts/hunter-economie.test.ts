@@ -144,6 +144,12 @@ async function main() {
     check("score 3 : refusé", !low.allowed && low.reason.includes("score 3/5"), JSON.stringify(low));
     const unread = hunterPolicy({ funnel_run_id: "run1", funnel_score: 5 });
     check("entonnoir sans Pappers lu : refusé", !unread.allowed && unread.reason.includes("registre non lu"), JSON.stringify(unread));
+    const free = hunterPolicy({ funnel_run_id: "run1", funnel_score: 5, registry_source: "gratuit", opposition_checked: true });
+    check("repli gratuit, opposition vérifiée par l'INPI : autorisé", free.allowed, JSON.stringify(free));
+    const unchecked = hunterPolicy({ funnel_run_id: "run1", funnel_score: 5, registry_source: "gratuit", opposition_checked: false });
+    check("opposition non vérifiée : Hunter attend", !unchecked.allowed && unchecked.reason.includes("non vérifiée"), JSON.stringify(unchecked));
+    const legacy = hunterPolicy({ funnel_score: 5 });
+    check("fiche manuelle sans le champ : inchangé, autorisé", legacy.allowed, JSON.stringify(legacy));
     const opposed = hunterPolicy({ ...funnel, funnel_score: 5, refuses_prospecting: true });
     check("opposition à la prospection : refusé", !opposed.allowed && opposed.reason.includes("opposition"), JSON.stringify(opposed));
     const big = hunterPolicy({ ...funnel, funnel_score: 5, headcount: 1200 });
@@ -177,7 +183,13 @@ async function main() {
     const big = await run({ pappers_read: true, headcount: 1200 });
     check("1 200 salariés : écartée, AUCUNE recherche de contact", big.seen.contact === 0 && Boolean(big.outcome.skipped), JSON.stringify(big.outcome));
     const unread = await run({});
-    check("Pappers non lu : aucune recherche de contact", unread.seen.contact === 0 && Boolean(unread.outcome.error));
+    // Repli gratuit (02/10/2026) : publiée « opposition non vérifiée » ; Hunter
+    // reste refusé par `hunterPolicy` (opposition_checked: false), le gratuit tourne.
+    check(
+      "registre non lu : publiée « opposition non vérifiée », sans erreur",
+      unread.seen.created === 1 && unread.outcome.error === null && unread.outcome.oppositionUnverified === true,
+      JSON.stringify(unread.outcome),
+    );
     const ok = await run({ pappers_read: true, headcount: 40 });
     check("PME de 40 salariés : contact cherché", ok.seen.contact === 1);
   }

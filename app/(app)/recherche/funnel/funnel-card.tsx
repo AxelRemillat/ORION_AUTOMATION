@@ -55,6 +55,7 @@ export function FunnelCard({ card }: { card: Card_ }) {
         <div className="flex flex-wrap gap-2">
           {contact && <Badge tone={contact.tone}>{contact.label}</Badge>}
           {card.emailDoubtful && <Badge tone="warning">email douteux : domaine hors site</Badge>}
+          {card.oppositionUnverified && <Badge tone="warning">opposition non vérifiée</Badge>}
           {card.statut === "retenu" && <Badge tone="info">en attente de creusage</Badge>}
           {card.badges.map((badge) => (
             <Badge key={badge} tone={badge.startsWith("décision au siège") ? "warning" : "neutral"}>

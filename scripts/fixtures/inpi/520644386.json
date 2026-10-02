@@ -1,0 +1,14 @@
+{
+  "id": "fixture-520644386",
+  "siren": "520644386",
+  "updatedAt": "2026-09-01T00:00:00+02:00",
+  "formality": {
+    "siren": "520644386",
+    "typePersonne": "M",
+    "diffusionINSEE": "O",
+    "diffusionCommerciale": true,
+    "content": {
+      "personneMorale": { "identite": { "entreprise": { "siren": "520644386", "denomination": "ARTFLEX" } } }
+    }
+  }
+}

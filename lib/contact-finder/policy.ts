@@ -11,7 +11,8 @@ import { digFactsOf, disqualify } from "@/lib/funnel/eligible";
  *
  *  1. qui a un SCORE d'entonnoir ≥ 4 (quand elle vient de l'entonnoir) ;
  *  2. dont le registre a été LU (opposition et taille vérifiables) quand elle
- *     vient de l'entonnoir — sans Pappers, ni l'une ni l'autre n'est connue ;
+ *     vient de l'entonnoir — par Pappers ou par le repli gratuit — et dont
+ *     l'opposition n'est pas restée « non vérifiée » ;
  *  3. qui ne serait pas ÉCARTÉE : opposition à la prospection, aucun salarié,
  *     plus de 249 salariés, filiale de grand groupe ou de groupe étranger,
  *     capitaux propres sous le seuil d'alerte (`disqualify`).
@@ -35,8 +36,14 @@ export function hunterPolicy(figures: Record<string, unknown> | null | undefined
   if (score !== null && score < MIN_HUNTER_SCORE) {
     return { allowed: false, reason: `score ${score}/5, Hunter réservé aux fiches ≥ ${MIN_HUNTER_SCORE}` };
   }
-  if (fromFunnel && facts.pappers_read !== true) {
+  // Registre lu : Pappers, ou le repli gratuit (tranche d'effectif de
+  // l'annuaire, opposition de l'INPI) quand Pappers est épuisé.
+  const registryRead = facts.pappers_read === true || facts.registry_source === "gratuit";
+  if (fromFunnel && !registryRead) {
     return { allowed: false, reason: "registre non lu : opposition et taille non vérifiables" };
+  }
+  if (facts.opposition_checked === false) {
+    return { allowed: false, reason: "opposition non vérifiée : Hunter attend la vérification" };
   }
   const verdict = disqualify(digFactsOf(facts));
   if (verdict) return { allowed: false, reason: `fiche à écarter (${verdict.reason})` };

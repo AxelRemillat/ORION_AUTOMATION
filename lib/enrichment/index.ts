@@ -41,6 +41,7 @@ import {
   type ScanStop,
 } from "./scan-plan";
 import { fetchPappers, hasPappersKey } from "./pappers";
+import { fetchInpiOpposition } from "./inpi";
 import { isHookFresh } from "@/lib/signals/dating";
 import { fetchWebResults, LINKUP_CONCURRENCY, hasLinkupKey } from "./linkup";
 import { guessOwnWebsite, hasProvenSignal, qualifyWebResults, structuralSignals } from "./signals";
@@ -218,7 +219,9 @@ export async function deepEnrich(
       if (data.net_income_eur != null) keyFigures.net_income_eur = data.net_income_eur;
       if (data.capital_eur != null) keyFigures.capital_eur = data.capital_eur;
       if (data.equity_eur != null) keyFigures.equity_eur = data.equity_eur;
-      // Opposition a la prospection : portee par Pappers seul (cf. lib/funnel/eligible.ts).
+      keyFigures.registry_source = "pappers";
+      keyFigures.opposition_checked = true;
+      keyFigures.opposition_source = "pappers";
       if (data.refuses_prospecting) keyFigures.refuses_prospecting = true;
       if (data.no_staff) keyFigures.no_staff = true;
       if (data.leader) keyFigures.leader = data.leader;
@@ -245,6 +248,27 @@ export async function deepEnrich(
       source: "pappers",
       message: "clé absente : site web, effectif réel et dirigeant non complétés",
     });
+  }
+
+  /*
+   * REPLI GRATUIT quand Pappers n'a pas répondu (crédits épuisés, clé absente,
+   * panne) : l'entonnoir ne s'arrête jamais. Les finances (CA, résultat,
+   * tranche d'effectif) viennent déjà de l'API Recherche d'entreprises
+   * (`baseKeyFigures`) ; l'opposition à la prospection, de l'API RNE de
+   * l'INPI. Si l'INPI ne répond pas non plus, la fiche est marquée
+   * « opposition non vérifiée » : publiée, mais non programmable.
+   */
+  if (base.siren && keyFigures.pappers_read !== true) {
+    keyFigures.registry_source = "gratuit";
+    const inpi = await fetchInpiOpposition(base.siren);
+    if (inpi.ok) {
+      keyFigures.opposition_checked = true;
+      keyFigures.opposition_source = "inpi";
+      if (inpi.refuses) keyFigures.refuses_prospecting = true;
+    } else {
+      keyFigures.opposition_checked = false;
+      warnings.push({ source: "inpi", message: inpi.error });
+    }
   }
 
   // --- 2. Site officiel ---------------------------------------------------

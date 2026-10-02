@@ -183,9 +183,14 @@ const STRENGTH: Record<string, number> = { fort: 3, moyen: 2, faible: 1 };
       try {
         const company = await deepEnrich(base, [], [], { attachedSignals: [toProspectSignal(input.signal)] });
         const figures = company.key_figures ?? {};
-        // Le job ne publierait pas sans Pappers (lib/funnel/dig.ts). Le rejeu
-        // cherche quand même le contact, pour mesurer, et le signale.
-        entry.pappers = figures.pappers_read === true ? "lu" : "NON LU (opposition et groupe non vérifiés)";
+        // Sans Pappers, repli gratuit (lib/funnel/dig.ts) : le rejeu dit quel
+        // registre a servi et si l'opposition a pu être vérifiée.
+        entry.pappers =
+          figures.pappers_read === true
+            ? "lu"
+            : figures.opposition_checked === true
+              ? "NON LU — repli gratuit, opposition vérifiée par l'INPI"
+              : "NON LU — repli gratuit, opposition NON VÉRIFIÉE";
         const verdict = disqualify(digFactsOf(figures));
         if (verdict) {
           entry.creusage = `écarté : ${verdict.reason}`;

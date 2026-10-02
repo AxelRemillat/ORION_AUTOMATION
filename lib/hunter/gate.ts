@@ -3,6 +3,9 @@
  * email-verifier) — économie de crédits, décidée le 01/10/2026 après un run
  * qui a épuisé le compte d'un coup.
  *
+ * Compte au 02/10/2026 : Hunter **Starter**, 2 000 crédits par mois, remis à
+ * zéro le 2 du mois.
+ *
  * Trois règles, dans cet ordre :
  *
  *  1. CACHE PAR DOMAINE, 90 JOURS. Une même requête (même domaine, même nom,

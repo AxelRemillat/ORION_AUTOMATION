@@ -36,6 +36,10 @@ export interface FunnelCard {
   phone: string | null;
   /** Hunter non appelé faute de crédit ou de budget : « à compléter (Hunter épuisé) ». */
   hunterSkipped: string | null;
+  /** Registre lu au creusage : Pappers, ou le repli gratuit (Recherche d'entreprises + INPI). */
+  registry: "pappers" | "gratuit" | null;
+  /** Aucune source n'a vérifié l'opposition : fiche visible, programmation bloquée. */
+  oppositionUnverified: boolean;
   prospectId: string | null;
   publication: "pret" | "a_completer" | null;
   statut: SignalCandidateRow["statut"];
@@ -79,7 +83,15 @@ export function toCard(row: SignalCandidateRow, now = new Date()): FunnelCard {
   const identity = row.identity as unknown as Partial<Identity> | null;
   const triage = row.triage as unknown as Triage | null;
   const contact = row.contact as
-    | { email?: string; badge?: ContactBadge; doubtful?: boolean; phone?: string; hunter_skipped?: string }
+    | {
+        email?: string;
+        badge?: ContactBadge;
+        doubtful?: boolean;
+        phone?: string;
+        hunter_skipped?: string;
+        registry?: "pappers" | "gratuit";
+        opposition_unverified?: boolean;
+      }
     | null;
   return {
     id: row.id,
@@ -103,6 +115,8 @@ export function toCard(row: SignalCandidateRow, now = new Date()): FunnelCard {
     emailDoubtful: contact?.doubtful === true,
     phone: contact?.phone ?? null,
     hunterSkipped: contact?.hunter_skipped ?? null,
+    registry: contact?.registry ?? null,
+    oppositionUnverified: contact?.opposition_unverified === true,
     prospectId: row.prospect_id,
     publication: row.publication,
     statut: row.statut,

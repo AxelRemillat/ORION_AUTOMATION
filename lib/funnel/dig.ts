@@ -1,4 +1,5 @@
 import type { ContactResult } from "@/lib/contact-finder";
+import type { OppositionCheck } from "@/lib/enrichment/opposition";
 import type { CompanyBase, EnrichedCompany } from "@/lib/enrichment/types";
 import type { ProspectSignal } from "@/types";
 import { digFactsOf, disqualify } from "./eligible";
@@ -6,7 +7,8 @@ import type { HarvestedSignal, Triage } from "./types";
 
 /**
  * ÉTAGE 4 — creusage payant, UNIQUEMENT sur les signaux retenus, par score
- * décroissant, plafonné. Pappers → fiche, module contact, brief stratège.
+ * décroissant, plafonné. Pappers (repli gratuit s'il est épuisé) → fiche,
+ * module contact, brief stratège.
  *
  * Une fiche n'est publiée dans « Prospects prêts » que si un email est trouvé ;
  * sinon elle part dans « À compléter ». Les dépendances sont injectées : le
@@ -37,6 +39,11 @@ export interface DigDeps {
    * atteint), `null` sinon. Absent (tests) : jamais bloqué.
    */
   hunterBlocked?: () => Promise<string | null>;
+  /**
+   * Revérifie l'opposition d'une fiche publiée « non vérifiée » (Pappers, sinon
+   * INPI). Absent (tests) : pas de revérification.
+   */
+  verifyOpposition?: (siren: string) => Promise<OppositionCheck>;
 }
 
 export interface DigOutcome {
@@ -51,6 +58,10 @@ export interface DigOutcome {
   contact: ContactResult | null;
   publication: "pret" | "a_completer" | null;
   error: string | null;
+  /** Registre lu : Pappers, ou le repli gratuit (Recherche d'entreprises + INPI). */
+  registry?: "pappers" | "gratuit";
+  /** Aucune source n'a pu vérifier l'opposition : publiée, mais non programmable. */
+  oppositionUnverified?: boolean;
 }
 
 export const clampDigLimit = (value: unknown) => {
@@ -99,21 +110,26 @@ export async function digOne(deps: DigDeps, candidate: DigCandidate): Promise<Di
      */
     const figures = company.key_figures ?? {};
     /*
-     * SANS PAPPERS, ON NE PUBLIE PAS.
+     * PAPPERS ÉPUISÉ : ON PUBLIE QUAND MÊME, SANS RISQUE.
      *
-     * 30/09/2026 : crédits Pappers épuisés (HTTP 401). L'enrichissement
-     * continuait sans le registre — ni opposition à la prospection, ni groupe,
-     * ni effectif réel — et la fiche pouvait sortir « prête » pour une
-     * entreprise opposée. Erreur passagère : reprise au run suivant.
+     * 30/09/2026 : crédits Pappers épuisés, l'étage ne publiait plus rien.
+     * L'enrichissement bascule désormais sur le repli gratuit (Recherche
+     * d'entreprises + INPI). Si aucune source n'a pu dire si l'entreprise
+     * s'oppose à la prospection, la fiche sort avec le badge « opposition non
+     * vérifiée » et ne peut pas être programmée ; la vérification est relancée
+     * au run suivant (`recheckOppositions`).
      */
-    if (figures.pappers_read !== true) {
-      const why = company.warnings?.find((warning) => warning.source === "pappers")?.message ?? "registre non lu";
-      return { ...base, error: `Pappers indisponible (${why}) : opposition et groupe non vérifiables` };
-    }
+    const registry = figures.registry_source === "gratuit" ? "gratuit" : "pappers";
+    // Rien n'a explicitement vérifié l'opposition (pas de SIREN, aucune source) :
+    // la fiche le porte, et la programmation reste bloquée.
+    const oppositionUnverified = figures.opposition_checked !== true;
     const verdict = disqualify(digFactsOf(figures));
     if (verdict) return { ...base, skipped: verdict.reason, error: null };
 
-    const created = await deps.createProspect(company, candidate);
+    const published = oppositionUnverified
+      ? { ...company, key_figures: { ...figures, opposition_checked: false } }
+      : company;
+    const created = await deps.createProspect(published, candidate);
     if ("error" in created) return { ...base, error: `fiche non créée : ${created.error}` };
     if ("existing" in created) return { ...base, error: "déjà en portefeuille" };
 
@@ -125,6 +141,8 @@ export async function digOne(deps: DigDeps, candidate: DigCandidate): Promise<Di
       contact,
       publication: contact.email ? "pret" : "a_completer",
       error: null,
+      registry,
+      oppositionUnverified,
     };
   } catch (error) {
     return { ...base, error: error instanceof Error ? error.message : "creusage impossible" };

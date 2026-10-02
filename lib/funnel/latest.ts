@@ -3,8 +3,10 @@ import { PUBLIC_COLUMNS, type Job } from "@/lib/jobs/types";
 import type { Database } from "@/types";
 import { runCost } from "./cost";
 import { hunterStatus, type HunterStatus } from "@/lib/hunter/gate";
+import { pappersCredits } from "@/lib/usage/balances";
 import { candidatesOf, countFunnel, yieldBySource, type SourceYield } from "./store";
 import type { FunnelCost, FunnelCounts } from "./types";
+import { registryUsage, type RegistryUsage } from "./registry";
 import { cardsOf, rejectsOf, type FunnelCard, type FunnelReject } from "./view";
 
 /**
@@ -28,6 +30,8 @@ export interface FunnelSnapshot {
   rejects: FunnelReject[];
   /** Hunter aujourd'hui : recherches facturées, budget du jour, blocage éventuel. */
   hunter: HunterStatus | null;
+  /** Registre du creusage : fiches lues par Pappers ou en gratuit, crédits Pappers restants. */
+  registry: RegistryUsage | null;
 }
 
 /** Recherches Hunter facturées aujourd'hui, lues avec la session de l'écran. */
@@ -57,7 +61,7 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
   const job = (data as Job | null) ?? null;
   const runId = typeof job?.result?.runId === "string" ? job.result.runId : null;
   if (!job || !runId) {
-    return { job, runId, counts: EMPTY, bySource: [], cost: null, readyShare: null, cards: [], rejects: [], hunter: null };
+    return { job, runId, counts: EMPTY, bySource: [], cost: null, readyShare: null, cards: [], rejects: [], hunter: null, registry: null };
   }
 
   const rows = await candidatesOf(db, userId, runId);
@@ -74,5 +78,6 @@ export async function latestFunnel(db: Db, userId: string): Promise<FunnelSnapsh
     cards,
     rejects: rejectsOf(rows),
     hunter: await hunterToday(db),
+    registry: registryUsage(cards, await pappersCredits().catch(() => null)),
   };
 }

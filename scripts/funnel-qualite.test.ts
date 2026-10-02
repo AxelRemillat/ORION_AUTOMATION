@@ -345,7 +345,12 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
         weight: 0.5,
       },
     );
-    check("registre non lu : aucune fiche créée, erreur passagère", created.length === 0 && /Pappers indisponible/.test(outcome.error ?? ""), JSON.stringify(outcome));
+    // Repli gratuit (02/10/2026) : l'entonnoir ne bloque plus, la fiche sort « opposition non vérifiée ».
+    check(
+      "registre non lu : fiche publiée quand même, « opposition non vérifiée »",
+      created.length === 1 && outcome.error === null && outcome.oppositionUnverified === true,
+      JSON.stringify(outcome),
+    );
   }
 
   console.log("\n8 ter. Une entreprise, un retenu (AJASSOCIES : trois offres)");
