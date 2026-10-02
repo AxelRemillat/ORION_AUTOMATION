@@ -14,7 +14,7 @@ export type ActionResult = { ok: true; message?: string } | { ok: false; error: 
 function refresh(prospectId?: string) {
   revalidatePath("/suivi");
   if (prospectId) revalidatePath(`/suivi/${prospectId}`);
-  revalidatePath("/stats");
+  revalidatePath("/reglages/donnees");
 }
 
 /**

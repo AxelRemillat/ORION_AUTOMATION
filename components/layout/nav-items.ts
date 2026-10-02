@@ -1,4 +1,4 @@
-import { BarChart3, Gauge, KanbanSquare, Search, Sun, Wallet, type LucideIcon } from "lucide-react";
+import { Gauge, KanbanSquare, Search, Settings, Sun, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -24,19 +24,14 @@ export const HOME_ITEM: NavItem = {
 
 /**
  * Les autres destinations. Prospection n'y figure plus : on l'ouvre depuis une
- * fiche. Stats et Coûts y restent jusqu'a l'arrivee de Reglages.
+ * fiche. Stats et Coûts sont devenus des sections de Réglages (redirections
+ * dans next.config.mjs).
  */
 export const NAV_ITEMS: NavItem[] = [
   { href: "/cockpit", label: "Cockpit", icon: Gauge, hint: "Vue d'ensemble, activité et consommation" },
   { href: "/recherche", label: "Recherche", icon: Search, hint: "Trouver de nouveaux prospects" },
   { href: "/suivi", label: "Pipeline", icon: KanbanSquare, hint: "Pipeline, relances et deals" },
-  { href: "/stats", label: "Stats", icon: BarChart3, hint: "Performance de la prospection" },
-  {
-    href: "/couts",
-    label: "Coûts",
-    icon: Wallet,
-    hint: "Consommation des APIs et coût par prospect",
-  },
+  { href: "/reglages", label: "Réglages", icon: Settings, hint: "Données, coûts, paramètres, intégrations, délivrabilité" },
 ];
 
 /** Toutes les destinations, « Aujourd'hui » compris. */
