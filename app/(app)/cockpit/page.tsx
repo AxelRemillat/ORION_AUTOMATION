@@ -12,6 +12,8 @@ import { EXAMPLE_SIGNALS } from "./_lib/example";
 import { buildQueue } from "./_lib/queue";
 import { buildAllPeriods, parseSeriesParam } from "./_lib/series";
 import { topSignals } from "./_lib/compute";
+import { PilotageCard } from "./_components/pilotage/pilotage-card";
+import { loadPilotage } from "@/lib/usage/pilotage";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -43,9 +45,12 @@ export default async function CockpitPage({
   const supabase = createClient();
 
   // Corbeille exclue partout : file d'actions, boîte de réception, courbes.
-  const [{ prospects, messages, deals, reminders, inbound }, statesResult] = await Promise.all([
+  const [{ prospects, messages, deals, reminders, inbound }, statesResult, pilotage] = await Promise.all([
     loadPortfolio(supabase, ["messages", "deals", "reminders", "inbound"]),
     supabase.from("action_states").select("*"),
+    // Pilotage : agrégats serveur, soldes fournisseurs en cache 1 h. Une panne
+    // ici ne doit jamais empêcher le Cockpit de s'afficher.
+    loadPilotage(supabase).catch(() => null),
   ]);
   const states = (statesResult.data ?? []) as ActionState[];
 
@@ -107,6 +112,8 @@ export default async function CockpitPage({
         periods={buildAllPeriods({ messages, inbound, prospects, deals })}
         initialSeries={parseSeriesParam(searchParams.kpi)}
       />
+
+      {pilotage && <PilotageCard consumption={pilotage.consumption} credits={pilotage.credits} />}
     </div>
   );
 }

@@ -132,20 +132,14 @@ export function pappersRemaining(data: Record<string, unknown>): number | null {
   return legacy === undefined ? null : Math.max(0, legacy);
 }
 
-/** Crédits Pappers restants (exact), `null` si inconnus. Gratuit, mis en cache 5 min. */
-let creditsCache: { at: number; value: number | null } | null = null;
-export async function pappersCredits(now = Date.now()): Promise<number | null> {
-  if (creditsCache && now - creditsCache.at < 5 * 60_000) return creditsCache.value;
-  const key = process.env.PAPPERS_API_KEY;
-  if (!key) return null;
-  const response = await fetchJson<Record<string, unknown>>(
-    `https://api.pappers.fr/v2/suivi-jetons?api_token=${encodeURIComponent(key)}`,
-    {},
-    10_000,
-  );
-  const value = response.ok ? pappersRemaining(response.data) : null;
-  creditsCache = { at: now, value };
-  return value;
+/**
+ * Crédits Pappers restants (exact), `null` si inconnus. Même lecture et même
+ * cache 1 h que les tuiles du Cockpit (lib/usage/credits.ts) : jamais un appel
+ * Pappers à chaque sondage du bandeau.
+ */
+export async function pappersCredits(): Promise<number | null> {
+  const { cachedExact, fetchPappersExact } = await import("./credits");
+  return (await cachedExact("pappers", fetchPappersExact))?.remaining ?? null;
 }
 
 /** Cles rencontrees selon les versions de l'API ; la premiere trouvee gagne. */
