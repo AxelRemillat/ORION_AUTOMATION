@@ -1,0 +1,14 @@
+{
+  "id": "fixture-453450256",
+  "siren": "453450256",
+  "updatedAt": "2026-09-01T00:00:00+02:00",
+  "formality": {
+    "siren": "453450256",
+    "typePersonne": "M",
+    "diffusionINSEE": "O",
+    "diffusionCommerciale": false,
+    "content": {
+      "personneMorale": { "identite": { "entreprise": { "siren": "453450256", "denomination": "SELECTION HABITAT" } } }
+    }
+  }
+}

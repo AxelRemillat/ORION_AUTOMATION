@@ -21,6 +21,8 @@ export function DraftSendBar({
   companyName,
   onTrashed,
   refusesProspecting = false,
+  oppositionUnverified = false,
+  prospectId,
 }: {
   messageId: string;
   defaultTo: string;
@@ -29,6 +31,9 @@ export function DraftSendBar({
   onTrashed: () => void;
   /** L'entreprise s'oppose à l'usage commercial de ses données (registre). */
   refusesProspecting?: boolean;
+  /** Opposition non vérifiée (Pappers et INPI muets) : programmation bloquée. */
+  oppositionUnverified?: boolean;
+  prospectId?: string;
 }) {
   const [state, setState] = useState<MailSendState | null>(null);
 
@@ -73,6 +78,8 @@ export function DraftSendBar({
             onTrashed={onTrashed}
             onChanged={refresh}
             refusesProspecting={refusesProspecting}
+            oppositionUnverified={oppositionUnverified}
+            prospectId={prospectId}
           />
         ) : (
           <MailTrashButton messageId={messageId} label={label} onTrashed={onTrashed} />

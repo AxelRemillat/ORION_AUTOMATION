@@ -160,7 +160,13 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
             <h2 className="mb-3 font-display text-[15px] font-semibold tracking-tight text-text">
               Fil de l&apos;affaire
             </h2>
-            <DealTimeline events={events} prospectId={typed.id} defaultTo={defaultRecipient(typed)} suggestions={foundAddresses(typed)} />
+            <DealTimeline
+              events={events}
+              prospectId={typed.id}
+              defaultTo={defaultRecipient(typed)}
+              suggestions={foundAddresses(typed)}
+              oppositionUnverified={typed.key_figures?.opposition_checked === false}
+            />
           </div>
         </div>
 

@@ -153,6 +153,19 @@ export interface ProspectKeyFigures {
   email_doubtful?: boolean;
   /** Pappers a répondu lors de l'enrichissement (opposition, groupe, effectif lus). */
   pappers_read?: boolean;
+  /**
+   * Registre lu à l'enrichissement : Pappers, ou le repli gratuit (finances de
+   * l'API Recherche d'entreprises, opposition de l'API RNE de l'INPI).
+   */
+  registry_source?: "pappers" | "gratuit";
+  /**
+   * Opposition à la prospection vérifiée par une source. `false` EXPLICITE :
+   * aucune source n'a pu répondre — badge « opposition non vérifiée » et
+   * programmation bloquée. Absent (fiches antérieures) : rien ne change.
+   */
+  opposition_checked?: boolean;
+  /** Qui a vérifié l'opposition : Pappers, l'INPI, ou l'utilisateur. */
+  opposition_source?: "pappers" | "inpi" | "manuel";
   /** Ce qui a déclenché le drapeau ci-dessus, en clair. */
   group_evidence?: string[];
   /** Dirigeant personne physique retrouvé derrière une holding. */

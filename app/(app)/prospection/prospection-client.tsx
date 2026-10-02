@@ -236,6 +236,8 @@ export function ProspectionClient({
                   validated={selected.status !== "nouveau"}
                   companyName={selected.company_name}
                   refusesProspecting={selected.key_figures?.refuses_prospecting === true}
+                  oppositionUnverified={selected.key_figures?.opposition_checked === false}
+                  prospectId={selected.id}
                   onTrashed={reset}
                 />
               )}

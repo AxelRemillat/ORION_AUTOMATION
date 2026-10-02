@@ -1,0 +1,14 @@
+{
+  "id": "fixture-898001029",
+  "siren": "898001029",
+  "updatedAt": "2026-09-01T00:00:00+02:00",
+  "formality": {
+    "siren": "898001029",
+    "typePersonne": "M",
+    "diffusionINSEE": "O",
+    "diffusionCommerciale": false,
+    "content": {
+      "personneMorale": { "identite": { "entreprise": { "siren": "898001029", "denomination": "ADJUVOO" } } }
+    }
+  }
+}

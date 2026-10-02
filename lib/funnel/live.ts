@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { verifyOpposition } from "@/lib/enrichment/opposition";
 import { hunterStatus } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
 import { chatJson, type AskFn } from "@/lib/ai/chat";
@@ -124,5 +125,6 @@ export function liveDigDeps(db: Db, userId: string, runId: string): DigDeps {
     },
     brief: (prospectId) => briefFor(db, prospectId),
     hunterBlocked: async () => (await hunterStatus(supabaseHunterStore())).blocked,
+    verifyOpposition,
   };
 }

@@ -12,8 +12,8 @@
  *   3. rien. L'appelant écrit « Bonjour, » et affiche un badge « sans contact
  *      nominatif ». C'est un résultat honnête, pas une panne.
  *
- * QUOTA — le plan gratuit Hunter est limité (25 recherches par mois au moment
- * de l'écriture). Plutôt que de coder ce chiffre en dur et de le voir vieillir,
+ * QUOTA — compte Hunter Starter depuis le 02/10/2026 : 2 000 crédits par mois,
+ * remis à zéro le 2 du mois. Plutôt que de coder ce chiffre en dur et de le voir vieillir,
  * on interroge `/v2/account`, qui renvoie la consommation réelle du plan
  * souscrit. Au-delà du quota, l'API répond 429 : on le traduit en message
  * clair, jamais en exception.

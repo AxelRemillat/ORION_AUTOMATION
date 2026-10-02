@@ -1,6 +1,7 @@
 import type { Db } from "@/lib/trash/scope";
 import { inSendWindow, MIN_GAP_MIN, spacedSlot } from "@/lib/mail-preflight/schedule";
 import { scheduleError } from "./paris-time";
+import { OPPOSITION_UNVERIFIED_ERROR, oppositionUnverified } from "./opposition-check";
 import { checkSendRules, deliver, isEmail, MESSAGE_COLUMNS, type OutboxMessage, type SendDeps } from "./send";
 
 /**
@@ -50,6 +51,17 @@ export async function scheduleMessage(
     .maybeSingle();
   const message = data as OutboxMessage | null;
   if (!message) return { ok: false, error: "Message introuvable." };
+
+  // Opposition non vérifiée (Pappers épuisé, INPI muet) : rien ne se programme.
+  const { data: owner } = await db
+    .from("prospects")
+    .select("key_figures")
+    .eq("id", message.prospect_id)
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  if (oppositionUnverified((owner as { key_figures?: Record<string, unknown> | null } | null)?.key_figures)) {
+    return { ok: false, error: OPPOSITION_UNVERIFIED_ERROR };
+  }
 
   // Les règles bloquantes sont vérifiées dès maintenant : inutile de
   // programmer un mail qui échouera au moment de partir. Le plafond, lui,

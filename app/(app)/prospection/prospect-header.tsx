@@ -69,6 +69,9 @@ export function ProspectHeader({
             ) : (
               offTarget && <Badge tone="danger">hors cible</Badge>
             )}
+            {prospect.key_figures?.opposition_checked === false && prospect.key_figures?.refuses_prospecting !== true && (
+              <Badge tone="warning">opposition non vérifiée</Badge>
+            )}
           </div>
 
           {offTarget && (

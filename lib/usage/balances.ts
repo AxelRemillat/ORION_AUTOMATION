@@ -115,6 +115,39 @@ async function linkupBalance(): Promise<ServiceBalance> {
 // Pappers — endpoint documente, schema de reponse a confirmer
 // ---------------------------------------------------------------------------
 
+/**
+ * Jetons restants d'une réponse `/v2/suivi-jetons`. Format constaté le
+ * 02/10/2026 : `{ jetons_abonnement, jetons_abonnement_utilises,
+ * jetons_pay_as_you_go_restants }` — le restant est le forfait du mois moins
+ * l'utilisé, plus le pay-as-you-go. Les anciens noms restent lus en repli.
+ */
+export function pappersRemaining(data: Record<string, unknown>): number | null {
+  const num = (key: string) => (typeof data[key] === "number" && Number.isFinite(data[key]) ? (data[key] as number) : null);
+  const plan = num("jetons_abonnement");
+  if (plan !== null) {
+    const used = num("jetons_abonnement_utilises") ?? 0;
+    return Math.max(0, plan - used) + Math.max(0, num("jetons_pay_as_you_go_restants") ?? 0);
+  }
+  const legacy = PAPPERS_KEYS.map(num).find((value): value is number => value !== null);
+  return legacy === undefined ? null : Math.max(0, legacy);
+}
+
+/** Crédits Pappers restants (exact), `null` si inconnus. Gratuit, mis en cache 5 min. */
+let creditsCache: { at: number; value: number | null } | null = null;
+export async function pappersCredits(now = Date.now()): Promise<number | null> {
+  if (creditsCache && now - creditsCache.at < 5 * 60_000) return creditsCache.value;
+  const key = process.env.PAPPERS_API_KEY;
+  if (!key) return null;
+  const response = await fetchJson<Record<string, unknown>>(
+    `https://api.pappers.fr/v2/suivi-jetons?api_token=${encodeURIComponent(key)}`,
+    {},
+    10_000,
+  );
+  const value = response.ok ? pappersRemaining(response.data) : null;
+  creditsCache = { at: now, value };
+  return value;
+}
+
 /** Cles rencontrees selon les versions de l'API ; la premiere trouvee gagne. */
 const PAPPERS_KEYS = [
   "jetons_restants",
@@ -134,13 +167,11 @@ async function pappersBalance(consumed: number): Promise<ServiceBalance> {
   );
 
   if (response.ok) {
-    const found = PAPPERS_KEYS.map((name) => response.data[name]).find(
-      (value): value is number => typeof value === "number" && Number.isFinite(value),
-    );
-    if (found !== undefined) {
+    const found = pappersRemaining(response.data);
+    if (found !== null) {
       return {
         service: "pappers",
-        remaining: Math.max(0, found),
+        remaining: found,
         unit: "crédit",
         quality: "exact",
         basis: "Compte Pappers (/suivi-jetons).",

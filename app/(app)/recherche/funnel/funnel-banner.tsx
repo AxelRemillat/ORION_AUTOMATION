@@ -1,4 +1,5 @@
 import type { FunnelSnapshot } from "@/lib/funnel/latest";
+import { registryLabel } from "@/lib/funnel/registry";
 
 /**
  * Bandeau du run : l'entonnoir chiffré (bruts → filtrés → retenus →
@@ -42,6 +43,15 @@ export function FunnelBanner({ snapshot }: { snapshot: FunnelSnapshot }) {
           {`Hunter aujourd'hui : ${snapshot.hunter.usedToday} / ${snapshot.hunter.budget} recherches`}
           {snapshot.hunter.blocked && (
             <span className="text-warn-ink">{` · ${snapshot.hunter.blocked} — creusage en mode gratuit`}</span>
+          )}
+        </p>
+      )}
+      {snapshot.registry && (
+        <p className="mt-1 font-data text-[12px] text-muted" aria-label="Registre utilisé">
+          {`Registre : ${registryLabel(snapshot.registry)}`}
+          {snapshot.registry.pappersCredits !== null && ` · ${snapshot.registry.pappersCredits} crédits Pappers restants ce mois`}
+          {snapshot.registry.unverified > 0 && (
+            <span className="text-warn-ink">{` · ${snapshot.registry.unverified} fiche(s) « opposition non vérifiée »`}</span>
           )}
         </p>
       )}

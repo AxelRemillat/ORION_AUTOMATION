@@ -30,10 +30,13 @@ export function DealTimeline({
   prospectId,
   defaultTo,
   suggestions,
+  oppositionUnverified = false,
 }: {
   events: TimelineEvent[];
   prospectId: string;
   defaultTo: string;
+  /** Opposition à la prospection non vérifiée : programmation bloquée. */
+  oppositionUnverified?: boolean;
   /** Adresses trouvées, avec leur source, proposées à la programmation. */
   suggestions?: { email: string; source: string }[];
 }) {
@@ -99,6 +102,8 @@ export function DealTimeline({
                     defaultTo={defaultTo}
                     suggestions={suggestions}
                     label="ce brouillon"
+                    oppositionUnverified={oppositionUnverified}
+                    prospectId={prospectId}
                   />
                 </div>
               )}

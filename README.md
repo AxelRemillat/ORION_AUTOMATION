@@ -58,9 +58,11 @@ puis se connecter sur `/login`.
 | `OPENAI_MODEL_EXTRACT` · `OPENAI_MODEL_STRATEGIST` · `OPENAI_MODEL_WRITER` · `OPENAI_MODEL_JUDGE` | serveur | Optionnelles — modèle par rôle (`lib/ai/models.ts`). Absentes = `OPENAI_MODEL` |
 | `OPENAI_REASONING_EFFORT_<ROLE>` | serveur | Optionnelle — `low`/`medium`/`high` pour un modèle de raisonnement (défaut : `medium` pour le stratège, `low` ailleurs). La température n'est alors pas envoyée |
 | `OPENAI_PRICES_JSON` | serveur | Optionnelle — prix des modèles hors grille, `{"modele":{"input":1.25,"output":10}}` en $ / million de tokens |
-| `PAPPERS_API_KEY` | serveur | Données légales des entreprises |
+| `PAPPERS_API_KEY` | serveur | Données légales des entreprises — source principale (abonnement 30 €/mois, 500 crédits). Épuisé : repli gratuit automatique, voir ci-dessous |
+| `INPI_USERNAME` · `INPI_PASSWORD` | serveur | Compte gratuit de l'API RNE de l'INPI (email et mot de passe du portail data.inpi.fr). Repli de l'opposition à la prospection quand Pappers est épuisé (`lib/enrichment/inpi.ts`). Absentes : les fiches creusées sans Pappers sortent « opposition non vérifiée » |
 | `LINKUP_API_KEY` | serveur | Recherche web / signaux |
-| `HUNTER_API_KEY` | serveur | Emails professionnels |
+| `HUNTER_API_KEY` | serveur | Emails professionnels — compte **Starter** : 2 000 crédits par mois, remis à zéro le 2 du mois |
+| `HUNTER_DAILY_BUDGET` | serveur | Optionnelle — recherches Hunter facturées par jour (défaut 10 ; 0 = Hunter coupé). Le Starter en permet ~65 par jour en moyenne |
 | `N8N_WEBHOOK_SEND_URL` | serveur | Webhook d'envoi des messages |
 | `CRON_SECRET` | serveur | Secret des crons Vercel (`/api/cron/purge-trash`, purge quotidienne de la corbeille). Sans lui, la route refuse tout et la purge se fait à l'ouverture de `/corbeille` |
 | `NEXT_PUBLIC_BOOKING_URL` | client + serveur | Optionnelle — lien de RDV placé dans le CTA des emails |
@@ -69,6 +71,23 @@ puis se connecter sur `/login`.
 | `PAPPERS_CREDIT_EUR` · `PAPPERS_PLAN_CREDITS` | serveur | Optionnelles — valeur d'un crédit, taille du forfait |
 | `HUNTER_SEARCH_EUR` | serveur | Optionnelle — valeur d'une recherche Hunter |
 | `OPENAI_MONTHLY_BUDGET_EUR` | serveur | Optionnelle — seul moyen d'estimer le restant OpenAI |
+
+### Registre : Pappers, puis repli gratuit
+
+Pappers reste la source principale du creusage (finances, effectif réel,
+groupe, opposition à la prospection). Quand il ne répond plus (crédits
+épuisés, clé absente, panne), l'entonnoir **ne s'arrête pas** :
+
+- finances (CA, résultat, tranche d'effectif) : API Recherche d'entreprises,
+  gratuite, déjà lue à l'identification ;
+- opposition à la prospection : API RNE de l'INPI, champ `diffusionCommerciale`
+  (`false` = l'entreprise s'oppose) ;
+- si aucune source n'a pu vérifier l'opposition, la fiche est publiée avec le
+  badge « opposition non vérifiée » et **rien ne se programme** : revérifiée
+  au run suivant, ou levée par la case « j'ai vérifié manuellement ».
+
+Le bandeau du run dit quel registre a servi et combien de crédits Pappers
+restent ce mois (`/v2/suivi-jetons`, appel gratuit).
 
 Sur Vercel : renseigner les mêmes variables dans *Settings → Environment Variables*.
 Aucune configuration supplémentaire n'est nécessaire, le projet se déploie tel quel.

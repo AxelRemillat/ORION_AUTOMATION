@@ -256,10 +256,16 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
             statut: "creusé",
             prospect_id: outcome.prospectId,
             publication: outcome.publication,
-            contact: { ...(outcome.contact ?? {}), badge: contactBadge(outcome.contact) },
+            contact: {
+              ...(outcome.contact ?? {}),
+              badge: contactBadge(outcome.contact),
+              registry: outcome.registry ?? "pappers",
+              ...(outcome.oppositionUnverified ? { opposition_unverified: true } : {}),
+            },
           },
     );
   }
+  const rechecked = await recheckOppositions(db, userId, runId, options.deps, OPPOSITION_RECHECKS_PER_STEP);
   /*
    * FICHES « À COMPLÉTER » DES RUNS PRÉCÉDENTS : une seconde recherche de
    * contact, UNE fois par fiche, avec le module corrigé (adresses masquées par
@@ -314,5 +320,90 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
       });
     }
   }
-  return { dug: pending.length, resumed: resumed.length, retried, remaining: Math.max(0, budget - pending.length) };
+  return { dug: pending.length, resumed: resumed.length, retried, rechecked, remaining: Math.max(0, budget - pending.length) };
+}
+
+/** Revérifications d'opposition par étape de creusage : le temps d'étape est compté. */
+const OPPOSITION_RECHECKS_PER_STEP = 5;
+
+/**
+ * FICHES « OPPOSITION NON VÉRIFIÉE » des runs précédents : revérifiées une
+ * fois par run (Pappers s'il a des crédits, sinon INPI).
+ *
+ *  - vérifiée, non opposée : la fiche redevient programmable ; si elle n'avait
+ *    pas d'email, la recherche de contact (Hunter, refusé tant que l'opposition
+ *    n'était pas vérifiée) est relancée ;
+ *  - vérifiée, opposée : la fiche est marquée opposée (envoi désactivé) et la
+ *    carte sort de l'entonnoir, motif à l'appui. Rien n'est supprimé ;
+ *  - toujours rien : on réessaiera au run suivant.
+ */
+export async function recheckOppositions(
+  db: Db,
+  userId: string,
+  runId: string,
+  deps: DigDeps,
+  max: number,
+): Promise<number> {
+  if (!deps.verifyOpposition || max <= 0) return 0;
+  const { data } = await db
+    .from("signal_candidates")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("statut", "creusé")
+    .not("prospect_id", "is", null)
+    .limit(500);
+  const unverified = ((data ?? []) as SignalCandidateRow[])
+    .filter((row) => {
+      const contact = (row.contact ?? {}) as { opposition_unverified?: boolean; opposition_rechecked_run?: string };
+      return contact.opposition_unverified === true && contact.opposition_rechecked_run !== runId;
+    })
+    .slice(0, max);
+
+  for (const row of unverified) {
+    const { data: prospect } = await db
+      .from("prospects")
+      .select("id, siren, key_figures")
+      .eq("id", row.prospect_id!)
+      .eq("user_id", userId)
+      .maybeSingle();
+    const contact = (row.contact ?? {}) as Record<string, unknown>;
+    const siren = (prospect as { siren?: string | null } | null)?.siren ?? row.siren;
+    const check = siren ? await deps.verifyOpposition(siren).catch(() => null) : null;
+    if (!prospect || !check?.ok) {
+      await updateCandidate(db, row.id, { contact: { ...contact, opposition_rechecked_run: runId } });
+      continue;
+    }
+    const figures = ((prospect as { key_figures?: Record<string, unknown> | null }).key_figures ?? {}) as Record<string, unknown>;
+    await db
+      .from("prospects")
+      .update({
+        key_figures: {
+          ...figures,
+          opposition_checked: true,
+          opposition_source: check.source,
+          ...(check.refuses ? { refuses_prospecting: true } : {}),
+        },
+      })
+      .eq("id", row.prospect_id!)
+      .eq("user_id", userId);
+    const verified = { ...contact, opposition_unverified: false, opposition_rechecked_run: runId };
+    if (check.refuses) {
+      await updateCandidate(db, row.id, {
+        statut: "rejeté",
+        motif_rejet: `creusage : opposition à la prospection commerciale déclarée au registre (vérifiée par ${check.source === "inpi" ? "l'INPI" : "Pappers"})`,
+        contact: verified,
+      });
+      continue;
+    }
+    if (row.publication === "a_completer") {
+      const found = await deps.findContact(row.prospect_id!).catch(() => null);
+      await updateCandidate(db, row.id, {
+        publication: found?.email ? "pret" : "a_completer",
+        contact: { ...verified, ...(found ?? {}), badge: found ? contactBadge(found) : contact.badge },
+      });
+      continue;
+    }
+    await updateCandidate(db, row.id, { contact: verified });
+  }
+  return unverified.length;
 }
