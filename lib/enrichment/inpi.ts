@@ -1,3 +1,4 @@
+import { recordFreeCall } from "@/lib/usage/record";
 /**
  * API RNE de l'INPI — repli GRATUIT pour l'opposition à la prospection quand
  * Pappers est épuisé (compte INPI gratuit : INPI_USERNAME / INPI_PASSWORD).
@@ -80,6 +81,8 @@ export async function fetchInpiOpposition(
   siren: string,
   fetchImpl: typeof fetch = fetch,
   now = Date.now(),
+  /** Journalisation de l'appel (Cockpit) ; injectable pour les tests. */
+  recordUsage: (entry: { service: "inpi"; operation: string }) => Promise<void> = recordFreeCall,
 ): Promise<OppositionRead> {
   const clean = siren.replace(/\s/g, "");
   if (!/^\d{9}$/.test(clean)) return { ok: false, error: "SIREN invalide" };
@@ -97,6 +100,8 @@ export async function fetchInpiOpposition(
         resetInpiToken();
         continue;
       }
+      // Appel réel à l'API RNE (gratuit) : compté pour le Cockpit, quelle qu'en soit l'issue.
+      void recordUsage({ service: "inpi", operation: "companies" });
       if (response.status === 429) return { ok: false, error: "quota INPI du jour atteint" };
       if (!response.ok) return { ok: false, error: `INPI HTTP ${response.status}` };
       const refuses = readOpposition(await response.json().catch(() => null));

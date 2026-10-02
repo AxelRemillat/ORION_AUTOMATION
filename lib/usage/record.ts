@@ -97,3 +97,28 @@ export async function recordUnitUsage(params: {
     prospectId: params.prospectId,
   });
 }
+
+/** Fournisseurs gratuits journalisés (table `free_api_calls`, sans coût). */
+export type FreeService = "inpi";
+
+/**
+ * Un appel à une API GRATUITE (INPI…) : compté pour le graphe « Consommation »
+ * du Cockpit, jamais facturé. Même règle que le reste : un échec d'écriture est
+ * avalé, la fonctionnalité mesurée ne casse jamais.
+ */
+export async function recordFreeCall(params: { service: FreeService; operation: string; units?: number }): Promise<void> {
+  const scriptUserId = process.env.ORION_SCRIPT_USER_ID;
+  try {
+    const supabase = (scriptUserId ? createAdminClient() : createClient()) as unknown as {
+      from: (table: string) => { insert: (row: Record<string, unknown>) => Promise<unknown> };
+    };
+    await supabase.from("free_api_calls").insert({
+      service: params.service,
+      operation: params.operation,
+      units: params.units ?? 1,
+      ...(scriptUserId ? { user_id: scriptUserId } : {}),
+    });
+  } catch {
+    // Hors contexte de requête ou base indisponible : on ne compte pas, on ne casse rien.
+  }
+}
