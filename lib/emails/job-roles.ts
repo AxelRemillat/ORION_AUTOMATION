@@ -1,3 +1,4 @@
+import { isClientAccounting } from "@/lib/funnel/pain-map";
 /**
  * Lecture des offres d'emploi : ce que le poste FAIT, et ce que son ouverture
  * implique opérationnellement.
@@ -66,6 +67,13 @@ export const JOB_ROLES: readonly JobRole[] = [
     consequence: "clôture et rapprochements mensuels qui mobilisent du temps de consolidation",
   },
   {
+    key: "comptable_clients",
+    pattern: /comptab\w* (des )?clients?|compta clients?|poste clients?|credit manager|recouvrement|charge(e)? d'encaissement/,
+    label: "Comptable clients",
+    does: "facturation clients, encaissements, relances des paiements en retard",
+    consequence: "factures clients à émettre et paiements à relancer à la main",
+  },
+  {
     key: "comptable",
     pattern: /comptable|aide-comptable|comptabilite fournisseurs/,
     label: "Comptable",
@@ -99,9 +107,14 @@ const normalize = (value: string): string =>
   value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 /** Poste reconnu dans un texte d'offre, ou `null`. */
-export function interpretJob(text: string): JobRole | null {
+export function interpretJob(text: string, context?: string | null): JobRole | null {
   const haystack = normalize(text);
-  return JOB_ROLES.find((role) => role.pattern.test(haystack)) ?? null;
+  const role = JOB_ROLES.find((item) => item.pattern.test(haystack)) ?? null;
+  // Comptable générique : l'offre ou le profil métier dit si c'est le côté clients.
+  if (role?.key === "comptable" && isClientAccounting(text, `${text} ${context ?? ""}`)) {
+    return JOB_ROLES.find((item) => item.key === "comptable_clients") ?? role;
+  }
+  return role;
 }
 
 /** La table, telle qu'injectée dans le prompt du stratège. */

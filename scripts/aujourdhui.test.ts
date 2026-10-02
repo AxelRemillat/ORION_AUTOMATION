@@ -108,7 +108,10 @@ console.log("\n4. Étiquettes et complétude");
   check("email douteux", tagsOf({ ...base, emailDoubtful: true }).includes("Email non vérifié"));
   check("opposition non vérifiée", tagsOf({ ...base, oppositionUnverified: true }).includes("Opposition non vérifiée"));
   check("site introuvable", tagsOf({ ...base, website: null }).includes("Site introuvable"));
-  check("profil métier vide", tagsOf({ ...base, hasBusinessProfile: false }).includes("Profil métier vide"));
+  // Lot 2a (02/10/2026) : site connu + profil vide = « Profil à compléter », bloquant.
+  check("site connu, profil vide : « Profil à compléter »", tagsOf({ ...base, hasBusinessProfile: false }).includes("Profil à compléter"));
+  check("… bloquant : pas dans « Nouveaux »", !isComplete(tagsOf({ ...base, hasBusinessProfile: false }), true));
+  check("sans site, profil vide : simple information", tagsOf({ ...base, website: null, hasBusinessProfile: false }).includes("Profil métier vide"));
   check("brouillon manquant", tagsOf({ ...base, hasDraft: false }).includes("Brouillon manquant"));
   check("brouillon en préparation : pas « manquant »", !tagsOf({ ...base, hasDraft: false, draftPending: true }).includes("Brouillon manquant"));
   // Site et profil sont des signaux de qualité, pas des blocages.

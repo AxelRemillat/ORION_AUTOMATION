@@ -385,6 +385,39 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
   };
 }
 
+/**
+ * JAMAIS DE BROUILLON AVEC UN PROFIL MÉTIER VIDE QUAND LA FICHE A UN SITE.
+ *
+ * 02/10/2026, NEW NET 3D : profil vide → accroche vague, pain « reporting »
+ * hors sujet. Le site a été lu juste avant (génération complète) ; s'il n'en
+ * sort aucun profil, on s'arrête AVANT le stratège et la rédaction : la fiche
+ * garde « Profil à compléter », sans brouillon, et l'échec est daté
+ * (`key_figures.profile_failed_at`) pour ne pas relancer en boucle.
+ */
+export async function requireProfileWhenSiteKnown(
+  ctx: Pick<StepContext, "db" | "userId">,
+  prospect: Prospect,
+  warnings: { source: string; message: string }[] = [],
+  now = new Date(),
+): Promise<void> {
+  const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
+  const profile = storedProfile(prospect.business_profile);
+  if (profile || !prospect.website) {
+    if (profile && typeof figures.profile_failed_at === "string") {
+      const { profile_failed_at: _cleared, ...rest } = figures;
+      await ctx.db.from("prospects").update({ key_figures: rest }).eq("id", prospect.id).eq("user_id", ctx.userId);
+    }
+    return;
+  }
+  await ctx.db
+    .from("prospects")
+    .update({ key_figures: { ...figures, profile_failed_at: now.toISOString() } })
+    .eq("id", prospect.id)
+    .eq("user_id", ctx.userId);
+  const why = warnings.map((warning) => warning.message).find((message) => /profil|site/i.test(message));
+  throw new Error(`Profil à compléter : le site ${prospect.website} n'a pas pu être lu${why ? ` (${why})` : ""} — aucun brouillon rédigé.`);
+}
+
 async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   const params = paramsOf(ctx);
   const prospect = await loadProspect(ctx, params.prospectId);
@@ -401,6 +434,7 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
     }));
     if (run.note) warnings.push({ source: "openai", message: run.note });
   }
+  await requireProfileWhenSiteKnown(ctx, prospect, warnings);
   let factsResult = buildFacts(prospect, contactOf(ctx));
 
   // --- DERNIÈRE CHANCE DONNÉE AUX SIGNAUX SANS DATE -----------------------

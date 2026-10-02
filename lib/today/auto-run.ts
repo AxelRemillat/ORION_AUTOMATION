@@ -19,10 +19,17 @@ type Loose = SupabaseClient<any, "public", any>;
 
 export const PREPARE_LABEL = "Préparation du jour";
 
-/** Code pur : la préparation de ce jour est-elle due ? */
+/**
+ * Code pur : la préparation de ce jour est-elle due ?
+ *
+ * Du lundi au vendredi seulement (heure de Paris) : rien à préparer le week-end,
+ * où rien ne part. « Lancer maintenant » (`enqueuePrepare`, déclenchement
+ * manuel) reste possible tous les jours.
+ */
 export function autoRunDue(input: { daily: boolean; autoHour: number; lastRunOn: string | null; now: Date }): boolean {
   if (!input.daily) return false;
-  const { date, time } = utcToParis(input.now);
+  const { date, time, weekday } = utcToParis(input.now);
+  if (weekday === 0 || weekday === 6) return false;
   if (input.lastRunOn && input.lastRunOn >= date) return false;
   return Number(time.slice(0, 2)) >= input.autoHour;
 }

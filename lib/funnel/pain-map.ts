@@ -10,6 +10,42 @@ interface PainRule {
   pain: string;
 }
 
+/**
+ * COMPTABILITÉ CLIENTS — facturation et relances de paiement, pas factures
+ * fournisseurs.
+ *
+ * 02/10/2026, NEW NET 3D (511178287) : offre « Comptable clients (H/F) » lue
+ * « factures fournisseurs et rapprochement bancaire » parce que la table
+ * rangeait tout « comptable » côté fournisseurs. Le côté clients se lit dans
+ * l'intitulé, ou — pour un intitulé générique de comptable — dans l'offre ou
+ * le profil métier (facturation, relances, encaissement, recouvrement).
+ */
+export const CLIENT_ACCOUNTING_PAIN = "facturation clients et relances de paiement";
+
+/** L'intitulé dit à lui seul le côté clients. */
+const CLIENT_SIDE_TITLE =
+  /comptab\w*\s+(des\s+)?clients?|compta\s+clients?|poste\s+clients?|comptes?\s+clients?|credit\s+manager|recouvrement|encaissements?|relances?\s+(de\s+|des\s+)?(paiements?|impayes|clients?|factures)|facturation\s+clients?|factures?\s+clients?|impayes/;
+/** Un poste comptable ou de facturation, dont le côté reste à lire. */
+const ACCOUNTING_TITLE = /comptab|compta\b|facturation|factures?/;
+/** Ce que l'offre ou le profil métier dit du côté clients. */
+const CLIENT_SIDE_CONTEXT = /comptab\w*\s+(des\s+)?clients?|facturation|factures?\s+clients?|relances?|encaissements?|recouvrement|impayes|paiements?\s+clients?/;
+
+/**
+ * Le poste relève-t-il de la comptabilité CLIENTS ?
+ *   - intitulé explicite (« comptable clients », « credit manager »…) : oui ;
+ *   - intitulé côté fournisseurs (« comptable fournisseurs ») : non ;
+ *   - intitulé comptable générique : oui si l'offre ou le profil métier parle
+ *     de facturation, relances, encaissement ou recouvrement (les « relances
+ *     fournisseurs » ne comptent pas).
+ */
+export function isClientAccounting(title: string | null | undefined, context?: string | null): boolean {
+  const head = normalize(title ?? "");
+  if (CLIENT_SIDE_TITLE.test(head)) return true;
+  if (/fournisseurs?/.test(head) || !ACCOUNTING_TITLE.test(head)) return false;
+  const around = normalize(context ?? "").replace(/relances?\s+(des\s+|aux\s+)?fournisseurs?/g, " ");
+  return CLIENT_SIDE_CONTEXT.test(around);
+}
+
 const RULES: readonly PainRule[] = [
   // Élargi le 28/09/2026 : sur 95 offres France Travail du run 69+31, 26 étaient
   // écartées faute d'intitulé reconnu alors que le poste disait bien le pain —
@@ -28,12 +64,18 @@ const RULES: readonly PainRule[] = [
   { pattern: /service client|charge(e)? de clientele|relation client/, pain: "tri des demandes clients" },
 ];
 
-const normalize = (value: string) =>
-  value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/’/g, "'");
+function normalize(value: string): string {
+  return value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/’/g, "'");
+}
 
-/** Pain probable d'un intitulé de poste, ou `null` s'il ne dit rien d'exploitable. */
-export function painForJob(title: string | null | undefined): string | null {
+/**
+ * Pain probable d'un intitulé de poste, ou `null` s'il ne dit rien
+ * d'exploitable. `context` (texte de l'offre, profil métier) départage un
+ * intitulé comptable générique : côté clients ou côté fournisseurs.
+ */
+export function painForJob(title: string | null | undefined, context?: string | null): string | null {
   if (!title) return null;
+  if (isClientAccounting(title, context)) return CLIENT_ACCOUNTING_PAIN;
   const text = normalize(title);
   return RULES.find((rule) => rule.pattern.test(text))?.pain ?? null;
 }
@@ -43,7 +85,8 @@ export function painMapBlock(): string {
   return [
     "- ADV / assistant commercial → saisie des commandes et des devis",
     "- deviseur / chargé d'affaires / technico-commercial → production des devis",
-    "- comptable / aide-comptable → factures fournisseurs, rapprochement bancaire",
+    "- comptable clients / credit manager / recouvrement (ou offre qui parle facturation, relances, encaissement) → facturation clients et relances de paiement",
+    "- comptable / aide-comptable (côté fournisseurs) → factures fournisseurs, rapprochement bancaire",
     "- planificateur / ordonnanceur → planning",
     "- magasinier / gestionnaire de stock → gestion du stock",
     "- assistant administratif / RH → dossiers administratifs, onboarding",

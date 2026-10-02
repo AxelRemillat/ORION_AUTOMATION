@@ -40,3 +40,13 @@ ab-reveal.md
 # état local de la CLI Supabase
 supabase/.temp
 scripts/.*.ts
+
+# Relais local Claude Code ↔ Cowork (n8n) — JAMAIS commité
+.claude/settings.local.json
+.claude/hooks/
+.claude/relay.on
+.claude/relay.log
+.claude/relay-state.json
+.claude/relay-guard.json
+.claude/relay-*
+.claude/relay.*

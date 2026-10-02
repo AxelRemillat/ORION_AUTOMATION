@@ -19,6 +19,7 @@ export const TODAY_TAGS = [
   "Opposition non vérifiée",
   "Site introuvable",
   "Profil métier vide",
+  "Profil à compléter",
   "Brouillon manquant",
   "Filiale de groupe",
 ] as const;
@@ -29,6 +30,7 @@ export const BLOCKING_TAGS: ReadonlySet<TodayTag> = new Set([
   "Email manquant",
   "Email non vérifié",
   "Opposition non vérifiée",
+  "Profil à compléter",
   "Brouillon manquant",
 ]);
 
@@ -88,6 +90,11 @@ export interface TodayItem {
   scheduledAt: string | null;
   /** Un brouillon est en cours de génération pour cette fiche. */
   draftPending: boolean;
+  /**
+   * La lecture du site pour le profil métier a échoué : pas de brouillon
+   * automatique tant que le site n'est pas corrigé ou le profil complété.
+   */
+  profileReadFailed?: boolean;
   /** Relance : quelle relance rédiger si le brouillon manque. */
   followUpType?: "relance_1" | "relance_2";
 }

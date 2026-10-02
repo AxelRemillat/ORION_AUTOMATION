@@ -278,6 +278,8 @@ export function buildFacts(
   siteText?: string | null,
 ): FactsResult {
   const figures = prospect.key_figures ?? {};
+  // Profil métier à plat : contexte de lecture des offres d'emploi.
+  const profileText = prospect.business_profile ? JSON.stringify(prospect.business_profile) : "";
   const facts: DerivedFact[] = [];
   let counter = 0;
 
@@ -426,7 +428,10 @@ export function buildFacts(
 
     // Un signal non date ou perime ne peut pas ouvrir un mail : rang 3 au mieux.
     const tier: HookTier = isAutomationHire && fresh ? 1 : fresh ? 3 : 4;
-    const job = RECRUITMENT.test(text) || signal.type === "recrutement" ? interpretJob(text) : null;
+    // L'offre et le profil métier départagent un poste comptable : côté clients
+    // (facturation, relances) ou côté fournisseurs (NEW NET 3D, 02/10/2026).
+    const jobContext = `${text} ${profileText}`;
+    const job = RECRUITMENT.test(text) || signal.type === "recrutement" ? interpretJob(text, jobContext) : null;
 
     // Offre de moins de 30 jours : le poste recrute dit quelle tache DEBORDE
     // aujourd'hui. On relie le flux a cette tache — et jamais a la personne :
@@ -435,6 +440,7 @@ export function buildFacts(
     const freshJob = freshJobHook(
       { label: str(signal.label) ?? "", jobTitle: str(figures.job_title) ?? str(signal.label), date },
       now,
+      jobContext,
     );
 
     add(

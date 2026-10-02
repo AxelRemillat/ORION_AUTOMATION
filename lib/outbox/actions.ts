@@ -7,6 +7,7 @@ import { deleteMessageForever, restoreMessage, trashMessage } from "./trash";
 import { deleteInboundForever, restoreInbound, trashInbound } from "./inbound-trash";
 import { setDoNotContact } from "./do-not-contact";
 import { confirmOppositionManually } from "./opposition-check";
+import { draftIfReady } from "@/lib/today/auto-draft";
 import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
 
@@ -119,5 +120,9 @@ export async function setProspectDoNotContact(
 export async function confirmOppositionChecked(prospectId: string): Promise<MailActionResult> {
   const id = await userId();
   if (!id) return SESSION_ERROR;
-  return done(await confirmOppositionManually(createClient(), id, prospectId));
+  const db = createClient();
+  const result = await confirmOppositionManually(db, id, prospectId);
+  // Opposition vérifiée : si c'était le dernier manque, le brouillon part tout seul.
+  if (result.ok) await draftIfReady(db, id, prospectId).catch(() => null);
+  return done(result);
 }
