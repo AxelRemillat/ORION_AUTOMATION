@@ -32,7 +32,7 @@ import { edges, maxSimilarity } from "@/lib/similarity";
 import { coerceTone } from "@/lib/tones";
 import { activeProspects } from "@/lib/trash/scope";
 import { loadOffer } from "@/lib/offer/read";
-import type { Prospect } from "@/types";
+import type { MessageOrigin, Prospect } from "@/types";
 import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
 import { storedProfile } from "@/lib/emails/business-profile";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
@@ -84,6 +84,12 @@ export const EMAIL_PARAMS_SCHEMA = z.object({
    * `false` pour ne pas créer de doublon.
    */
   saveDraft: z.boolean().default(true),
+  /**
+   * Provenance du brouillon : `eval` (eval:mails) ou `script`. Un tel brouillon
+   * est marqué (`messages.origin`), n'apparaît jamais dans « Aujourd'hui » et ne
+   * réécrit jamais le brouillon de l'application — ni l'inverse.
+   */
+  origin: z.enum(["eval", "script"]).nullish(),
   /**
    * Brouillon déjà en base pour ce prospect (génération précédente) : il est
    * RÉÉCRIT au lieu d'en créer un second, tant qu'il n'est pas parti.
@@ -513,10 +519,16 @@ async function replaceableDraft(
  * désigne pas : une nouvelle génération le RÉÉCRIT au lieu d'en empiler un
  * second. Jamais un mail programmé, en cours d'envoi ou à la corbeille.
  */
-export async function latestIntroDraft(ctx: Pick<StepContext, "db" | "userId">, prospectId: string): Promise<string | null> {
+export async function latestIntroDraft(
+  ctx: Pick<StepContext, "db" | "userId">,
+  prospectId: string,
+  origin: MessageOrigin | null = null,
+): Promise<string | null> {
+  // `select("*")` et filtre en mémoire : la colonne `origin` peut ne pas encore
+  // exister entre le déploiement et la migration — la requête ne doit pas casser.
   const { data } = await ctx.db
     .from("messages")
-    .select("id")
+    .select("*")
     .eq("user_id", ctx.userId)
     .eq("prospect_id", prospectId)
     .eq("type", "intro")
@@ -524,9 +536,9 @@ export async function latestIntroDraft(ctx: Pick<StepContext, "db" | "userId">, 
     .is("deleted_at", null)
     .not("send_status", "in", "(scheduled,sending)")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return (data as { id: string } | null)?.id ?? null;
+    .limit(20);
+  const own = ((data ?? []) as { id: string; origin?: string | null }[]).find((row) => (row.origin ?? null) === origin);
+  return own?.id ?? null;
 }
 
 async function draftStep(ctx: StepContext): Promise<StepOutcome> {
@@ -630,10 +642,11 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   if (params.saveDraft) {
     // Écrit en dernier, juste avant le commit de l'étape : seule une coupure
     // entre les deux laisserait un brouillon en double (jamais un mail envoyé).
+    const origin = params.origin ?? null;
     const existing =
       ctx.job.result.messageId ??
-      (await replaceableDraft(ctx, prospect.id, params.replaceMessageId)) ??
-      (await latestIntroDraft(ctx, prospect.id));
+      (origin ? null : await replaceableDraft(ctx, prospect.id, params.replaceMessageId)) ??
+      (await latestIntroDraft(ctx, prospect.id, origin));
     if (existing) {
       const { error } = await ctx.db
         .from("messages")
@@ -653,6 +666,8 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
           subject: email.subject.trim() || null,
           body: email.body.trim(),
           status: "draft",
+          // Seulement hors application : la colonne n'est jamais citée sinon.
+          ...(origin ? { origin } : {}),
         })
         .select("id")
         .single();

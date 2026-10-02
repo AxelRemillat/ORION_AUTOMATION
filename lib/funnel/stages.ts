@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HUNTER_EPUISE } from "@/lib/hunter/gate";
+import { cappedScore, subsidiaryBadge } from "@/lib/enrichment/subsidiary";
 import type { Database, SignalCandidateRow } from "@/types";
 import { examinationPlan, MAX_EXAMINED } from "./budget";
 import { clampDigLimit, contactBadge, digOne, digOrder, type DigDeps } from "./dig";
@@ -256,6 +257,13 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
             statut: "creusé",
             prospect_id: outcome.prospectId,
             publication: outcome.publication,
+            // Filiale de groupe : score plafonné à 3, badge sur la carte.
+            ...(outcome.subsidiary
+              ? {
+                  score: cappedScore(row.score, outcome.subsidiary),
+                  badges: [...new Set([...(row.badges ?? []), subsidiaryBadge(outcome.subsidiary)])],
+                }
+              : {}),
             contact: {
               ...(outcome.contact ?? {}),
               badge: contactBadge(outcome.contact),

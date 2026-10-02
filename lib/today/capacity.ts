@@ -1,7 +1,6 @@
-import { buildDeliverability } from "@/lib/outbox/deliverability";
+import { buildDeliverability, DELIVERABILITY_COLUMNS, type SentRow } from "@/lib/outbox/deliverability";
 import { utcToParis } from "@/lib/outbox/paris-time";
 import type { Db } from "@/lib/trash/scope";
-import type { Message } from "@/types";
 import { sendDay } from "./plan";
 
 /**
@@ -21,10 +20,10 @@ export interface Capacity {
 
 export async function loadCapacity(db: Db, userId: string, now = new Date()): Promise<Capacity> {
   const [sentRes, plannedRes] = await Promise.all([
-    db.from("messages").select("status, sent_at").eq("user_id", userId).eq("status", "sent"),
+    db.from("messages").select(DELIVERABILITY_COLUMNS).eq("user_id", userId).eq("status", "sent"),
     db.from("messages").select("scheduled_at").eq("user_id", userId).in("send_status", ["scheduled", "sending"]).is("deleted_at", null),
   ]);
-  const deliverability = buildDeliverability((sentRes.data ?? []) as Pick<Message, "status" | "sent_at">[], now);
+  const deliverability = buildDeliverability((sentRes.data ?? []) as unknown as SentRow[], now);
   const day = sendDay(now);
   const taken = ((plannedRes.data ?? []) as { scheduled_at: string | null }[])
     .map((row) => row.scheduled_at)

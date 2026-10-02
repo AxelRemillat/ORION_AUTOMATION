@@ -33,7 +33,9 @@ const USER = "u1";
 const NOW = new Date("2026-10-05T07:30:00Z"); // lundi 9 h 30 à Paris
 const prospect = (id: string, over: Record<string, unknown> = {}) => ({
   id, user_id: USER, company_name: `Société ${id}`, status: "nouveau", email: `contact@${id}.fr`, website: `https://${id}.fr`,
-  key_figures: {}, signals: [], sector: "Transport", city: "Lyon", deleted_at: null, do_not_contact: false, business_profile: { a: 1 }, ...over,
+  // Registre lu (Pappers) : l'opposition est connue. Une fiche sans cette marque
+  // est « Opposition non vérifiée » depuis le 02/10/2026 (ADJUVOO).
+  key_figures: { pappers_read: true }, signals: [], sector: "Transport", city: "Lyon", deleted_at: null, do_not_contact: false, business_profile: { a: 1 }, ...over,
 });
 const candidate = (id: string, prospectId: string, over: Record<string, unknown> = {}) => ({
   id, user_id: USER, run_id: "run-30-09", statut: "creusé", publication: "pret", prospect_id: prospectId, source: "bodacc",
@@ -85,6 +87,7 @@ async function main() {
   console.log("\n12. Complétion automatique : une fois par run, trois au plus");
   {
     const db = new FakeDb({
+      prospects: [prospect("p1", { email: null }), prospect("p2", { email: null })],
       signal_candidates: [
         candidate("c1", "p1", { publication: "a_completer", contact: { badge: "aucun" } }),
         candidate("c2", "p2", { publication: "a_completer", contact: { badge: "aucun", attempts: 3 } }),

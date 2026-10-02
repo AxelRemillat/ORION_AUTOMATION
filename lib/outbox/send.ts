@@ -4,7 +4,7 @@ import type { Message, MessageType, ProspectStatus } from "@/types";
 import { loadOffer } from "@/lib/offer/read";
 import { signatureFor } from "@/lib/offer/model";
 import { blockReason, normalizeSubject, preflight, type PreflightResult } from "@/lib/mail-preflight";
-import { buildDeliverability } from "./deliverability";
+import { buildDeliverability, DELIVERABILITY_COLUMNS, type SentRow } from "./deliverability";
 import { offWeekend } from "./paris-time";
 import { RELANCE_TYPES, replySinceLastSend } from "./relances";
 
@@ -95,6 +95,22 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
     return fail("blocked", "Prospect marqué « ne plus contacter » : envoi refusé.", 409);
   }
 
+  // Une INTRO ne part jamais vers un prospect déjà contacté : il ne se relance
+  // que par ses relances, dans le fil (ARTFLEX, 02/10/2026).
+  if (message.type === "intro") {
+    const { data: already } = await db
+      .from("messages")
+      .select("id, sent_at")
+      .eq("user_id", message.user_id)
+      .eq("prospect_id", message.prospect_id)
+      .eq("status", "sent")
+      .neq("id", message.id)
+      .limit(1);
+    if (already?.length) {
+      return fail("blocked", "Prospect déjà contacté : une intro ne repart pas, passez par une relance.", 409);
+    }
+  }
+
   // Une relance ne part jamais vers quelqu'un qui a répondu.
   if (RELANCE_TYPES.includes(message.type)) {
     const replied = await replySinceLastSend(db, message.user_id, message.prospect_id);
@@ -106,10 +122,10 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
 
   const { data: sent } = await db
     .from("messages")
-    .select("status, sent_at")
+    .select(DELIVERABILITY_COLUMNS)
     .eq("user_id", message.user_id)
     .eq("status", "sent");
-  const cap = buildDeliverability((sent ?? []) as Pick<Message, "status" | "sent_at">[], now);
+  const cap = buildDeliverability((sent ?? []) as unknown as SentRow[], now);
   if (cap.remaining <= 0) {
     return fail(
       "blocked",

@@ -20,6 +20,7 @@ export const TODAY_TAGS = [
   "Site introuvable",
   "Profil métier vide",
   "Brouillon manquant",
+  "Filiale de groupe",
 ] as const;
 export type TodayTag = (typeof TODAY_TAGS)[number];
 

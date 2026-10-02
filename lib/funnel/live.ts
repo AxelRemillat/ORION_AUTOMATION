@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { verifyOpposition } from "@/lib/enrichment/opposition";
+import { cappedScore, subsidiaryOf } from "@/lib/enrichment/subsidiary";
 import { hunterStatus } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
 import { chatJson, type AskFn } from "@/lib/ai/chat";
@@ -91,6 +92,8 @@ export function liveDigDeps(db: Db, userId: string, runId: string): DigDeps {
         attachedSignals: [toProspectSignal(candidate.signal)],
       });
       const leader = candidate.signal.facts.newLeaders?.[0];
+      // Filiale de groupe : score plafonné à 3 (et donc pas de Hunter, réservé aux ≥ 4).
+      const subsidiary = subsidiaryOf(company.key_figures as Record<string, unknown> | undefined);
       return {
         ...company,
         key_figures: {
@@ -101,7 +104,8 @@ export function liveDigDeps(db: Db, userId: string, runId: string): DigDeps {
           ...(leader ? { new_leader_name: `${leader.firstName} ${leader.surname}`, new_leader_role: leader.role } : {}),
           ...(candidate.signal.facts.jobTitle ? { job_title: candidate.signal.facts.jobTitle } : {}),
           funnel_run_id: runId,
-          funnel_score: candidate.triage.score,
+          funnel_score: cappedScore(candidate.triage.score, subsidiary),
+          ...(subsidiary ? { group_subsidiary: subsidiary } : {}),
           funnel_hook: candidate.triage.accroche_possible,
         },
       };

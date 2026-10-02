@@ -7,8 +7,9 @@ import { isEmail } from "@/lib/mail-preflight/recipient";
 import { discard, saveDraft, scheduleBatch, undoDiscard, type CoreResult, type DraftEdit, type ScheduleRequest } from "@/lib/today/actions-core";
 import { loadCapacity } from "@/lib/today/capacity";
 import { completeOne } from "@/lib/today/complete";
+import { exclusionOf } from "@/lib/today/items";
 import { draftReply } from "@/lib/outbox/reply-generate";
-import { DISCARD_REASONS, TODAY_KINDS, type DiscardReason, type InboundMessage, type SignalCandidateRow, type TodayKind } from "@/types";
+import { DISCARD_REASONS, TODAY_KINDS, type DiscardReason, type InboundMessage, type Prospect, type SignalCandidateRow, type TodayKind } from "@/types";
 
 /**
  * Actions de l'écran « Aujourd'hui ». Client de session : la RLS limite tout
@@ -69,6 +70,10 @@ export async function scheduleToday(requests: ScheduleRequest[]) {
 export async function completeToday(input: { prospectId: string; candidateId: string | null }): Promise<CoreResult<{ email: string | null }>> {
   const ctx = await session();
   if (!ctx) return SESSION;
+  // Fiche opposée, « ne plus contacter » ou hors cible : aucune complétion.
+  const { data: owner } = await ctx.db.from("prospects").select("*").eq("id", input.prospectId).eq("user_id", ctx.userId).maybeSingle();
+  const why = owner ? exclusionOf(owner as Prospect) : "fiche introuvable";
+  if (why) return { ok: false, error: `Complétion refusée : ${why}.` };
   const deps = liveDigDeps(ctx.db, ctx.userId, "manuel");
   if (input.candidateId) {
     const { data } = await ctx.db.from("signal_candidates").select("*").eq("id", input.candidateId).maybeSingle();
