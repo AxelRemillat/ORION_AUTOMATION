@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parisToUtc } from "@/lib/outbox/paris-time";
 import { readAll } from "@/lib/supabase/read-all";
+import { openAiBudgetState, openAiMonthlyCap, type OpenAiBudgetState } from "./budgets";
 import { buildConsumption, consumptionSince, type Consumption, type FreeRow, type UsageRow } from "./consumption";
 import {
   buildCreditTiles,
@@ -24,6 +25,8 @@ type Loose = SupabaseClient<any, "public", any>;
 export interface Pilotage {
   consumption: Consumption;
   credits: CreditTile[];
+  /** Plafond mensuel OpenAI : alerte à 80 %, arrêt de la préparation à 100 %. */
+  openai: OpenAiBudgetState;
 }
 
 /** Soldes fournisseurs : jamais plus de 700 ms d'attente, sinon estimation. */
@@ -56,6 +59,7 @@ export async function loadPilotage(db: unknown, now = new Date()): Promise<Pilot
 
   return {
     consumption,
+    openai: openAiBudgetState(consumption.month.byProvider.openai, openAiMonthlyCap()),
     credits: buildCreditTiles({
       hunterUsed: Math.round(sum(usage, "hunter", cycle)),
       pappersUsed: Math.round(sum(usage, "pappers", monthStart)),

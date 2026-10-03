@@ -56,6 +56,8 @@ export interface PrepareHealth {
   at: string;
   /** Brouillons (`email_generate`) lancés par cette préparation et tombés en échec. */
   failedDrafts: number;
+  /** Arrêt propre sur plafond (OpenAI) : le motif, tel que le job l'a écrit. */
+  stoppedReason?: string | null;
   firstDraftError: string | null;
 }
 
@@ -63,6 +65,7 @@ export interface PrepareHealth {
 export function prepareAlert(health: PrepareHealth | null): string | null {
   if (!health) return null;
   if (health.status === "failed") return `Dernière préparation en échec : ${health.error ?? "erreur inconnue"}`;
+  if (health.stoppedReason) return `Dernière préparation arrêtée — ${health.stoppedReason}`;
   if (health.failedDrafts > 0) {
     return `${health.failedDrafts} brouillon(s) non rédigé(s)${health.firstDraftError ? ` : ${health.firstDraftError}` : ""}`;
   }
@@ -73,14 +76,14 @@ export async function lastPrepareHealth(db: unknown, userId: string): Promise<Pr
   const loose = db as Loose;
   const { data } = await loose
     .from("jobs")
-    .select("status, error, created_at, finished_at")
+    .select("status, error, created_at, finished_at, progress")
     .eq("user_id", userId)
     .eq("type", "search_signals")
     .eq("params->>kind", "prepare")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const job = data as { status: string; error: string | null; created_at: string; finished_at: string | null } | null;
+  const job = data as { status: string; error: string | null; created_at: string; finished_at: string | null; progress?: { step?: string } | null } | null;
   if (!job) return null;
   const { data: drafts } = await loose
     .from("jobs")
@@ -96,6 +99,7 @@ export async function lastPrepareHealth(db: unknown, userId: string): Promise<Pr
     at: job.finished_at ?? job.created_at,
     failedDrafts: failed.length,
     firstDraftError: failed.find((row) => row.error)?.error ?? null,
+    stoppedReason: job.progress?.step?.startsWith("Plafond") ? job.progress.step : null,
   };
 }
 

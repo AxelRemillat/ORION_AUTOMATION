@@ -1,3 +1,4 @@
+import { openAiMonthlyCap } from "./budgets";
 import type { ApiService } from "@/types";
 
 /**
@@ -185,11 +186,12 @@ export function linkupFetchCost(): number {
 }
 
 /** Budget mensuel OpenAI, optionnel, pour estimer ce qu'il reste. */
+/**
+ * Plafond mensuel OpenAI (€). Depuis le 03/10/2026 c'est un plafond RÉEL,
+ * défaut 15 € (lib/usage/budgets.ts) : il n'est plus jamais « non fixé ».
+ */
 export function openAiMonthlyBudget(): number | null {
-  const raw = process.env.OPENAI_MONTHLY_BUDGET_EUR;
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : null;
+  return openAiMonthlyCap();
 }
 
 /** Libellés des services, pour l'affichage. */
