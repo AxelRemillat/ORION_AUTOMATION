@@ -15,7 +15,6 @@ import { runDueSends, scheduleMessage } from "../lib/outbox/scheduler";
 import { sendNow } from "../lib/outbox/send";
 import { DNC_CANCEL_REASON, setDoNotContact } from "../lib/outbox/do-not-contact";
 import { inboxEntries } from "../app/(app)/cockpit/_lib/compute";
-import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
 import type { InboundMessage, Prospect } from "../types";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 
@@ -122,11 +121,6 @@ async function main() {
     let portfolio = await loadPortfolio(db, ["messages", "inbound"]);
     check("disparaît du Cockpit", !inboxEntries(portfolio.inbound, portfolio.prospects).some((entry) => entry.id === "in-b"));
     check("… des compteurs", mailboxCounts(portfolio.inbound, portfolio.messages, portfolio.prospects).recus === 1);
-    const queue = buildQueue({
-      prospects: portfolio.prospects, messages: portfolio.messages, reminders: [], states: [],
-      inbound: portfolio.inbound.filter((item) => !item.handled).map((item) => ({ id: item.id, prospect_id: item.prospect_id })),
-    });
-    check("… et des actions du jour", !queue.visible.some((action) => action.id === "reponse-in-b"));
     check("… et du fil", !conversation("beta", portfolio.messages, portfolio.inbound).some((item) => item.id === "in-b"));
     check("listé dans /corbeille → Mails (reçus)", (await trashedInbound(db)).some((item) => item.id === "in-b"));
 

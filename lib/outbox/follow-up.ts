@@ -5,6 +5,8 @@ import { stripSignature } from "@/app/api/emails/generate/pipeline";
 import { loadOffer } from "@/lib/offer/read";
 import { signatureFor } from "@/lib/offer/model";
 import type { Db } from "@/lib/trash/scope";
+import { followUpBlock, followUpRefusal } from "./follow-up-policy";
+import { replySinceLastSend } from "./relances";
 import type { MessageType, Prospect } from "@/types";
 
 /**
@@ -48,6 +50,11 @@ export async function draftFollowUp(
   input: { userId: string; prospect: Prospect; type: FollowUpType; complete?: typeof completeText },
 ): Promise<FollowUpResult> {
   const { prospect, type } = input;
+  // Jamais de relance pour un prospect opposé, « ne plus contacter », perdu ou
+  // qui a répondu — même règle que l'envoi (lib/outbox/follow-up-policy.ts).
+  const replied = await replySinceLastSend(db, input.userId, prospect.id).catch(() => null);
+  const blocked = followUpBlock(prospect, { replied: Boolean(replied) });
+  if (blocked) return { ok: false, error: followUpRefusal(blocked) };
   const { data: previous } = await db
     .from("messages")
     .select("type, subject, body, sent_at, thread_id, gmail_message_id")

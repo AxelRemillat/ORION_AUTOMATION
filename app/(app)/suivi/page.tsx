@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadPortfolio } from "@/lib/trash/portfolio";
 import { requireUser } from "@/lib/auth";
 import { offWeekend } from "@/lib/outbox/paris-time";
+import { followUpBlock } from "@/lib/outbox/follow-up-policy";
 import { formatEur } from "@/lib/utils";
 import type { Prospect } from "@/types";
 import { DueReminders } from "./_components/due-reminders";
@@ -35,12 +36,12 @@ export default async function SuiviPage() {
   const byId = new Map(prospects.map((prospect) => [prospect.id, prospect]));
   const limit = endOfToday();
 
-  // Même règle que la prochaine action des cartes : pas de relance le week-end
-  // (repoussée au lundi) ni pour un prospect opposé à la prospection.
-  const opposed = new Set(rows.filter((row) => row.actionFacts.opposition).map((row) => row.id));
+  // Même règle partout (lib/outbox/follow-up-policy.ts) : pas de relance le
+  // week-end (repoussée au lundi), ni pour un prospect opposé, « ne plus
+  // contacter », perdu ou qui a répondu.
   const due: DueReminderRow[] = reminders
     .map((reminder) => ({ reminder, dueAt: offWeekend(new Date(reminder.due_at)).toISOString() }))
-    .filter(({ reminder, dueAt }) => dueAt <= limit && byId.has(reminder.prospect_id) && !opposed.has(reminder.prospect_id))
+    .filter(({ reminder, dueAt }) => dueAt <= limit && byId.has(reminder.prospect_id) && !followUpBlock(byId.get(reminder.prospect_id) ?? null))
     .map(({ reminder, dueAt }) => {
       const prospect = byId.get(reminder.prospect_id) as Prospect;
       return {

@@ -2,11 +2,10 @@
  * Agrégats du Cockpit — fonctions PURES.
  * Les pages passent les lignes Supabase brutes, ces fonctions renvoient de quoi
  * afficher. Aucune donnée inventée ici : ce qui n'est pas calculable à partir
- * des tables reste absent, et la page bascule alors sur `_lib/example.ts`.
+ * des tables reste absent.
  */
 import type { InboundMessage, Prospect } from "@/types";
-import { compareHeat, heatContextOf, heatScore, strongestSignal } from "@/lib/scoring";
-import type { InboxEntry, SignalHighlight } from "./types";
+import type { InboxEntry } from "./types";
 
 /** Extrait lisible du corps d'un email : une seule ligne, sans blancs parasites. */
 function excerptOf(body: string, max = 160): string {
@@ -47,30 +46,4 @@ export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[], m
       unread: !message.handled,
       doNotContact: Boolean(message.prospect_id && blocked.has(message.prospect_id)),
     }));
-}
-
-/**
- * Signaux les plus forts du portefeuille.
- *
- * Les sources actuelles ne datent pas leurs résultats : on ne peut donc pas
- * trier par fraîcheur réelle. On classe par score de chaleur, et l'écran le dit.
- */
-export function topSignals(prospects: Prospect[], limit = 4): SignalHighlight[] {
-  return prospects
-    .filter((prospect) => prospect.signals?.length)
-    .map((prospect) => {
-      const score = heatScore(prospect.signals, {
-        seed: prospect.company_name,
-        context: heatContextOf(prospect.key_figures),
-      });
-      const strongest = strongestSignal(prospect.signals);
-      return {
-        prospectId: prospect.id,
-        companyName: prospect.company_name,
-        signal: strongest ?? prospect.signals[0],
-        score,
-      };
-    })
-    .sort((a, b) => compareHeat(a.score, b.score))
-    .slice(0, limit);
 }

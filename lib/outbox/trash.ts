@@ -66,7 +66,7 @@ export async function restoreMessage(db: Db, messageId: string): Promise<Message
 /** Supprime des mails DÉJÀ à la corbeille, et l'état de leurs actions Cockpit. */
 async function purge(db: Db, ids: string[]): Promise<MessageTrashResult> {
   if (!ids.length) return { ok: true, count: 0 };
-  // Les identifiants d'action du Cockpit (_lib/queue.ts) dérivent de ces lignes.
+  // Anciens états d'action du Cockpit (file retirée le 03/10/2026) : nettoyés avec ces lignes.
   await db.from("action_states").delete().in("action_id", ids.map((id) => `brouillon-${id}`));
   const { data, error } = await db
     .from("messages")

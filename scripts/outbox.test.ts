@@ -21,7 +21,6 @@ import { formatParisDay, formatScheduled, offWeekend, parisToUtc, scheduleError,
 import { nextAction } from "../app/(app)/suivi/_lib/next-action";
 import { buildRows } from "../app/(app)/suivi/_lib/rows";
 import type { Message, Prospect, Reminder } from "../types";
-import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 
 let failures = 0;
@@ -88,8 +87,6 @@ async function main() {
 
     const portfolio = await loadPortfolio(db, ["messages"]);
     check("il disparaît des écrans", !portfolio.messages.some((row) => row.id === "m1"));
-    const queue = buildQueue({ prospects: portfolio.prospects, messages: portfolio.messages, reminders: [], inbound: [], states: [] });
-    check("il sort de la file « à envoyer » du Cockpit", !queue.visible.some((item) => item.id === "brouillon-m1"));
 
     const web = n8n();
     const refused = await sendNow(db, { userId: "u1", messageId: "m1", prospectId: "acme", to: "a@acme.fr" }, { ...web.deps, now: at(1) });

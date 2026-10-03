@@ -43,7 +43,6 @@ export default async function DelivrabilitePage() {
               { label: "Montée en charge", value: capacity.warmupDay === null ? "—" : `jour ${capacity.warmupDay}`, hint: "jours ouvrés depuis le 1er envoi réel" },
               { label: "Envois aujourd'hui", value: `${capacity.sentToday} / ${capacity.dailyCap}`, hint: "plafond du jour" },
               { label: "Taux de rebond", value: pct(volumes.bounceRate), hint: `${volumes.bounces} rebond(s) sur ${volumes.sent} envois${highBounce ? " · au-dessus de 3 %" : ""}` },
-              { label: "Plaintes (spam)", value: "—", hint: "non mesurées sans Google Postmaster Tools" },
             ].map((stat) => (
               <div key={stat.label} className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-line bg-surface-2/60 p-3">
                 <span className="text-[12px] text-muted">{stat.label}</span>
@@ -51,6 +50,19 @@ export default async function DelivrabilitePage() {
                 <span className="text-[11px] text-faint">{stat.hint}</span>
               </div>
             ))}
+            {/* Plaintes : pas d'intégration Postmaster pour l'instant, un test de placement à la main. */}
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-line bg-surface-2/60 p-3">
+              <span className="text-[12px] text-muted">Plaintes (spam)</span>
+              <span className="text-[13px] text-text">Vérifie le placement avec un test mail-tester.com</span>
+              <a
+                href="https://www.mail-tester.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="self-start text-[12px] text-primary-ink underline-offset-2 hover:underline"
+              >
+                Ouvrir mail-tester.com ↗
+              </a>
+            </div>
           </CardContent>
         </Card>
         <DncCard
