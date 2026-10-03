@@ -18,6 +18,8 @@ import type { TodayContact, TodayFact, TodaySignal, TodayStatus } from "./types"
 
 type Draft = Pick<Message, "id" | "subject" | "body" | "status" | "sent_at" | "send_status" | "scheduled_at"> & {
   validated_at?: string | null;
+  quality_score?: number | null;
+  quality_reason?: string | null;
 };
 
 /** Pourquoi on n'écrit pas à cette fiche — `null` si rien ne s'y oppose. */
@@ -102,6 +104,7 @@ export function prospectItem(input: {
     hasDraft: Boolean(draft),
     draftPending: input.draftPending,
     subsidiary,
+    qualityReview: Boolean(draft?.quality_reason),
   });
   return {
     key: `prospect:${prospect.id}`,
@@ -124,6 +127,7 @@ export function prospectItem(input: {
     optOut: split.optOut,
     signature: split.signature,
     why: [
+      draft?.quality_reason && `À revoir — ${draft.quality_reason}`,
       card?.pain && `Pain : ${card.pain}`,
       card?.hook && `Accroche : ${card.hook}`,
       score != null && `Score ${score}/5${subsidiary && rawScore !== score ? ` (plafonné : ${rawScore}/5)` : ""}`,
@@ -134,6 +138,7 @@ export function prospectItem(input: {
     attempts: input.attempts,
     scheduledAt: draft?.scheduled_at ?? null,
     draftPending: input.draftPending,
+    quality: draft?.quality_score == null ? null : Number(draft.quality_score),
     profileReadFailed: typeof figures.profile_failed_at === "string",
     exclusion: exclusionOf(prospect),
     weight: input.weight,

@@ -239,7 +239,7 @@ function lengthBounds(tone: ToneKey): { min: number; max: number } {
 }
 
 /** Nombres écrits dans le corps, y compris « 41 M€ » et « 40,9 M ». */
-function numbersIn(text: string): number[] {
+export function numbersIn(text: string): number[] {
   const found: number[] = [];
   for (const match of text.replace(/ /g, " ").matchAll(/(\d[\d\s]*(?:[.,]\d+)?)/g)) {
     const value = Number(match[1].replace(/\s/g, "").replace(",", "."));

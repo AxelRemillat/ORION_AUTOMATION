@@ -77,6 +77,17 @@ export function TodayList({
                       </p>
                       <p className="truncate text-[12px] text-muted">{item.subline || item.tags.join(" · ")}</p>
                     </div>
+                    {item.quality != null && (
+                      <span
+                        title="Note du relecteur automatique (9 = envoyable sans retouche)"
+                        className={cn(
+                          "shrink-0 rounded-full border px-1.5 py-0.5 font-data text-[10px]",
+                          item.quality >= 9 ? "border-good/25 bg-good/10 text-good-ink" : "border-warn/25 bg-warn/10 text-warn-ink",
+                        )}
+                      >
+                        {item.quality}/10
+                      </span>
+                    )}
                     <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[11px]", STATUS[item.status].className)}>
                       {STATUS[item.status].label}
                     </span>

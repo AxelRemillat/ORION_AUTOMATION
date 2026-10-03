@@ -160,7 +160,7 @@ async function draftsStep(ctx: StepContext): Promise<StepOutcome> {
       {
         type: "email_generate",
         target: { prospectId: item.prospectId!, label: `Mail ${item.companyName}` },
-        params: { prospectId: item.prospectId!, mode: "full", saveDraft: true, storedContact: true, origin: PREPARE_KIND },
+        params: { prospectId: item.prospectId!, mode: "full", saveDraft: true, storedContact: true, auto: true },
       },
       ctx.userId,
     );

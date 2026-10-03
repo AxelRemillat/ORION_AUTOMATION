@@ -25,6 +25,8 @@ export interface TagInput {
   draftPending: boolean;
   /** Filiale d'un groupe (lib/enrichment/subsidiary.ts) : signalée, non bloquante. */
   subsidiary?: string | null;
+  /** Brouillon noté sous 9/10 par le juge qualité (`messages.quality_reason`). */
+  qualityReview?: boolean;
 }
 
 export function tagsOf(input: TagInput): TodayTag[] {
@@ -38,6 +40,7 @@ export function tagsOf(input: TagInput): TodayTag[] {
   if (!input.hasBusinessProfile) tags.push(input.website ? "Profil à compléter" : "Profil métier vide");
   if (!input.hasDraft && !input.draftPending) tags.push("Brouillon manquant");
   if (input.subsidiary) tags.push("Filiale de groupe");
+  if (input.hasDraft && input.qualityReview) tags.push("À revoir");
   return tags;
 }
 

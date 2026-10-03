@@ -31,9 +31,14 @@ import { describesNeed, needConfidence } from "@/lib/emails/need-lead";
 import { edges, maxSimilarity } from "@/lib/similarity";
 import { coerceTone } from "@/lib/tones";
 import { activeProspects } from "@/lib/trash/scope";
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { loadOffer } from "@/lib/offer/read";
 import type { MessageOrigin, Prospect } from "@/types";
-import { draftFromBrief } from "@/app/api/emails/generate/pipeline";
+import { offerNumbers } from "@/app/api/emails/generate/pipeline";
+import { generateQualityDraft } from "@/lib/emails/quality/generate";
+import { askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
+import { replaceDraft } from "@/lib/emails/quality/versions";
+import { signatureFor } from "@/lib/offer/model";
 import { storedProfile } from "@/lib/emails/business-profile";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import type { Evidence } from "@/app/api/emails/generate/prompt";
@@ -90,6 +95,11 @@ export const EMAIL_PARAMS_SCHEMA = z.object({
    * réécrit jamais le brouillon de l'application — ni l'inverse.
    */
   origin: z.enum(["eval", "script"]).nullish(),
+  /**
+   * Job lancé SANS CLIC (préparation du matin, fiche complétée). Un brouillon
+   * retouché à la main (`messages.edited_by_hand`) n'est alors jamais réécrit.
+   */
+  auto: z.boolean().optional(),
   /**
    * Brouillon déjà en base pour ce prospect (génération précédente) : il est
    * RÉÉCRIT au lieu d'en créer un second, tant qu'il n'est pas parti.
@@ -330,6 +340,12 @@ export function emailBlocker(prospect: Prospect): { message: string; status: num
       message: "Prospect clôturé : ce prospect est marqué « Perdu », la génération est désactivée.",
       status: 409,
     };
+  }
+  // Offres publiées pour des clients (temps partagé, recrutement…) : aucun
+  // brouillon, le signal ne concerne pas l'entreprise elle-même.
+  const forClient = offTargetReason(prospect);
+  if (forClient?.startsWith("signal pour un client")) {
+    return { message: `Hors cible — ${forClient}. Aucun brouillon.`, status: 409 };
   }
   if (!process.env.OPENAI_API_KEY) {
     return { message: "OPENAI_API_KEY absente : la génération est indisponible.", status: 503 };
@@ -604,31 +620,45 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     return [opening, closing].filter(Boolean);
   });
 
+  // --- Gabarit qualité (03/10/2026) : salutation, accroche, proposition,
+  // démo avec lien, demande ; garde-fou + juge, 2 réécritures au plus.
+  const figures = prospect.key_figures ?? {};
+  const civilities = { ...((figures.civilites as CivilityCache | undefined) ?? {}) };
+  const greetingInput = {
+    email: contact?.email ?? prospect.email,
+    leaderPerson,
+    contactName: contact?.full_name ?? (typeof figures.contact_name === "string" ? figures.contact_name : null),
+    addressee: incomingLeader(figures)?.fullName ?? null,
+  };
+  const unknown = unknownFirstName(greetingInput, civilities);
+  if (unknown) {
+    civilities[cacheKey(unknown)] = await askCivility(askFor(prospect.id), unknown, greetingPerson(greetingInput)?.last ?? "");
+    // Gardée sur la fiche : la question ne se repose jamais pour ce prénom.
+    await ctx.db.from("prospects").update({ key_figures: { ...figures, civilites: civilities } }).eq("id", prospect.id);
+    prospect.key_figures = { ...figures, civilites: civilities };
+  }
+  const profile = storedProfile(prospect.business_profile);
   const draft = await guardAi(() =>
-    draftFromBrief({
-      offer: loaded.offer,
+    generateQualityDraft({
       ask: askFor(prospect.id),
       brief,
       facts,
-      tone: coerceTone(params.tone),
-      contact,
       prospectId: prospect.id,
-      registryName: singleCompanyName(prospect.company_name),
-      avoid,
-      leaderPerson,
-      // Un dirigeant qui vient d'arriver est interpellé par son prénom : c'est
-      // à lui que le mail parle, et son arrivée est l'accroche.
-      addressee: incomingLeader(prospect.key_figures ?? {})?.fullName ?? null,
-      // Le secteur oriente la preuve : interim, RH et formation ne passent pas
-      // de commandes, ils traitent des dossiers.
-      sector: prospect.sector,
+      companyName: brief.companyName || singleCompanyName(prospect.company_name),
+      activity: profile?.offer ?? prospect.sector ?? null,
+      prospectText: [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" "),
+      greeting: buildQualityGreeting(greetingInput, civilities),
+      signature: signatureFor(loaded.offer),
       forbiddenNames: factsResult.foreignEntities,
-      judge: params.mode !== "rewrite",
-      onStage: (stage) => ctx.progress(EMAIL_STAGES[stage]),
+      offerNumbers: offerNumbers(loaded.offer),
     }),
   );
   if ("error" in draft) throw new JobError(draft.error, true, 502);
-  const { email, validation, critique, failing } = draft;
+  const email = { subject: draft.subject, body: draft.body };
+  const best = draft.history.find((attempt) => attempt.body === draft.body);
+  const validation = best?.rules ?? { ok: false, failures: [] };
+  const critique = null;
+  const failing = draft.needsReview && draft.reviewReason ? [draft.reviewReason] : [];
 
   const similarity = maxSimilarity(email.body, previousBodies);
   if (similarity > SIMILARITY_LIMIT) {
@@ -658,7 +688,6 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       .eq("id", prospect.id);
   }
 
-  const figures = prospect.key_figures ?? {};
   const confidence = needConfidence({
     facts,
     hasSiteContent: figures.site_status === "lu",
@@ -681,14 +710,13 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       ctx.job.result.messageId ??
       (origin ? null : await replaceableDraft(ctx, prospect.id, params.replaceMessageId)) ??
       (await latestIntroDraft(ctx, prospect.id, origin));
+    const quality = { quality_score: draft.score, quality_reason: draft.needsReview ? draft.reviewReason : null };
     if (existing) {
-      const { error } = await ctx.db
-        .from("messages")
-        .update({ subject: email.subject.trim() || null, body: email.body.trim() })
-        .eq("id", existing)
-        .eq("status", "draft")
-        .not("send_status", "in", "(scheduled,sending)");
-      if (error) throw new Error(`brouillon non enregistré : ${error.message}`);
+      const saved = await replaceDraft(ctx, existing, { subject: email.subject.trim() || null, body: email.body.trim(), ...quality }, {
+        auto: params.auto === true,
+        reason: params.auto ? "régénération automatique" : "régénération demandée",
+      });
+      if (saved === "edited") warnings.push({ source: "openai", message: "Brouillon retouché à la main : il n'est pas réécrit automatiquement." });
       messageId = existing;
     } else {
       const { data, error } = await ctx.db
@@ -700,6 +728,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
           subject: email.subject.trim() || null,
           body: email.body.trim(),
           status: "draft",
+          ...quality,
           // Seulement hors application : la colonne n'est jamais citée sinon.
           ...(origin ? { origin } : {}),
         })
@@ -720,14 +749,15 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     warnings,
     critique,
     /** Les points qui n'ont pas pu être corrigés : l'UI affiche « à revoir ». */
-    needsReview: !validation.ok || failing.length > 0,
+    needsReview: draft.needsReview,
+    qualityScore: draft.score,
     /**
      * Brouillon produit malgré l'absence d'accroche forte (« Générer quand
      * même »). Il reste utile comme base, mais il ne doit jamais partir tel
      * quel sans qu'on sache pourquoi il est faible.
      */
     generic: !hookReadiness(facts).ready,
-    reviewReasons: [...validation.failures, ...failing],
+    reviewReasons: draft.needsReview && draft.reviewReason ? [draft.reviewReason] : [],
     needLead: describesNeed(`${leadText} ${brief.pain.task}`)
       ? {
           text: leadText,
