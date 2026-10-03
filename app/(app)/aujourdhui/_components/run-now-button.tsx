@@ -15,10 +15,13 @@ export function RunNowButton({
   liveJobId,
   dailyTarget,
   onFinished,
+  blockedReason = null,
 }: {
   liveJobId: string | null;
   dailyTarget: number;
   onFinished: () => void;
+  /** Plafond OpenAI du mois atteint : le bouton dit pourquoi au lieu de lancer. */
+  blockedReason?: string | null;
 }) {
   const toast = useToast();
   const [jobId, setJobId] = useState(liveJobId);
@@ -58,6 +61,16 @@ export function RunNowButton({
           Préparation en cours · {pct} %
         </Button>
         <p className="max-w-[280px] truncate font-data text-[11px] text-faint">{job?.progress.step ?? "En file d'attente"}</p>
+      </div>
+    );
+  }
+  if (blockedReason) {
+    return (
+      <div className="flex max-w-[320px] flex-col gap-1">
+        <Button size="sm" variant="outline" disabled title={blockedReason}>
+          <Play className="h-3.5 w-3.5" aria-hidden /> Lancer maintenant
+        </Button>
+        <p className="text-[11px] text-lost-ink">{blockedReason}</p>
       </div>
     );
   }

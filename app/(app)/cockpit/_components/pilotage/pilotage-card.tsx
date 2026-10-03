@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { niceTicks } from "@/lib/charts/nice-ticks";
 import { PROVIDER_LABELS, PROVIDERS, type Consumption, type Provider } from "@/lib/usage/consumption";
 import type { CreditTile } from "@/lib/usage/credits";
+import type { OpenAiBudgetState } from "@/lib/usage/budgets";
 
 /**
  * Bloc « Pilotage » : consommation par fournisseur sur 30 jours (barres
@@ -117,7 +118,16 @@ function CreditTileView({ tile }: { tile: CreditTile }) {
   );
 }
 
-export function PilotageCard({ consumption, credits }: { consumption: Consumption; credits: CreditTile[] }) {
+export function PilotageCard({
+  consumption,
+  credits,
+  openai = null,
+}: {
+  consumption: Consumption;
+  credits: CreditTile[];
+  /** Plafond OpenAI : alerte à 80 %, préparation arrêtée à 100 %. */
+  openai?: OpenAiBudgetState | null;
+}) {
   const [mode, setMode] = useState<Mode>("calls");
   const { month, window } = consumption;
 
@@ -146,6 +156,16 @@ export function PilotageCard({ consumption, credits }: { consumption: Consumptio
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
+        {openai?.message && (
+          <p
+            role="alert"
+            className={`rounded-lg border px-3 py-2 text-[13px] ${
+              openai.level === "plafond" ? "border-lost/25 bg-lost/10 text-lost-ink" : "border-warn/25 bg-warn/10 text-warn-ink"
+            }`}
+          >
+            {openai.message}
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-line p-3">
             <span className="text-[12px] text-muted">Dépense de {month.label}</span>

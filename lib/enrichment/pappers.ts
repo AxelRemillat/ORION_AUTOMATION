@@ -9,6 +9,12 @@ import { cached } from "./cache";
 import { readPappersHeadcount } from "./headcount";
 import type { Result } from "./http";
 
+/** Compteur réel, chargé à la demande (module serveur). */
+async function defaultAllowance(): Promise<{ allowed: boolean; reason?: string }> {
+  const { pappersAllowance } = await import("@/lib/usage/budgets-server");
+  return pappersAllowance();
+}
+
 const BASE_URL = "https://api.pappers.fr/v2/entreprise";
 
 interface PappersFinance {
@@ -226,12 +232,25 @@ function latestFinance(finances: PappersFinance[] | undefined): PappersFinance |
   return sorted.find((f) => f.chiffre_affaires != null) ?? sorted[0];
 }
 
-export async function fetchPappers(siren: string): Promise<Result<PappersData>> {
+export async function fetchPappers(
+  siren: string,
+  options: {
+    /** Plafond du jour (lib/usage/budgets-server.ts) ; injectable pour les tests. */
+    allowance?: () => Promise<{ allowed: boolean; reason?: string }>;
+    fetchJson?: typeof fetchJson;
+  } = {},
+): Promise<Result<PappersData>> {
   const token = process.env.PAPPERS_API_KEY;
   if (!token) return { ok: false, error: "PAPPERS_API_KEY absente" };
 
+  // PLAFOND DU JOUR (PAPPERS_DAILY_BUDGET, défaut 40, minuit Paris) : au-delà,
+  // aucun appel — l'enrichissement passe au repli gratuit (INPI + Recherche
+  // d'entreprises), la vérification d'opposition à l'INPI.
+  const gate = await (options.allowance ?? defaultAllowance)().catch(() => ({ allowed: true }) as { allowed: boolean; reason?: string });
+  if (!gate.allowed) return { ok: false, error: gate.reason ?? "budget Pappers du jour atteint" };
+
   const params = new URLSearchParams({ api_token: token, siren });
-  const response = await fetchJson<PappersResponse>(`${BASE_URL}?${params}`);
+  const response = await (options.fetchJson ?? fetchJson)<PappersResponse>(`${BASE_URL}?${params}`);
   // Pappers debite 1 credit par fiche entreprise, meme si on n'en exploite
   // qu'une partie. On journalise l'appel reel, pas ce qu'on en a tire.
   if (response.ok) {

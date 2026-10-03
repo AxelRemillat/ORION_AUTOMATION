@@ -1,4 +1,5 @@
 import { utcToParis } from "@/lib/outbox/paris-time";
+import { openAiMonthlyCap, pappersDailyBudget } from "@/lib/usage/budgets";
 
 /**
  * Réglages › Coûts — détail par fournisseur et par mois (heure de Paris), et
@@ -59,16 +60,33 @@ export interface Budget {
 }
 
 /** Budgets et forfaits en vigueur, tels que l'app les applique (noms de variables, jamais de valeur secrète). */
-export function budgets(env: Record<string, string | undefined>, hunterDaily: number): Budget[] {
-  const openai = Number(env.OPENAI_MONTHLY_BUDGET_EUR);
+export function budgets(
+  env: Record<string, string | undefined>,
+  hunterDaily: number,
+  live: { pappersUsedToday?: number | null; openai?: { spent: number; cap: number; ratio: number } | null } = {},
+): Budget[] {
   const hunterEur = Number(env.HUNTER_SEARCH_EUR);
   const pappersEur = Number(env.PAPPERS_CREDIT_EUR);
+  const pappersDaily = pappersDailyBudget(env);
+  const openaiCap = openAiMonthlyCap(env);
+  const euros = (value: number) => `${value.toFixed(2).replace(".", ",")} €`;
   return [
     { label: "Hunter — recherches par jour", value: hunterDaily === 0 ? "coupé" : String(hunterDaily), source: "HUNTER_DAILY_BUDGET" },
     { label: "Hunter — forfait", value: "2 000 crédits / mois, remis à zéro le 2", source: "Starter" },
     { label: "Hunter — prix d'une recherche", value: hunterEur > 0 ? `${hunterEur} €` : "non renseigné", source: "HUNTER_SEARCH_EUR" },
+    {
+      label: "Pappers — plafond par jour",
+      value: pappersDaily === 0
+        ? "coupé"
+        : `${pappersDaily} crédits${live.pappersUsedToday != null ? ` · ${live.pappersUsedToday} utilisés aujourd'hui` : ""}`,
+      source: "PAPPERS_DAILY_BUDGET (défaut 40, minuit Paris)",
+    },
     { label: "Pappers — forfait", value: `${env.PAPPERS_PLAN_CREDITS ?? "500"} crédits / mois`, source: "PAPPERS_PLAN_CREDITS" },
     { label: "Pappers — prix d'un crédit", value: pappersEur > 0 ? `${pappersEur} €` : "non renseigné", source: "PAPPERS_CREDIT_EUR" },
-    { label: "OpenAI — plafond mensuel", value: openai > 0 ? `${openai} €` : "non fixé", source: "OPENAI_MONTHLY_BUDGET_EUR" },
+    {
+      label: "OpenAI — plafond mensuel",
+      value: `${euros(openaiCap)}${live.openai ? ` · ${euros(live.openai.spent)} dépensés (${Math.round(live.openai.ratio * 100)} %)` : ""}`,
+      source: "OPENAI_MONTHLY_BUDGET_EUR (défaut 15 €) · alerte à 80 %, préparation arrêtée à 100 %",
+    },
   ];
 }

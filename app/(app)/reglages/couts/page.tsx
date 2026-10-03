@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { hunterDailyBudget } from "@/lib/hunter/gate";
 import { budgets, monthlyCosts } from "@/lib/settings/costs";
+import { openAiBudget, pappersAllowance } from "@/lib/usage/budgets-server";
 import { readAll } from "@/lib/supabase/read-all";
 import { createClient } from "@/lib/supabase/server";
 import { BudgetsCard } from "./budgets-card";
@@ -14,12 +15,16 @@ export default async function CoutsPage() {
   await requireUser();
   const supabase = createClient();
   const since = new Date(Date.now() - 200 * 86_400_000).toISOString();
+  const [pappers, openai] = await Promise.all([
+    pappersAllowance({ db: supabase as never }).catch(() => null),
+    openAiBudget({ db: supabase as never }).catch(() => null),
+  ]);
   const rows = await readAll<{ service: string; cost: number; created_at: string }>(() =>
     supabase.from("api_usage").select("service, cost, created_at").gte("created_at", since).order("created_at").order("id"),
   ).catch(() => []);
   return (
     <>
-      <BudgetsCard budgets={budgets(process.env, hunterDailyBudget())} months={monthlyCosts(rows)} />
+      <BudgetsCard budgets={budgets(process.env, hunterDailyBudget(), { pappersUsedToday: pappers?.used ?? null, openai })} months={monthlyCosts(rows)} />
       <CostsView />
     </>
   );

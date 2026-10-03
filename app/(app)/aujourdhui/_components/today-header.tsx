@@ -15,6 +15,7 @@ export function TodayHeader({
   capacity,
   liveJobId,
   alert = null,
+  blockedReason = null,
   dailyTarget,
   onFinished,
 }: {
@@ -24,6 +25,8 @@ export function TodayHeader({
   liveJobId: string | null;
   /** Échec de la dernière préparation : affiché tel quel, en rouge. */
   alert?: string | null;
+  /** Plafond OpenAI atteint : « Lancer maintenant » affiche pourquoi. */
+  blockedReason?: string | null;
   dailyTarget: number;
   onFinished: () => void;
 }) {
@@ -51,7 +54,7 @@ export function TodayHeader({
               montée en charge · jour {capacity.warmupDay}
             </span>
           )}
-          <RunNowButton liveJobId={liveJobId} dailyTarget={dailyTarget} onFinished={onFinished} />
+          <RunNowButton liveJobId={liveJobId} dailyTarget={dailyTarget} onFinished={onFinished} blockedReason={blockedReason} />
         </div>
       </div>
       {alert && (

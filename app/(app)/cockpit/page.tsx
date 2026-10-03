@@ -77,7 +77,7 @@ export default async function CockpitPage({
 
       {pilotage && (
         <section id="pilotage" className="scroll-mt-24">
-          <PilotageCard consumption={pilotage.consumption} credits={pilotage.credits} />
+          <PilotageCard consumption={pilotage.consumption} credits={pilotage.credits} openai={pilotage.openai} />
         </section>
       )}
     </div>
