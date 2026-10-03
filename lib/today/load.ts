@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toCard } from "@/lib/funnel/view";
 import { readAll } from "@/lib/supabase/read-all";
+import { followUpBlock } from "@/lib/outbox/follow-up-policy";
 import { signatureFor } from "@/lib/offer/model";
 import { loadOffer } from "@/lib/offer/read";
 import { offWeekend, parisToUtc, utcToParis } from "@/lib/outbox/paris-time";
@@ -46,7 +47,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   const today = utcToParis(now).date;
   const endOfDay = parisToUtc(today, "23:59")!;
 
-  const [prospectsRes, messagesRes, candidatesRes, inboundRes, remindersRes, discardsRes, jobsRes, loaded] = await Promise.all([
+  const [prospectsRes, messagesRes, candidatesRes, inboundRes, remindersRes, discardsRes, jobsRes, loaded, repliesRes] = await Promise.all([
     // Lectures complètes (pages de 1 000) : au-delà, PostgREST tronque en silence.
     readAll<Prospect>(() => db.from("prospects").select("*").eq("user_id", userId).is("deleted_at", null).order("id")).then((data) => ({ data })),
     readAll<Row>(() =>
@@ -58,6 +59,8 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     db.from("prospect_discards").select("*").eq("user_id", userId).is("undone_at", null),
     db.from("jobs").select("type, status, target").eq("user_id", userId).in("status", ["queued", "running"]),
     loadOffer(db, userId),
+    // Toutes les réponses reçues (traitées ou non) : une relance ne part jamais vers qui a répondu.
+    db.from("inbound_messages").select("prospect_id, received_at").eq("user_id", userId).is("deleted_at", null).not("prospect_id", "is", null),
   ]);
 
   const prospects = new Map(((prospectsRes.data ?? []) as Prospect[]).map((row) => [row.id, row]));
@@ -83,6 +86,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     discardedToday: Boolean(discard && parisDay(discard.created_at) === today),
   });
 
+  const replies = (repliesRes.data ?? []) as { prospect_id: string; received_at: string }[];
   const raw: RawTodayItem[] = [];
 
   // 1. Réponses à traiter.
@@ -98,6 +102,10 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     const prospect = prospects.get(reminder.prospect_id);
     const sent = prospect ? lastSent(prospect.id) : null;
     if (!prospect || !sent || !FOLLOWS_UP.has(prospect.status)) continue;
+    // Opposé, « ne plus contacter », perdu ou a répondu : jamais proposé (lib/outbox/follow-up-policy.ts).
+    const sentAt = Date.parse(sent.sent_at ?? "") || 0;
+    const replied = replies.some((row) => row.prospect_id === prospect.id && Date.parse(row.received_at) > sentAt);
+    if (followUpBlock(prospect, { replied })) continue;
     if (offWeekend(new Date(reminder.due_at)) > endOfDay) continue;
     const type = NEXT_RELANCE[sent.type];
     if (!type) continue;

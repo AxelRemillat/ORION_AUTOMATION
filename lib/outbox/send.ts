@@ -7,6 +7,7 @@ import { blockReason, normalizeSubject, preflight, type PreflightResult } from "
 import { buildDeliverability, DELIVERABILITY_COLUMNS, type SentRow } from "./deliverability";
 import { offWeekend } from "./paris-time";
 import { RELANCE_TYPES, replySinceLastSend } from "./relances";
+import { followUpBlock, followUpRefusal } from "./follow-up-policy";
 
 /**
  * LE chemin d'envoi d'un mail — manuel (/api/emails/send) comme programmé
@@ -85,7 +86,7 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
 
   const { data: prospect } = await db
     .from("prospects")
-    .select("id, deleted_at, do_not_contact, email, key_figures, website")
+    .select("id, status, deleted_at, do_not_contact, email, key_figures, website")
     .eq("id", message.prospect_id)
     .eq("user_id", message.user_id)
     .maybeSingle();
@@ -111,10 +112,19 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
     }
   }
 
-  // Une relance ne part jamais vers quelqu'un qui a répondu.
+  // Opposé à la prospection (registre) : aucune prise de contact ne part —
+  // seule une réponse à un mail qu'il nous a écrit reste possible.
+  if (message.type !== "reponse" && row.key_figures?.refuses_prospecting === true) {
+    return fail("blocked", "Prospect opposé à la prospection commerciale : envoi refusé.", 409);
+  }
+
+  // Une relance ne part jamais vers un prospect opposé, « ne plus contacter »,
+  // perdu, ou qui a répondu (lib/outbox/follow-up-policy.ts).
   if (RELANCE_TYPES.includes(message.type)) {
     const replied = await replySinceLastSend(db, message.user_id, message.prospect_id);
     if (replied) return fail("preflight", `Relance refusée : le prospect a répondu (${replied.slice(0, 10)}).`, 422);
+    const blocked = followUpBlock(row);
+    if (blocked) return fail("blocked", followUpRefusal(blocked), 409);
   }
 
   const check = await preflightFor(db, message, to, row);
@@ -137,6 +147,7 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
 }
 
 type ProspectForPreflight = {
+  status?: string | null;
   deleted_at?: string | null;
   do_not_contact?: boolean;
   email?: string | null;

@@ -86,7 +86,7 @@ export async function purgeProspects(db: Db, doomed: readonly Doomed[]): Promise
     if (error) return { ok: false, error: `exclusion du SIREN : ${error.message}` };
   }
 
-  // Les identifiants d'action du Cockpit (_lib/queue.ts) dérivent de ces lignes.
+  // Anciens états d'action du Cockpit (file retirée le 03/10/2026) : nettoyés avec ces lignes.
   const [reminders, messages, inbound] = await Promise.all([
     db.from("reminders").select("id").in("prospect_id", ids),
     db.from("messages").select("id").in("prospect_id", ids),

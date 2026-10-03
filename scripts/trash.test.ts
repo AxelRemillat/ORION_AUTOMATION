@@ -17,8 +17,7 @@ import {
 import { knownSirens } from "../lib/trash/exclusions";
 import { daysBeforePurge, purgeCutoff } from "../lib/trash/retention";
 import { authorizeCron } from "../lib/trash/cron-auth";
-import { buildQueue } from "../app/(app)/cockpit/_lib/queue";
-import { inboxEntries, topSignals } from "../app/(app)/cockpit/_lib/compute";
+import { inboxEntries } from "../app/(app)/cockpit/_lib/compute";
 import { buildRows } from "../app/(app)/suivi/_lib/rows";
 import { buildFunnel } from "../app/(app)/reglages/donnees/_lib/metrics";
 
@@ -130,10 +129,7 @@ const asDb = (fake: FakeDb) => fake as unknown as Db;
     check("routes (envoi, génération, relance) : prospect refusé", !(await isActiveProspect(db, "alpha")));
     check("routes : prospect actif accepté", await isActiveProspect(db, "beta"));
 
-    const queue = buildQueue({ ...portfolio, inbound: portfolio.inbound, size: 20, now: at(1).getTime() });
-    check("Cockpit, actions du jour : rien sur alpha", !queue.visible.some((action) => JSON.stringify(action).includes("alpha") || JSON.stringify(action).includes("ALPHA")));
     check("Cockpit, boîte de réception : rien d'alpha", !inboxEntries(portfolio.inbound, portfolio.prospects).some((entry) => JSON.stringify(entry).includes("alpha")));
-    check("Cockpit, signaux : rien d'alpha", !topSignals(portfolio.prospects).some((signal) => JSON.stringify(signal).includes("ALPHA")));
     const rows = buildRows(portfolio.prospects, portfolio.messages, portfolio.reminders, portfolio.deals);
     check("Suivi / pipeline : une seule ligne, beta", rows.length === 1 && rows[0].id === "beta");
     const funnel = buildFunnel(portfolio.prospects, portfolio.messages);
@@ -151,8 +147,6 @@ const asDb = (fake: FakeDb) => fake as unknown as Db;
   // -------------------------------------------------------------------------
   {
     const portfolio = await loadPortfolio(asDb(seed()), ["messages", "deals", "reminders", "inbound"]);
-    const queue = buildQueue({ ...portfolio, size: 20, now: at(1).getTime() });
-    check("témoin : alpha présent dans les actions du jour", JSON.stringify(queue.visible).includes("ALPHA"));
     check("témoin : deux lignes au Suivi", buildRows(portfolio.prospects, portfolio.messages, portfolio.reminders, portfolio.deals).length === 2);
     check("témoin : l'entonnoir compte deux prospects", buildFunnel(portfolio.prospects, portfolio.messages)[0].count === 2);
     check("témoin : réponse d'alpha dans la boîte de réception", inboxEntries(portfolio.inbound, portfolio.prospects).length === 2);
