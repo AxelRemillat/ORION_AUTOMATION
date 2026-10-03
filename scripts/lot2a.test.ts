@@ -154,7 +154,8 @@ async function main() {
     check("site illisible déjà constaté : rien n'est lancé", (await draftIfReady(new FakeDb(withCandidate({ business_profile: null, key_figures: { pappers_read: true, profile_failed_at: "2026-10-02T16:30:00Z" } })) as unknown as Db, USER, "newnet", { now: NOW, enqueue })) === "pas prête");
     const pending = withCandidate();
     pending.jobs = [{ user_id: USER, type: "email_generate", status: "running", target: { prospectId: "newnet" } }] as never;
-    check("brouillon déjà en préparation : pas de doublon", (await draftIfReady(new FakeDb(pending) as unknown as Db, USER, "newnet", { now: NOW, enqueue })) === "déjà en cours");
+    check("brouillon déjà en préparation : pas de doublon", (await draftIfReady(new FakeDb(pending) as unknown as Db, USER, "newnet", { now: NOW, enqueue })) === "déjà en cours");
+
     const realNewNet = { ...withCandidate(), prospects: [{ ...newNet(), business_profile: PROFILE }] };
     check("NEW NET 3D elle-même : hors cible, aucun brouillon lancé", (await draftIfReady(new FakeDb(realNewNet) as unknown as Db, USER, "newnet", { now: NOW, enqueue })) === "pas prête");
   }
