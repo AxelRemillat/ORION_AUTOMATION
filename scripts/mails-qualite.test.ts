@@ -1,0 +1,199 @@
+/**
+ * Qualité des mails (03/10/2026) — objectif « envoyable sans retouche ».
+ * Fixtures uniquement : aucun réseau, aucun crédit (le modèle est un double).
+ *
+ * Exécution : `npm run test:mails-qualite`.
+ */
+import { FakeDb } from "./fake-supabase";
+import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
+import { offTargetReason } from "../lib/funnel/off-target";
+import { filterSignal } from "../lib/funnel/filter";
+import { buildQualityGreeting, unknownFirstName } from "../lib/emails/quality/greeting";
+import { ALLOWED_DEMO_URLS, demoFor } from "../lib/emails/quality/demo-links";
+import { checkMail } from "../lib/emails/quality/rules";
+import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
+import { generateQualityDraft } from "../lib/emails/quality/generate";
+import { parseVerdict } from "../lib/emails/quality/judge";
+import { replaceDraft } from "../lib/emails/quality/versions";
+import { tagsOf, isComplete } from "../lib/today/tags";
+import { saveDraft } from "../lib/today/actions-core";
+import type { AskFn } from "../lib/ai/chat";
+import type { DerivedFact } from "../lib/emails/derived-facts";
+import type { StrategyBrief } from "../lib/emails/strategist";
+import type { Db } from "../lib/trash/scope";
+import type { Prospect } from "../types";
+
+let failures = 0;
+function check(name: string, condition: boolean, detail = "") {
+  if (condition) console.log(`  ok   ${name}`);
+  else {
+    failures += 1;
+    console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+
+const BELLEDONNE_HOOK =
+  "Avec quatre fournils et des clients en restauration, chaque commande doit être saisie, vérifiée puis confirmée au bon site. C'est souvent là que les délais se perdent.";
+const BELLEDONNE_PROPOSAL =
+  "J'automatise ce type de tâche pour des PME : la commande reçue par mail est saisie dans votre outil et la confirmation part après votre validation.";
+const GREETING = "Bonjour Monsieur Anquetil,";
+const demo = demoFor("saisie et confirmation des commandes des restaurants");
+const cta = CTA_VARIANTS[0];
+const ruleContext = { greeting: GREETING, facts: [] as DerivedFact[], prospectText: "boulangerie bio", companyName: "Le Pain de Belledonne" };
+const parts = (over: Partial<{ subject: string; hook: string; proposal: string }> = {}) => ({
+  subject: "Commandes des restaurants",
+  hook: BELLEDONNE_HOOK,
+  proposal: BELLEDONNE_PROPOSAL,
+  ...over,
+});
+const verdictJson = (score: number, reason = "accroche générique") =>
+  JSON.stringify({
+    // Grille pleine (10), moins ce qui manque, retiré de l'accroche (3 pt au plus).
+    criteria: { accroche: 3 - (10 - score), proposition: 2, preuve: 1, clarte: 2, naturel: 1, demande: 1 },
+    reasons: score >= 9 ? [] : [reason],
+    fix: score >= 9 ? null : "Pars d'un fait plus concret.",
+  });
+
+async function main() {
+  console.log("\n1. Exclusion amont : offres publiées pour des clients");
+  check("1PACT : temps partagé (profil)", Boolean(thirdPartyEmployer({ naf: "70.22Z", names: ["1PACT"], activity: "Mise à disposition de salariés en CDI, à temps plein ou en temps partagé entre plusieurs entreprises." })));
+  check("NEW NET 3D : Groupe Talents Handicap (nom)", Boolean(thirdPartyEmployer({ naf: "62.02A", names: ["NEW NET 3D (GROUPE TALENTS HANDICAP)"], website: "https://talents-handicap.com" })));
+  check("Comptalents, Assistalents", Boolean(thirdPartyEmployer({ names: ["Comptalents"] })) && Boolean(thirdPartyEmployer({ names: ["Assistalents"] })));
+  check("NAF 78.20Z", Boolean(thirdPartyEmployer({ naf: "78.20Z", names: ["X"] })));
+  check("offre « pour notre client »", Boolean(thirdPartyEmployer({ names: ["ACME"], signalText: "Pour notre client, acteur de la logistique, nous recherchons…" })));
+  for (const [name, naf, activity] of [
+    ["KOMAKS FRANCE", "46.51Z", null],
+    ["LE PAIN DE BELLEDONNE", "10.71A", "Fabrication et vente de pains, biscuits, cakes, chocolats et confiseries bio."],
+    ["AKTID", "71.12B", null],
+    ["ARTFLEX", "46.74B", "Distribution de robinetterie industrielle et d’accessoires de tuyauterie."],
+    ["HUMAN SIGHT", "70.22Z", "Conseil SIRH, paie, GTA."],
+  ] as const) {
+    check(`${name} : pas exclu`, thirdPartyEmployer({ naf, names: [name], activity }) === null, String(thirdPartyEmployer({ naf, names: [name], activity })));
+  }
+  const pact = { company_name: "1PACT", website: "https://1pact.com", size_range: null, key_figures: { naf_code: "70.22Z" }, business_profile: { offer: "Mise à disposition de salariés en CDI, à temps plein ou en temps partagé." } } as unknown as Prospect;
+  check("fiche existante 1PACT → hors cible, sans suppression", offTargetReason(pact)?.startsWith("signal pour un client") === true, String(offTargetReason(pact)));
+  const verdict = filterSignal(
+    { source: "france-travail", date: "2026-09-30", text: "Préparateur de commandes", url: null, siren: "1", companyName: "COMPTALENTS", facts: { label: "Offre", jobTitle: "Comptable" }, hash: "h" } as never,
+    { siren: "1", name: "COMPTALENTS", naf: "70.22Z", effectifCode: "12", diffusion: "O" } as never,
+  );
+  check("entonnoir : rejeté avec le badge « signal pour un client »", verdict.status === "rejeté" && verdict.badges.includes("signal pour un client"), JSON.stringify(verdict));
+
+  console.log("\n2. Salutation");
+  const lebreton = { email: "silouane.lebreton@1pact.com", leaderPerson: "Silouane Lebreton", contactName: "Silouane Lebreton" };
+  check("1PACT : prénom inconnu → demandé au modèle", unknownFirstName(lebreton) === "Silouane");
+  check("1PACT nominatif → « Bonjour Monsieur Lebreton, »", buildQualityGreeting(lebreton, { silouane: "M" }) === "Bonjour Monsieur Lebreton,");
+  const ivanov = { email: "contact@komaks.fr", leaderPerson: "Gradimir Ivanov" };
+  check("KOMAKS générique + dirigeant → « Bonjour Monsieur Ivanov, »", buildQualityGreeting(ivanov, { gradimir: "M" }) === "Bonjour Monsieur Ivanov,", buildQualityGreeting(ivanov, { gradimir: "M" }));
+  check("BELLEDONNE → « Bonjour Monsieur Anquetil, »", buildQualityGreeting({ email: "contact@belledonnebio.shop", leaderPerson: "Bruno Vincent Anquetil" }) === GREETING);
+  check("AKTID (aktid@aktid.fr, pas de dirigeant) → « Bonjour, »", buildQualityGreeting({ email: "aktid@aktid.fr" }) === "Bonjour,");
+  check("prénom mixte ou inconnu (« ? ») → « Bonjour, »", buildQualityGreeting(ivanov, { gradimir: "?" }) === "Bonjour,");
+  check("nominatif sans prénom (j.benes@) → « Bonjour, »", buildQualityGreeting({ email: "j.benes@briol-diffusion.fr", leaderPerson: "Séverine Nassif" }) === "Bonjour,");
+
+  console.log("\n3. Preuve : une démo par pain, URL vérifiée");
+  check("devis → /agent", demoFor("préparer les devis de menuiserie").path === "/agent");
+  check("commandes → tri des e-mails", demoFor("saisie des commandes reçues par mail").path === "/automatisations?demo=email");
+  check("factures, relances → factures", demoFor("facturation clients et relances de paiement").path === "/automatisations?demo=invoice");
+  check("reporting → compte rendu", demoFor("reporting hebdomadaire des chantiers").path === "/automatisations?demo=meeting");
+  check("SAV → service client", demoFor("réclamations du service après-vente").path === "/automatisations?demo=sav");
+  check("sinon → toutes les démos", demoFor("autre chose").path === "/automatisations");
+  check("aucune route /agent/<métier> (404 sur le site)", ALLOWED_DEMO_URLS.every((url) => !/\/agent\//.test(url)));
+
+  console.log("\n4. Garde-fou déterministe");
+  const target = assemble(parts(), { greeting: GREETING, demo, cta });
+  const ok = checkMail(parts(), target, ruleContext);
+  check("le mail cible (9/10) passe", ok.ok, ok.failures.join(" | "));
+  check("60 à 90 mots", countWords(target) >= 60 && countWords(target) <= 90, String(countWords(target)));
+  check("la ligne de preuve porte l'URL", target.includes(`Exemple testable en une minute : axelremillat.com/automatisations?demo=email`));
+  const fail = (name: string, over: Partial<{ subject: string; hook: string; proposal: string }>, pattern: RegExp) => {
+    const mail = parts(over);
+    const result = checkMail(mail, assemble(mail, { greeting: GREETING, demo, cta }), ruleContext);
+    check(name, !result.ok && result.failures.some((line) => pattern.test(line)), result.failures.join(" | "));
+  };
+  fail("KOMAKS : citer l'offre d'emploi → refusé", { hook: "Votre offre de préparateur publiée en septembre montre un besoin. Les commandes s'accumulent." }, /Offre d'emploi/);
+  fail("« vous recrutez » → refusé", { hook: "Vous recrutez un comptable fournisseurs. Les factures s'empilent." }, /Offre d'emploi/);
+  fail("« flux » → refusé", { proposal: "J'automatise ce type de tâche pour des PME : un flux saisit la commande dans votre outil." }, /Mots interdits.*flux/);
+  fail("sigle RHD inconnu du prospect → refusé", { hook: "Vos clients RHD commandent chaque matin. Chaque commande est ressaisie à la main." }, /Sigles.*RHD/);
+  fail("jargon « pièces de mission » → refusé", { hook: "Chaque mission génère ses pièces de mission. Elles sont classées à la main." }, /pièces de mission/);
+  fail("phrase à rallonge → refusée", { hook: "Avec quatre fournils, des boutiques, des clients en restauration et des épiceries fines partout dans la région, chaque commande passe par plusieurs mains avant la livraison." }, /Phrase de \d+ mots/);
+  fail("point-virgule (AKTID) → refusé", { hook: "Vos études couvrent la structure et les fluides ; chaque dossier circule entre plusieurs ingénieurs. Les versions se croisent." }, /Point-virgule/);
+  fail("proposition = liste d'étapes → refusée", { proposal: "J'automatise ce type de tâche pour des PME : lecture du mail, extraction des lignes, contrôle du stock, saisie, puis envoi de la confirmation." }, /liste d'étapes/);
+  fail("donnée de registre → refusée", { hook: "Avec 45 salariés et 11,6 M€ de chiffre d'affaires, vos factures s'accumulent. Le suivi prend du temps." }, /registre/);
+  fail("« exemples testables sur mon site » → refusé", { proposal: "J'automatise ce type de tâche pour des PME, avec des exemples testables sur mon site." }, /exemples testables/);
+  const noLink = checkMail(parts(), target.replace(/Exemple testable.*\n/, ""), ruleContext);
+  check("lien de démo absent → refusé", !noLink.ok && noLink.failures.some((line) => /Lien de démo/.test(line)));
+
+  console.log("\n5. Boucle : juge, 2 réécritures au plus, « À revoir »");
+  const brief = {
+    companyName: "Le Pain de Belledonne",
+    angle: { type: "metier", hookFactIds: [], insight: "Quatre fournils et des clients en restauration" },
+    pain: { task: "saisie et confirmation des commandes des restaurants", whyThem: [], automationIdea: "commande reçue par mail saisie dans l'outil" },
+    rankedFacts: [],
+    avoid: [],
+    cta: "",
+    proofId: null,
+    targetingWarning: null,
+    excludedAngles: [],
+  } as unknown as StrategyBrief;
+  const base = { brief, facts: [], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme" };
+  const scripted = (writer: string[], judge: string[]): { ask: AskFn; calls: string[] } => {
+    const calls: string[] = [];
+    const ask: AskFn = async (role) => {
+      calls.push(role);
+      return role === "writer" ? writer.shift() ?? "" : judge.shift() ?? "";
+    };
+    return { ask, calls };
+  };
+  const good = JSON.stringify(parts());
+  {
+    const { ask, calls } = scripted([good], [verdictJson(10)]);
+    const outcome = await generateQualityDraft({ ...base, ask });
+    check("9/10 du premier coup : retenu, pas « À revoir »", !("error" in outcome) && !outcome.needsReview && outcome.score === 10 && outcome.attempts === 1, JSON.stringify(calls));
+    check("mention « stop » et signature gardées", !("error" in outcome) && outcome.body.includes("stop") && outcome.body.trimEnd().endsWith("axelremillat.com/pme"));
+  }
+  {
+    const { ask, calls } = scripted([good, good, good], [verdictJson(7), verdictJson(8), verdictJson(7)]);
+    const outcome = await generateQualityDraft({ ...base, ask });
+    check("toujours < 9 : 3 essais (2 réécritures), puis « À revoir »", !("error" in outcome) && outcome.needsReview && outcome.attempts === 3, JSON.stringify(calls));
+    check("la raison est donnée", !("error" in outcome) && /Note 8\/10/.test(outcome.reviewReason ?? ""), !("error" in outcome) ? String(outcome.reviewReason) : "");
+    check("le meilleur essai est gardé (8/10)", !("error" in outcome) && outcome.score === 8);
+  }
+  {
+    const bad = JSON.stringify(parts({ hook: "Vous recrutez un préparateur. Les commandes s'accumulent." }));
+    const { ask, calls } = scripted([bad, good], [verdictJson(9)]);
+    const outcome = await generateQualityDraft({ ...base, ask });
+    check("règle cassée → réécrit sans payer le juge", calls.join(",") === "writer,writer,judge" && !("error" in outcome) && !outcome.needsReview, calls.join(","));
+  }
+  check("demande : une variante stable par prospect", ctaFor("p1") === ctaFor("p1") && CTA_VARIANTS.includes(ctaFor("p2") as never));
+  check("juge : note bornée par la grille", parseVerdict(JSON.stringify({ criteria: { accroche: 9, proposition: 2 }, reasons: [] }))?.score === 5);
+
+  console.log("\n6. Historique et « modifié à la main »");
+  {
+    const db = new FakeDb({ messages: [{ id: "m1", user_id: "u", status: "draft", send_status: "draft", subject: "Ancien", body: "Ancien texte", quality_score: null, edited_by_hand: false, deleted_at: null }], message_versions: [] });
+    const saved = await replaceDraft({ db: db as unknown as Db, userId: "u" }, "m1", { subject: "Nouveau", body: "Nouveau texte", quality_score: 9.5 }, { auto: true, reason: "régénération automatique" });
+    check("ancienne version rangée avant le remplacement", saved === "saved" && db.rows("message_versions")[0]?.body === "Ancien texte");
+    check("brouillon remplacé, note posée", db.rows("messages")[0]?.body === "Nouveau texte" && db.rows("messages")[0]?.quality_score === 9.5);
+  }
+  {
+    const db = new FakeDb({ messages: [{ id: "m2", user_id: "u", status: "draft", send_status: "draft", subject: "Mien", body: "Retouché par Axel", edited_by_hand: true, deleted_at: null }], message_versions: [] });
+    const saved = await replaceDraft({ db: db as unknown as Db, userId: "u" }, "m2", { subject: "Généré", body: "Généré" }, { auto: true, reason: "régénération automatique" });
+    check("retouché à la main : jamais réécrit automatiquement", saved === "edited" && db.rows("messages")[0]?.body === "Retouché par Axel" && db.rows("message_versions").length === 0);
+  }
+  {
+    const db = new FakeDb({ messages: [{ id: "m3", user_id: "u", status: "draft", send_status: "draft", subject: "Objet", body: "Bonjour,\n\nTexte.", edited_by_hand: false, deleted_at: null }] });
+    await saveDraft(db as unknown as Db, "u", { messageId: "m3", subject: "Objet", core: "Bonjour,\n\nTexte.", optOut: false, signature: null }, true);
+    check("Valider sans changer le texte : pas « modifié à la main »", db.rows("messages")[0]?.edited_by_hand === false);
+    await saveDraft(db as unknown as Db, "u", { messageId: "m3", subject: "Objet", core: "Bonjour,\n\nTexte retouché.", optOut: false, signature: null });
+    check("texte retouché : « modifié à la main »", db.rows("messages")[0]?.edited_by_hand === true);
+  }
+
+  console.log("\n7. Note < 9 : « À revoir », pas « Nouveaux »");
+  const tags = tagsOf({ email: "a@b.fr", emailDoubtful: false, oppositionUnverified: false, website: "x", hasBusinessProfile: true, hasDraft: true, draftPending: false, qualityReview: true });
+  check("étiquette « À revoir »", tags.includes("À revoir"));
+  check("bloquante : la fiche ne va pas dans « Nouveaux »", !isComplete(tags, true));
+  check("note ≥ 9 : rien ne change", isComplete(tagsOf({ email: "a@b.fr", emailDoubtful: false, oppositionUnverified: false, website: "x", hasBusinessProfile: true, hasDraft: true, draftPending: false, qualityReview: false }), true));
+
+  console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+void main();
