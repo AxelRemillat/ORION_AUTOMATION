@@ -1,5 +1,6 @@
 import { AT_LEAST_TEN, AT_LEAST_TWENTY, isSmallB2C } from "./eligible";
 import { isStaffingNaf } from "@/lib/signals";
+import { THIRD_PARTY_BADGE, thirdPartyEmployer } from "@/lib/emails/quality/third-party";
 import { painForJob } from "./pain-map";
 import type { FilterVerdict, HarvestedSignal, Identity } from "./types";
 
@@ -178,6 +179,10 @@ export function filterSignal(
 
   // --- Hors cible ------------------------------------------------------------
   if (isStaffingNaf(identity.naf)) return reject("agence d'emploi : elle recrute pour ses clients");
+  // Recruteur, temps partagé, portage, groupement d'employeurs : l'offre est
+  // publiée POUR un client (1PACT, NEW NET 3D, 03/10/2026). Badge visible.
+  const forClient = thirdPartyEmployer({ naf: identity.naf, names: [identity.name, signal.companyName], signalText: text });
+  if (forClient) return { ...reject(`${THIRD_PARTY_BADGE} : ${forClient}`), badges: [THIRD_PARTY_BADGE] };
   const excluded = options.excludedSectors ?? DEFAULT_EXCLUDED_SECTORS;
   if (prefixMatch(identity.naf, excluded)) return reject(`secteur exclu (NAF ${identity.naf})`);
   if (isSmallB2C(identity.naf, identity.effectifCode)) {

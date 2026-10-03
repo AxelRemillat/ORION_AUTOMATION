@@ -33,11 +33,17 @@ export interface DraftEdit {
 export async function saveDraft(db: Db, userId: string, edit: DraftEdit, validate?: boolean): Promise<CoreResult> {
   const body = joinBody(edit.core, edit);
   if (!edit.core.trim()) return { ok: false, error: "Le message est vide." };
+  // « Modifié à la main » seulement si le texte a VRAIMENT changé : Valider
+  // renvoie aussi le texte, tel quel le plus souvent.
+  const { data: current } = await db.from("messages").select("subject, body").eq("id", edit.messageId).eq("user_id", userId).maybeSingle();
+  const stored = current as { subject: string | null; body: string } | null;
+  const changed = Boolean(stored) && (stored!.body.trim() !== body.trim() || (stored!.subject ?? "") !== (edit.subject.trim() || ""));
   const { data, error } = await db
     .from("messages")
     .update({
       subject: edit.subject.trim() || null,
       body,
+      ...(changed ? { edited_by_hand: true } : {}),
       ...(validate === undefined ? {} : { validated_at: validate ? new Date().toISOString() : null }),
     })
     .eq("id", edit.messageId)

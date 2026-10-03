@@ -130,8 +130,11 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("\n3. Fiche complétée → brouillon lancé automatiquement");
   {
+    // NEW NET 3D publie ses offres pour des clients (« signal pour un client »,
+    // 03/10/2026) : elle est désormais hors cible. Le mécanisme testé ici ne
+    // dépend pas de l'entreprise : même fiche, nom et site neutres.
     const tables = (over: Record<string, unknown> = {}) => ({
-      prospects: [{ ...newNet(), business_profile: PROFILE, ...over }],
+      prospects: [{ ...newNet(), company_name: "ACME LOGISTIQUE", website: "https://acme-logistique.fr", business_profile: PROFILE, ...over }],
       messages: [], signal_candidates: [], reminders: [], inbound_messages: [], prospect_discards: [], jobs: [],
     });
     const queued: { prospectId?: string; mode?: string }[] = [];
@@ -152,6 +155,9 @@ async function main() {
     const pending = withCandidate();
     pending.jobs = [{ user_id: USER, type: "email_generate", status: "running", target: { prospectId: "newnet" } }] as never;
     check("brouillon déjà en préparation : pas de doublon", (await draftIfReady(new FakeDb(pending) as unknown as Db, USER, "newnet", { now: NOW, enqueue })) === "déjà en cours");
+
+    const realNewNet = { ...withCandidate(), prospects: [{ ...newNet(), business_profile: PROFILE }] };
+    check("NEW NET 3D elle-même : hors cible, aucun brouillon lancé", (await draftIfReady(new FakeDb(realNewNet) as unknown as Db, USER, "newnet", { now: NOW, enqueue })) === "pas prête");
   }
 
   // -------------------------------------------------------------------------

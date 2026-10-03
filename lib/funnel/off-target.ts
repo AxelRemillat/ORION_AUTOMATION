@@ -1,5 +1,6 @@
 import { disqualify, isSmallB2C, type DigFacts } from "./eligible";
 import type { Prospect } from "@/types";
+import { thirdPartyEmployer } from "@/lib/emails/quality/third-party";
 
 /**
  * HORS CIBLE — la même règle, appliquée aux fiches DÉJÀ OUVERTES.
@@ -19,8 +20,23 @@ import type { Prospect } from "@/types";
  * fiche enrichie avant que ces champs n'existent ne dit rien — et c'est le bon
  * comportement : on ne devine pas, on affiche ce qu'on sait.
  */
-export function offTargetReason(prospect: Pick<Prospect, "key_figures" | "size_range">): string | null {
+export function offTargetReason(
+  prospect: Pick<Prospect, "key_figures" | "size_range"> &
+    Partial<Pick<Prospect, "company_name" | "website" | "business_profile">>,
+): string | null {
   const figures = prospect.key_figures ?? {};
+  /*
+   * Offres publiées pour des clients (temps partagé, recrutement, portage) :
+   * hors cible, la fiche reste en base. Lu sur ce que la fiche porte déjà.
+   */
+  const profile = (prospect.business_profile ?? {}) as { offer?: unknown };
+  const forClient = thirdPartyEmployer({
+    naf: typeof figures.naf_code === "string" ? figures.naf_code : null,
+    names: [prospect.company_name],
+    website: prospect.website,
+    activity: typeof profile.offer === "string" ? profile.offer : null,
+  });
+  if (forClient) return `signal pour un client : ${forClient}`;
   const num = (value: unknown) => (typeof value === "number" ? value : null);
 
   const facts: DigFacts = {

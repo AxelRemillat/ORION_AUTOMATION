@@ -32,7 +32,7 @@ export async function draftIfReady(
     {
       type: "email_generate",
       target: { prospectId, label: `Mail ${item.companyName}` },
-      params: { prospectId, mode: "full", saveDraft: true, storedContact: true },
+      params: { prospectId, mode: "full", saveDraft: true, storedContact: true, auto: true },
     },
     userId,
   );

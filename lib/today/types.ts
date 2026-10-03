@@ -22,6 +22,7 @@ export const TODAY_TAGS = [
   "Profil à compléter",
   "Brouillon manquant",
   "Filiale de groupe",
+  "À revoir",
 ] as const;
 export type TodayTag = (typeof TODAY_TAGS)[number];
 
@@ -32,6 +33,8 @@ export const BLOCKING_TAGS: ReadonlySet<TodayTag> = new Set([
   "Opposition non vérifiée",
   "Profil à compléter",
   "Brouillon manquant",
+  // Note du juge qualité sous 9/10 : pas dans « Nouveaux prospects ».
+  "À revoir",
 ]);
 
 export type ContactKind = "nominatif" | "generique" | "aucun";
@@ -90,6 +93,8 @@ export interface TodayItem {
   scheduledAt: string | null;
   /** Un brouillon est en cours de génération pour cette fiche. */
   draftPending: boolean;
+  /** Note /10 du juge qualité (petit badge sur la carte) ; `null` = brouillon d'avant. */
+  quality?: number | null;
   /**
    * La lecture du site pour le profil métier a échoué : pas de brouillon
    * automatique tant que le site n'est pas corrigé ou le profil complété.

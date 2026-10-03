@@ -23,7 +23,12 @@ export async function loadDraft(id: string): Promise<Draft | null> {
 
 const pending = new Map<string, ReturnType<typeof setTimeout>>();
 
-/** Écrit la retouche 800 ms après la dernière frappe. Un mail parti n'est jamais modifié. */
+/**
+ * Écrit la retouche 800 ms après la dernière frappe. Un mail parti n'est jamais modifié.
+ * La retouche marque le brouillon « modifié à la main » : aucune régénération
+ * automatique ne l'écrasera plus. Si la colonne manque encore (migration pas
+ * encore passée), la retouche est écrite sans le drapeau plutôt que perdue.
+ */
 export function saveDraftSoon(id: string, draft: Draft): void {
   const previous = pending.get(id);
   if (previous) clearTimeout(previous);
@@ -31,12 +36,11 @@ export function saveDraftSoon(id: string, draft: Draft): void {
     id,
     setTimeout(() => {
       pending.delete(id);
-      void createClient()
-        .from("messages")
-        .update({ subject: draft.subject.trim() || null, body: draft.body.trim() })
-        .eq("id", id)
-        .eq("status", "draft")
-        .is("deleted_at", null)
+      const content = { subject: draft.subject.trim() || null, body: draft.body.trim() };
+      const write = (patch: typeof content & { edited_by_hand?: boolean }) =>
+        createClient().from("messages").update(patch).eq("id", id).eq("status", "draft").is("deleted_at", null);
+      void write({ ...content, edited_by_hand: true })
+        .then(({ error }) => (error ? write(content) : undefined))
         .then(() => undefined, () => undefined);
     }, 800),
   );

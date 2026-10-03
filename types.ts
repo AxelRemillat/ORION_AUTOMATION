@@ -352,9 +352,27 @@ export type Message = {
    * une génération normale. NULL = application.
    */
   origin?: MessageOrigin | null;
+  /** Note /10 du juge qualité (migration 20261003151548). NULL = brouillon d'avant. */
+  quality_score?: number | null;
+  /** Pourquoi le brouillon est « À revoir ». NULL = envoyable. */
+  quality_reason?: string | null;
+  /** Retouché par Axel : plus jamais régénéré automatiquement. */
+  edited_by_hand?: boolean;
 }
 
 export type MessageOrigin = "eval" | "script";
+
+/** Version remplacée d'un brouillon (régénération) : rien n'est écrasé pour de bon. */
+export type MessageVersion = {
+  id: string;
+  user_id: string;
+  message_id: string | null;
+  subject: string | null;
+  body: string;
+  quality_score: number | null;
+  reason: string;
+  created_at: string;
+};
 
 /**
  * Email entrant, déjà trié par n8n comme lié à la prospection.
@@ -751,6 +769,7 @@ export type ProspectDiscard = {
 
 export type ProspectDiscardInsert = Partial<ProspectDiscard> & Pick<ProspectDiscard, "kind" | "reason">;
 export type ProspectDiscardUpdate = Partial<ProspectDiscard>;
+export type MessageVersionInsert = Partial<MessageVersion> & Pick<MessageVersion, "body" | "reason">;
 
 export type FunnelSettingsInsert = Partial<FunnelSettings>;
 export type FunnelSettingsUpdate = Partial<FunnelSettings>;
@@ -868,6 +887,12 @@ export type Database = {
         Row: FunnelSettings;
         Insert: FunnelSettingsInsert;
         Update: FunnelSettingsUpdate;
+        Relationships: [];
+      };
+      message_versions: {
+        Row: MessageVersion;
+        Insert: MessageVersionInsert;
+        Update: Partial<MessageVersion>;
         Relationships: [];
       };
       prospect_discards: {
