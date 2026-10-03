@@ -61,7 +61,7 @@ async function main() {
     check("octobre (Paris) : OpenAI + Hunter de 00 h 30", months[0].byProvider.openai.eur === 1.2 && months[0].byProvider.hunter.calls === 1 && months[0].total === 1.23, months[0]);
     check("septembre : Pappers ; service inconnu ignoré", months[1].byProvider.pappers.eur === 0.06 && months[1].total === 0.06);
     const list = budgets({ OPENAI_MONTHLY_BUDGET_EUR: "20", HUNTER_SEARCH_EUR: "0.025", OPENAI_API_KEY: SECRET }, 50);
-    check("budgets : Hunter 50/jour, OpenAI 20 €, forfaits", list.some((b) => b.value === "50") && list.some((b) => b.value === "20 €") && list.some((b) => b.value.includes("2 000")));
+    check("budgets : Hunter 50/jour, OpenAI 20 €, forfaits", list.some((b) => b.value === "50") && list.some((b) => b.value.startsWith("20,00 €")) && list.some((b) => b.value.includes("2 000")));
     check("budgets : jamais une clé", !JSON.stringify(list).includes(SECRET));
   }
 

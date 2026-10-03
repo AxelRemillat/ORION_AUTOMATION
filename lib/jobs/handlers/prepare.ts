@@ -1,4 +1,6 @@
 import { verifyOpposition } from "@/lib/enrichment/opposition";
+import { openAiBudget } from "@/lib/usage/budgets-server";
+import type { OpenAiBudgetState } from "@/lib/usage/budgets";
 import { liveDigDeps } from "@/lib/funnel/live";
 import { verifyQueueOppositions } from "@/lib/today/opposition";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
@@ -182,19 +184,37 @@ async function summaryStep(ctx: StepContext): Promise<StepOutcome> {
   };
 }
 
+/**
+ * PLAFOND OPENAI (OPENAI_MONTHLY_BUDGET_EUR, défaut 15 €) : vérifié avant chaque
+ * étape qui peut en consommer. Atteint, la préparation s'ARRÊTE PROPREMENT :
+ * le run de l'entonnoir est clos (bilan), les brouillons déjà faits restent,
+ * et le motif devient l'avancement du job — c'est ce que « Lancer maintenant »
+ * et l'en-tête d'« Aujourd'hui » affichent.
+ */
+type Step = (ctx: StepContext) => Promise<StepOutcome>;
+
+export function openAiGuarded(step: Step, budget: () => Promise<OpenAiBudgetState> = () => openAiBudget()): Step {
+  return async (ctx) => {
+    const state = await budget().catch(() => null);
+    if (state?.level !== "plafond") return step(ctx);
+    const closed = await finishStep(ctx).catch(() => ({}) as StepOutcome);
+    return { ...closed, done: true, progress: progress(state.message ?? "Plafond OpenAI atteint : préparation arrêtée.", 100) };
+  };
+}
+
 export const prepareHandler: JobHandler = {
   steps: [
     prepareRun,
     oppositionStep,
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
-    triageStep,
-    ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i, DIG_STEPS)),
-    completeStep,
-    profilesStep,
-    repliesStep,
-    relancesStep,
-    draftsStep,
+    openAiGuarded(triageStep),
+    ...Array.from({ length: DIG_STEPS }, (_, i) => openAiGuarded(digStep(i, DIG_STEPS))),
+    openAiGuarded(completeStep),
+    openAiGuarded(profilesStep),
+    openAiGuarded(repliesStep),
+    openAiGuarded(relancesStep),
+    openAiGuarded(draftsStep),
     summaryStep,
   ],
   onFailed: closeRunOnFailure,
