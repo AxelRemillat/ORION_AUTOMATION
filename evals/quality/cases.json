@@ -1,0 +1,11 @@
+[
+  { "id": "belledonne", "match": "%PAIN DE BELLEDONNE%", "note": "Cible 9/10 écrite par Axel : quatre fournils, clients en restauration, commandes saisies puis confirmées." },
+  { "id": "1pact", "match": "%1PACT%", "note": "Temps partagé : offres publiées pour des clients → exclu en amont, aucun brouillon." },
+  { "id": "komaks", "match": "%KOMAKS%", "note": "Adresse générique, dirigeant connu (Gradimir Ivanov) ; l'accroche citait l'offre de préparateur (interdit)." },
+  { "id": "newnet", "match": "%NEW NET 3D%", "note": "Groupe Talents Handicap (recrutement) → exclu en amont, aucun brouillon." },
+  { "id": "aktid", "match": "%AKTID%", "note": "Phrase à rallonge avec point-virgule dans le brouillon du 03/10." },
+  { "id": "briol", "match": "%BRIOL DIFFUSION%", "note": "Référence : devis de menuiserie, trois showrooms." },
+  { "id": "bonnin", "match": "%BONNIN FRERES%", "note": "Référence : laboratoire qui alimente les boutiques." },
+  { "id": "artflex", "match": "%ARTFLEX%", "note": "Référence : demandes de prix en robinetterie industrielle." },
+  { "id": "bouvet", "match": "%BOUVET CARTIER%", "note": "Référence : demandes entrantes d'une agence immobilière." }
+]

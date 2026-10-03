@@ -51,7 +51,9 @@ export const demoUrl = (link: DemoLink) => `${DEMO_HOST}${link.path}`;
 const TABLE: { key: DemoLink["key"]; pattern: RegExp }[] = [
   { key: "devis", pattern: /devis|chiffrag|chiffrer|demande(s)? de prix|cotation|pré-?devis|métré/i },
   { key: "sav", pattern: /\bsav\b|après-vente|apres-vente|réclamation|reclamation|service client|retours? client|litige|support/i },
-  { key: "factures", pattern: /factur|relance(s)? de paiement|impayé|impaye|encaissement|règlement|reglement|comptab|fournisseurs?/i },
+  // « fournisseurs » seul ne suffit pas : confirmer une commande fournisseur n'est pas
+  // traiter une facture (AKTID, éval du 03/10).
+  { key: "factures", pattern: /factur|relance(s)? de paiement|impayé|impaye|encaissement|règlement|reglement|comptab/i },
   { key: "reporting", pattern: /reporting|compte(s)?[ -]rendus?|tableau de bord|rapport|synthèse|synthese|indicateurs|csv|export/i },
   { key: "fichier", pattern: /doublon|fichier clients?|base clients|nettoyage|dédoublonn|dedoublonn/i },
   { key: "emails", pattern: /commande|tri des|trier|demandes? (entrantes?|reçues?|recues?)|boîte|boite|e-?mails?|mails? entrants?|orienter|qualifier|accueil|réservation|reservation|planning|rendez-vous/i },

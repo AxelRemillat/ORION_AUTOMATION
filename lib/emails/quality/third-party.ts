@@ -29,7 +29,7 @@ export interface ThirdPartyInput {
 
 /** Activité : mise à disposition, portage, recrutement pour des tiers. */
 const ACTIVITY =
-  /(temps partag[ée]|mise [àa] disposition (de|du) (personnel|salari)|groupement d['’]employeurs|portage salarial|cabinet de recrutement|agence de recrutement|plateforme de recrutement|job ?board|site d['’]emploi|chasseurs? de t[êe]tes|int[ée]rim\b|travail temporaire|recrut(e|ons|ement) pour (le compte de |nos |ses |des )?(clients?|entreprises partenaires))/i;
+  /(temps partag[ée]|mise [àa] disposition (de|du) (personnel|salari[ée]s?)|groupement d['’]employeurs|portage salarial|cabinet de recrutement|agence de recrutement|plateforme de recrutement|job ?board|site d['’]emploi|chasseurs? de t[êe]tes|int[ée]rim\b|travail temporaire|recrut(e|ons|ement) pour (le compte de |nos |ses |des )?(clients?|entreprises partenaires))/i;
 
 /** Raison sociale ou domaine : marques de recruteurs (Comptalents, Talents Handicap, …). */
 const NAME =

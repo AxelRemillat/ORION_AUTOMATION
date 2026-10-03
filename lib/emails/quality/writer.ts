@@ -54,12 +54,15 @@ ${input.activity ? `- Activité (leur site) : ${input.activity}\n` : ""}${factLi
 
 1. ACCROCHE — ${LIMITS.hookSentences} phrases au plus, ${LIMITS.sentenceWords} mots au plus CHACUNE.
    Phrase 1 : UN fait concret propre à eux, tiré de leur activité (sites, produits, clientèle, façon dont arrivent commandes et demandes).
-   Phrase 2 : la conséquence opérationnelle, là où le temps ou les erreurs se perdent.
+   Phrase 2 : la conséquence opérationnelle, là où le temps ou les erreurs se perdent — en mots simples,
+   sujet + verbe + complément (« C'est souvent là que les délais se perdent. »), jamais une tournure lourde.
    INTERDIT : citer une offre d'emploi ou dire « vous recrutez » ; une donnée de registre (effectif, chiffre d'affaires, date de création, capital) ;
    leur expliquer leur propre métier ou paraphraser leur modèle (« Chez X, le détachement en temps partagé répartit… ») ;
    « sur votre site » ; le point-virgule ; les phrases à rallonge.
 2. PROPOSITION — UNE phrase de ${LIMITS.proposalWords} mots au plus, qui commence par « J'automatise ce type de tâche pour des PME : ».
-   Elle dit ce qui change pour EUX en mots de dirigeant : le temps gagné, les erreurs ou retards évités, ce qui se fait tout seul.
+   Forme : ce qui se fait tout seul chez eux (UNE ou DEUX actions, pas plus), puis le BÉNÉFICE dit en clair
+   (« sans ressaisie », « sans oubli », « vous répondez le jour même », « l'équipe n'y passe plus ses matinées »).
+   Le bénéfice est obligatoire : une phrase qui ne fait qu'énumérer des opérations est refusée.
    Pas d'étapes techniques, pas de liste. Elle colle à la démo « ${input.demo.label} ».
 3. OBJET — 2 à 6 mots, vocabulaire métier, majuscule initiale puis minuscules (« Commandes des restaurants »). Ni forme juridique, ni « Automatisation de ».
 
