@@ -1,4 +1,11 @@
-import { isStaffingNaf } from "@/lib/signals";
+/**
+ * Agences d'emploi (78.10Z, 78.20Z, 78.30Z). Même règle que `isStaffingNaf`
+ * (lib/signals), recopiée ici : ce module est importé côté navigateur (via
+ * lib/funnel/off-target.ts) et lib/signals tire du code serveur.
+ */
+const STAFFING_NAF = new Set(["7810Z", "7820Z", "7830Z"]);
+const isStaffingNaf = (naf: string | null | undefined) =>
+  Boolean(naf) && STAFFING_NAF.has((naf ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase());
 
 /**
  * « SIGNAL POUR UN CLIENT » — l'entreprise publie des offres d'emploi pour des
@@ -10,7 +17,7 @@ import { isStaffingNaf } from "@/lib/signals";
  * client. Le NAF seul ne suffit pas (ni l'un ni l'autre n'est en 78.xx) : on
  * lit aussi la raison sociale, le site, le profil métier et le texte de l'offre.
  *
- * Code pur : utilisé par le filtre de l'entonnoir (en amont, avant tout coût),
+ * Code pur, SANS dépendance (importé côté navigateur) : utilisé par le filtre de l'entonnoir (en amont, avant tout coût),
  * par le « hors cible » des fiches déjà ouvertes, et par la génération.
  */
 
