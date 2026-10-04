@@ -1,6 +1,6 @@
 import { knownNumbers, type DerivedFact } from "@/lib/emails/derived-facts";
 import { numbersIn, validateSubject } from "@/lib/emails/validate";
-import { ALLOWED_DEMO_URLS, demoFor, DEMO_LINKS, type DemoLink } from "./demo-links";
+import { ALLOWED_DEMO_URLS, demoForProposal, DEMO_LINKS, type DemoLink } from "./demo-links";
 import { avecAllowed, opensWithAvec } from "./readiness";
 import { countWords, PROOF_PREFIX, sentencesOf, type MailParts } from "./template";
 
@@ -170,7 +170,7 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   // --- La démo illustre ce que dit la proposition (SPI ENERGIE : tri des
   // e-mails dans la phrase, agent devis dans le lien).
   if (context.demo) {
-    const said = demoFor(parts.proposal);
+    const said = demoForProposal(parts.proposal);
     if (said.key !== "general" && said.key !== context.demo) {
       failures.push(`Démo incohérente : la proposition parle de « ${said.label} » mais le lien montre « ${DEMO_LINKS[context.demo].label} ». Aligne la phrase sur la démo, ou l'inverse.`);
     }

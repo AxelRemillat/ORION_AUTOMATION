@@ -9,7 +9,7 @@ import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { offTargetReason } from "../lib/funnel/off-target";
 import { filterSignal } from "../lib/funnel/filter";
 import { buildQualityGreeting, unknownFirstName } from "../lib/emails/quality/greeting";
-import { ALLOWED_DEMO_URLS, demoFor } from "../lib/emails/quality/demo-links";
+import { ALLOWED_DEMO_URLS, demoFor, demoForProposal } from "../lib/emails/quality/demo-links";
 import { checkMail } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
 import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
@@ -272,6 +272,10 @@ async function main() {
     const devis = parts({ proposal: "J'automatise ce type de tâche pour des PME : chaque demande reçue est transformée en devis prêt à vérifier." });
     const devisOk = checkMail(devis, assemble(devis, { greeting: GREETING, demo: demoFor("devis"), cta }), { ...ruleContext, demo: "devis" });
     check("phrase « devis » + agent devis → cohérent", !devisOk.failures.some((line) => /Démo incohérente/.test(line)), devisOk.failures.join(" | "));
+    const sortsQuotes = "J'automatise ce type de tâche pour des PME : les e-mails de demande de devis et de commande sont triés et orientés vers la bonne personne.";
+    check("SPI : « demandes de devis… triées et orientées » → démo e-mails (l'action décide)", demoForProposal(sortsQuotes).key === "emails", demoForProposal(sortsQuotes).key);
+    check("« prépare un devis chiffré » → agent devis", demoForProposal("J'automatise ce type de tâche pour des PME : chaque demande reçue est lue et un devis chiffré est préparé pour validation.").key === "devis");
+    check("« factures » sans action de tri → table habituelle", demoForProposal("J'automatise ce type de tâche pour des PME : les factures fournisseurs sont saisies dans votre comptabilité.").key === "factures");
 
     const avec = parts({ hook: "Avec quatre fournils et des clients en restauration, chaque commande est vérifiée à la main. Une erreur retarde la livraison." });
     const second = checkMail(avec, assemble(avec, { greeting: GREETING, demo, cta }), { ...ruleContext, dayOpenings: { total: 1, avec: 1 } });
