@@ -7,6 +7,8 @@ import { niceTicks } from "@/lib/charts/nice-ticks";
 import { PROVIDER_LABELS, PROVIDERS, type Consumption, type Provider } from "@/lib/usage/consumption";
 import type { CreditTile } from "@/lib/usage/credits";
 import type { OpenAiBudgetState } from "@/lib/usage/budgets";
+import type { Readiness } from "@/lib/usage/readiness";
+import { ReadinessTiles } from "./readiness-tiles";
 
 /**
  * Bloc « Pilotage » : consommation par fournisseur sur 30 jours (barres
@@ -122,9 +124,15 @@ export function PilotageCard({
   consumption,
   credits,
   openai = null,
+  readiness = null,
+  target = null,
 }: {
   consumption: Consumption;
   credits: CreditTile[];
+  /** Mails prêts / jour et coût par mail prêt (30 jours). */
+  readiness?: Readiness | null;
+  /** « Mails prêts visés par jour » (Réglages › Paramètres). */
+  target?: number | null;
   /** Plafond OpenAI : alerte à 80 %, préparation arrêtée à 100 %. */
   openai?: OpenAiBudgetState | null;
 }) {
@@ -179,6 +187,8 @@ export function PilotageCard({
             <CreditTileView key={tile.key} tile={tile} />
           ))}
         </div>
+
+        {readiness && <ReadinessTiles readiness={readiness} target={target} />}
 
         {consumption.empty ? (
           <p className="rounded-lg border border-dashed border-line px-4 py-8 text-center text-[13px] text-muted">

@@ -5,9 +5,16 @@
  */
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
-import { cached } from "./cache";
+import { cached, readCache, writeCache } from "./cache";
 import { readPappersHeadcount } from "./headcount";
 import type { Result } from "./http";
+
+const skipKey = (siren: string) => `pappers:skip:${siren.replace(/\s/g, "")}`;
+
+/** Marque une fiche « Pappers non nécessaire » pour 30 jours (lib/enrichment/pappers-policy.ts). */
+export async function markPappersSkipped(siren: string): Promise<void> {
+  await writeCache(skipKey(siren), true).catch(() => undefined);
+}
 
 /** Compteur réel, chargé à la demande (module serveur). */
 async function defaultAllowance(): Promise<{ allowed: boolean; reason?: string }> {
@@ -238,10 +245,30 @@ export async function fetchPappers(
     /** Plafond du jour (lib/usage/budgets-server.ts) ; injectable pour les tests. */
     allowance?: () => Promise<{ allowed: boolean; reason?: string }>;
     fetchJson?: typeof fetchJson;
+    /** Cache 30 jours par SIREN ; injectable pour les tests. */
+    cache?: { read: <T>(key: string) => Promise<T | null>; write: (key: string, value: unknown) => Promise<void> };
+    /**
+     * Passe outre la marque « Pappers non nécessaire » posée par l'enrichissement
+     * (repli d'opposition, holding, cas où l'annuaire ne suffit pas).
+     */
+    force?: boolean;
   } = {},
 ): Promise<Result<PappersData>> {
   const token = process.env.PAPPERS_API_KEY;
   if (!token) return { ok: false, error: "PAPPERS_API_KEY absente" };
+
+  // SOBRIÉTÉ (05/10/2026) : une fiche Pappers lue une fois sert 30 jours. Avant,
+  // la recherche de contact relisait la fiche que l'enrichissement venait de
+  // payer — un crédit de plus par prospect, pour rien.
+  const cacheKey = `pappers:entreprise:${siren.replace(/\s/g, "")}`;
+  const cache = options.cache ?? { read: readCache, write: (key: string, value: unknown) => writeCache(key, value) };
+  const hit = await cache.read<PappersData>(cacheKey).catch(() => null);
+  if (hit) return { ok: true, data: hit };
+  // L'enrichissement a jugé Pappers inutile pour cette fiche : les appels
+  // suivants (recherche de contact…) ne le paient pas non plus.
+  if (!options.force && (await cache.read<boolean>(skipKey(siren)).catch(() => null))) {
+    return { ok: false, error: "Pappers non nécessaire pour cette fiche (sobriété : annuaire et INPI suffisent)" };
+  }
 
   // PLAFOND DU JOUR (PAPPERS_DAILY_BUDGET, défaut 40, minuit Paris) : au-delà,
   // aucun appel — l'enrichissement passe au repli gratuit (INPI + Recherche
@@ -262,9 +289,7 @@ export async function fetchPappers(
   const finance = latestFinance(raw.finances);
   const leader = raw.representants?.[0];
 
-  return {
-    ok: true,
-    data: {
+  const data: PappersData = {
       website: raw.site_web?.trim() || null,
       email: raw.email?.trim() || null,
       sector: raw.libelle_code_naf ?? raw.domaine_activite ?? null,
@@ -288,8 +313,9 @@ export async function fetchPappers(
       representatives: mapRepresentatives(raw.representants),
       leader_since: leader?.date_prise_de_poste?.slice(0, 10) ?? null,
       openings: mapOpenings(raw.etablissements),
-    },
   };
+  await cache.write(cacheKey, data).catch(() => undefined);
+  return { ok: true, data };
 }
 
 /**
@@ -313,7 +339,7 @@ export async function fetchHoldingProfile(siren: string): Promise<HoldingProfile
   if (!/^\d{9}$/.test(clean)) return null;
 
   return cached<HoldingProfile>(`pappers:holding:${clean}`, async () => {
-    const response = await fetchPappers(clean);
+    const response = await fetchPappers(clean, { force: true });
     if (!response.ok) return null;
     const data = response.data;
     return {

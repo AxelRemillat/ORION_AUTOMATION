@@ -40,7 +40,8 @@ import {
   STOP_LABELS,
   type ScanStop,
 } from "./scan-plan";
-import { fetchPappers, hasPappersKey } from "./pappers";
+import { fetchPappers, hasPappersKey, markPappersSkipped } from "./pappers";
+import { pappersNeed } from "./pappers-policy";
 import { fetchInpiOpposition } from "./inpi";
 import { isHookFresh } from "@/lib/signals/dating";
 import { fetchWebResults, LINKUP_CONCURRENCY, hasLinkupKey } from "./linkup";
@@ -200,8 +201,14 @@ export async function deepEnrich(
   let legalRepresentatives: PappersRepresentative[] = [];
   let pappersWebsite: string | null = null;
 
-  if (base.siren && hasPappersKey()) {
-    const pappers = await fetchPappers(base.siren);
+  // Sobriété : Pappers seulement quand l'annuaire gratuit ne suffit pas
+  // (lib/enrichment/pappers-policy.ts) ; sinon repli gratuit ci-dessous.
+  const need = pappersNeed(base);
+  if (base.siren && hasPappersKey() && !need.needed) {
+    warnings.push({ source: "pappers", message: `Pappers non appelé : ${need.reason}` });
+    await markPappersSkipped(base.siren);
+  } else if (base.siren && hasPappersKey()) {
+    const pappers = await fetchPappers(base.siren, { force: true });
     if (pappers.ok) {
       const data = pappers.data;
       // Preuve que le registre a été lu : sans elle, l'opposition à la

@@ -53,11 +53,13 @@ async function main() {
     process.env.PAPPERS_API_KEY = "cle-de-test";
     let called = 0;
     const fakeJson = (async () => ((called += 1), { ok: true, data: {} })) as never;
-    const blocked = await fetchPappers("520644386", { allowance: async () => ({ allowed: false, reason: "budget Pappers du jour atteint (40/40) : repli gratuit, reprise demain" }), fetchJson: fakeJson });
+    // Sans cache : ce test ne vérifie que le plafond (le cache 30 j est testé dans test:volume).
+    const cache = { read: async () => null, write: async () => undefined };
+    const blocked = await fetchPappers("520644386", { allowance: async () => ({ allowed: false, reason: "budget Pappers du jour atteint (40/40) : repli gratuit, reprise demain" }), fetchJson: fakeJson, cache });
     check("au point d'appel : aucun appel Pappers au-delà du plafond", !blocked.ok && called === 0 && /repli gratuit/.test((blocked as { error: string }).error), blocked);
-    const allowed = await fetchPappers("520644386", { allowance: async () => ({ allowed: true }), fetchJson: fakeJson });
+    const allowed = await fetchPappers("520644386", { allowance: async () => ({ allowed: true }), fetchJson: fakeJson, cache });
     check("sous le plafond : l'appel part", called === 1 && allowed.ok, allowed);
-    const broken = await fetchPappers("520644386", { allowance: async () => { throw new Error("base muette"); }, fetchJson: fakeJson });
+    const broken = await fetchPappers("520644386", { allowance: async () => { throw new Error("base muette"); }, fetchJson: fakeJson, cache });
     check("compteur en panne : on n'empêche pas l'appel (jamais de blocage de l'entonnoir)", called === 2 && broken.ok);
     delete process.env.PAPPERS_API_KEY;
   }

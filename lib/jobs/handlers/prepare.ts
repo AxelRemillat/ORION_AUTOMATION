@@ -1,5 +1,6 @@
 import { verifyOpposition } from "@/lib/enrichment/opposition";
-import { openAiBudget } from "@/lib/usage/budgets-server";
+import { openAiBudget, pappersAllowance } from "@/lib/usage/budgets-server";
+import { candidatesOf } from "@/lib/funnel/store";
 import type { OpenAiBudgetState } from "@/lib/usage/budgets";
 import { liveDigDeps } from "@/lib/funnel/live";
 import { verifyQueueOppositions } from "@/lib/today/opposition";
@@ -204,6 +205,52 @@ async function summaryStep(ctx: StepContext): Promise<StepOutcome> {
 }
 
 /**
+ * OBJECTIF DU JOUR (« Mails prêts visés par jour », défaut 15) : au lieu d'un
+ * nombre fixe de fiches creusées, la préparation ÉLARGIT l'entonnoir une fois
+ * si l'objectif n'est pas atteint — fenêtre doublée (30 jours max), toute la
+ * France — tant que les budgets le permettent (plafond OpenAI du mois, plafond
+ * Pappers du jour). Un seul élargissement par préparation.
+ */
+const WIDEN_DIG_STEPS = 4;
+
+export function widenPlan(input: { ready: number; target: number; days: number; departements: string[]; budgetOk: boolean; alreadyWidened: boolean }):
+  | { widen: false; reason: string }
+  | { widen: true; days: number; departements: string[]; digLimit: number; reason: string } {
+  if (input.ready >= input.target) return { widen: false, reason: `objectif atteint (${input.ready}/${input.target} prêts)` };
+  if (input.alreadyWidened) return { widen: false, reason: `objectif non atteint après élargissement (${input.ready}/${input.target})` };
+  if (!input.budgetOk) return { widen: false, reason: `objectif non atteint (${input.ready}/${input.target}) : budget du jour atteint, pas d'élargissement` };
+  const missing = input.target - input.ready;
+  const days = Math.min(30, Math.max(input.days * 2, input.days + 7));
+  return {
+    widen: true,
+    days,
+    departements: [],
+    digLimit: Math.min(30, input.target + missing),
+    reason: `objectif non atteint (${input.ready}/${input.target}) : entonnoir élargi à ${days} jours, toute la France`,
+  };
+}
+
+async function widenStep(ctx: StepContext): Promise<StepOutcome> {
+  const prefs = await prefsOf(ctx);
+  const runId = runIdOf(ctx);
+  const ready = (await candidatesOf(ctx.db, ctx.userId, runId)).filter((row) => row.statut === "creusé" && row.publication === "pret").length;
+  const [openai, pappers] = await Promise.all([openAiBudget().catch(() => null), pappersAllowance().catch(() => null)]);
+  const plan = widenPlan({
+    ready,
+    target: prefs.dailyTarget,
+    days: prefs.days,
+    departements: prefs.departements,
+    budgetOk: openai?.level !== "plafond" && pappers?.allowed !== false,
+    alreadyWidened: Boolean(ctx.job.state.widen),
+  });
+  if (!plan.widen) return { progress: progress(plan.reason, 80) };
+  return { state: { widen: { days: plan.days, departements: plan.departements, digLimit: plan.digLimit } }, progress: progress(plan.reason, 80) };
+}
+
+/** Étape du second tour : ne tourne que si l'entonnoir a été élargi. */
+const whenWidened = (step: Step): Step => async (ctx) => (ctx.job.state.widen ? step(ctx) : {});
+
+/**
  * PLAFOND OPENAI (OPENAI_MONTHLY_BUDGET_EUR, défaut 15 €) : vérifié avant chaque
  * étape qui peut en consommer. Atteint, la préparation s'ARRÊTE PROPREMENT :
  * le run de l'entonnoir est clos (bilan), les brouillons déjà faits restent,
@@ -231,6 +278,12 @@ export const prepareHandler: JobHandler = {
     openAiGuarded(triageStep),
     siteStep,
     ...Array.from({ length: DIG_STEPS }, (_, i) => openAiGuarded(digStep(i, DIG_STEPS))),
+    // Objectif du jour : un second tour élargi si besoin (sinon ces étapes ne font rien).
+    widenStep,
+    whenWidened(harvestStep),
+    ...Array.from({ length: FILTER_STEPS }, (_, i) => whenWidened(filterStep(i))),
+    whenWidened(openAiGuarded(triageStep)),
+    ...Array.from({ length: WIDEN_DIG_STEPS }, (_, i) => whenWidened(openAiGuarded(digStep(i, WIDEN_DIG_STEPS)))),
     openAiGuarded(completeStep),
     openAiGuarded(profilesStep),
     openAiGuarded(repliesStep),
