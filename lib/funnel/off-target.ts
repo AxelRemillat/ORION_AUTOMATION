@@ -1,6 +1,7 @@
 import { disqualify, isSmallB2C, type DigFacts } from "./eligible";
 import type { Prospect } from "@/types";
 import { thirdPartyEmployer } from "@/lib/emails/quality/third-party";
+import { subsidiaryOf } from "@/lib/enrichment/subsidiary";
 
 /**
  * HORS CIBLE — la même règle, appliquée aux fiches DÉJÀ OUVERTES.
@@ -37,6 +38,14 @@ export function offTargetReason(
     activity: typeof profile.offer === "string" ? profile.offer : null,
   });
   if (forClient) return `signal pour un client : ${forClient}`;
+  /*
+   * FILIALE DE GROUPE : la décision se prend au siège — pas proposée par défaut
+   * (Cowork, 05/10/2026 : MAVIFLEX, groupe Hörmann, affichée en « Nouveaux »
+   * avec 10/10). Avant, seuls les drapeaux « grand groupe » et « société mère
+   * étrangère » excluaient ; le reste n'était qu'un badge.
+   */
+  const group = subsidiaryOf(figures, prospect.company_name);
+  if (group) return `filiale de groupe (${group}) : la décision se prend au siège`;
   const num = (value: unknown) => (typeof value === "number" ? value : null);
 
   const facts: DigFacts = {

@@ -121,7 +121,9 @@ export function liveDigDeps(db: Db, userId: string, runId: string): DigDeps {
       return { id: data.id };
     },
     findContact: async (prospectId) => {
-      const contact = await findContact(prospectId);
+      // Le site a été cherché AVANT (étape « sites », complétion) : pas de
+      // Linkup ici, il ne sert qu'à la recherche de site plafonnée.
+      const contact = await findContact(prospectId, { linkup: 0 });
       if (contact.email) {
         await db.from("prospects").update({ email: contact.email }).eq("id", prospectId).is("email", null);
       }

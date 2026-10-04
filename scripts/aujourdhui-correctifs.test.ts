@@ -5,6 +5,7 @@
  * recopiés de la base, fixtures seulement : aucun appel réseau, aucun crédit.
  * Exécution : `npm run test:aujourdhui-correctifs`.
  */
+import { offTargetReason } from "../lib/funnel/off-target";
 import { readFileSync } from "node:fs";
 import { fetchInpiOpposition, resetInpiToken } from "../lib/enrichment/inpi";
 import { candidateDomains, NOT_OFFICIAL } from "../lib/enrichment/site";
@@ -127,7 +128,9 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("\n2. ADJUVOO : opposée — dans AUCUN groupe, aucune complétion");
   {
-    const adjuvoo = prospect("adjuvoo", "ADJUVOO", "898001029", { key_figures: ADJUVOO_FIGURES });
+    // Filiale (dirigée par une société), ADJUVOO serait hors cible d'office depuis le
+    // 05/10 : ce test porte sur l'OPPOSITION, on lui donne un dirigeant personne physique.
+    const adjuvoo = prospect("adjuvoo", "ADJUVOO", "898001029", { key_figures: { ...ADJUVOO_FIGURES, leader_person: "Jean Test" } });
     const db = new FakeDb({
       prospects: [adjuvoo],
       messages: [message("ma", "adjuvoo", { created_at: "2026-10-02T16:31:06Z" })],
@@ -247,8 +250,11 @@ Axel Remillat`;
       reminders: [], inbound_messages: [], prospect_discards: [], jobs: [],
     });
     const item = flatten((await loadToday(db as unknown as Db, USER, new Date("2026-10-02T17:00:00Z"))).groups).find((row) => row.prospectId === "maviflex");
-    check("« Aujourd'hui » : badge « Filiale de groupe », score 3/5", item?.tags.includes("Filiale de groupe") === true && item.score === 3, { tags: item?.tags, score: item?.score });
-    check("… la raison est dite", item?.why.some((line) => line.includes("Hörmann")) === true, item?.why);
+    // Règle du 05/10/2026 (Cowork) : une filiale de groupe n'est PAS proposée par
+    // défaut — elle est hors cible, comme « grand groupe ». Avant : badge + score 3.
+    check("« Aujourd'hui » : filiale de groupe hors de toute file (hors cible)", item === undefined, { tags: item?.tags, score: item?.score });
+    const reason = offTargetReason({ company_name: "MAVIFLEX", size_range: null, key_figures: MAVIFLEX_FIGURES } as never);
+    check("… la raison est dite (groupe Hörmann)", reason?.includes("Hörmann") === true, reason);
 
     const outcome = await digOne(
       {

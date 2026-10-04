@@ -39,6 +39,11 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
                 <p className="text-[12px] text-faint">
                   {[row.sector, row.city].filter(Boolean).join(" · ") || "—"}
                 </p>
+                {row.unreachable && (
+                  <Badge tone="neutral" className="mt-1" title={row.unreachable}>
+                    Non joignable
+                  </Badge>
+                )}
               </TD>
               <TD>
                 <span

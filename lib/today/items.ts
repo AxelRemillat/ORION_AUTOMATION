@@ -28,6 +28,10 @@ export function exclusionOf(prospect: Prospect | null): string | null {
   if (!prospect) return null;
   if (prospect.do_not_contact) return "ne plus contacter";
   if (prospect.key_figures?.refuses_prospecting) return "opposé à la prospection";
+  // Trois tentatives sans site ni email (lib/today/complete.ts) : hors de
+  // « À compléter », la fiche reste au Pipeline.
+  const unreachable = (prospect.key_figures as { unreachable?: { reason?: string } } | null)?.unreachable;
+  if (unreachable) return `non joignable : ${unreachable.reason ?? "aucun site ni email trouvé"}`;
   const off = offTargetReason(prospect);
   return off ? `hors cible : ${off}` : null;
 }
@@ -90,7 +94,7 @@ export function prospectItem(input: {
   const signal = signalOf(prospect, card);
   const split = splitBody(draft?.body ?? "", input.signature);
   const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
-  const subsidiary = subsidiaryOf(figures);
+  const subsidiary = subsidiaryOf(figures, prospect.company_name);
   const mailReview = (figures.mail_review as { reason?: string } | undefined)?.reason ?? null;
   const rawScore = card?.score ?? (typeof figures.funnel_score === "number" ? figures.funnel_score : null);
   const score = cappedScore(rawScore, subsidiary);

@@ -37,7 +37,10 @@ const EXCLUDED_GROUPS: { reason: string; entries: string[] }[] = [
   },
   {
     reason: "petites annonces ou emploi",
-    entries: ["leboncoin", "indeed", "welcometothejungle", "hellowork", "francetravail", "pole-emploi"],
+    entries: [
+      "leboncoin", "indeed", "welcometothejungle", "hellowork", "francetravail", "pole-emploi", "apec", "cadremploi",
+      "meteojob", "jobijoba", "monster", "jobteaser", "glassdoor", "optioncarriere", "regionsjob", "talent.com",
+    ],
   },
   {
     reason: "plateforme tierce",
