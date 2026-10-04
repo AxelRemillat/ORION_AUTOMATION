@@ -24,6 +24,9 @@ import { actionFacts, prospectSendState } from "../_lib/rows";
 import { nextAction } from "../_lib/next-action";
 import { STAGE_TONE_VARS, stageOf } from "../_lib/stages";
 import { buildTimeline } from "../_lib/timeline";
+import { buildHistory } from "@/lib/history/build";
+import { loadHistoryRow } from "@/lib/history/load";
+import { HistoryCard } from "../_components/history/history-card";
 
 /** Relance à proposer ensuite : la 1re tant qu'elle n'existe pas, puis la 2e. */
 function nextFollowUp(messages: Message[]): "relance_1" | "relance_2" | null {
@@ -68,6 +71,9 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
     ...actionFacts(typed, messages),
   });
   const events = buildTimeline(messages, reminders, deals);
+  // Historique : une requête agrégée (relations embarquées), aucun appel externe.
+  const historyRow = await loadHistoryRow(supabase, typed.id);
+  const history = historyRow ? buildHistory(historyRow) : null;
   const followUp = nextFollowUp(messages);
   const sendState = prospectSendState(messages);
 
@@ -158,6 +164,9 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
             </CardContent>
           </Card>
 
+          {history && (
+            <HistoryCard prospectId={typed.id} events={history.events} summary={history.summary} nextAction={action.label} />
+          )}
           <div>
             <h2 className="mb-3 font-display text-[15px] font-semibold tracking-tight text-text">
               Fil de l&apos;affaire

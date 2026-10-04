@@ -1,3 +1,4 @@
+import { recordProspectEvent } from "@/lib/history/record";
 import type { Db } from "@/lib/trash/scope";
 import { PROSPECT_STATUSES, type ProspectStatus } from "@/types";
 
@@ -32,6 +33,7 @@ export async function setDoNotContact(db: Db, prospectId: string, on: boolean): 
         .update({ do_not_contact: true, status_before_dnc: prospect.status, status: "perdu" })
         .eq("id", prospectId);
       if (update.error) return { ok: false, error: update.error.message };
+      await recordProspectEvent(db, { prospectId, kind: "dnc", data: { on: true, from: prospect.status } });
     }
     // Conditionnelle : un envoi déjà pris par un tick (`sending`) n'est pas touché ;
     // il sera de toute façon refusé par les règles d'envoi.
@@ -53,5 +55,7 @@ export async function setDoNotContact(db: Db, prospectId: string, on: boolean): 
     .from("prospects")
     .update({ do_not_contact: false, status_before_dnc: null, status: restored })
     .eq("id", prospectId);
-  return update.error ? { ok: false, error: update.error.message } : { ok: true, cancelled: 0 };
+  if (update.error) return { ok: false, error: update.error.message };
+  await recordProspectEvent(db, { prospectId, kind: "dnc", data: { on: false, to: restored } });
+  return { ok: true, cancelled: 0 };
 }
