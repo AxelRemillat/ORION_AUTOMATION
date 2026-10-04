@@ -36,6 +36,7 @@ import { loadOffer } from "@/lib/offer/read";
 import type { MessageOrigin, Prospect } from "@/types";
 import { offerNumbers } from "@/app/api/emails/generate/pipeline";
 import { generateQualityDraft } from "@/lib/emails/quality/generate";
+import { recordDraftVariant } from "@/lib/emails/quality/variant";
 import { clichesOf } from "@/lib/emails/quality/rules";
 import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import { askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
@@ -794,6 +795,12 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       if (error || !data) throw new Error(`brouillon non enregistré : ${error?.message ?? "inconnue"}`);
       messageId = data.id;
     }
+  }
+
+  // Variante mesurée (lib/variants/record.ts) : expérience n° 1 = style d'objet.
+  // Ne lève jamais — mesurer ne doit pas casser la rédaction.
+  if (messageId) {
+    await recordDraftVariant(ctx.db, { messageId, userId: ctx.userId, brief, outcome: draft });
   }
 
   // Un brouillon existe enfin : l'ancien « À revoir faute de matière » tombe.

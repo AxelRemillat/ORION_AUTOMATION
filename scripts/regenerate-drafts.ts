@@ -17,6 +17,7 @@ import { loadToday } from "@/lib/today/load";
 import { flatten } from "@/lib/today/group";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { replaceDraft } from "@/lib/emails/quality/versions";
+import { recordDraftVariant } from "@/lib/emails/quality/variant";
 import { clichesOf } from "@/lib/emails/quality/rules";
 import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import type { Prospect } from "@/types";
@@ -72,7 +73,7 @@ async function main() {
       continue;
     }
     // Recherche de site gratuite en amont, puis lecture du site : enregistrées (comme le job).
-    const { outcome, civilities } = await prepareMail(prospect, userId, { readSite: true, persist: true, usedCliches, dayOpenings });
+    const { outcome, civilities, brief } = await prepareMail(prospect, userId, { readSite: true, persist: true, usedCliches, dayOpenings });
     if ("blocked" in outcome) {
       // Pas de matière : le texte du brouillon ne change pas, mais il passe en
       // « À revoir » avec la raison (plus jamais affiché en « Nouveaux »).
@@ -93,6 +94,7 @@ async function main() {
       { subject: outcome.subject, body: outcome.body, quality_score: outcome.score, quality_reason: outcome.needsReview ? outcome.reviewReason : null },
       { auto: true, reason: "régénération gabarit qualité (03/10/2026)" },
     );
+    if (saved !== "edited") await recordDraftVariant(db, { messageId: item.messageId!, userId, brief, outcome });
     // Civilités résolues : gardées sur la fiche, la question ne se repose pas.
     if (Object.keys(civilities).length) {
       await db.from("prospects").update({ key_figures: { ...(prospect.key_figures ?? {}), civilites: civilities } }).eq("id", prospect.id);

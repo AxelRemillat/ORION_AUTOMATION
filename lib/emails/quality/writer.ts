@@ -4,6 +4,7 @@ import { FORBIDDEN_WORDS, LIMITS } from "./rules";
 import { COWORK_REFERENCES, TARGET_EXAMPLE } from "./references";
 import type { DemoLink } from "./demo-links";
 import type { MailParts } from "./template";
+import { subjectInstruction, type SubjectArm } from "./experiment";
 
 /**
  * RÉDACTEUR du gabarit qualité. Il n'écrit que TROIS morceaux : l'objet,
@@ -31,6 +32,8 @@ export interface WriterInput {
   usedCliches?: readonly string[];
   /** Quota d'ouvertures « Avec… » atteint pour la journée (1 mail sur 3). */
   avoidAvec?: boolean;
+  /** Expérience n° 1 : style d'objet imposé (lib/emails/quality/experiment.ts). */
+  subjectArm?: SubjectArm;
   /** Consignes de réécriture (validateur, puis juge). */
   feedback?: string | null;
 }
@@ -80,7 +83,7 @@ ${input.avoidAvec ? "   N'OUVRE PAS par « Avec » (déjà un mail sur trois auj
    AU PLUS UN cliché du type « sans ressaisie » / « sans oubli »${input.usedCliches?.length ? ` — et PAS ceux déjà employés aujourd'hui : ${input.usedCliches.join(", ")}` : ""}. Le plus souvent, aucun.
    Pas d'étapes techniques, pas de liste, pas d'hypothèse. Elle décrit CE QUE MONTRE la démo « ${input.demo.label} » :
    le lien posé ensuite doit illustrer exactement cette phrase (devis → préparer le devis ; tri, aiguillage, commandes → les e-mails reçus).
-3. OBJET — 2 à 6 mots, vocabulaire métier, majuscule initiale puis minuscules (« Commandes des restaurants »). Ni forme juridique, ni « Automatisation de ».
+3. ${subjectInstruction(input.subjectArm ?? "metier")}
 
 MOTS INTERDITS : ${FORBIDDEN_WORDS.join(", ")}, et tout sigle qu'ils n'emploient pas eux-mêmes. Aucune URL, aucune question, aucun chiffre absent des faits, pas de salutation ni de signature.
 Le mail complet doit faire 60 à 90 mots : ton accroche + ta proposition ≈ 45 à 60 mots.
