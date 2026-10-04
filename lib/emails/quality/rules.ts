@@ -72,6 +72,33 @@ export const SOFT_CONSEQUENCE =
 export const VISIBLE_HYPOTHESIS = /\bsi (vos|vous|ces|des|votre|les|leurs?|elles?|ils?)\b|s['’]ils?\b|[ée]ventuellement|peut-[êe]tre|le cas [ée]ch[ée]ant/i;
 export const ENDING_CLICHES = /sans (ressaisie|oubli|erreur|double saisie|perte)|\bni (oubli|ressaisie|erreur|double saisie|perte)/gi;
 
+/**
+ * RÉPÉTITION (décision Cowork, itération 2) : un même groupe nominal au plus
+ * DEUX fois dans le mail, objet compris. KOMAKS disait trois fois « commandes
+ * de consommables ». On compte les groupes « nom (de|des|du) nom » et les paires
+ * de mots pleins.
+ */
+const GROUP_STOP = new Set([
+  "pour", "avec", "dans", "votre", "vos", "chaque", "leur", "leurs", "sont", "est", "une", "des", "les", "par", "sur", "aux", "qui",
+  "que", "cette", "ces", "tout", "tous", "plus", "j'automatise", "type", "tâche", "pme", "reçues", "reçus", "reçue", "e-mail",
+]);
+export function repeatedGroups(text: string): string[] {
+  const words = text
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .split(/[^a-zà-ÿ'-]+/)
+    .filter(Boolean);
+  const counts = new Map<string, number>();
+  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  const full = (word: string) => word.length >= 4 && !GROUP_STOP.has(word);
+  for (let index = 0; index < words.length - 1; index += 1) {
+    const [a, b, c] = [words[index], words[index + 1], words[index + 2]];
+    if (full(a) && ["de", "des", "du", "d'"].includes(b) && c && full(c)) bump(`${a} ${b} ${c}`);
+    else if (full(a) && full(b)) bump(`${a} ${b}`);
+  }
+  return [...counts.entries()].filter(([, count]) => count > 2).map(([group]) => group);
+}
+
 /** Le cliché de fin d'une proposition (pour varier entre les mails du jour). */
 export const clichesOf = (text: string) => [...new Set((text.match(ENDING_CLICHES) ?? []).map((value) => value.toLowerCase()))];
 
@@ -131,6 +158,9 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   if (cliches.length > 1) failures.push(`${cliches.length} clichés de fin (${cliches.join(", ")}) : un seul par mail.`);
   const repeated = clichesOf(written).filter((value) => (context.usedCliches ?? []).includes(value));
   if (repeated.length) failures.push(`« ${repeated[0]} » est déjà dans un autre mail du jour : formule le bénéfice autrement.`);
+
+  const repeated3 = repeatedGroups(`${parts.subject}. ${written}`);
+  if (repeated3.length) failures.push(`« ${repeated3[0]} » revient plus de deux fois : varie (pronom, synonyme, ou supprime une occurrence).`);
 
   // --- Proposition : une phrase, un bénéfice, pas une liste d'étapes.
   const proposal = sentencesOf(parts.proposal);

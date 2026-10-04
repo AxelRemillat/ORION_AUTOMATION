@@ -45,6 +45,8 @@ import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import type { Evidence } from "@/app/api/emails/generate/prompt";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
 import { findContact as findContactOnSite } from "@/lib/contact-finder";
+import { findSiteFree, siteIdentity } from "@/lib/contact-finder/free-site";
+import { realDeps as realContactDeps } from "@/lib/contact-finder/clients";
 
 /**
  * Génération d'un mail, en trois étapes reprenables :
@@ -444,6 +446,20 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   // Génération complète seulement : « autre angle » et « réécrire » relisent
   // le profil déjà stocké, sans nouvelle lecture du site.
   if (params.mode === "full") {
+    // SITE INCONNU : recherche GRATUITE d'abord (domaines déduits du nom,
+    // validés par les mentions légales) — pas de fait propre sans site.
+    if (!prospect.website) {
+      const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
+      const found = await findSiteFree(
+        siteIdentity({ id: prospect.id, name: prospect.company_name, tradeNames: [figures.commercial_name as string | null], siren: prospect.siren, city: prospect.city }),
+        realContactDeps(prospect.id),
+      ).catch(() => null);
+      if (found) {
+        await ctx.db.from("prospects").update({ website: found.website }).eq("id", prospect.id).is("website", null);
+        prospect.website = found.website;
+        warnings.push({ source: "openai", message: `site trouvé gratuitement : ${found.domain}` });
+      }
+    }
     const run = await ensureBusinessProfile(ctx.db, prospect, profileAsk(prospect.id)).catch((error: unknown) => ({
       profile: storedProfile(prospect.business_profile),
       refreshed: false,
@@ -675,6 +691,18 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       .from("prospects")
       .update({ key_figures: { ...(prospect.key_figures ?? {}), mail_review: { reason: draft.blocked, at: new Date().toISOString() } } })
       .eq("id", prospect.id);
+    // Un ancien brouillon (gabarit d'avant) ne reste pas en « Nouveaux » : il
+    // passe en « À revoir » avec la raison, texte inchangé. Jamais un brouillon
+    // retouché à la main.
+    const stale = await latestIntroDraft(ctx, prospect.id);
+    if (stale) {
+      await ctx.db
+        .from("messages")
+        .update({ quality_reason: draft.blocked })
+        .eq("id", stale)
+        .eq("status", "draft")
+        .eq("edited_by_hand", false);
+    }
     throw new JobError(`À revoir — ${draft.blocked}. Aucun brouillon.`, false, 409);
   }
   const email = { subject: draft.subject, body: draft.body };

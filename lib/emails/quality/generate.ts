@@ -70,7 +70,7 @@ const rank = (attempt: QualityAttempt) => (attempt.rules.ok ? 100 : 0) - attempt
 export type QualityBlocked = { blocked: string };
 
 export async function generateQualityDraft(input: QualityInput): Promise<QualityOutcome | QualityBlocked | { error: string }> {
-  const ready = mailReadiness({ facts: input.facts, brief: input.brief, hasSite: Boolean(input.website) });
+  const ready = mailReadiness({ facts: input.facts, brief: input.brief, hasSite: Boolean(input.website), companyName: input.companyName });
   if (!ready.ok) return { blocked: ready.reason };
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
   const cta = ctaFor(input.prospectId);
