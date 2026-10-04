@@ -45,6 +45,7 @@ ${grid}
 
 Seuil : 9/10 = envoyable tel quel, sans retouche. Sois exigeant : un mail correct mais générique vaut 6 ou 7. Dans le doute entre deux notes, prends la plus basse.
 La salutation, la ligne « Exemple testable en une minute : <lien> » et la demande finale sont imposées : ne les reproche pas, sauf si le lien ne correspond pas au sujet.
+Le STYLE DE L'OBJET est imposé par une expérience (sujet métier court, ou question courte) : un objet en question n'est PAS une seconde question du mail, ne le pénalise pas.
 
 MAIL CIBLE — 9/10, le niveau attendu :
 ${TARGET_EXAMPLE}

@@ -8,6 +8,7 @@ import { checkMail, type RuleResult } from "./rules";
 import { assemble, ctaFor, type MailParts } from "./template";
 import { buildWriterPrompt, parseParts } from "./writer";
 import { avecAllowed, mailReadiness } from "./readiness";
+import { subjectArm, type SubjectArm } from "./experiment";
 
 /**
  * GÉNÉRATION QUALITÉ — objectif « envoyable sans retouche » (≥ 9/10).
@@ -39,6 +40,8 @@ export interface QualityInput {
   usedCliches?: readonly string[];
   /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
   dayOpenings?: { total: number; avec: number };
+  /** Expérience n° 1 : bras du style d'objet (défaut : celui du prospect). */
+  subjectArm?: SubjectArm;
   /** Site connu : sans lui, « profil insuffisant » dit qu'il n'y a rien à lire. */
   website?: string | null;
 }
@@ -63,6 +66,8 @@ export interface QualityOutcome {
   reviewReason: string | null;
   attempts: number;
   demo: string;
+  /** Expérience n° 1 : bras du style d'objet. */
+  subjectStyle: SubjectArm;
   history: QualityAttempt[];
 }
 
@@ -75,6 +80,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   const ready = mailReadiness({ facts: input.facts, brief: input.brief, hasSite: Boolean(input.website), companyName: input.companyName });
   if (!ready.ok) return { blocked: ready.reason };
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
+  const arm = input.subjectArm ?? subjectArm(input.prospectId);
   const cta = ctaFor(input.prospectId);
   const facts = briefFacts(input.brief, input.facts);
   // Le juge voit les MÊMES faits que le rédacteur : faits du brief + faits
@@ -87,7 +93,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own: ready.own, activity: input.activity, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings), feedback }),
+      buildWriterPrompt({ brief: input.brief, facts, own: ready.own, activity: input.activity, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings), subjectArm: arm, feedback }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -114,6 +120,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       offerNumbers: input.offerNumbers,
       usedCliches: input.usedCliches,
       demo: chosen.key,
+      subjectArm: arm,
       dayOpenings: input.dayOpenings,
     });
     // Le juge ne note qu'un mail qui passe le garde-fou : inutile de payer pour
@@ -149,6 +156,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     reviewReason,
     attempts: history.length,
     demo: best.demo ?? demo.path,
+    subjectStyle: arm,
     history,
   };
 }

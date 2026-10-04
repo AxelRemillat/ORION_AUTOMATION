@@ -13,6 +13,9 @@ import { ALLOWED_DEMO_URLS, demoFor, demoForProposal } from "../lib/emails/quali
 import { checkMail } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
 import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
+import { subjectArm, subjectArmProblem } from "../lib/emails/quality/experiment";
+import { buildWriterPrompt } from "../lib/emails/quality/writer";
+import { recordDraftVariant } from "../lib/emails/quality/variant";
 import { avecAllowed, hookOfBody, isBlockedReason, mailReadiness, nameFact, opensWithAvec } from "../lib/emails/quality/readiness";
 import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-finder/free-site";
 import { bySite } from "../lib/funnel/site-priority";
@@ -288,6 +291,32 @@ async function main() {
     check("blocage reconnu (profil insuffisant)", isBlockedReason("profil insuffisant : aucun fait propre lu sur le site"));
     check("blocage reconnu (sans site)", isBlockedReason("À revoir — sans site : aucun site trouvé"));
     check("note du juge : pas un blocage", !isBlockedReason("Note 8/10 : accroche générique"));
+  }
+
+  console.log("\n5e. Expérience n° 1 : style d'objet (50/50)");
+  {
+    const ids = Array.from({ length: 2000 }, (_, index) => `prospect-${index}-${index * 7919}`);
+    const questions = ids.filter((id) => subjectArm(id) === "question").length;
+    check("répartition proche de 50/50 sur 2 000 fiches", questions > 900 && questions < 1100, String(questions));
+    check("bras stable pour une même fiche (régénération)", subjectArm("p-belledonne") === subjectArm("p-belledonne"));
+    check("bras « question » : « Vos confirmations de délai ? » accepté", subjectArmProblem("Vos confirmations de délai ?", "question") === null);
+    check("bras « question » : un sujet sans « ? » refusé", subjectArmProblem("Confirmations de délai", "question") !== null);
+    check("bras « métier » : « Commandes de consommables » accepté", subjectArmProblem("Commandes de consommables", "metier") === null);
+    check("bras « métier » : une question refusée", subjectArmProblem("Vos commandes ?", "metier") !== null);
+    const prompt = buildWriterPrompt({ brief, facts: [], own: [OWN_FACT], activity: null, companyName: "ACME", demo, greeting: GREETING, cta, subjectArm: "question" });
+    check("consigne d'objet du bras transmise au rédacteur", prompt.includes("UNE QUESTION COURTE"));
+    const mail = parts({ subject: "Commandes des restaurants" });
+    const armCheck = checkMail(mail, assemble(mail, { greeting: GREETING, demo, cta }), { ...ruleContext, subjectArm: "question" });
+    check("garde-fou : l'objet doit suivre son bras", armCheck.failures.some((line) => /bras « question »/.test(line)), armCheck.failures.join(" | "));
+
+    const { ask } = scripted([JSON.stringify(parts({ subject: "Vos commandes des restaurants ?" }))], [verdictJson(10)]);
+    const outcome = await generateQualityDraft({ ...base, ask, subjectArm: "question" });
+    check("la génération rend le bras retenu", isDraft(outcome) && outcome.subjectStyle === "question");
+
+    const rows: Record<string, unknown>[] = [];
+    const writer = { from: () => ({ upsert: async (row: Record<string, unknown>) => (rows.push(row), { error: null }) }) };
+    if (isDraft(outcome)) await recordDraftVariant(writer, { messageId: "m1", userId: "u1", brief, outcome });
+    check("variante enregistrée : bras, démo, demande, premier mot, longueur", rows[0]?.subject_style === "question" && rows[0]?.demo === "emails" && rows[0]?.cta === "rdv-15-min" && Boolean(rows[0]?.opening_word) && Number(rows[0]?.length) > 0, JSON.stringify(rows[0]));
   }
 
   console.log("\n6. Historique et « modifié à la main »");

@@ -2,6 +2,7 @@ import { knownNumbers, type DerivedFact } from "@/lib/emails/derived-facts";
 import { numbersIn, validateSubject } from "@/lib/emails/validate";
 import { ALLOWED_DEMO_URLS, demoForProposal, DEMO_LINKS, type DemoLink } from "./demo-links";
 import { avecAllowed, opensWithAvec } from "./readiness";
+import { subjectArmProblem, type SubjectArm } from "./experiment";
 import { countWords, PROOF_PREFIX, sentencesOf, type MailParts } from "./template";
 
 /**
@@ -120,6 +121,8 @@ export interface RuleContext {
   demo?: DemoLink["key"];
   /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
   dayOpenings?: { total: number; avec: number };
+  /** Expérience n° 1 : style d'objet imposé. */
+  subjectArm?: SubjectArm;
 }
 
 export interface RuleResult {
@@ -231,5 +234,7 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   if (total < LIMITS.minWords) failures.push(`${total} mots : trop court, l'accroche doit poser un fait et sa conséquence.`);
 
   failures.push(...validateSubject(parts.subject, context.companyName));
+  const arm = context.subjectArm ? subjectArmProblem(parts.subject, context.subjectArm) : null;
+  if (arm) failures.push(arm);
   return { ok: failures.length === 0, failures };
 }

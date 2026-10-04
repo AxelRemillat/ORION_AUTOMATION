@@ -14,6 +14,7 @@ import { completeOne } from "@/lib/today/complete";
 import { liveCompletionDeps } from "@/lib/today/complete-live";
 import { exclusionOf } from "@/lib/today/items";
 import { replaceDraft } from "@/lib/emails/quality/versions";
+import { recordDraftVariant } from "@/lib/emails/quality/variant";
 import type { Prospect, SignalCandidateRow } from "@/types";
 
 const LINKUP_MAX = 10;
@@ -79,11 +80,14 @@ async function main() {
     const quality = { quality_score: result.score, quality_reason: result.needsReview ? result.reviewReason : null };
     const { data: drafts } = await db.from("messages").select("id").eq("prospect_id", now.id).eq("type", "intro").eq("status", "draft").is("deleted_at", null).limit(1);
     const existing = (drafts?.[0] as { id: string } | undefined)?.id;
+    let messageId = existing ?? null;
     if (existing) {
       await replaceDraft({ db: db as never, userId }, existing, { subject: result.subject, body: result.body, ...quality }, { auto: true, reason: "complétion automatique (05/10/2026)" });
     } else {
-      await db.from("messages").insert({ prospect_id: now.id, user_id: userId, type: "intro", status: "draft", subject: result.subject, body: result.body, ...quality });
+      const { data: inserted } = await db.from("messages").insert({ prospect_id: now.id, user_id: userId, type: "intro", status: "draft", subject: result.subject, body: result.body, ...quality }).select("id").single();
+      messageId = (inserted as { id: string } | null)?.id ?? null;
     }
+    if (messageId) await recordDraftVariant(db, { messageId, userId, brief: prepared.brief, outcome: result });
     console.log(`${now.company_name} | site : ${site} | email : ${now.email} | mail ${result.needsReview ? "À REVOIR" : "prêt"} ${result.score ?? "?"}/10`);
     console.log(`    Objet : ${result.subject}\n${result.body.split("\n\nSi le sujet")[0].replace(/^/gm, "    ")}`);
   }
