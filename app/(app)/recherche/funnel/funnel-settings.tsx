@@ -98,6 +98,19 @@ export function FunnelSettings({ onStart, busy = false }: { onStart?: () => void
         <Label htmlFor="funnel-limit">Fiches à creuser</Label>
         <Input id="funnel-limit" type="number" min={1} max={30} value={prefs.digLimit} onChange={(event) => set({ digLimit: Number(event.target.value) || 15 })} />
       </div>
+      <div>
+        <Label htmlFor="funnel-target">Mails prêts visés par jour</Label>
+        <Input
+          id="funnel-target"
+          type="number"
+          min={1}
+          max={30}
+          value={prefs.dailyTarget}
+          onChange={(event) => set({ dailyTarget: Number(event.target.value) || 15 })}
+          aria-describedby="funnel-target-hint"
+        />
+        <p id="funnel-target-hint" className="mt-1 text-[12px] text-faint">La préparation élargit l&apos;entonnoir pour l&apos;atteindre, dans les budgets.</p>
+      </div>
       <div className="md:col-span-2">
         <Label htmlFor="funnel-preferred">Secteurs préférés (préfixes NAF)</Label>
         <Input id="funnel-preferred" value={text.preferred} onChange={(event) => setText({ ...text, preferred: event.target.value })} />

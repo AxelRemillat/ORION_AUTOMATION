@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { loadCapacity } from "@/lib/today/capacity";
 import { DncCard } from "./dnc-card";
 import { DnsCard } from "./dns-card";
+import { RampCard } from "./ramp-card";
+import { nextRampStep, type RampInbound } from "@/lib/settings/ramp";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Délivrabilité · Réglages · ORION" };
@@ -17,14 +19,23 @@ const pct = (value: number | null) => (value === null ? "—" : `${(value * 100)
 export default async function DelivrabilitePage() {
   const user = await requireUser();
   const db = createClient();
-  const [checks, capacity, volumes, prospects] = await Promise.all([
+  const [checks, capacity, volumes, prospects, inbound] = await Promise.all([
     checkDomain(SENDING_DOMAIN).catch(() => []),
     loadCapacity(db, user.id),
     loadVolumes(db, user.id),
     readAll<{ id: string; company_name: string; city: string | null; do_not_contact: boolean | null }>(() =>
       db.from("prospects").select("id, company_name, city, do_not_contact").is("deleted_at", null).order("company_name").order("id"),
     ),
+    readAll<RampInbound & { id: string }>(() =>
+      db.from("inbound_messages").select("id, from_email, subject, body, category, received_at").is("deleted_at", null).order("id"),
+    ).catch(() => []),
   ]);
+  const ramp = nextRampStep({
+    currentCap: capacity.dailyCap,
+    sentTotal: volumes.sent,
+    inbound,
+    dnsOk: { spf: checks.find((c) => c.name === "SPF")?.verdict === "ok", dkim: checks.find((c) => c.name === "DKIM")?.verdict === "ok" },
+  });
   const rows = prospects.map((row) => ({ id: row.id, name: row.company_name, city: row.city ?? null, dnc: Boolean(row.do_not_contact) }));
   const highBounce = volumes.bounceRate !== null && volumes.bounceRate > 0.03;
 
@@ -65,6 +76,7 @@ export default async function DelivrabilitePage() {
             </div>
           </CardContent>
         </Card>
+        <RampCard current={ramp.current} target={ramp.target} ready={ramp.ready} conditions={ramp.conditions} />
         <DncCard
           blocked={rows.filter((row) => row.dnc)}
           candidates={rows.filter((row) => !row.dnc)}

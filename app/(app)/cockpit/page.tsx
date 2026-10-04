@@ -8,6 +8,7 @@ import { ActivityCard } from "./_components/activity/activity-card";
 import { buildAllPeriods, parseSeriesParam } from "./_lib/series";
 import { PilotageCard } from "./_components/pilotage/pilotage-card";
 import { loadPilotage } from "@/lib/usage/pilotage";
+import { readPrefs } from "@/lib/funnel/settings";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -33,15 +34,16 @@ export default async function CockpitPage({
   // clignotement entre le rendu serveur et la reprise cote client.
   searchParams: { kpi?: string };
 }) {
-  await requireUser();
+  const user = await requireUser();
   const supabase = createClient();
 
   // Corbeille exclue partout : boîte de réception, courbes.
-  const [{ prospects, messages, deals, inbound }, pilotage] = await Promise.all([
+  const [{ prospects, messages, deals, inbound }, pilotage, prefs] = await Promise.all([
     loadPortfolio(supabase, ["messages", "deals", "inbound"]),
     // Pilotage : agrégats serveur, soldes fournisseurs en cache 1 h. Une panne
     // ici ne doit jamais empêcher le Cockpit de s'afficher.
     loadPilotage(supabase).catch(() => null),
+    readPrefs(supabase, user.id).catch(() => null),
   ]);
   // Aperçu de la boîte mail : les plus récents ; « Tout voir » → /cockpit/mails.
   const mailbox = buildMailbox({ prospects, messages, inbound });
@@ -77,7 +79,13 @@ export default async function CockpitPage({
 
       {pilotage && (
         <section id="pilotage" className="scroll-mt-24">
-          <PilotageCard consumption={pilotage.consumption} credits={pilotage.credits} openai={pilotage.openai} />
+          <PilotageCard
+            consumption={pilotage.consumption}
+            credits={pilotage.credits}
+            openai={pilotage.openai}
+            readiness={pilotage.readiness}
+            target={prefs?.dailyTarget ?? null}
+          />
         </section>
       )}
     </div>

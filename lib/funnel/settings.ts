@@ -20,7 +20,8 @@ export interface FunnelPrefs {
 }
 
 export const DEFAULT_AUTO_HOUR = 5;
-export const DEFAULT_DAILY_TARGET = 25;
+/** « Mails prêts visés par jour » : 15 au départ (05/10/2026), 20 puis 30 ensuite. */
+export const DEFAULT_DAILY_TARGET = 15;
 export const MAX_DAILY_TARGET = 30;
 
 const bounded = (value: unknown, min: number, max: number, fallback: number) => {

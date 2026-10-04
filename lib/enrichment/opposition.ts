@@ -18,7 +18,7 @@ export type OppositionOrder = "pappers-first" | "inpi-first";
 
 async function viaPappers(siren: string): Promise<OppositionCheck | null> {
   if (!hasPappersKey()) return null;
-  const pappers = await fetchPappers(siren);
+  const pappers = await fetchPappers(siren, { force: true });
   return pappers.ok ? { ok: true, refuses: pappers.data.refuses_prospecting, source: "pappers" } : null;
 }
 
@@ -27,7 +27,8 @@ async function viaInpi(siren: string): Promise<OppositionCheck> {
   return inpi.ok ? { ok: true, refuses: inpi.refuses, source: "inpi" } : { ok: false, error: inpi.error };
 }
 
-export async function verifyOpposition(siren: string, order: OppositionOrder = "pappers-first"): Promise<OppositionCheck> {
+// INPI d'abord partout (sobriété Pappers, 05/10/2026) : Pappers n'est plus qu'un repli.
+export async function verifyOpposition(siren: string, order: OppositionOrder = "inpi-first"): Promise<OppositionCheck> {
   if (order === "inpi-first") {
     const inpi = await viaInpi(siren);
     return inpi.ok ? inpi : ((await viaPappers(siren)) ?? inpi);

@@ -38,7 +38,10 @@ export const STEP_BUDGET_MS = 240_000;
 export async function prefsOf(ctx: StepContext): Promise<FunnelPrefs> {
   const stored = await readPrefs(ctx.db, ctx.userId);
   // Un run manuel peut surcharger zones, fenêtre et plafond, sans toucher aux réglages.
-  return cleanPrefs(ctx.job.params, stored);
+  // Préparation élargie (objectif du jour non atteint) : fenêtre, zones et
+  // plafond de creusage du second tour (lib/jobs/handlers/prepare.ts).
+  const widen = (ctx.job.state?.widen ?? null) as Record<string, unknown> | null;
+  return cleanPrefs({ ...ctx.job.params, ...(widen ?? {}) }, stored);
 }
 
 const progress = (step: string, pct: number, counts = { scanned: 0, signals: 0, sheets: 0 }) => ({ step, pct, counts });

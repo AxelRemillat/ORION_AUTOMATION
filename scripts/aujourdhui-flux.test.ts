@@ -81,7 +81,7 @@ async function main() {
     const job = db.rows("jobs")[0] as { params?: { kind?: string; digLimit?: number }; user_id?: string };
     check("job « prepare », objectif 25, pour le bon compte", job?.params?.kind === "prepare" && job.params.digLimit === 25 && job.user_id === USER);
     check("réglages bornés", cleanPrefs({ autoHour: 99, dailyTarget: 0 }, DEFAULT_PREFS).autoHour === 23 && cleanPrefs({ dailyTarget: 0 }).dailyTarget === 1);
-    check("défauts : 5 h, 25 fiches", DEFAULT_PREFS.autoHour === 5 && DEFAULT_PREFS.dailyTarget === 25);
+    check("défauts : 5 h, 15 mails prêts visés", DEFAULT_PREFS.autoHour === 5 && DEFAULT_PREFS.dailyTarget === 15);
   }
 
   console.log("\n12. Complétion automatique : une fois par run, trois au plus");
