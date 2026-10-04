@@ -63,3 +63,21 @@ export function demoFor(painText: string): DemoLink {
   const found = TABLE.find((row) => row.pattern.test(painText));
   return DEMO_LINKS[found?.key ?? "general"];
 }
+
+/**
+ * Démo d'après l'ACTION de la phrase « J'automatise… », pas d'après un mot.
+ *
+ * SPI ENERGIE (04/10) : « les e-mails de demande de devis sont triés et
+ * orientés vers la bonne personne » — la phrase parle de TRIER, pas de
+ * préparer un devis ; le mot « devis » envoyait pourtant vers l'agent devis.
+ * Préparer, rédiger, chiffrer un devis → agent devis ; trier, orienter,
+ * aiguiller, classer → démo e-mails ; sinon la table habituelle.
+ */
+const QUOTE_ACTION = /(pr[ée]par|r[ée]dig|chiffr|[ée]tabli|transform|g[ée]n[èe]r)\w*[^.]{0,50}\bdevis\b|\bdevis\b[^.]{0,30}\b(pr[êe]ts?|pr[ée]par[ée]s?|chiffr[ée]s?)\b/i;
+const SORT_ACTION = /\b(tri[ée]e?s?|trier|orient[ée]e?s?|orienter|aiguill\w*|class[ée]e?s?|classer|r[ée]parti\w*)\b/i;
+
+export function demoForProposal(proposal: string): DemoLink {
+  if (QUOTE_ACTION.test(proposal)) return DEMO_LINKS.devis;
+  if (SORT_ACTION.test(proposal)) return DEMO_LINKS.emails;
+  return demoFor(proposal);
+}

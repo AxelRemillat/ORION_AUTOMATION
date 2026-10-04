@@ -2,7 +2,7 @@ import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { withOptOut } from "@/lib/mail-preflight/opt-out";
-import { demoFor } from "./demo-links";
+import { demoFor, demoForProposal } from "./demo-links";
 import { judgeMail, PASS_SCORE, type JudgeVerdict } from "./judge";
 import { checkMail, type RuleResult } from "./rules";
 import { assemble, ctaFor, type MailParts } from "./template";
@@ -101,7 +101,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     // démo e-mails choisie d'après un pain « stocks »). Repli : le pain du brief.
     // La démo illustre la phrase « J'automatise… » d'abord, puis l'objet et
     // l'accroche, puis le pain du brief (finition Cowork : SPI ENERGIE).
-    const fromProposal = demoFor(parts.proposal);
+    const fromProposal = demoForProposal(parts.proposal);
     const fromText = demoFor(`${parts.subject} ${parts.hook}`);
     const chosen = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo;
     const core = assemble(parts, { greeting: input.greeting, demo: chosen, cta });
