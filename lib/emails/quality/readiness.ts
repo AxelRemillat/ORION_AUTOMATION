@@ -88,6 +88,30 @@ const UNCERTAIN_TASK = /\bsi (ces|vos|cette|leurs?|elles?|ils?)\b|font partie du
 const UNCERTAIN_IDEA =
   /\bsi (les|vos|leurs?|ces) [^,.;]{0,40}\b(arrivent|arrive|parviennent|sont (re[çc]us?|envoy[ée]s?)|utilisent|existent?)\b|font partie du poste|[ée]ventuellement|peut-[êe]tre|probablement|[àa] confirmer/i;
 
+/**
+ * Raison d'un BLOCAGE (aucun mail rédigé faute de matière) — par opposition à
+ * une note du juge sous 9. Un brouillon bloqué n'affiche plus de note : celle
+ * qu'il porte date d'une génération précédente (ALERYS, 04/10 : « 10/10 » sur
+ * une fiche « À revoir »).
+ */
+export const isBlockedReason = (reason: string | null | undefined) =>
+  Boolean(reason && /^(profil insuffisant|pain incertain|À revoir — sans site)/.test(reason));
+
+/** Une accroche qui ouvre sur « Avec » (« Avec vos quatre fournils… »). */
+export const opensWithAvec = (hook: string) => /^\s*avec\b/i.test(hook);
+
+/** Accroche d'un corps stocké : le paragraphe qui suit la salutation. */
+export const hookOfBody = (body: string) => (body.replace(/\r\n/g, "\n").split(/\n\s*\n/)[1] ?? "").trim();
+
+/**
+ * Ouvertures en « Avec » : au plus UN mail sur TROIS de la journée
+ * (décision Cowork, finition). `day` = brouillons déjà écrits aujourd'hui.
+ */
+export function avecAllowed(day: { total: number; avec: number } | undefined): boolean {
+  if (!day) return true;
+  return day.avec + 1 <= Math.ceil((day.total + 1) / 3);
+}
+
 export type Readiness = { ok: true; own: DerivedFact[] } | { ok: false; reason: string };
 
 export function mailReadiness(input: {

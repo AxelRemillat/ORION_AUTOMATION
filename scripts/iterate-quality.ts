@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { db, ownerId, prepareMail, spentSince } from "./quality-live";
 import { countWords } from "@/lib/emails/quality/template";
 import { clichesOf } from "@/lib/emails/quality/rules";
+import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import type { Prospect } from "@/types";
 
 const BUDGET_EUR = 0.3;
@@ -29,6 +30,7 @@ async function main() {
   const started = new Date().toISOString();
   const cases = JSON.parse(readFileSync(process.argv[3] ?? "evals/quality/iteration.json", "utf8")) as { match: string }[];
   const usedCliches: string[] = [];
+  const dayOpenings = { total: 0, avec: 0 };
   let sendable = 0;
   let review = 0;
   const out: string[] = [`# Itération ${iteration} — ${started.slice(0, 16).replace("T", " ")} UTC`, ""];
@@ -44,7 +46,7 @@ async function main() {
       out.push(`## ${item.match} — introuvable`, "");
       continue;
     }
-    const { outcome, greeting, brief, profileNote } = await prepareMail(prospect, userId, { usedCliches, readSite: true });
+    const { outcome, greeting, brief, profileNote } = await prepareMail(prospect, userId, { usedCliches, readSite: true, dayOpenings });
     out.push(`## ${prospect.company_name}`);
     if ("error" in outcome) {
       out.push(`Erreur : ${outcome.error}`, "");
@@ -64,6 +66,8 @@ async function main() {
     }
     sendable += 1;
     usedCliches.push(...clichesOf(outcome.body));
+    dayOpenings.total += 1;
+    if (opensWithAvec(hookOfBody(outcome.body))) dayOpenings.avec += 1;
     const core = outcome.body.split("\n\nSi le sujet ne vous concerne pas")[0].trim();
     const demo = `axelremillat.com${outcome.demo}`;
     out.push(

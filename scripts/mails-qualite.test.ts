@@ -13,7 +13,7 @@ import { ALLOWED_DEMO_URLS, demoFor } from "../lib/emails/quality/demo-links";
 import { checkMail } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
 import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
-import { mailReadiness, nameFact } from "../lib/emails/quality/readiness";
+import { avecAllowed, hookOfBody, isBlockedReason, mailReadiness, nameFact, opensWithAvec } from "../lib/emails/quality/readiness";
 import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-finder/free-site";
 import { bySite } from "../lib/funnel/site-priority";
 import { repeatedGroups } from "../lib/emails/quality/rules";
@@ -256,6 +256,34 @@ async function main() {
       ({ row: { id, identity: { base: { company_name: id, website } }, contact } as never });
     const ordered = bySite([row("sans-site", { site_free: { website: null, checked_at: "x" } }), row("pas-vu", null), row("avec-site", { site_free: { website: "https://a.fr", checked_at: "x" } }), row("annuaire", null, "https://b.fr")]);
     check("ordre : site trouvé, puis à chercher, puis sans site", ordered.map((item) => (item.row as { id: string }).id).join(",") === "avec-site,annuaire,pas-vu,sans-site", ordered.map((item) => (item.row as { id: string }).id).join(","));
+  }
+
+  console.log("\n5d. Finition (Cowork #5)");
+  {
+    const spi = parts({
+      subject: "Devis de maintenance",
+      hook: "Chez vous, les demandes de maintenance des réseaux d'air comprimé arrivent par e-mail. Une demande mal aiguillée retarde le devis au client.",
+      proposal: "J'automatise ce type de tâche pour des PME : les demandes et commandes reçues par e-mail sont triées et transmises à la bonne personne.",
+    });
+    const incoherent = checkMail(spi, assemble(spi, { greeting: GREETING, demo: demoFor("devis"), cta }), { ...ruleContext, demo: "devis" });
+    check("SPI : phrase « tri des e-mails » + lien agent devis → refusé", incoherent.failures.some((line) => /Démo incohérente/.test(line)), incoherent.failures.join(" | "));
+    const coherent = checkMail(spi, assemble(spi, { greeting: GREETING, demo: demoFor("commandes reçues par e-mail"), cta }), { ...ruleContext, demo: "emails" });
+    check("même phrase + démo e-mails → cohérent", !coherent.failures.some((line) => /Démo incohérente/.test(line)), coherent.failures.join(" | "));
+    const devis = parts({ proposal: "J'automatise ce type de tâche pour des PME : chaque demande reçue est transformée en devis prêt à vérifier." });
+    const devisOk = checkMail(devis, assemble(devis, { greeting: GREETING, demo: demoFor("devis"), cta }), { ...ruleContext, demo: "devis" });
+    check("phrase « devis » + agent devis → cohérent", !devisOk.failures.some((line) => /Démo incohérente/.test(line)), devisOk.failures.join(" | "));
+
+    const avec = parts({ hook: "Avec quatre fournils et des clients en restauration, chaque commande est vérifiée à la main. Une erreur retarde la livraison." });
+    const second = checkMail(avec, assemble(avec, { greeting: GREETING, demo, cta }), { ...ruleContext, dayOpenings: { total: 1, avec: 1 } });
+    check("2e « Avec » sur 2 mails → refusé", second.failures.some((line) => /Ouverture « Avec… »/.test(line)), second.failures.join(" | "));
+    const fourth = checkMail(avec, assemble(avec, { greeting: GREETING, demo, cta }), { ...ruleContext, dayOpenings: { total: 3, avec: 1 } });
+    check("2e « Avec » sur 4 mails → permis (1 sur 3)", !fourth.failures.some((line) => /Ouverture « Avec… »/.test(line)));
+    check("1er mail du jour en « Avec » → permis", avecAllowed({ total: 0, avec: 0 }));
+    check("accroche lue dans un corps stocké", opensWithAvec(hookOfBody("Bonjour,\n\nAvec vos fournils, …\n\nJ'automatise …")));
+
+    check("blocage reconnu (profil insuffisant)", isBlockedReason("profil insuffisant : aucun fait propre lu sur le site"));
+    check("blocage reconnu (sans site)", isBlockedReason("À revoir — sans site : aucun site trouvé"));
+    check("note du juge : pas un blocage", !isBlockedReason("Note 8/10 : accroche générique"));
   }
 
   console.log("\n6. Historique et « modifié à la main »");

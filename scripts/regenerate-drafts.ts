@@ -3,7 +3,8 @@
  * (« Nouveaux prospects » + « À compléter ») avec le gabarit qualité.
  *
  *   npm run regenerate:drafts -- --dry   aperçu, aucune écriture
- *   npm run regenerate:drafts            régénère (PAYANT, plafond 1 €)
+ *   npm run regenerate:drafts            régénère (PAYANT, plafond 0,50 €)
+ *   npm run regenerate:drafts -- --only "%SPI ENERGIE%"   une seule fiche (motif ILIKE)
  *
  * Règles : aucun envoi, aucune suppression. L'ancienne version de chaque
  * brouillon est rangée dans `message_versions` AVANT remplacement
@@ -17,20 +18,29 @@ import { flatten } from "@/lib/today/group";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { clichesOf } from "@/lib/emails/quality/rules";
+import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import type { Prospect } from "@/types";
 
 const BUDGET_EUR = 0.5;
 const dry = process.argv.includes("--dry");
+const onlyIndex = process.argv.indexOf("--only");
+const only = onlyIndex >= 0 ? (process.argv[onlyIndex + 1] ?? "").replace(/%/g, "").trim().toLowerCase() : null;
 
 async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const items = flatten((await loadToday(db as never, userId)).groups).filter(
-    (item) => (item.kind === "nouveau" || item.kind === "a_completer") && item.messageType === "intro" && item.messageId && item.status === "todo",
+    (item) =>
+      (item.kind === "nouveau" || item.kind === "a_completer") &&
+      item.messageType === "intro" &&
+      item.messageId &&
+      item.status === "todo" &&
+      (!only || item.companyName.toLowerCase().includes(only)),
   );
   console.log(`${items.length} brouillon(s) d'intro non validés dans la file du jour${dry ? " (aperçu)" : ""}.`);
   const report = { regenerated: 0, shown: 0, review: 0, edited: 0, skipped: 0, errors: 0 };
   const usedCliches: string[] = [];
+  const dayOpenings = { total: 0, avec: 0 };
 
   for (const item of items) {
     const spent = await spentSince(userId, started);
@@ -62,12 +72,12 @@ async function main() {
       continue;
     }
     // Recherche de site gratuite en amont, puis lecture du site : enregistrées (comme le job).
-    const { outcome, civilities } = await prepareMail(prospect, userId, { readSite: true, persist: true, usedCliches });
+    const { outcome, civilities } = await prepareMail(prospect, userId, { readSite: true, persist: true, usedCliches, dayOpenings });
     if ("blocked" in outcome) {
       // Pas de matière : le texte du brouillon ne change pas, mais il passe en
       // « À revoir » avec la raison (plus jamais affiché en « Nouveaux »).
       await db.from("prospects").update({ key_figures: { ...(prospect.key_figures ?? {}), mail_review: { reason: outcome.blocked, at: new Date().toISOString() } } }).eq("id", prospect.id);
-      await db.from("messages").update({ quality_reason: outcome.blocked }).eq("id", item.messageId!).eq("status", "draft").eq("edited_by_hand", false);
+      await db.from("messages").update({ quality_reason: outcome.blocked, quality_score: null }).eq("id", item.messageId!).eq("status", "draft").eq("edited_by_hand", false);
       report.review += 1;
       console.log(`- ${item.companyName} : À revoir, aucun nouveau mail — ${outcome.blocked}`);
       continue;
@@ -94,6 +104,8 @@ async function main() {
       else {
         report.shown += 1;
         usedCliches.push(...clichesOf(outcome.body));
+        dayOpenings.total += 1;
+        if (opensWithAvec(hookOfBody(outcome.body))) dayOpenings.avec += 1;
       }
     }
     console.log(`- ${item.companyName} : ${outcome.score ?? "?"}/10${outcome.needsReview ? ` → À revoir (${outcome.reviewReason})` : ""}`);

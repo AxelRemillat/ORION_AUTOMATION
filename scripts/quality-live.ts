@@ -113,7 +113,7 @@ export interface PreparedMail {
 export async function prepareMail(
   prospect: Prospect,
   userId: string,
-  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean } = {},
+  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean; dayOpenings?: { total: number; avec: number } } = {},
 ): Promise<PreparedMail> {
   const ask = liveAsk(prospect.id);
   // Comme le job : site inconnu → recherche GRATUITE (domaines du nom, validés
@@ -188,6 +188,7 @@ export async function prepareMail(
     forbiddenNames: factsResult.foreignEntities,
     offerNumbers: offerNumbers(offer),
     usedCliches: options.usedCliches,
+    dayOpenings: options.dayOpenings,
     website: prospect.website,
   });
   return { outcome, civilities, greeting: salutation, brief, profileNote, foundSite };

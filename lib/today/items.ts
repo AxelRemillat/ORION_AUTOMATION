@@ -1,3 +1,4 @@
+import { isBlockedReason } from "@/lib/emails/quality/readiness";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import type { FunnelCard } from "@/lib/funnel/view";
 import type { InboundMessage, Message, Prospect } from "@/types";
@@ -140,7 +141,8 @@ export function prospectItem(input: {
     attempts: input.attempts,
     scheduledAt: draft?.scheduled_at ?? null,
     draftPending: input.draftPending,
-    quality: draft?.quality_score == null ? null : Number(draft.quality_score),
+    // Bloqué faute de matière : la note portée date d'une génération précédente, on ne l'affiche pas.
+    quality: draft?.quality_score == null || isBlockedReason(draft.quality_reason) ? null : Number(draft.quality_score),
     profileReadFailed: typeof figures.profile_failed_at === "string",
     exclusion: exclusionOf(prospect),
     weight: input.weight,
