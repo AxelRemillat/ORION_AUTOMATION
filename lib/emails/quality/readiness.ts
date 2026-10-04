@@ -78,14 +78,15 @@ export function nameFact(name: string | null | undefined): DerivedFact | null {
 
 /**
  * Doute sur LEUR fonctionnement (« si ces tâches font partie du poste », « si
- * les pièces arrivent par mail », « s'ils en utilisent un »). Une condition
+ * les pièces arrivent par mail »). Une condition sur l'OUTIL (« s'ils en utilisent
+ * un ») ou
  * TECHNIQUE de l'automatisation (« si le seuil est atteint », « si la réponse
  * manque ») n'est pas une hypothèse : itération 2, AKTID, SPI ENERGIE et AGCEI
  * étaient bloqués à tort.
  */
 const UNCERTAIN_TASK = /\bsi (ces|vos|cette|leurs?|elles?|ils?)\b|font partie du poste|[ée]ventuellement|peut-[êe]tre|probablement|sans doute|[àa] confirmer|suppos/i;
 const UNCERTAIN_IDEA =
-  /\bsi (les|vos|leurs?|ces) [^,.;]{0,40}\b(arrivent|arrive|parviennent|sont (re[çc]us?|envoy[ée]s?)|utilisent|existent?)\b|s['’]ils? en (utilise|utilisent|a|ont)|font partie du poste|[ée]ventuellement|peut-[êe]tre|probablement|[àa] confirmer/i;
+  /\bsi (les|vos|leurs?|ces) [^,.;]{0,40}\b(arrivent|arrive|parviennent|sont (re[çc]us?|envoy[ée]s?)|utilisent|existent?)\b|font partie du poste|[ée]ventuellement|peut-[êe]tre|probablement|[àa] confirmer/i;
 
 export type Readiness = { ok: true; own: DerivedFact[] } | { ok: false; reason: string };
 

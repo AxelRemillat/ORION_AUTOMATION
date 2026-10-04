@@ -48,9 +48,11 @@ export function candidateDomains(names: readonly (string | null | undefined)[], 
   };
   const place = tokens(city ?? "").join("-");
   for (const name of names) {
+    // « C.T.A. » : des lettres isolées forment un sigle, « cta » — repéré sur le
+    // nom BRUT (« a » serait sinon retiré comme mot vide).
+    const acronym = /^\s*([a-z]\s*[.\s]\s*){2,}[a-z]?\.?\s*$/i.test(name ?? "") ? (name ?? "").replace(/[^a-z]/gi, "").toLowerCase() : null;
     const raw = tokens(name ?? "");
-    // « C.T.A. » : des lettres isolées forment un sigle, « cta ».
-    const words = raw.every((word) => word.length === 1) ? [raw.join("")] : raw.filter((word) => word.length > 1);
+    const words = acronym ? [acronym] : raw.filter((word) => word.length > 1);
     if (!words.length) continue;
     const two = words.slice(0, 2);
     if (two.length === 2) {

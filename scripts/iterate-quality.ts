@@ -27,7 +27,7 @@ const signalOf = (prospect: Prospect) => {
 async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
-  const cases = JSON.parse(readFileSync("evals/quality/iteration.json", "utf8")) as { match: string }[];
+  const cases = JSON.parse(readFileSync(process.argv[3] ?? "evals/quality/iteration.json", "utf8")) as { match: string }[];
   const usedCliches: string[] = [];
   let sendable = 0;
   let review = 0;

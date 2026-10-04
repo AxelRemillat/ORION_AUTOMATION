@@ -48,7 +48,7 @@ async function main() {
       console.log(`${item.id} : exclu (${excluded})`);
       continue;
     }
-    const { outcome, greeting } = await prepareMail(prospect, userId);
+    const { outcome, greeting } = await prepareMail(prospect, userId, { readSite: true });
     if ("blocked" in outcome) {
       lines.push(`**À revoir, aucun mail** : ${outcome.blocked}`, "");
       console.log(`${item.id} : à revoir (${outcome.blocked})`);

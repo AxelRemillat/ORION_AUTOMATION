@@ -15,7 +15,7 @@ import type { InboundMessage, Prospect } from "@/types";
 import { createJob } from "../store";
 import { EMPTY_PROGRESS } from "../types";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
-import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, STEP_BUDGET_MS, triageStep } from "./funnel";
+import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, siteStep, STEP_BUDGET_MS, triageStep } from "./funnel";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
 
 /** Variante de `search_signals` qui prépare « Aujourd'hui » (voir handlers/index.ts). */
@@ -229,6 +229,7 @@ export const prepareHandler: JobHandler = {
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
     openAiGuarded(triageStep),
+    siteStep,
     ...Array.from({ length: DIG_STEPS }, (_, i) => openAiGuarded(digStep(i, DIG_STEPS))),
     openAiGuarded(completeStep),
     openAiGuarded(profilesStep),

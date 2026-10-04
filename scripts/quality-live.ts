@@ -60,6 +60,10 @@ import type { StrategyBrief } from "@/lib/emails/strategist";
 import type { QualityBlocked, QualityOutcome } from "@/lib/emails/quality/generate";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const businessProfile = require("@/lib/jobs/business-profile") as typeof import("@/lib/jobs/business-profile");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const freeSite = require("@/lib/contact-finder/free-site") as typeof import("@/lib/contact-finder/free-site");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const contactClients = require("@/lib/contact-finder/clients") as typeof import("@/lib/contact-finder/clients");
 
 export const liveAsk = (prospectId: string | null): AskFn => (role, system, user, temperature, operation) =>
   chatJson({
@@ -95,6 +99,8 @@ export interface PreparedMail {
   outcome: QualityOutcome | QualityBlocked | { error: string };
   /** Note sur la lecture du site faite pour l'occasion (en mémoire). */
   profileNote?: string | null;
+  /** Site trouvé par la recherche gratuite pour l'occasion. */
+  foundSite?: string | null;
   brief?: StrategyBrief;
   civilities: Record<string, "M" | "F" | "?">;
   greeting: string;
@@ -107,15 +113,32 @@ export interface PreparedMail {
 export async function prepareMail(
   prospect: Prospect,
   userId: string,
-  options: { usedCliches?: readonly string[]; readSite?: boolean } = {},
+  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean } = {},
 ): Promise<PreparedMail> {
   const ask = liveAsk(prospect.id);
+  // Comme le job : site inconnu → recherche GRATUITE (domaines du nom, validés
+  // par les mentions légales). Écrit seulement si `persist` (régénération).
+  let foundSite: string | null = null;
+  if (options.readSite && !prospect.website) {
+    const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
+    const found = await freeSite
+      .findSiteFree(
+        freeSite.siteIdentity({ id: prospect.id, name: prospect.company_name, tradeNames: [figures.commercial_name as string | null], siren: prospect.siren, city: prospect.city }),
+        contactClients.realDeps(prospect.id),
+      )
+      .catch(() => null);
+    if (found) {
+      foundSite = found.website;
+      prospect.website = found.website;
+      if (options.persist) await db.from("prospects").update({ website: found.website }).eq("id", prospect.id).is("website", null);
+    }
+  }
   // Comme le job : site connu, profil vide → lecture du site. Ici EN MÉMOIRE
   // (`persist: false`) : rien n'est écrit en base.
   let profileNote: string | null = null;
   if (options.readSite && prospect.website && !storedProfile(prospect.business_profile)) {
     const run = await businessProfile
-      .ensureBusinessProfile(db as never, prospect, businessProfile.profileAsk(prospect.id), { persist: false })
+      .ensureBusinessProfile(db as never, prospect, businessProfile.profileAsk(prospect.id), { persist: options.persist === true })
       .catch((error: unknown) => ({ profile: null, refreshed: false, note: error instanceof Error ? error.message : "lecture impossible" }));
     if (run.profile) prospect.business_profile = run.profile as unknown as Record<string, unknown>;
     profileNote = run.refreshed ? "site lu pour l'occasion (non enregistré)" : run.note;
@@ -167,5 +190,5 @@ export async function prepareMail(
     usedCliches: options.usedCliches,
     website: prospect.website,
   });
-  return { outcome, civilities, greeting: salutation, brief, profileNote };
+  return { outcome, civilities, greeting: salutation, brief, profileNote, foundSite };
 }

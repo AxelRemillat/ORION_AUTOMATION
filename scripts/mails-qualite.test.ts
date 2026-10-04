@@ -13,7 +13,10 @@ import { ALLOWED_DEMO_URLS, demoFor } from "../lib/emails/quality/demo-links";
 import { checkMail } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
 import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
-import { mailReadiness } from "../lib/emails/quality/readiness";
+import { mailReadiness, nameFact } from "../lib/emails/quality/readiness";
+import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-finder/free-site";
+import { bySite } from "../lib/funnel/site-priority";
+import { repeatedGroups } from "../lib/emails/quality/rules";
 import { parseVerdict } from "../lib/emails/quality/judge";
 import { replaceDraft } from "../lib/emails/quality/versions";
 import { tagsOf, isComplete } from "../lib/today/tags";
@@ -203,6 +206,56 @@ async function main() {
   {
     const blockedTags = tagsOf({ email: "a@b.fr", emailDoubtful: false, oppositionUnverified: false, website: "x", hasBusinessProfile: false, hasDraft: false, draftPending: false, qualityReview: true });
     check("fiche bloquée : « À revoir », pas « Brouillon manquant » (pas de relance en boucle)", blockedTags.includes("À revoir") && !blockedTags.includes("Brouillon manquant"));
+  }
+
+  console.log("\n5c. Décisions Cowork (itération 2)");
+  {
+    const rule2 = (name: string, over: Partial<{ subject: string; hook: string; proposal: string }>, pattern: RegExp) => {
+      const mail = parts(over);
+      const result = checkMail(mail, assemble(mail, { greeting: GREETING, demo, cta }), ruleContext);
+      check(name, !result.ok && result.failures.some((line) => pattern.test(line)), result.failures.join(" | "));
+    };
+    // Site trouvé gratuitement : domaines du nom, jamais Linkup ni Hunter.
+    const domains = candidateDomains(["ACTUEL VERANDA ET MENUISERIE"]);
+    check("domaines du nom : actuel-veranda.fr en tête", domains[0] === "actuel-veranda.fr", domains.join(","));
+    check("sigle : « C.T.A. » → cta.fr", candidateDomains(["C.T.A."]).includes("cta.fr"), candidateDomains(["C.T.A."]).join(","));
+    check("forme juridique retirée", !candidateDomains(["SARL BONNIN FRERES"]).some((domain) => domain.includes("sarl")));
+    const paid: string[] = [];
+    const fakeDeps = {
+      fetchHtml: async (url: string) =>
+        url.includes("actuel-veranda.fr")
+          ? { url, html: "<html><body>Actuel Véranda et Menuiserie — vérandas, menuiseries. Mentions légales : ACTUEL VERANDA ET MENUISERIE, SIREN 123 456 789</body></html>" }
+          : null,
+      webSearch: async () => (paid.push("linkup"), []),
+      hunterDomainSearch: async () => (paid.push("hunter"), []),
+      hunterFinder: async () => (paid.push("hunter"), null),
+      hunterVerify: async () => (paid.push("hunter"), null),
+    };
+    const site = await findSiteFree(siteIdentity({ name: "ACTUEL VERANDA ET MENUISERIE", siren: "123456789" }), fakeDeps as never);
+    check("site validé par les mentions légales", site?.domain === "actuel-veranda.fr", JSON.stringify(site));
+    check("aucun appel payant (Linkup, Hunter)", paid.length === 0, paid.join(","));
+    const none = await findSiteFree(siteIdentity({ name: "BLANCHARD ET BLAZQUEZ", siren: "1" }), { ...fakeDeps, fetchHtml: async () => null } as never);
+    check("aucun site validé → null, jamais un domaine deviné", none === null);
+
+    // Exception étroite : la raison sociale nomme au moins deux activités.
+    check("ACTUEL VERANDA ET MENUISERIE → fait propre", nameFact("ACTUEL VERANDA ET MENUISERIE")?.value === "vérandas, menuiserie");
+    check("BLANCHARD ET BLAZQUEZ (deux noms) → pas un fait", nameFact("BLANCHARD ET BLAZQUEZ") === null);
+    check("PRAT SERVICE DEPANNAGE (une activité) → pas un fait", nameFact("PRAT SERVICE DEPANNAGE") === null);
+    const byName = mailReadiness({ facts: [], brief, hasSite: false, companyName: "ACTUEL VERANDA ET MENUISERIE" });
+    check("sans site mais deux activités nommées : mail possible", byName.ok);
+    const noSite = mailReadiness({ facts: [], brief, hasSite: false, companyName: "PRAT SERVICE DEPANNAGE" });
+    check("sans site ni exception : « À revoir — sans site »", !noSite.ok && noSite.reason.startsWith("À revoir — sans site"));
+
+    // Répétitions : un groupe nominal au plus deux fois.
+    check("« commandes de consommables » ×3 → signalé", repeatedGroups("Commandes de consommables. Chaque commandes de consommables reçue. Les commandes de consommables sont triées.").includes("commandes de consommables"));
+    check("deux fois : permis", repeatedGroups("Commandes de consommables. Les commandes de consommables sont triées.").length === 0);
+    rule2("répétition dans le mail → refusée", { subject: "Commandes de consommables", hook: "Avec quatre fournils, les commandes de consommables arrivent chaque matin. Une commande de consommables oubliée retarde la livraison.", proposal: "J'automatise ce type de tâche pour des PME : les commandes de consommables reçues par e-mail sont lues et les manquantes signalées." }, /revient plus de deux fois/);
+
+    // Entonnoir : site trouvé d'abord, sans changer le plafond.
+    const row = (id: string, contact: Record<string, unknown> | null, website: string | null = null) =>
+      ({ row: { id, identity: { base: { company_name: id, website } }, contact } as never });
+    const ordered = bySite([row("sans-site", { site_free: { website: null, checked_at: "x" } }), row("pas-vu", null), row("avec-site", { site_free: { website: "https://a.fr", checked_at: "x" } }), row("annuaire", null, "https://b.fr")]);
+    check("ordre : site trouvé, puis à chercher, puis sans site", ordered.map((item) => (item.row as { id: string }).id).join(",") === "avec-site,annuaire,pas-vu,sans-site", ordered.map((item) => (item.row as { id: string }).id).join(","));
   }
 
   console.log("\n6. Historique et « modifié à la main »");
