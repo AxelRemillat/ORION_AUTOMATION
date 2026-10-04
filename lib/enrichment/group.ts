@@ -1,4 +1,5 @@
-import { fetchHoldingProfile, type PappersRepresentative } from "./pappers";
+import type { PappersRepresentative } from "./pappers";
+import { readHolding } from "./holding-free";
 import type { ParentGroup } from "./extract";
 import { LARGE_GROUP_HEADCOUNT, LARGE_GROUP_REVENUE_EUR } from "./entity-match";
 import { looksLikeSubsidiaryByFigures } from "./headcount";
@@ -130,9 +131,12 @@ export async function assessGroup(input: GroupInput): Promise<GroupAssessment> {
 
   if (!moral.siren || input.allowHoldingLookup === false) return result;
 
-  const holding = await fetchHoldingProfile(moral.siren);
-  if (!holding) return result;
-  result.extraPappersCalls = 1;
+  // Annuaire gratuit d'abord ; Pappers seulement s'il ne publie aucun chiffre
+  // de la holding (lib/enrichment/holding-free.ts).
+  const read = await readHolding(moral.siren);
+  if (!read) return result;
+  const holding = read.profile;
+  result.extraPappersCalls = read.pappersCalls;
 
   // Le dirigeant réel : la première personne physique de la holding.
   const person = holding.people[0];

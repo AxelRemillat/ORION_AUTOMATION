@@ -19,6 +19,8 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 interface GouvDirigeant {
   type_dirigeant?: string;
+  /** SIREN d'un dirigeant personne morale (holding) : l'annuaire le publie. */
+  siren?: string;
   nom?: string;
   prenoms?: string;
   denomination?: string;
@@ -171,6 +173,17 @@ function parentCompany(dirigeants: GouvDirigeant[] | undefined): string | null {
   return entity?.denomination?.trim() || null;
 }
 
+/** SIREN de cette même société mère, quand l'annuaire le publie. */
+function parentCompanySiren(dirigeants: GouvDirigeant[] | undefined): string | null {
+  const entity = dirigeants?.find(
+    (item) =>
+      (item.type_dirigeant === "personne morale" || Boolean(item.denomination)) &&
+      isOwnerRole(item.qualite),
+  );
+  const siren = entity?.siren?.replace(/\s/g, "") ?? "";
+  return /^\d{9}$/.test(siren) ? siren : null;
+}
+
 /**
  * `code_postal` / `departement` filtrent les ÉTABLISSEMENTS, pas le siège :
  * une entreprise remonte dès qu'une de ses antennes matche. On affiche donc le
@@ -214,6 +227,7 @@ function mapResult(raw: GouvResult, geoFiltered: boolean): CompanyBase | null {
       // Date complete : elle seule permet un age exact (cf. companyAge).
       founded_on: raw.date_creation ?? null,
       effectif_code: raw.tranche_effectif_salarie ?? null,
+      parent_company_siren: parentCompanySiren(raw.dirigeants),
       legal_code: raw.nature_juridique ?? null,
       company_category: raw.categorie_entreprise ?? null,
       head_office_city: headOffice !== city ? headOffice : null,

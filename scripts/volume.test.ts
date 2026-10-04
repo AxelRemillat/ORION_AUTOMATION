@@ -26,7 +26,7 @@ async function main() {
     const base = (over: Record<string, unknown>) => ({ siren: "520644386", parent_company: null, figures: { revenue_eur: 2_000_000 }, ...over }) as never;
     check("annuaire suffisant (CA publié, dirigeant personne) : Pappers non appelé", !pappersNeed(base({})).needed);
     check("aucun CA publié : Pappers (finances)", pappersNeed(base({ figures: {} })).needed);
-    check("dirigée par une société : Pappers (holding)", pappersNeed(base({ parent_company: "LLED" })).needed);
+    check("dirigée par une société (CA publié) : plus de Pappers — holding résolue dans l'annuaire", !pappersNeed(base({ parent_company: "LLED" })).needed);
     check("sans SIREN : jamais", !pappersNeed(base({ siren: null })).needed);
 
     process.env.PAPPERS_API_KEY = "cle-de-test";
@@ -116,6 +116,25 @@ async function main() {
     check("peu d'envois (8) : pas prête, et dit pourquoi", !nextRampStep({ currentCap: 15, sentTotal: 8, inbound: [], dnsOk: { spf: true, dkim: true }, now }).conditions[3].ok);
   }
 
+
+  console.log("\n6. Holdings résolues dans l'annuaire gratuit");
+  {
+    const { holdingFromDirectory, readHolding } = await import("../lib/enrichment/holding-free");
+    const company = (over: Record<string, unknown>) => ({
+      ok: true as const,
+      data: { siren: "812345678", company_name: "LLED", leader_person: "Jean-Pierre Romeo", figures: { effectif_code: "03", revenue_eur: 120_000 }, ...over },
+    });
+    const profile = await holdingFromDirectory("812345678", (async () => company({})) as never);
+    check("annuaire : dirigeant personne physique, plancher d'effectif, CA", profile?.people[0]?.name === "Jean-Pierre Romeo" && profile.headcount === 6 && profile.revenue_eur === 120_000, profile);
+    check("homonyme renvoyé par l'annuaire (autre SIREN) : ignoré", (await holdingFromDirectory("812345678", (async () => company({ siren: "999999999" })) as never)) === null);
+
+    let pappers = 0;
+    const fakePappers = async () => ((pappers += 1), { siren: "812345678", name: null, people: [], revenue_eur: 80_000_000, headcount: 900 });
+    const free = await readHolding("812345678", { resolve: (async () => company({})) as never, pappers: fakePappers });
+    check("chiffres publiés : 0 crédit Pappers", free?.source === "annuaire" && free.pappersCalls === 0 && pappers === 0, free);
+    const noFigures = await readHolding("812345679", { resolve: (async () => company({ siren: "812345679", figures: { effectif_code: "NN" } })) as never, pappers: fakePappers });
+    check("aucun chiffre dans l'annuaire : Pappers (finances pour la règle d'exclusion), dirigeant gardé", noFigures?.source === "pappers" && noFigures.pappersCalls === 1 && pappers === 1 && noFigures.profile.people[0]?.name === "Jean-Pierre Romeo", noFigures);
+  }
   console.log(failures === 0 ? "\nTous les tests du volume passent.\n" : `\n${failures} test(s) en échec.\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

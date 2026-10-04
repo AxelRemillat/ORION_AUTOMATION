@@ -351,11 +351,19 @@ export async function deepEnrich(
   }
 
   // --- 4. Groupe et dirigeant derriere la holding -------------------------
+  // Sans lecture Pappers, les représentants viennent de l'annuaire : la holding
+  // (avec son SIREN) se résout alors gratuitement.
+  if (!legalRepresentatives.length && base.parent_company && base.figures.parent_company_siren) {
+    legalRepresentatives = [
+      { name: base.parent_company, role: null, isCompany: true, siren: base.figures.parent_company_siren, firstName: null, lastName: null, since: null },
+    ];
+  }
   const group = await assessGroup({
     representatives: legalRepresentatives,
     knownLeaderPerson: base.leader_person,
     parentGroup: extraction ? extraction.parentGroup : null,
-    allowHoldingLookup: hasPappersKey(),
+    // Lecture gratuite d'abord ; Pappers seulement si l'annuaire n'a aucun chiffre.
+    allowHoldingLookup: true,
     revenueEur: keyFigures.revenue_eur ?? null,
     headcount: keyFigures.headcount ?? null,
   });

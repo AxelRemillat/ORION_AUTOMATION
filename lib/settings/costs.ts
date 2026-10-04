@@ -79,7 +79,7 @@ export function budgets(
       value: pappersDaily === 0
         ? "coupé"
         : `${pappersDaily} crédits${live.pappersUsedToday != null ? ` · ${live.pappersUsedToday} utilisés aujourd'hui` : ""}`,
-      source: "PAPPERS_DAILY_BUDGET (défaut 40, minuit Paris)",
+      source: "PAPPERS_DAILY_BUDGET (défaut 24, minuit Paris)",
     },
     { label: "Pappers — forfait", value: `${env.PAPPERS_PLAN_CREDITS ?? "500"} crédits / mois`, source: "PAPPERS_PLAN_CREDITS" },
     { label: "Pappers — prix d'un crédit", value: pappersEur > 0 ? `${pappersEur} €` : "non renseigné", source: "PAPPERS_CREDIT_EUR" },
