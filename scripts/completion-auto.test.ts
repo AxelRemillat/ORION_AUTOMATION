@@ -121,6 +121,10 @@ async function main() {
     calls.length = 0;
     const withSite = await completeOne(new FakeDb({ signal_candidates: [{ id: "c1", contact: { attempts: 2 } }] }) as unknown as Db, row(2), { deps: deps({ resolveSite: async () => ({ website: "https://acme.fr", found: false }) }), runId: "r3" });
     check("site connu mais pas d'email : reste « À compléter » (formulaire de contact)", !withSite.unreachable);
+    calls.length = 0;
+    const dbBlocked = new FakeDb({ signal_candidates: [{ id: "c1", contact: { attempts: 2 } }] });
+    const blocked = await completeOne(dbBlocked as unknown as Db, row(2), { deps: deps({ resolveSite: async () => ({ unreadable: "sairem.com" }) }), runId: "r3" });
+    check("site protégé contre les robots (403) : jamais « Non joignable », raison gardée", !blocked.unreachable && (dbBlocked.rows("signal_candidates")[0].contact as { site_unreadable?: string }).site_unreadable === "sairem.com");
 
     const fiche = (figures: Record<string, unknown>, name = "ACME") => ({ company_name: name, key_figures: figures, size_range: null, do_not_contact: false }) as unknown as Prospect;
     check("« Non joignable » : sort de « Aujourd'hui »", exclusionOf(fiche({ unreachable: { reason: "3 tentatives sans site ni email" } }))?.startsWith("non joignable") === true);
