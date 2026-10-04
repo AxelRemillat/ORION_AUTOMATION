@@ -285,6 +285,7 @@ export const prepareHandler: JobHandler = {
     whenWidened(harvestStep),
     ...Array.from({ length: FILTER_STEPS }, (_, i) => whenWidened(filterStep(i))),
     whenWidened(openAiGuarded(triageStep)),
+    whenWidened(siteStep),
     ...Array.from({ length: WIDEN_DIG_STEPS }, (_, i) => whenWidened(openAiGuarded(digStep(i, WIDEN_DIG_STEPS)))),
     openAiGuarded(completeStep),
     openAiGuarded(profilesStep),
