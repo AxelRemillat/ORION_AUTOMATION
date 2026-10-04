@@ -12,6 +12,8 @@ import { exclusionOf } from "../lib/today/items";
 import { subsidiaryOf } from "../lib/enrichment/subsidiary";
 import { offTargetReason } from "../lib/funnel/off-target";
 import { toJobSignal } from "../lib/signals/france-travail";
+import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
+import { runSiteStage } from "../lib/funnel/site-priority";
 import type { ContactDeps } from "../lib/contact-finder/finder";
 import type { Db } from "../lib/trash/scope";
 import type { Prospect, SignalCandidateRow } from "../types";
@@ -145,6 +147,37 @@ async function main() {
     check("entreprise.url → employerUrl", signal?.employerUrl === "http://www.tc-transport.fr", JSON.stringify(signal));
     const none = toJobSignal({ intitule: "Comptable", dateCreation: "2026-10-01T08:00:00Z", entreprise: { nom: "ACME" }, id: "2" } as never);
     check("sans url : null", none?.employerUrl === null);
+  }
+
+  console.log("\n6. Run 2 : avant toute dépense, opposition et « signal pour un client »");
+  {
+    check("PB SOLUTIONS « assistance technique ou au forfait » : régie, hors cible", Boolean(thirdPartyEmployer({ activity: "Prestations d'ingénierie en assistance technique ou au forfait pour l'industrie." })));
+    check("fabricant « assistance technique et SAV de nos machines » : PAS de la régie", thirdPartyEmployer({ activity: "Assistance technique et SAV de nos machines d'emballage." }) === null);
+    check("« ingénieurs en régie » : exclu", Boolean(thirdPartyEmployer({ activity: "Nos ingénieurs interviennent en régie chez nos clients." })));
+
+    const base = { company_name: "ACME", siren: "123456789", city: "LYON", postal_code: "69001", website: null };
+    const rows = [
+      { id: "opp", statut: "retenu", triage: { score: 5 }, weight: 1, identity: { base: { ...base, siren: "111111111" } }, contact: null, badges: [] },
+      { id: "regie", statut: "retenu", triage: { score: 4 }, weight: 1, identity: { base: { ...base, siren: "222222222" } }, contact: null, badges: [] },
+      { id: "ok", statut: "retenu", triage: { score: 4 }, weight: 1, identity: { base: { ...base, siren: "333333333" } }, contact: null, badges: [] },
+    ].map((row) => ({ ...row, user_id: "u", run_id: "r1" }));
+    const db = new FakeDb({ signal_candidates: rows });
+    const searched: string[] = [];
+    const report = await runSiteStage(db as unknown as Db, "u", "r1", {
+      checkOpposition: async (siren) => siren === "111111111",
+      findSite: async (_identity, row) => (searched.push(row.id), { website: `https://${row.id}.fr`, domain: `${row.id}.fr`, confidence: 90 }),
+      screenClient: async (website) => (website.includes("regie") ? "régie ou assistance technique" : null),
+      deadline: Date.now() + 60_000,
+    });
+    const statut = (id: string) => db.rows("signal_candidates").find((row) => row.id === id) as Record<string, unknown>;
+    check("opposée (INPI) : rejetée AVANT toute recherche de site", statut("opp").statut === "rejeté" && !searched.includes("opp"), JSON.stringify(statut("opp")));
+    check("régie lue sur l'accueil : rejetée avant creusage, badge « signal pour un client »", statut("regie").statut === "rejeté" && (statut("regie").badges as string[]).includes("signal pour un client"));
+    check("fiche saine : site gardé pour le creusage", (statut("ok").contact as { site_free?: { website?: string } }).site_free?.website === "https://ok.fr");
+    check("compteurs du run", report.opposed === 1 && report.clients === 1 && report.found === 1, JSON.stringify(report));
+
+    const fetchStore: LinkupGateStore = { read: async () => null, write: async () => undefined, usedSince: async (_since, kind) => (kind === "fetch" ? 59 : 30) };
+    check("lectures de page : plafond à part (60), les recherches à 30/30 ne les bloquent pas", (await linkupGate(fetchStore, "https://acme.fr", new Date(), "fetch")).status === "call");
+    check("recherches : toujours bloquées à 30/30", (await linkupGate(fetchStore, "acme lyon site officiel")).status === "blocked");
   }
 
   console.log(failures === 0 ? "\nTous les tests de complétion passent.\n" : `\n${failures} test(s) en echec.\n`);

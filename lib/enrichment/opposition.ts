@@ -14,7 +14,8 @@ export type OppositionCheck =
   | { ok: true; refuses: boolean; source: "pappers" | "inpi" }
   | { ok: false; error: string };
 
-export type OppositionOrder = "pappers-first" | "inpi-first";
+/** `inpi-only` : gratuit, sans repli Pappers — l'étape « sites », avant toute dépense. */
+export type OppositionOrder = "pappers-first" | "inpi-first" | "inpi-only";
 
 async function viaPappers(siren: string): Promise<OppositionCheck | null> {
   if (!hasPappersKey()) return null;
@@ -29,6 +30,7 @@ async function viaInpi(siren: string): Promise<OppositionCheck> {
 
 // INPI d'abord partout (sobriété Pappers, 05/10/2026) : Pappers n'est plus qu'un repli.
 export async function verifyOpposition(siren: string, order: OppositionOrder = "inpi-first"): Promise<OppositionCheck> {
+  if (order === "inpi-only") return viaInpi(siren);
   if (order === "inpi-first") {
     const inpi = await viaInpi(siren);
     return inpi.ok ? inpi : ((await viaPappers(siren)) ?? inpi);

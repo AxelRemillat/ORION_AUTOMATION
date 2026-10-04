@@ -14,7 +14,13 @@
  * annonces BODACC, les types les plus prometteurs passent d'abord.
  */
 
-export const MAX_EXAMINED = 600;
+/**
+ * 1 800 (était 600) : viser ~40 retenus par run (Cowork, 05/10/2026). Au
+ * rendement mesuré le 05/10 — 14 % des examinés passent le filtre, 16 % des
+ * filtrés sont retenus au tri —, 600 n'en donnaient que 12. Le tri coûte peu ;
+ * les plafonds Pappers, Hunter, Linkup et OpenAI restent les garde-fous.
+ */
+export const MAX_EXAMINED = 1800;
 export const BODACC_MAX_SHARE = 0.2;
 
 export interface Examinable {

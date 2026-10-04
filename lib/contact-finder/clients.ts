@@ -4,7 +4,7 @@ import { findEmailByName } from "@/lib/enrichment/hunter";
 import { chatJson } from "@/lib/ai/chat";
 import { getOpenAI } from "@/lib/openai";
 import { recordOpenAiUsage, recordUnitUsage } from "@/lib/usage/record";
-import { linkupCacheKey, linkupGate } from "@/lib/linkup/gate";
+import { LINKUP_OPERATIONS, linkupCacheKey, linkupGate } from "@/lib/linkup/gate";
 import { supabaseLinkupStore } from "@/lib/linkup/store";
 import type { ContactDeps, HunterHit, VerifierStatus } from "./finder";
 import type { CompanyIdentity } from "./types";
@@ -118,7 +118,7 @@ async function callLinkup(key: string, query: string) {
       body: JSON.stringify({ q: query, depth: "standard", outputType: "searchResults", includeImages: false }),
     });
     if (!response.ok) return null;
-    await recordUnitUsage({ service: "linkup", operation: "contact:search", units: 1 });
+    await recordUnitUsage({ service: "linkup", operation: LINKUP_OPERATIONS.site, units: 1 });
     const body = (await response.json()) as { results?: { name?: string; url?: string; content?: string }[] };
     return (body.results ?? [])
       .filter((item) => item.url)

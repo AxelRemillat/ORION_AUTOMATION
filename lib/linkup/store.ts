@@ -1,6 +1,6 @@
 import { readCache, writeCache } from "@/lib/enrichment/cache";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
-import { LINKUP_CACHE_TTL_MS, type LinkupGateStore } from "./gate";
+import { COUNTED_OPERATIONS, LINKUP_CACHE_TTL_MS, type LinkupGateStore } from "./gate";
 
 /**
  * Accès réels du garde-fou Linkup (lib/linkup/gate.ts). SERVEUR UNIQUEMENT.
@@ -11,12 +11,13 @@ export function supabaseLinkupStore(): LinkupGateStore {
   return {
     read: (key) => readCache(key),
     write: (key, value) => writeCache(key, value, LINKUP_CACHE_TTL_MS),
-    async usedSince(since) {
+    async usedSince(since, kind = "search") {
       const db = process.env.ORION_SCRIPT_USER_ID ? createAdminClient() : createClient();
       const { data, error } = await db
         .from("api_usage")
         .select("units")
         .eq("service", "linkup")
+        .in("operation", COUNTED_OPERATIONS[kind])
         .gte("created_at", since.toISOString());
       if (error) throw new Error(error.message);
       return (data ?? []).reduce((total, row) => total + (Number(row.units) || 0), 0);

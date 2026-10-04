@@ -9,6 +9,9 @@ import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { runSiteStage } from "@/lib/funnel/site-priority";
 import { resolveSite } from "@/lib/contact-finder/free-site";
+import { textOf } from "@/lib/contact-finder/links";
+import { verifyOpposition } from "@/lib/enrichment/opposition";
+import { thirdPartyEmployer } from "@/lib/emails/quality/third-party";
 import { realDeps as realContactDeps } from "@/lib/contact-finder/clients";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
@@ -29,7 +32,8 @@ export const FUNNEL_KIND = "funnel";
  */
 
 /** 600 identités à ~1 par seconde (avec les 429 de l'annuaire) : 8 étapes de 240 s. */
-export const FILTER_STEPS = 8;
+// 10 étapes de 240 s : 1 800 identités annuaire à ~1 par seconde.
+export const FILTER_STEPS = 10;
 export const DIG_PER_STEP = 4;
 const DIG_STEPS = 5;
 /** Marge avant la coupure d'une fonction (300 s). */
@@ -89,7 +93,15 @@ export const filterStep = (index: number) =>
 export async function siteStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const deps = realContactDeps(null);
-  const { checked, found } = await runSiteStage(ctx.db, ctx.userId, runId, {
+  const { checked, found, opposed, clients } = await runSiteStage(ctx.db, ctx.userId, runId, {
+    checkOpposition: async (siren) => {
+      const check = await verifyOpposition(siren, "inpi-only");
+      return check.ok ? check.refuses : null;
+    },
+    screenClient: async (website) => {
+      const page = await deps.fetchHtml(website);
+      return page ? thirdPartyEmployer({ activity: textOf(page.html).slice(0, 5000) }) : null;
+    },
     // URL de l'offre, domaines du nom, puis Linkup (score ≥ 4, plafond du jour).
     findSite: async (identity, row) =>
       (
@@ -101,7 +113,12 @@ export async function siteStep(ctx: StepContext): Promise<StepOutcome> {
       ).site,
     deadline: Date.now() + STEP_BUDGET_MS,
   });
-  return { progress: progress(`Sites : ${found} trouvé(s) sur ${checked} fiche(s) vérifiée(s)`, 56) };
+  return {
+    progress: progress(
+      `Sites : ${found} trouvé(s) sur ${checked} fiche(s) · ${opposed} opposée(s) (INPI) · ${clients} « signal pour un client » écartée(s)`,
+      56,
+    ),
+  };
 }
 
 export async function triageStep(ctx: StepContext): Promise<StepOutcome> {

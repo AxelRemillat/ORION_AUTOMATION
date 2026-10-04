@@ -38,6 +38,15 @@ export interface ThirdPartyInput {
 const ACTIVITY =
   /(temps partag[ée]|mise [àa] disposition (de|du) (personnel|salari[ée]s?)|groupement d['’]employeurs|portage salarial|cabinet de recrutement|agence de recrutement|plateforme de recrutement|job ?board|site d['’]emploi|chasseurs? de t[êe]tes|int[ée]rim\b|travail temporaire|recrut(e|ons|ement) pour (le compte de |nos |ses |des )?(clients?|entreprises partenaires))/i;
 
+/**
+ * RÉGIE (Cowork, 05/10/2026) : ingénieurs ou techniciens placés chez des clients
+ * (« assistance technique ou au forfait » — PB SOLUTIONS). « Assistance
+ * technique » seule n'est PAS de la régie (un fabricant l'emploie pour son
+ * SAV) : il faut un indice de mise à disposition à côté.
+ */
+const REGIE =
+  /(\ben r[ée]gie\b|\br[ée]gie (d['’]ing[ée]nieurs?|technique)|assistance technique[^.]{0,80}\b(forfait|ing[ée]nieurs?|consultants?|r[ée]gie|chez (nos|vos|le) clients?)|\b(forfait|ing[ée]nieurs?|consultants?)\b[^.]{0,80}assistance technique)/i;
+
 /** Raison sociale ou domaine : marques de recruteurs (Comptalents, Talents Handicap, …). */
 const NAME =
   /(\btalents?\b|\w+talents?\b|recrut|int[ée]rim|staffing|\bjobs?\b|\bemploi\b|portage|groupement d['’ ]?employeurs|^ge\s|temps partag)/i;
@@ -52,6 +61,8 @@ export function thirdPartyEmployer(input: ThirdPartyInput): string | null {
   const activity = input.activity ?? "";
   const hit = activity.match(ACTIVITY);
   if (hit) return `activité « ${hit[0].toLowerCase()} » : ses offres sont publiées pour des clients`;
+  const regie = activity.match(REGIE);
+  if (regie) return `régie ou assistance technique (« ${regie[0].toLowerCase().slice(0, 60)} ») : personnel placé chez des clients`;
   const domain = (input.website ?? "").replace(/^https?:\/\/(www\.)?/i, "").split(/[/.]/)[0] ?? "";
   for (const name of [...(input.names ?? []), domain]) {
     const match = (name ?? "").match(NAME);

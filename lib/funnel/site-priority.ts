@@ -4,6 +4,7 @@ import type { Database, SignalCandidateRow } from "@/types";
 import { baseOf, candidatesOf, pendingDigOf, updateCandidate } from "./store";
 import type { Triage } from "./types";
 import { digOrder } from "./dig";
+import { THIRD_PARTY_BADGE } from "@/lib/emails/quality/third-party";
 
 /**
  * « SITE TROUVÉ » AVANT LES APPELS PAYANTS (décision Cowork, itération 2).
@@ -50,6 +51,14 @@ export async function runSiteStage(
   options: {
     /** Résolution du site d'UN retenu (le candidat est fourni : offre, score de tri). */
     findSite: (identity: ReturnType<typeof siteIdentity>, row: SignalCandidateRow) => Promise<FreeSite | null>;
+    /**
+     * Opposition au registre, GRATUITE (INPI seul), AVANT toute recherche :
+     * le 05/10, 4 sites sur 6 ont été trouvés (Linkup compris) pour des fiches
+     * ensuite rejetées au creusage pour opposition. `null` = inconnue.
+     */
+    checkOpposition?: (siren: string) => Promise<boolean | null>;
+    /** Lecture de l'accueil du site trouvé : motif « signal pour un client », `null` sinon. */
+    screenClient?: (website: string) => Promise<string | null>;
     deadline: number;
     limit?: number;
     now?: Date;
@@ -63,16 +72,40 @@ export async function runSiteStage(
   const ordered = digOrder(pool.map((row) => ({ row, triage: row.triage as unknown as Triage, weight: row.weight ?? 0 }))).map(({ row }) => row);
   let checked = 0;
   let found = 0;
+  let opposed = 0;
+  let clients = 0;
   for (const row of ordered) {
     if (Date.now() > options.deadline || checked >= (options.limit ?? 40)) break;
     const base = baseOf(row)!;
+    if (base.siren && options.checkOpposition) {
+      const refuses = await options.checkOpposition(base.siren).catch(() => null);
+      if (refuses) {
+        opposed += 1;
+        checked += 1;
+        await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: "opposition à la prospection commerciale déclarée au registre (INPI, vérifiée avant toute dépense)" });
+        continue;
+      }
+    }
     const identity = siteIdentity({ id: row.id, name: base.company_name, siren: base.siren, city: base.city, postalCode: base.postal_code });
     const site = await options.findSite(identity, row).catch(() => null);
     checked += 1;
+    // Agence d'emploi, portage, régie… lue sur l'accueil du site : exclue AVANT
+    // Pappers et Hunter (OPTINERIS, 05/10, découverte trop tard).
+    const forClient = site && options.screenClient ? await options.screenClient(site.website).catch(() => null) : null;
+    if (forClient) {
+      clients += 1;
+      await updateCandidate(db, row.id, {
+        statut: "rejeté",
+        motif_rejet: `${THIRD_PARTY_BADGE} : ${forClient}`,
+        badges: [...(row.badges ?? []), THIRD_PARTY_BADGE],
+        contact: { ...((row.contact as Record<string, unknown> | null) ?? {}), site_free: { website: site?.website ?? null, checked_at: (options.now ?? new Date()).toISOString() } },
+      });
+      continue;
+    }
     if (site) found += 1;
     await updateCandidate(db, row.id, {
       contact: { ...((row.contact as Record<string, unknown> | null) ?? {}), site_free: { website: site?.website ?? null, checked_at: (options.now ?? new Date()).toISOString() } },
     });
   }
-  return { checked, found, remaining: Math.max(0, ordered.length - checked) };
+  return { checked, found, opposed, clients, remaining: Math.max(0, ordered.length - checked) };
 }

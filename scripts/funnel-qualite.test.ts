@@ -196,13 +196,18 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
       ...Array.from({ length: 2515 }, (_, i) => ({ id: `b${i}`, source: "bodacc", date: "2026-09-20", strength: 3 })),
       ...Array.from({ length: 138 }, (_, i) => ({ id: `f${i}`, source: "france-travail", date: "2026-09-21", strength: 1 })),
     ];
-    const plan = examinationPlan(rows, MAX_LOOKUPS);
+    // La RÈGLE (offres d'abord, BODACC à 20 % du budget) est testée sur un
+    // budget de 600 — celui du run du 30/09. Le plafond de production est passé
+    // à 1 800 le 05/10 (lib/funnel/budget.ts) : vérifié plus bas.
+    const plan = examinationPlan(rows, 600);
     // Budget de 600 : TOUTES les offres (138), BODACC plafonné à 20 % (120).
     check("run du 30/09 : toutes les offres, BODACC à 20 %", plan.bySource["france-travail"] === 138 && plan.bySource.bodacc === 120, JSON.stringify(plan.bySource));
     check("France Travail passe en premier", plan.examine[0].source === "france-travail");
     check("le reste est marqué, pas laissé brut", plan.skip.length === rows.length - plan.examine.length && plan.examine.length === 258);
-    const fewOffers = examinationPlan([...rows.slice(0, 2515), ...rows.slice(2515, 2515 + 40)], MAX_LOOKUPS);
+    const fewOffers = examinationPlan([...rows.slice(0, 2515), ...rows.slice(2515, 2515 + 40)], 600);
     check("peu d'offres : toutes prises, BODACC ne comble pas (20 % max)", fewOffers.bySource["france-travail"] === 40 && fewOffers.bySource.bodacc === 120, JSON.stringify(fewOffers.bySource));
+    const production = examinationPlan(rows, MAX_LOOKUPS);
+    check("plafond de production (1 800) : toutes les offres, BODACC à 20 % (360)", MAX_LOOKUPS === 1800 && production.bySource["france-travail"] === 138 && production.bySource.bodacc === 360, JSON.stringify(production.bySource));
 
     // Étage 2 sur un faux Supabase : les hors-budget sont « non examiné », les autres filtrés.
     const now = "2026-09-30T10:00:00Z";
