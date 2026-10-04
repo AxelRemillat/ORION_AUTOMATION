@@ -53,11 +53,15 @@ export function liveCompletionDeps(db: Db, userId: string, runId: string): Compl
         // Un domaine du nom répond mais REFUSE les robots (401/403/429) : site
         // probable, à ouvrir à la main. Aucune tentative de contournement.
         const names = [prospect.company_name, text(figures.commercial_name)].filter((name): name is string => Boolean(name));
+        // Domaine nu ET « www. » : SAIREM répond 200 sur sairem.com (redirection)
+        // mais 403 sur www.sairem.com et ses mentions légales (05/10/2026).
         for (const domain of candidateDomains(names, prospect.city).slice(0, 4)) {
-          const status = await fetch(`https://${domain}`, { redirect: "follow", headers: { "User-Agent": "ORION-prospect/1.0 (+https://axelremillat.com)" } })
-            .then((response) => response.status)
-            .catch(() => 0);
-          if ([401, 403, 429].includes(status)) return { unreadable: domain };
+          for (const host of [domain, `www.${domain}`]) {
+            const status = await fetch(`https://${host}/`, { redirect: "manual", headers: { "User-Agent": "ORION-prospect/1.0 (+https://axelremillat.com)" } })
+              .then((response) => response.status)
+              .catch(() => 0);
+            if ([401, 403, 429].includes(status)) return { unreadable: domain };
+          }
         }
         return null;
       }
