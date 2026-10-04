@@ -16,9 +16,10 @@ import { loadToday } from "@/lib/today/load";
 import { flatten } from "@/lib/today/group";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { replaceDraft } from "@/lib/emails/quality/versions";
+import { clichesOf } from "@/lib/emails/quality/rules";
 import type { Prospect } from "@/types";
 
-const BUDGET_EUR = 1;
+const BUDGET_EUR = 0.5;
 const dry = process.argv.includes("--dry");
 
 async function main() {
@@ -28,7 +29,8 @@ async function main() {
     (item) => (item.kind === "nouveau" || item.kind === "a_completer") && item.messageType === "intro" && item.messageId && item.status === "todo",
   );
   console.log(`${items.length} brouillon(s) d'intro non validés dans la file du jour${dry ? " (aperçu)" : ""}.`);
-  const report = { regenerated: 0, review: 0, edited: 0, skipped: 0, errors: 0 };
+  const report = { regenerated: 0, shown: 0, review: 0, edited: 0, skipped: 0, errors: 0 };
+  const usedCliches: string[] = [];
 
   for (const item of items) {
     const spent = await spentSince(userId, started);
@@ -59,7 +61,17 @@ async function main() {
       console.log(`- ${item.companyName} : serait régénéré`);
       continue;
     }
-    const { outcome, civilities } = await prepareMail(prospect, userId);
+    // Recherche de site gratuite en amont, puis lecture du site : enregistrées (comme le job).
+    const { outcome, civilities } = await prepareMail(prospect, userId, { readSite: true, persist: true, usedCliches });
+    if ("blocked" in outcome) {
+      // Pas de matière : le texte du brouillon ne change pas, mais il passe en
+      // « À revoir » avec la raison (plus jamais affiché en « Nouveaux »).
+      await db.from("prospects").update({ key_figures: { ...(prospect.key_figures ?? {}), mail_review: { reason: outcome.blocked, at: new Date().toISOString() } } }).eq("id", prospect.id);
+      await db.from("messages").update({ quality_reason: outcome.blocked }).eq("id", item.messageId!).eq("status", "draft").eq("edited_by_hand", false);
+      report.review += 1;
+      console.log(`- ${item.companyName} : À revoir, aucun nouveau mail — ${outcome.blocked}`);
+      continue;
+    }
     if ("error" in outcome) {
       report.errors += 1;
       console.log(`- ${item.companyName} : erreur — ${outcome.error} (brouillon inchangé)`);
@@ -79,6 +91,10 @@ async function main() {
     else {
       report.regenerated += 1;
       if (outcome.needsReview) report.review += 1;
+      else {
+        report.shown += 1;
+        usedCliches.push(...clichesOf(outcome.body));
+      }
     }
     console.log(`- ${item.companyName} : ${outcome.score ?? "?"}/10${outcome.needsReview ? ` → À revoir (${outcome.reviewReason})` : ""}`);
   }

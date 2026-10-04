@@ -1,0 +1,12 @@
+[
+  { "match": "%PAIN DE BELLEDONNE%" },
+  { "match": "%KOMAKS%" },
+  { "match": "%AKTID%" },
+  { "match": "C.T.A.%" },
+  { "match": "%SPI ENERGIE%" },
+  { "match": "%AGCEI%" },
+  { "match": "%LYPSIS%" },
+  { "match": "%ACTUEL VERANDA%" },
+  { "match": "%BLANCHARD ET BLAZQUEZ%" },
+  { "match": "%PRAT SERVICE%" }
+]

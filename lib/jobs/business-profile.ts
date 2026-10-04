@@ -34,7 +34,8 @@ export async function ensureBusinessProfile(
   db: Db,
   prospect: Prospect,
   ask: ProfileAsk,
-  options: { force?: boolean; now?: Date } = {},
+  /** `persist: false` : lecture en mémoire seulement (itérations qualité, rien en base). */
+  options: { force?: boolean; now?: Date; persist?: boolean } = {},
 ): Promise<ProfileRun> {
   const known = storedProfile(prospect.business_profile);
   if (known && !options.force && profileIsFresh(prospect.business_profile_at, options.now)) {
@@ -42,6 +43,9 @@ export async function ensureBusinessProfile(
   }
   if (!prospect.website) return { profile: known, refreshed: false, note: "pas de site connu : profil métier non lu" };
 
+  // Un échec ponctuel (page lente, extraction ratée) est retenté UNE fois
+  // (décision Cowork, itération 2 : AGCEI lu une fois sur deux).
+  for (let attempt = 0; attempt < 2; attempt += 1) {
   const coverage = await coverSite(
     {
       name: prospect.company_name,
@@ -55,19 +59,27 @@ export async function ensureBusinessProfile(
     .filter((page) => !JOB_PAGE.test(new URL(page.url).pathname))
     .slice(0, 4)
     .map((page) => ({ url: page.url, text: page.text }));
-  if (!pages.length) return { profile: known, refreshed: false, note: coverage.note ?? "site illisible" };
+  if (!pages.length) {
+    if (attempt === 0) continue;
+    return { profile: known, refreshed: false, note: coverage.note ?? "site illisible" };
+  }
 
   const profile = await extractProfile(ask, prospect.company_name, pages);
-  if (!profile) return { profile: known, refreshed: false, note: "profil métier inexploitable" };
+  if (!profile) {
+    if (attempt === 0) continue;
+    return { profile: known, refreshed: false, note: "profil métier inexploitable" };
+  }
 
   const at = (options.now ?? new Date()).toISOString();
-  await db
+  if (options.persist !== false) await db
     .from("prospects")
     .update({ business_profile: profile as unknown as Record<string, unknown>, business_profile_at: at })
     .eq("id", prospect.id);
   prospect.business_profile = profile as unknown as Record<string, unknown>;
   prospect.business_profile_at = at;
   return { profile, refreshed: true, note: null };
+  }
+  return { profile: known, refreshed: false, note: "site illisible" };
 }
 
 /** Appel du rôle « profile » (gpt-6-luna par défaut), coût imputé au prospect. */

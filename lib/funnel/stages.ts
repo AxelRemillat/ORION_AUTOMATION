@@ -20,6 +20,7 @@ import {
 } from "./store";
 import { triage, type TriageAsk } from "./triage";
 import type { Identity, Triage } from "./types";
+import { bySite, siteOf } from "./site-priority";
 
 /**
  * Boucles des étages 2 à 4, sur les lignes d'un run. Dépendances injectées :
@@ -230,10 +231,12 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
     resumed.push(row);
   }
 
-  const pending = [
+  // Site trouvé d'abord (étape gratuite `runSiteStage`) : une fiche sans site
+  // ne pourra pas recevoir de mail, elle passe derrière. Même plafond.
+  const pending = bySite([
     ...digOrder(current.map((row) => ({ row, triage: row.triage as unknown as Triage, weight: row.weight ?? 0 }))),
     ...digOrder(resumed.map((row) => ({ row, triage: row.triage as unknown as Triage, weight: row.weight ?? 0 }))),
-  ].slice(0, Math.max(0, Math.min(budget, options.perStep)));
+  ]).slice(0, Math.max(0, Math.min(budget, options.perStep)));
 
   for (const { row, triage: verdict, weight } of pending) {
     // Une fiche reprise d'un run précédent rejoint ce run : elle y est comptée.
@@ -241,7 +244,8 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
     const outcome = await digOne(options.deps, {
       id: row.id,
       signal: rowToSignal(row),
-      base: baseOf(row)!,
+      // Le site trouvé gratuitement accompagne l'enrichissement et la recherche de contact.
+      base: { ...baseOf(row)!, website: siteOf(row) },
       triage: verdict,
       weight,
     });

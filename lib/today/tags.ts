@@ -25,7 +25,11 @@ export interface TagInput {
   draftPending: boolean;
   /** Filiale d'un groupe (lib/enrichment/subsidiary.ts) : signalée, non bloquante. */
   subsidiary?: string | null;
-  /** Brouillon noté sous 9/10 par le juge qualité (`messages.quality_reason`). */
+  /**
+   * À revoir : brouillon noté sous 9/10 (`messages.quality_reason`), ou aucun
+   * mail rédigé faute de matière (`key_figures.mail_review` : profil
+   * insuffisant, pain incertain).
+   */
   qualityReview?: boolean;
 }
 
@@ -38,9 +42,11 @@ export function tagsOf(input: TagInput): TodayTag[] {
   // Site connu, profil vide : JAMAIS de brouillon sans l'avoir lu (bloquant).
   // Sans site, le profil vide n'est qu'une information.
   if (!input.hasBusinessProfile) tags.push(input.website ? "Profil à compléter" : "Profil métier vide");
-  if (!input.hasDraft && !input.draftPending) tags.push("Brouillon manquant");
+  // Bloqué faute de matière : « À revoir », pas « Brouillon manquant » — sinon
+  // la préparation relancerait la rédaction à chaque run, pour rien.
+  if (!input.hasDraft && !input.draftPending && !input.qualityReview) tags.push("Brouillon manquant");
   if (input.subsidiary) tags.push("Filiale de groupe");
-  if (input.hasDraft && input.qualityReview) tags.push("À revoir");
+  if (input.qualityReview) tags.push("À revoir");
   return tags;
 }
 

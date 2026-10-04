@@ -7,6 +7,9 @@ import { runDigStage, runFilterStage, runTriageStage } from "@/lib/funnel/stages
 import { candidatesOf, countFunnel, insertHarvest, yieldBySource } from "@/lib/funnel/store";
 import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
+import { runSiteStage } from "@/lib/funnel/site-priority";
+import { findSiteFree } from "@/lib/contact-finder/free-site";
+import { realDeps as realContactDeps } from "@/lib/contact-finder/clients";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
 
@@ -79,6 +82,17 @@ export const filterStep = (index: number) =>
     };
   };
 
+/** Étape GRATUITE : recherche de site des retenus, avant le creusage payant. */
+export async function siteStep(ctx: StepContext): Promise<StepOutcome> {
+  const runId = runIdOf(ctx);
+  const deps = realContactDeps(null);
+  const { checked, found } = await runSiteStage(ctx.db, ctx.userId, runId, {
+    findSite: (identity) => findSiteFree(identity, deps, { deadline: Date.now() + STEP_BUDGET_MS }),
+    deadline: Date.now() + STEP_BUDGET_MS,
+  });
+  return { progress: progress(`Sites : ${found} trouvé(s) sur ${checked} fiche(s) vérifiée(s)`, 56) };
+}
+
 export async function triageStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const { triaged, retained } = await runTriageStage(ctx.db, ctx.userId, runId, liveTriageAsk);
@@ -144,6 +158,7 @@ export const signalFunnelHandler: JobHandler = {
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
     triageStep,
+    siteStep,
     ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i)),
     finishStep,
   ],
