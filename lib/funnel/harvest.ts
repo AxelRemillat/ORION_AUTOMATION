@@ -65,6 +65,7 @@ export function fromOfficial(signal: OfficialSignal): HarvestedSignal {
       jobTitle: signal.jobTitle,
       city: signal.city,
       postalCode: signal.postalCode,
+      ...(signal.employerUrl ? { employerUrl: signal.employerUrl } : {}),
     },
     hash: signalHash({ source, siren: signal.siren, companyName: signal.companyName, date, text }),
   };

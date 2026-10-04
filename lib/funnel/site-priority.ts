@@ -47,7 +47,13 @@ export async function runSiteStage(
   db: Db,
   userId: string,
   runId: string,
-  options: { findSite: (identity: ReturnType<typeof siteIdentity>) => Promise<FreeSite | null>; deadline: number; limit?: number; now?: Date },
+  options: {
+    /** Résolution du site d'UN retenu (le candidat est fourni : offre, score de tri). */
+    findSite: (identity: ReturnType<typeof siteIdentity>, row: SignalCandidateRow) => Promise<FreeSite | null>;
+    deadline: number;
+    limit?: number;
+    now?: Date;
+  },
 ) {
   const current = await candidatesOf(db, userId, runId);
   const earlier = await pendingDigOf(db, userId).catch(() => [] as SignalCandidateRow[]);
@@ -60,7 +66,8 @@ export async function runSiteStage(
   for (const row of ordered) {
     if (Date.now() > options.deadline || checked >= (options.limit ?? 40)) break;
     const base = baseOf(row)!;
-    const site = await options.findSite(siteIdentity({ id: row.id, name: base.company_name, siren: base.siren, city: base.city, postalCode: base.postal_code })).catch(() => null);
+    const identity = siteIdentity({ id: row.id, name: base.company_name, siren: base.siren, city: base.city, postalCode: base.postal_code });
+    const site = await options.findSite(identity, row).catch(() => null);
     checked += 1;
     if (site) found += 1;
     await updateCandidate(db, row.id, {

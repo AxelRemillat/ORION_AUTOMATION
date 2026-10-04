@@ -25,6 +25,8 @@ export interface ProspectRow {
   actionFacts: ActionFacts;
   /** Prochain envoi programmé (ISO), ou le dernier échec d'envoi. */
   sendState: ProspectSendState | null;
+  /** « Non joignable » : trois tentatives sans site ni email (motif), `null` sinon. */
+  unreachable: string | null;
 }
 
 export interface ProspectSendState {
@@ -147,6 +149,7 @@ export function buildRows(
       action: nextAction({ status: prospect.status, nextDueAt, ...facts }),
       actionFacts: facts,
       sendState: prospectSendState(own),
+      unreachable: (prospect.key_figures as { unreachable?: { reason?: string } } | null)?.unreachable?.reason ?? null,
     };
   });
 }

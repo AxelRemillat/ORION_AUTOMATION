@@ -22,6 +22,15 @@ import { shouldRetryCompletion } from "./tags";
  *
  * Rien n'est effacé : le contact trouvé est FUSIONNÉ dans `contact`, et
  * l'adresse n'écrase jamais une adresse déjà saisie sur la fiche.
+ *
+ * COMPLÉTION AUTOMATIQUE (Cowork, 05/10/2026) — le goulot était le SITE :
+ *   1. site résolu d'abord (`resolveSite` : URL connues → domaines du nom →
+ *      Linkup plafonné), écrit sur la fiche s'il manquait ;
+ *   2. email : pages du site, puis Hunter (règles existantes) ; une adresse
+ *      dont le domaine n'a pas de MX est écartée ;
+ *   3. profil métier lu dès que le site est trouvé ;
+ *   4. trois tentatives sans site NI email : « Non joignable » — la fiche
+ *      sort de « À compléter » (rien n'est supprimé, elle reste au Pipeline).
  */
 
 type Db = SupabaseClient<Database>;
@@ -30,7 +39,18 @@ export interface CompletionDeps {
   findContact: (prospectId: string) => Promise<ContactResult>;
   /** Motif si Hunter est bloqué (crédits, budget du jour), `null` sinon. */
   hunterBlocked?: () => Promise<string | null>;
+  /** Site de la fiche : connu, ou résolu et ÉCRIT sur la fiche ; `null` sinon. */
+  resolveSite?: (row: SignalCandidateRow) => Promise<{ website: string; found: boolean } | null>;
+  /** Lecture du profil métier (site tout juste trouvé). */
+  readProfile?: (prospectId: string) => Promise<void>;
+  /** Le domaine reçoit-il du courrier ? `null` = incertain (on garde). */
+  hasMx?: (domain: string) => Promise<boolean | null>;
+  /** Passe la fiche en « Non joignable » (fiche gardée, motif daté). */
+  markUnreachable?: (prospectId: string, reason: string) => Promise<void>;
 }
+
+/** Tentatives au-delà desquelles une fiche sans site ni email est « Non joignable ». */
+export const UNREACHABLE_AFTER = 3;
 
 type ContactJson = { attempts?: number; last_attempt_run?: string; retried_at?: string } & Record<string, unknown>;
 
@@ -41,9 +61,18 @@ export async function completeOne(
   db: Db,
   row: SignalCandidateRow,
   input: { deps: CompletionDeps; runId: string; now?: Date },
-): Promise<{ found: boolean; email: string | null }> {
+): Promise<{ found: boolean; email: string | null; website: string | null; unreachable: boolean }> {
   const previous = (row.contact as ContactJson | null) ?? {};
-  const contact = await input.deps.findContact(row.prospect_id!).catch(() => null);
+  // 1. Le SITE d'abord : sans domaine, ni la page contact ni Hunter ne peuvent rien.
+  const site = input.deps.resolveSite ? await input.deps.resolveSite(row).catch(() => null) : null;
+  let contact = await input.deps.findContact(row.prospect_id!).catch(() => null);
+  // 2. Une adresse sur un domaine sans MX ne recevra jamais le mail.
+  const domain = contact?.email?.split("@")[1];
+  if (contact?.email && domain && input.deps.hasMx && (await input.deps.hasMx(domain)) === false) {
+    contact = { ...contact, email: undefined, email_type: undefined, found_by: `${contact.found_by} (écartée : domaine sans MX)` };
+  }
+  // 3. Site tout juste trouvé : le profil métier est lu tout de suite.
+  if (site?.found && input.deps.readProfile) await input.deps.readProfile(row.prospect_id!).catch(() => undefined);
   // Hunter retenu faute de crédit : la tentative ne compte pas, elle sera refaite.
   const starved = Boolean(contact?.hunter_skipped?.startsWith(HUNTER_EPUISE)) && !contact?.email;
   await updateCandidate(db, row.id, {
@@ -59,9 +88,16 @@ export async function completeOne(
             last_attempt_run: input.runId,
             retried_at: (input.now ?? new Date()).toISOString(),
           }),
+      ...(site ? { website: site.website } : {}),
     },
   });
-  return { found: Boolean(contact?.email), email: contact?.email ?? null };
+  // 4. Trois tentatives sans site ni email : « Non joignable ».
+  const attempts = starved ? attemptsOf(previous) : attemptsOf(previous) + 1;
+  const unreachable = !contact?.email && !site && attempts >= UNREACHABLE_AFTER;
+  if (unreachable && input.deps.markUnreachable) {
+    await input.deps.markUnreachable(row.prospect_id!, `${attempts} tentatives sans site ni email`).catch(() => undefined);
+  }
+  return { found: Boolean(contact?.email), email: contact?.email ?? null, website: site?.website ?? null, unreachable };
 }
 
 /**
@@ -124,8 +160,9 @@ export async function runCompletionStage(
       refiltered += 1;
       continue;
     }
-    // Hunter bloqué et recherche gratuite déjà faite : on attend le retour des crédits.
-    if (blocked && attemptsOf(row.contact as ContactJson | null) > 0) continue;
+    // Hunter bloqué, site déjà connu et recherche gratuite déjà faite : on
+    // attend le retour des crédits. Sans site, la recherche de site vaut la peine.
+    if (blocked && owner.website && attemptsOf(row.contact as ContactJson | null) > 0) continue;
     tried += 1;
     if ((await completeOne(db, row, { deps: options.deps, runId, now: options.now })).found) found += 1;
   }

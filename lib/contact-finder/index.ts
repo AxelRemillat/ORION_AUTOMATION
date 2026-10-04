@@ -10,7 +10,7 @@ import { conclusionOf, type PastSearch, type StoredSearch } from "./report";
 import { hunterPolicy } from "./policy";
 import { hunterStatus, type HunterGateStore } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
-import type { CompanyIdentity, ContactBudget, ContactResult, ContactTrace } from "./types";
+import { DEFAULT_BUDGET, type CompanyIdentity, type ContactBudget, type ContactResult, type ContactTrace } from "./types";
 
 export type { ContactResult } from "./types";
 
@@ -39,6 +39,11 @@ export interface FindContactOptions {
   deps?: ContactDeps;
   /** Compteur et cache Hunter ; injecté par les tests (aucun budget lu sinon). */
   hunterStore?: HunterGateStore;
+  /**
+   * Recherches Linkup permises ici. 0 quand le site a déjà été cherché par
+   * `resolveSite` (score ≥ 4, plafond du jour) : Linkup ne sert qu'à ça.
+   */
+  linkup?: number;
 }
 
 /**
@@ -68,7 +73,8 @@ export async function findContact(prospectId: string, options: FindContactOption
   const company = await identityOf(prospect, website);
   const store = options.hunterStore ?? (options.deps ? null : supabaseHunterStore());
   const hunter = await hunterFor(prospect, store);
-  const { result, trace } = await runContactSearch(company, options.deps ?? realDeps(prospect.id), undefined, { hunter });
+  const budget = options.linkup === undefined ? undefined : { ...DEFAULT_BUDGET, linkup: options.linkup };
+  const { result, trace } = await runContactSearch(company, options.deps ?? realDeps(prospect.id), budget, { hunter });
   if (options.persist !== false) await persist(db, prospect, storedSearch(trace, result, company, prospect), result, website);
   return result;
 }

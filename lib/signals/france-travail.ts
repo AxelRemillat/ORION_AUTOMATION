@@ -170,12 +170,18 @@ export interface JobSignal {
   /** Date de création de l'offre, ISO. */
   publishedAt: string;
   url: string;
+  /**
+   * Site de l'ENTREPRISE donné par l'offre (`entreprise.url`) — présent dans
+   * ~8 % des offres nommées (échantillon de 150 offres, 05/10/2026). Une
+   * piste, pas une preuve : validé comme tout site trouvé avant usage.
+   */
+  employerUrl?: string | null;
 }
 
 interface RawOffer {
   intitule?: string | null;
   dateCreation?: string | null;
-  entreprise?: { nom?: string | null } | null;
+  entreprise?: { nom?: string | null; url?: string | null; description?: string | null } | null;
   lieuTravail?: { libelle?: string | null; codePostal?: string | null } | null;
   origineOffre?: { urlOrigine?: string | null } | null;
   id?: string | null;
@@ -216,6 +222,7 @@ export function toJobSignal(offer: RawOffer): JobSignal | null {
     url:
       offer.origineOffre?.urlOrigine ??
       (offer.id ? `https://candidat.francetravail.fr/offres/recherche/detail/${offer.id}` : SEARCH_URL),
+    employerUrl: offer.entreprise?.url?.trim() || null,
   };
 }
 

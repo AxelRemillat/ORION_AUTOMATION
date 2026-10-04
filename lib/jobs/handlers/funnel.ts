@@ -8,7 +8,7 @@ import { candidatesOf, countFunnel, insertHarvest, yieldBySource } from "@/lib/f
 import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { runSiteStage } from "@/lib/funnel/site-priority";
-import { findSiteFree } from "@/lib/contact-finder/free-site";
+import { resolveSite } from "@/lib/contact-finder/free-site";
 import { realDeps as realContactDeps } from "@/lib/contact-finder/clients";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
@@ -90,7 +90,15 @@ export async function siteStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const deps = realContactDeps(null);
   const { checked, found } = await runSiteStage(ctx.db, ctx.userId, runId, {
-    findSite: (identity) => findSiteFree(identity, deps, { deadline: Date.now() + STEP_BUDGET_MS }),
+    // URL de l'offre, domaines du nom, puis Linkup (score ≥ 4, plafond du jour).
+    findSite: async (identity, row) =>
+      (
+        await resolveSite(identity, deps, {
+          knownUrls: [(row.facts as { employerUrl?: string | null } | null)?.employerUrl],
+          score: (row.triage as { score?: number } | null)?.score ?? row.score,
+          deadline: Date.now() + STEP_BUDGET_MS,
+        })
+      ).site,
     deadline: Date.now() + STEP_BUDGET_MS,
   });
   return { progress: progress(`Sites : ${found} trouvé(s) sur ${checked} fiche(s) vérifiée(s)`, 56) };

@@ -9,6 +9,7 @@ import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import { draftFollowUp } from "@/lib/outbox/follow-up";
 import { draftReply } from "@/lib/outbox/reply-generate";
 import { runCompletionStage } from "@/lib/today/complete";
+import { liveCompletionDeps } from "@/lib/today/complete-live";
 import { loadToday } from "@/lib/today/load";
 import { flatten } from "@/lib/today/group";
 import { needsIntroDraft } from "@/lib/today/tags";
@@ -51,9 +52,10 @@ const deadline = () => Date.now() + STEP_BUDGET_MS;
 async function completeStep(ctx: StepContext): Promise<StepOutcome> {
   const runId = runIdOf(ctx);
   const prefs = await prefsOf(ctx);
-  const deps = liveDigDeps(ctx.db, ctx.userId, runId);
+  // Site d'abord (URL connues → domaines → Linkup plafonné), email, profil,
+  // « Non joignable » après trois tentatives (lib/today/complete-live.ts).
   const report = await runCompletionStage(ctx.db, ctx.userId, runId, {
-    deps: { findContact: deps.findContact, hunterBlocked: deps.hunterBlocked },
+    deps: liveCompletionDeps(ctx.db, ctx.userId, runId),
     prefs,
     limit: COMPLETE_PER_STEP,
     deadline: deadline(),

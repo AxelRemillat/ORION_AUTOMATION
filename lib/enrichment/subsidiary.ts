@@ -38,7 +38,23 @@ const COMPANY_NAME = /\b(SA|SAS|SASU|SARL|EURL|SCA|SCS|SNC|SE|GMBH|AG|BV|NV|LTD|
 const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
 /** Nom du groupe (ou de la société mère) si l'entreprise en est une filiale, `null` sinon. */
-export function subsidiaryOf(figures: Record<string, unknown> | null | undefined): string | null {
+/** Mot distinctif d'un nom (≥ 4 lettres, hors forme juridique), pour reconnaître une holding du même nom. */
+const coreWords = (name: string) =>
+  name
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(COMPANY_NAME, " ")
+    .split(/[^A-Z0-9]+/)
+    .filter((word) => word.length >= 4 && !["COMPAGNIE", "HOLDING", "GROUPE", "GROUP", "SOCIETE", "FRANCE"].includes(word));
+
+/**
+ * Nom du groupe (ou de la société mère) si l'entreprise en est une filiale, `null` sinon.
+ *
+ * `companyName` : une société dirigeante qui PORTE LE NOM de l'entreprise
+ * (« ALERYS & COMPAGNIE » pour ALERYS) est sa holding familiale, pas un groupe.
+ */
+export function subsidiaryOf(figures: Record<string, unknown> | null | undefined, companyName?: string | null): string | null {
   const facts = figures ?? {};
   const parent = text(facts.parent_group) || text(facts.parent_company);
 
@@ -51,7 +67,11 @@ export function subsidiaryOf(figures: Record<string, unknown> | null | undefined
   }
 
   const leader = text(facts.leader);
-  if (leader && !text(facts.leader_person) && COMPANY_NAME.test(leader)) return parent || leader;
+  if (leader && !text(facts.leader_person) && COMPANY_NAME.test(leader)) {
+    const own = companyName ? coreWords(companyName) : [];
+    if (own.length && coreWords(leader).some((word) => own.includes(word))) return null;
+    return parent || leader;
+  }
   return null;
 }
 

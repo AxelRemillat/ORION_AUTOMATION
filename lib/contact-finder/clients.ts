@@ -4,6 +4,8 @@ import { findEmailByName } from "@/lib/enrichment/hunter";
 import { chatJson } from "@/lib/ai/chat";
 import { getOpenAI } from "@/lib/openai";
 import { recordOpenAiUsage, recordUnitUsage } from "@/lib/usage/record";
+import { linkupCacheKey, linkupGate } from "@/lib/linkup/gate";
+import { supabaseLinkupStore } from "@/lib/linkup/store";
 import type { ContactDeps, HunterHit, VerifierStatus } from "./finder";
 import type { CompanyIdentity } from "./types";
 import { gatedHunterCall, hunterCacheKey } from "@/lib/hunter/gate";
@@ -88,9 +90,24 @@ async function fetchHtml(url: string): Promise<{ html: string; url: string } | n
   return { html, url: response.url || url };
 }
 
+/**
+ * Recherche Linkup, derrière le garde-fou (lib/linkup/gate.ts) : cache 90 jours
+ * par requête, plafond du jour `LINKUP_DAILY_BUDGET`. Bloquée : `null`, comme
+ * une panne — la recherche continue sans elle.
+ */
 async function webSearch(query: string) {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return null;
+  const store = supabaseLinkupStore();
+  const gate = await linkupGate<{ url: string; title: string; snippet: string }[]>(store, query);
+  if (gate.status === "cache") return gate.value;
+  if (gate.status === "blocked") return null;
+  const results = await callLinkup(key, query);
+  if (results) await store.write(linkupCacheKey(query), results).catch(() => undefined);
+  return results;
+}
+
+async function callLinkup(key: string, query: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {

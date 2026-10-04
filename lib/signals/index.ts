@@ -105,6 +105,8 @@ export interface OfficialSignal {
   capitalAmount: number | null;
   /** Intitulé publié, pour une offre d'emploi. */
   jobTitle: string | null;
+  /** Site de l'entreprise donné par l'offre France Travail (à valider). */
+  employerUrl?: string | null;
 }
 
 
@@ -239,6 +241,7 @@ function jobToOfficialSignal(job: JobSignal): OfficialSignal {
     newLeaders: [],
     capitalAmount: null,
     jobTitle: job.title,
+    employerUrl: job.employerUrl ?? null,
   };
 }
 

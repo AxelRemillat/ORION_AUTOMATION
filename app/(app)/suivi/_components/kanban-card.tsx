@@ -66,6 +66,11 @@ export function KanbanCard({
       <p className="mt-0.5 truncate text-[12px] text-faint">
         {[row.sector, row.city].filter(Boolean).join(" · ") || "—"}
       </p>
+      {row.unreachable && (
+        <span title={row.unreachable} className="mt-1 inline-block rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-muted">
+          Non joignable
+        </span>
+      )}
 
       {row.sendState && (
         <SendStateBadge
