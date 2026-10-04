@@ -60,6 +60,13 @@ async function main() {
       continue;
     }
     const { outcome, civilities } = await prepareMail(prospect, userId);
+    if ("blocked" in outcome) {
+      // Pas de matière : le brouillon actuel reste tel quel, la raison va sur la fiche.
+      await db.from("prospects").update({ key_figures: { ...(prospect.key_figures ?? {}), mail_review: { reason: outcome.blocked, at: new Date().toISOString() } } }).eq("id", prospect.id);
+      report.review += 1;
+      console.log(`- ${item.companyName} : À revoir, aucun nouveau mail — ${outcome.blocked}`);
+      continue;
+    }
     if ("error" in outcome) {
       report.errors += 1;
       console.log(`- ${item.companyName} : erreur — ${outcome.error} (brouillon inchangé)`);

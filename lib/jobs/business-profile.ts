@@ -34,7 +34,8 @@ export async function ensureBusinessProfile(
   db: Db,
   prospect: Prospect,
   ask: ProfileAsk,
-  options: { force?: boolean; now?: Date } = {},
+  /** `persist: false` : lecture en mémoire seulement (itérations qualité, rien en base). */
+  options: { force?: boolean; now?: Date; persist?: boolean } = {},
 ): Promise<ProfileRun> {
   const known = storedProfile(prospect.business_profile);
   if (known && !options.force && profileIsFresh(prospect.business_profile_at, options.now)) {
@@ -61,7 +62,7 @@ export async function ensureBusinessProfile(
   if (!profile) return { profile: known, refreshed: false, note: "profil métier inexploitable" };
 
   const at = (options.now ?? new Date()).toISOString();
-  await db
+  if (options.persist !== false) await db
     .from("prospects")
     .update({ business_profile: profile as unknown as Record<string, unknown>, business_profile_at: at })
     .eq("id", prospect.id);

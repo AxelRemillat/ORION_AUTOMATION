@@ -101,8 +101,10 @@ export async function setTodayContact(input: { prospectId: string; candidateId: 
   if (website) {
     const { data: current } = await ctx.db.from("prospects").select("key_figures").eq("id", input.prospectId).maybeSingle();
     const figures = ((current as { key_figures?: Record<string, unknown> | null } | null)?.key_figures ?? {}) as Record<string, unknown>;
-    if (typeof figures.profile_failed_at === "string") {
-      const { profile_failed_at: _cleared, ...rest } = figures;
+    // Nouveau site : l'échec de lecture et le « À revoir » faute de profil
+    // ne comptent plus — la rédaction sera retentée.
+    if (typeof figures.profile_failed_at === "string" || figures.mail_review) {
+      const { profile_failed_at: _cleared, mail_review: _review, ...rest } = figures;
       figuresPatch = { key_figures: rest };
     }
   }

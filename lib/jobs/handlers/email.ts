@@ -36,6 +36,7 @@ import { loadOffer } from "@/lib/offer/read";
 import type { MessageOrigin, Prospect } from "@/types";
 import { offerNumbers } from "@/app/api/emails/generate/pipeline";
 import { generateQualityDraft } from "@/lib/emails/quality/generate";
+import { clichesOf } from "@/lib/emails/quality/rules";
 import { askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
@@ -638,6 +639,17 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     prospect.key_figures = { ...figures, civilites: civilities };
   }
   const profile = storedProfile(prospect.business_profile);
+  // Clichés de fin déjà servis dans les brouillons du jour : le nouveau varie.
+  const dayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+  const { data: todays } = await ctx.db
+    .from("messages")
+    .select("body")
+    .eq("user_id", ctx.userId)
+    .eq("type", "intro")
+    .eq("status", "draft")
+    .neq("prospect_id", prospect.id)
+    .gte("created_at", dayStart);
+  const usedCliches = [...new Set(((todays ?? []) as { body: string }[]).flatMap((row) => clichesOf(row.body)))];
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -651,9 +663,20 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       signature: signatureFor(loaded.offer),
       forbiddenNames: factsResult.foreignEntities,
       offerNumbers: offerNumbers(loaded.offer),
+      usedCliches,
+      website: prospect.website,
     }),
   );
   if ("error" in draft) throw new JobError(draft.error, true, 502);
+  if ("blocked" in draft) {
+    // Pas de mail sans fait propre ni pain sûr : la raison est gardée sur la
+    // fiche (« À revoir » dans Aujourd'hui), aucun brouillon, aucune reprise.
+    await ctx.db
+      .from("prospects")
+      .update({ key_figures: { ...(prospect.key_figures ?? {}), mail_review: { reason: draft.blocked, at: new Date().toISOString() } } })
+      .eq("id", prospect.id);
+    throw new JobError(`À revoir — ${draft.blocked}. Aucun brouillon.`, false, 409);
+  }
   const email = { subject: draft.subject, body: draft.body };
   const best = draft.history.find((attempt) => attempt.body === draft.body);
   const validation = best?.rules ?? { ok: false, failures: [] };
@@ -737,6 +760,13 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       if (error || !data) throw new Error(`brouillon non enregistré : ${error?.message ?? "inconnue"}`);
       messageId = data.id;
     }
+  }
+
+  // Un brouillon existe enfin : l'ancien « À revoir faute de matière » tombe.
+  const reviewed = (prospect.key_figures ?? {}) as Record<string, unknown>;
+  if (messageId && reviewed.mail_review) {
+    const { mail_review: _cleared, ...rest } = reviewed;
+    await ctx.db.from("prospects").update({ key_figures: rest }).eq("id", prospect.id);
   }
 
   const response = {

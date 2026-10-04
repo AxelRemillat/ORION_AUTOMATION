@@ -12,7 +12,8 @@ import { buildQualityGreeting, unknownFirstName } from "../lib/emails/quality/gr
 import { ALLOWED_DEMO_URLS, demoFor } from "../lib/emails/quality/demo-links";
 import { checkMail } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
-import { generateQualityDraft } from "../lib/emails/quality/generate";
+import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
+import { mailReadiness } from "../lib/emails/quality/readiness";
 import { parseVerdict } from "../lib/emails/quality/judge";
 import { replaceDraft } from "../lib/emails/quality/versions";
 import { tagsOf, isComplete } from "../lib/today/tags";
@@ -134,7 +135,9 @@ async function main() {
     targetingWarning: null,
     excludedAngles: [],
   } as unknown as StrategyBrief;
-  const base = { brief, facts: [], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme" };
+  const OWN_FACT = { id: "F1", key: "business_locations", label: "Implantations", value: "quatre fournils", source: "Site officiel", hookTier: 1, bodyUsable: true } as unknown as DerivedFact;
+  const isDraft = (outcome: unknown): outcome is QualityOutcome => Boolean(outcome && typeof outcome === "object" && "body" in outcome);
+  const base = { brief, facts: [OWN_FACT], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme" };
   const scripted = (writer: string[], judge: string[]): { ask: AskFn; calls: string[] } => {
     const calls: string[] = [];
     const ask: AskFn = async (role) => {
@@ -147,24 +150,60 @@ async function main() {
   {
     const { ask, calls } = scripted([good], [verdictJson(10)]);
     const outcome = await generateQualityDraft({ ...base, ask });
-    check("9/10 du premier coup : retenu, pas « À revoir »", !("error" in outcome) && !outcome.needsReview && outcome.score === 10 && outcome.attempts === 1, JSON.stringify(calls));
-    check("mention « stop » et signature gardées", !("error" in outcome) && outcome.body.includes("stop") && outcome.body.trimEnd().endsWith("axelremillat.com/pme"));
+    check("9/10 du premier coup : retenu, pas « À revoir »", isDraft(outcome) && !outcome.needsReview && outcome.score === 10 && outcome.attempts === 1, JSON.stringify(calls));
+    check("mention « stop » et signature gardées", isDraft(outcome) && outcome.body.includes("stop") && outcome.body.trimEnd().endsWith("axelremillat.com/pme"));
   }
   {
     const { ask, calls } = scripted([good, good, good], [verdictJson(7), verdictJson(8), verdictJson(7)]);
     const outcome = await generateQualityDraft({ ...base, ask });
-    check("toujours < 9 : 3 essais (2 réécritures), puis « À revoir »", !("error" in outcome) && outcome.needsReview && outcome.attempts === 3, JSON.stringify(calls));
-    check("la raison est donnée", !("error" in outcome) && /Note 8\/10/.test(outcome.reviewReason ?? ""), !("error" in outcome) ? String(outcome.reviewReason) : "");
-    check("le meilleur essai est gardé (8/10)", !("error" in outcome) && outcome.score === 8);
+    check("toujours < 9 : 3 essais (2 réécritures), puis « À revoir »", isDraft(outcome) && outcome.needsReview && outcome.attempts === 3, JSON.stringify(calls));
+    check("la raison est donnée", isDraft(outcome) && /Note 8\/10/.test(outcome.reviewReason ?? ""), isDraft(outcome) ? String(outcome.reviewReason) : "");
+    check("le meilleur essai est gardé (8/10)", isDraft(outcome) && outcome.score === 8);
   }
   {
     const bad = JSON.stringify(parts({ hook: "Vous recrutez un préparateur. Les commandes s'accumulent." }));
     const { ask, calls } = scripted([bad, good], [verdictJson(9)]);
     const outcome = await generateQualityDraft({ ...base, ask });
-    check("règle cassée → réécrit sans payer le juge", calls.join(",") === "writer,writer,judge" && !("error" in outcome) && !outcome.needsReview, calls.join(","));
+    check("règle cassée → réécrit sans payer le juge", calls.join(",") === "writer,writer,judge" && isDraft(outcome) && !outcome.needsReview, calls.join(","));
   }
   check("demande : une variante stable par prospect", ctaFor("p1") === ctaFor("p1") && CTA_VARIANTS.includes(ctaFor("p2") as never));
   check("juge : note bornée par la grille", parseVerdict(JSON.stringify({ criteria: { accroche: 9, proposition: 2 }, reasons: [] }))?.score === 5);
+
+  console.log("\n5b. Règles Cowork (itération 1)");
+  {
+    const rule = (name: string, over: Partial<{ subject: string; hook: string; proposal: string }>, pattern: RegExp, used: string[] = []) => {
+      const mail = parts(over);
+      const result = checkMail(mail, assemble(mail, { greeting: GREETING, demo, cta }), { ...ruleContext, usedCliches: used });
+      check(name, !result.ok && result.failures.some((line) => pattern.test(line)), result.failures.join(" | "));
+    };
+    rule("« Dans le commerce de gros… » → refusé", { hook: "Dans le commerce de gros, une demande de prix réunit plusieurs références. Le client attend votre retour." }, /Accroche descriptive/);
+    rule("« Spi Energie travaille dans… » → refusé", { hook: "Spi Energie travaille dans le génie climatique et le froid. Un article manquant retarde le chantier." }, /Accroche descriptive/);
+    rule("« Vous fabriquez… » → refusé", { hook: "Vous fabriquez des équipements électriques. Une confirmation fournisseur oubliée retarde l'expédition." }, /Accroche descriptive/);
+    rule("« prend du temps » → refusé", { hook: "Avec quatre fournils, chaque commande est vérifiée à la main. Cette vérification prend du temps." }, /Conséquence molle/);
+    rule("hypothèse visible « si vos demandes » → refusée", { proposal: "J'automatise ce type de tâche pour des PME : si vos demandes arrivent par mail, elles sont triées pour validation." }, /Hypothèse visible/);
+    rule("deux clichés → refusé", { proposal: "J'automatise ce type de tâche pour des PME : les commandes sont saisies dans votre outil, sans ressaisie ni oubli." }, /clichés de fin/);
+    rule("cliché déjà servi aujourd'hui → refusé", { proposal: "J'automatise ce type de tâche pour des PME : les commandes reçues par mail sont saisies dans votre outil, sans ressaisie." }, /déjà dans un autre mail/, ["sans ressaisie"]);
+    const komaks =
+      "Avec un catalogue qui mêle consommables d'impression et matériel informatique, chaque commande demande de vérifier le stock référence par référence. Quand un article manque, le client attend votre retour.";
+    const ref = parts({
+      hook: komaks,
+      proposal: "J'automatise ce type de tâche pour des PME : chaque commande reçue par e-mail est lue, les références disponibles partent en liste de prélèvement et les manquantes vous sont signalées.",
+    });
+    const refResult = checkMail(ref, assemble(ref, { greeting: "Bonjour Monsieur Ivanov,", demo, cta }), { ...ruleContext, greeting: "Bonjour Monsieur Ivanov," });
+    check("la référence KOMAKS 10/10 de Cowork passe le garde-fou", refResult.ok, refResult.failures.join(" | "));
+    const empty = mailReadiness({ facts: [], brief });
+    check("aucun fait propre → « profil insuffisant », aucun appel", !empty.ok && empty.reason.startsWith("profil insuffisant"));
+    const doubtful = { ...brief, pain: { ...brief.pain, task: "qualifier les demandes de prix, si ces tâches font partie du poste" } } as typeof brief;
+    const unsure = mailReadiness({ facts: [OWN_FACT], brief: doubtful });
+    check("pain au conditionnel → « pain incertain »", !unsure.ok && unsure.reason.startsWith("pain incertain"));
+    const { ask, calls } = scripted([], []);
+    const blocked = await generateQualityDraft({ ...base, facts: [], ask });
+    check("bloqué : aucun appel au modèle", "blocked" in blocked && calls.length === 0, JSON.stringify(blocked));
+  }
+  {
+    const blockedTags = tagsOf({ email: "a@b.fr", emailDoubtful: false, oppositionUnverified: false, website: "x", hasBusinessProfile: false, hasDraft: false, draftPending: false, qualityReview: true });
+    check("fiche bloquée : « À revoir », pas « Brouillon manquant » (pas de relance en boucle)", blockedTags.includes("À revoir") && !blockedTags.includes("Brouillon manquant"));
+  }
 
   console.log("\n6. Historique et « modifié à la main »");
   {

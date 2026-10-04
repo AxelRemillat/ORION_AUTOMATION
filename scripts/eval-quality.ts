@@ -49,6 +49,11 @@ async function main() {
       continue;
     }
     const { outcome, greeting } = await prepareMail(prospect, userId);
+    if ("blocked" in outcome) {
+      lines.push(`**À revoir, aucun mail** : ${outcome.blocked}`, "");
+      console.log(`${item.id} : à revoir (${outcome.blocked})`);
+      continue;
+    }
     if ("error" in outcome) {
       lines.push(`**Erreur** : ${outcome.error}`, "");
       console.log(`${item.id} : erreur ${outcome.error}`);

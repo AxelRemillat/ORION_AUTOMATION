@@ -7,6 +7,7 @@ import { judgeMail, PASS_SCORE, type JudgeVerdict } from "./judge";
 import { checkMail, type RuleResult } from "./rules";
 import { assemble, ctaFor, type MailParts } from "./template";
 import { buildWriterPrompt, parseParts } from "./writer";
+import { mailReadiness } from "./readiness";
 
 /**
  * GÉNÉRATION QUALITÉ — objectif « envoyable sans retouche » (≥ 9/10).
@@ -34,6 +35,10 @@ export interface QualityInput {
   signature: string;
   forbiddenNames?: readonly string[];
   offerNumbers?: readonly number[];
+  /** Clichés de fin des autres mails du jour : on varie. */
+  usedCliches?: readonly string[];
+  /** Site connu : sans lui, « profil insuffisant » dit qu'il n'y a rien à lire. */
+  website?: string | null;
 }
 
 export interface QualityAttempt {
@@ -42,6 +47,8 @@ export interface QualityAttempt {
   body: string;
   rules: RuleResult;
   verdict: JudgeVerdict | null;
+  /** Démo retenue pour cet essai. */
+  demo?: string;
 }
 
 export interface QualityOutcome {
@@ -59,18 +66,26 @@ export interface QualityOutcome {
 
 const rank = (attempt: QualityAttempt) => (attempt.rules.ok ? 100 : 0) - attempt.rules.failures.length + (attempt.verdict?.score ?? 0);
 
-export async function generateQualityDraft(input: QualityInput): Promise<QualityOutcome | { error: string }> {
+/** Pas de mail : la fiche part en « À revoir » avec cette raison, sans appel payant. */
+export type QualityBlocked = { blocked: string };
+
+export async function generateQualityDraft(input: QualityInput): Promise<QualityOutcome | QualityBlocked | { error: string }> {
+  const ready = mailReadiness({ facts: input.facts, brief: input.brief, hasSite: Boolean(input.website) });
+  if (!ready.ok) return { blocked: ready.reason };
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
   const cta = ctaFor(input.prospectId);
   const facts = briefFacts(input.brief, input.facts);
-  const factText = facts.map((fact) => `- ${fact.label} : ${fact.value}`).join("\n");
+  // Le juge voit les MÊMES faits que le rédacteur : faits du brief + faits
+  // propres (site, profil). Sinon il tient pour « supposé » ce qui est lu sur
+  // le site (AGCEI, itération 2 : « bobines et transformateurs » notés 6/10).
+  const factText = [...new Set([...facts, ...ready.own])].map((fact) => `- ${fact.label} : ${fact.value}`).join("\n");
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
 
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, activity: input.activity, companyName: input.companyName, demo, greeting: input.greeting, cta, feedback }),
+      buildWriterPrompt({ brief: input.brief, facts, own: ready.own, activity: input.activity, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, feedback }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -80,7 +95,11 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       feedback = "La réponse n'était pas le JSON demandé : {\"subject\",\"hook\",\"proposal\"}.";
       continue;
     }
-    const core = assemble(parts, { greeting: input.greeting, demo, cta });
+    // La démo suit ce que le mail DIT (AGCEI, itération 2 : mail sur les devis,
+    // démo e-mails choisie d'après un pain « stocks »). Repli : le pain du brief.
+    const written = demoFor(`${parts.subject} ${parts.hook} ${parts.proposal}`);
+    const chosen = written.key === "general" ? demo : written;
+    const core = assemble(parts, { greeting: input.greeting, demo: chosen, cta });
     const rules = checkMail(parts, core, {
       greeting: input.greeting,
       facts,
@@ -88,6 +107,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       companyName: input.companyName,
       forbiddenNames: input.forbiddenNames,
       offerNumbers: input.offerNumbers,
+      usedCliches: input.usedCliches,
     });
     // Le juge ne note qu'un mail qui passe le garde-fou : inutile de payer pour
     // une note que la règle a déjà tranchée.
@@ -95,7 +115,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       ? await judgeMail(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText }, `qualite:juge:${attempt}`)
       : null;
     const body = withOptOut(`${core}\n\n${input.signature}`, input.signature);
-    history.push({ parts, body, rules, verdict });
+    history.push({ parts, body, rules, verdict, demo: chosen.path });
     if (rules.ok && verdict && verdict.score >= PASS_SCORE) break;
 
     feedback = rules.ok
@@ -121,7 +141,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     needsReview: !passed,
     reviewReason,
     attempts: history.length,
-    demo: demo.path,
+    demo: best.demo ?? demo.path,
     history,
   };
 }

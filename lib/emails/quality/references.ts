@@ -72,3 +72,86 @@ Chez vous, un flux lirait chaque demande, repérerait le bien et le motif, puis 
 Auriez-vous 15 minutes pour que je vous montre à quoi ça ressemblerait ?`,
   },
 ];
+
+/**
+ * RÉFÉRENCES 10/10 DE COWORK — exemples du générateur ET du juge. Chaque mail
+ * réécrit par Cowork et noté 10/10 s'ajoute ici (itérations qualité).
+ */
+export const COWORK_REFERENCES: { company: string; body: string }[] = [
+  {
+    company: "KOMAKS FRANCE",
+    body: `Bonjour Monsieur Ivanov,
+
+Avec un catalogue qui mêle consommables d'impression et matériel informatique, chaque commande demande de vérifier le stock référence par référence. Quand un article manque, le client attend votre retour.
+
+J'automatise ce type de tâche pour des PME : chaque commande reçue par e-mail est lue, les références disponibles partent en liste de prélèvement et les manquantes vous sont signalées.
+
+Exemple testable en une minute : axelremillat.com/automatisations?demo=email
+
+Auriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
+  },
+];
+
+/**
+ * ÉTALONNAGE DU JUGE — mails notés par Cowork (itération 1, 04/10/2026), avec
+ * la raison. Le juge doit retrouver ces notes à ±0,5 : il était trop indulgent
+ * d'environ 1,5 point.
+ */
+export const CALIBRATION: { company: string; hook: string; proposal: string; score: number; why: string }[] = [
+  {
+    company: "LE PAIN DE BELLEDONNE",
+    hook: "Vos quatre fournils livrent aussi des clients en restauration hors domicile. Chaque commande demande de vérifier les quantités avant de confirmer une date de livraison.",
+    proposal: "J'automatise ce type de tâche pour des PME : les commandes reçues par e-mail sont triées et inscrites dans le suivi des commandes, sans ressaisie des références.",
+    score: 9,
+    why: "Bon fait propre (quatre fournils, restauration). La seconde phrase reste un peu générique.",
+  },
+  {
+    company: "KOMAKS FRANCE",
+    hook: "Vous vendez des consommables d'impression aux côtés de matériel bureautique et informatique. Vérifier leur disponibilité et préparer les listes de prélèvement prend du temps.",
+    proposal: "J'automatise ce type de tâche pour des PME : les commandes reçues par e-mail sont triées et leurs références disponibles inscrites sur une liste de prélèvement, sans ressaisie.",
+    score: 8,
+    why: "« Vous vendez… aux côtés de… » paraphrase leur activité ; « prend du temps » est une conséquence molle.",
+  },
+  {
+    company: "AKTID",
+    hook: "Vos projets de centres de tri clés en main mobilisent des commandes auprès de fournisseurs. Suivre leurs confirmations et leurs dates de livraison prend du temps aux achats.",
+    proposal: "J'automatise ce type de tâche pour des PME : les confirmations reçues par e-mail mettent à jour le suivi des commandes, et les relances sont préparées sans oubli ni ressaisie.",
+    score: 9,
+    why: "Accroche concrète ; « prend du temps aux achats » est maladroit.",
+  },
+  {
+    company: "ACTUEL VERANDA ET MENUISERIE",
+    hook: "Entre vérandas, menuiserie métallique et serrurerie, vos demandes ne portent pas toutes sur les mêmes travaux. Une demande en attente d'une réponse ou d'une pièce peut passer inaperçue.",
+    proposal: "J'automatise ce type de tâche pour des PME : les e-mails reçus sont classés et les demandes à relancer signalées, sans oubli dans le suivi.",
+    score: 9,
+    why: "Bon : la conséquence (« peut passer inaperçue ») est concrète.",
+  },
+  {
+    company: "SPI ENERGIE",
+    hook: "Spi Energie travaille dans le génie climatique, le froid et la maintenance technique. Quand un article manque, l'équipe perd du temps à retrouver la demande et à préparer sa commande.",
+    proposal: "J'automatise ce type de tâche pour des PME : les demandes reçues par e-mail sont triées et les commandes fournisseurs préparées, sans ressaisie pour l'équipe chargée du stock.",
+    score: 6,
+    why: "« Spi Energie travaille dans… » est une paraphrase ; le pain est supposé.",
+  },
+  {
+    company: "AGCEI",
+    hook: "Vous fabriquez des équipements électriques. Quand une commande fournisseur attend une confirmation, retrouver le bon échange peut prendre du temps.",
+    proposal: "J'automatise ce type de tâche pour des PME : les e-mails liés aux commandes fournisseurs sont triés et les relances à faire sont signalées, sans oubli dans la boîte de réception.",
+    score: 6,
+    why: "Aucun fait propre ; pain supposé.",
+  },
+  {
+    company: "LYPSIS",
+    hook: "Dans le commerce de gros, une demande de prix peut réunir plusieurs références et quantités. Trier ces demandes et suivre les réponses en attente prend du temps.",
+    proposal: "J'automatise ce type de tâche pour des PME : si vos demandes arrivent par mail, elles sont triées et les relances sont préparées pour validation, sans ressaisie ni oubli.",
+    score: 6,
+    why: "Accroche par le secteur, hypothèse visible (« si vos demandes »).",
+  },
+  {
+    company: "C.T.A.",
+    hook: "Dans le commerce de gros, les demandes s'accompagnent de documents commerciaux et administratifs à préparer. Leur classement dans le bon dossier prend aussi du temps.",
+    proposal: "J'automatise ce type de tâche pour des PME : les documents se préremplissent à partir des pièces reçues par mail et leur classement vous est proposé, sans ressaisie.",
+    score: 5,
+    why: "Accroche par le secteur, pain vague (« documents administratifs »).",
+  },
+];

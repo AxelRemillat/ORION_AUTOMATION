@@ -90,6 +90,7 @@ export function prospectItem(input: {
   const split = splitBody(draft?.body ?? "", input.signature);
   const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
   const subsidiary = subsidiaryOf(figures);
+  const mailReview = (figures.mail_review as { reason?: string } | undefined)?.reason ?? null;
   const rawScore = card?.score ?? (typeof figures.funnel_score === "number" ? figures.funnel_score : null);
   const score = cappedScore(rawScore, subsidiary);
   const tags = tagsOf({
@@ -104,7 +105,7 @@ export function prospectItem(input: {
     hasDraft: Boolean(draft),
     draftPending: input.draftPending,
     subsidiary,
-    qualityReview: Boolean(draft?.quality_reason),
+    qualityReview: Boolean(draft?.quality_reason) || (!draft && Boolean(mailReview)),
   });
   return {
     key: `prospect:${prospect.id}`,
@@ -128,6 +129,7 @@ export function prospectItem(input: {
     signature: split.signature,
     why: [
       draft?.quality_reason && `À revoir — ${draft.quality_reason}`,
+      !draft && mailReview && `À revoir — ${mailReview}`,
       card?.pain && `Pain : ${card.pain}`,
       card?.hook && `Accroche : ${card.hook}`,
       score != null && `Score ${score}/5${subsidiary && rawScore !== score ? ` (plafonné : ${rawScore}/5)` : ""}`,

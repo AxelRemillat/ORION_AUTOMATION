@@ -9,8 +9,8 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { db, ownerId, prepareMail, spentSince } from "./quality-live";
-import { demoUrl, demoFor } from "@/lib/emails/quality/demo-links";
 import { countWords } from "@/lib/emails/quality/template";
+import { clichesOf } from "@/lib/emails/quality/rules";
 import type { Prospect } from "@/types";
 
 const BUDGET_EUR = 0.3;
@@ -28,6 +28,9 @@ async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const cases = JSON.parse(readFileSync("evals/quality/iteration.json", "utf8")) as { match: string }[];
+  const usedCliches: string[] = [];
+  let sendable = 0;
+  let review = 0;
   const out: string[] = [`# Itération ${iteration} — ${started.slice(0, 16).replace("T", " ")} UTC`, ""];
 
   for (const item of cases) {
@@ -41,19 +44,33 @@ async function main() {
       out.push(`## ${item.match} — introuvable`, "");
       continue;
     }
-    const { outcome, greeting, brief } = await prepareMail(prospect, userId);
+    const { outcome, greeting, brief, profileNote } = await prepareMail(prospect, userId, { usedCliches, readSite: true });
     out.push(`## ${prospect.company_name}`);
     if ("error" in outcome) {
       out.push(`Erreur : ${outcome.error}`, "");
       continue;
     }
+    if ("blocked" in outcome) {
+      review += 1;
+      out.push(`- À REVOIR, aucun mail — ${outcome.blocked}${profileNote ? ` (lecture du site : ${profileNote})` : ""}`, "");
+      console.log(`${prospect.company_name} : à revoir (${outcome.blocked})`);
+      continue;
+    }
+    if (outcome.needsReview) {
+      review += 1;
+      out.push(`- À REVOIR après ${outcome.attempts} essais — ${outcome.reviewReason}`, "");
+      console.log(`${prospect.company_name} : à revoir (${outcome.score}/10)`);
+      continue;
+    }
+    sendable += 1;
+    usedCliches.push(...clichesOf(outcome.body));
     const core = outcome.body.split("\n\nSi le sujet ne vous concerne pas")[0].trim();
-    const demo = brief ? demoUrl(demoFor(`${brief.pain.task} ${brief.pain.automationIdea}`)) : outcome.demo;
+    const demo = `axelremillat.com${outcome.demo}`;
     out.push(
       `- Signal : ${signalOf(prospect)}`,
       `- Pain retenu : ${brief?.pain.task ?? "?"}`,
       `- Démo : ${demo}`,
-      `- Salutation : ${greeting}`,
+      `- Salutation : ${greeting}${profileNote ? ` · profil : ${profileNote}` : ""}`,
       `- Mots : ${countWords(core)} · note du juge : ${outcome.score ?? "?"}/10${outcome.needsReview ? ` (À revoir : ${outcome.reviewReason})` : ""} · essais : ${outcome.attempts}`,
       "",
       `Objet : ${outcome.subject}`,
@@ -64,7 +81,7 @@ async function main() {
     console.log(`${prospect.company_name} : ${outcome.score}/10`);
   }
   const spent = await spentSince(userId, started);
-  out.push(`Coût OpenAI de l'itération : ${spent.toFixed(3)} €.`);
+  out.push(`Envoyables : ${sendable} · À revoir : ${review}.`, `Coût OpenAI de l'itération : ${spent.toFixed(3)} €.`);
   const file = `evals/quality/iteration-${iteration}.md`;
   writeFileSync(file, `${out.join("\n")}\n`);
   console.log(`Rapport : ${file} · ${spent.toFixed(3)} €`);

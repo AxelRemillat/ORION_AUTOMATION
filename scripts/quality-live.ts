@@ -57,7 +57,9 @@ const { incomingLeader } = require("@/lib/emails/incoming-leader") as typeof imp
 
 import type { AskFn } from "@/lib/ai/chat";
 import type { StrategyBrief } from "@/lib/emails/strategist";
-import type { QualityOutcome } from "@/lib/emails/quality/generate";
+import type { QualityBlocked, QualityOutcome } from "@/lib/emails/quality/generate";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const businessProfile = require("@/lib/jobs/business-profile") as typeof import("@/lib/jobs/business-profile");
 
 export const liveAsk = (prospectId: string | null): AskFn => (role, system, user, temperature, operation) =>
   chatJson({
@@ -90,7 +92,9 @@ const isBrief = (value: unknown): value is StrategyBrief =>
   Boolean(value && typeof value === "object" && (value as StrategyBrief).angle && (value as StrategyBrief).pain && (value as StrategyBrief).companyName);
 
 export interface PreparedMail {
-  outcome: QualityOutcome | { error: string };
+  outcome: QualityOutcome | QualityBlocked | { error: string };
+  /** Note sur la lecture du site faite pour l'occasion (en mémoire). */
+  profileNote?: string | null;
   brief?: StrategyBrief;
   civilities: Record<string, "M" | "F" | "?">;
   greeting: string;
@@ -100,8 +104,22 @@ export interface PreparedMail {
  * Le vrai chemin du job (`draftStep`), sans écriture : brief stocké (sinon le
  * stratège), faits, civilité (prénom inconnu → modèle léger), gabarit qualité.
  */
-export async function prepareMail(prospect: Prospect, userId: string): Promise<PreparedMail> {
+export async function prepareMail(
+  prospect: Prospect,
+  userId: string,
+  options: { usedCliches?: readonly string[]; readSite?: boolean } = {},
+): Promise<PreparedMail> {
   const ask = liveAsk(prospect.id);
+  // Comme le job : site connu, profil vide → lecture du site. Ici EN MÉMOIRE
+  // (`persist: false`) : rien n'est écrit en base.
+  let profileNote: string | null = null;
+  if (options.readSite && prospect.website && !storedProfile(prospect.business_profile)) {
+    const run = await businessProfile
+      .ensureBusinessProfile(db as never, prospect, businessProfile.profileAsk(prospect.id), { persist: false })
+      .catch((error: unknown) => ({ profile: null, refreshed: false, note: error instanceof Error ? error.message : "lecture impossible" }));
+    if (run.profile) prospect.business_profile = run.profile as unknown as Record<string, unknown>;
+    profileNote = run.refreshed ? "site lu pour l'occasion (non enregistré)" : run.note;
+  }
   const figures = (prospect.key_figures ?? {}) as Record<string, unknown>;
   const text = (value: unknown) => (typeof value === "string" && value ? value : null);
   const contact = prospect.email
@@ -146,6 +164,8 @@ export async function prepareMail(prospect: Prospect, userId: string): Promise<P
     signature: signatureFor(offer),
     forbiddenNames: factsResult.foreignEntities,
     offerNumbers: offerNumbers(offer),
+    usedCliches: options.usedCliches,
+    website: prospect.website,
   });
-  return { outcome, civilities, greeting: salutation, brief };
+  return { outcome, civilities, greeting: salutation, brief, profileNote };
 }

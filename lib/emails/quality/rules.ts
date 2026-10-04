@@ -52,6 +52,29 @@ const REGISTRY = /(\bsalarié|\bsalarie|effectif|chiffre d['’]affaires|\bca de
 const SITE_AS_SOURCE = /(sur votre site|d['’]apr[èe]s votre site|votre site (indique|pr[ée]sente|mentionne)|j['’]ai vu (que|sur)|en parcourant)/i;
 const VAGUE_PROOF = /(exemples? testables?|sur mon site|démos? en ligne)/i;
 
+/**
+ * Règles Cowork (itération 1, 04/10/2026) — ce qui faisait perdre 2 à 4 points.
+ *
+ * 1. Ouvertures qui DÉCRIVENT au lieu de poser un fait : « Dans le commerce de
+ *    gros… », « Spi Energie travaille dans… », « Vous fabriquez… ».
+ * 2. Conséquence molle : « prend du temps ». Il faut un effet observable
+ *    (client qui attend, retard, double saisie, relance oubliée, devis tardif).
+ * 3. Hypothèse visible : « si vos demandes… ».
+ * 4. Clichés de fin : un seul « sans ressaisie / sans oubli », et pas celui déjà
+ *    servi dans les autres mails du jour.
+ */
+export const DESCRIPTIVE_OPENING =
+  /^(dans (le|la|les|l['’]|un|une)\s|en tant que\b|[^.]{0,60}?\b(travaille|travaillent|est sp[ée]cialis[ée]e?|sont sp[ée]cialis[ée]s|op[èe]re|intervient|est active?|[ée]volue) (dans|en|sur)\b|vous (vendez|fabriquez|[êe]tes|proposez|distribuez|produisez|concevez|commercialisez)\b)/iu;
+/** « Spi Energie vend… » : le NOM en sujet d'un verbe de description (sensible à la casse). */
+export const NAME_DESCRIBES = /^[A-ZÀ-Ý][\w&.' -]{1,40} (vend|fabrique|distribue|produit|commercialise|est un|est une)\b/u;
+export const SOFT_CONSEQUENCE =
+  /(prend(re)?( aussi| souvent| vite)? (du|beaucoup de|un) temps|peut (vite |aussi )?prendre du temps|prend du temps|chronophage|demande (de l['’][ée]nergie|du temps|beaucoup de temps)|co[uû]te (du|beaucoup de) temps|mobilise du temps)/i;
+export const VISIBLE_HYPOTHESIS = /\bsi (vos|vous|ces|des|votre|les|leurs?|elles?|ils?)\b|s['’]ils?\b|[ée]ventuellement|peut-[êe]tre|le cas [ée]ch[ée]ant/i;
+export const ENDING_CLICHES = /sans (ressaisie|oubli|erreur|double saisie|perte)|\bni (oubli|ressaisie|erreur|double saisie|perte)/gi;
+
+/** Le cliché de fin d'une proposition (pour varier entre les mails du jour). */
+export const clichesOf = (text: string) => [...new Set((text.match(ENDING_CLICHES) ?? []).map((value) => value.toLowerCase()))];
+
 const normalize = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 export interface RuleContext {
@@ -63,6 +86,8 @@ export interface RuleContext {
   companyName: string;
   forbiddenNames?: readonly string[];
   offerNumbers?: readonly number[];
+  /** Clichés de fin déjà servis dans les autres mails du jour : à ne pas reprendre. */
+  usedCliches?: readonly string[];
 }
 
 export interface RuleResult {
@@ -94,6 +119,18 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
     }
     if (/;/.test(sentence)) failures.push(`Point-virgule (« ${sentence.slice(0, 50)}… ») : fais deux phrases courtes ou supprimes-en une.`);
   }
+
+  // --- Règles Cowork : décrire n'est pas accrocher, « prend du temps » n'est pas une conséquence.
+  const opening = parts.hook.trim().match(DESCRIPTIVE_OPENING) ?? parts.hook.trim().match(NAME_DESCRIBES);
+  if (opening) failures.push(`Accroche descriptive (« ${opening[0].trim()} ») : pose un FAIT PROPRE comme contexte (sites, gamme, clientèle), pas une description de leur métier ou de leur secteur.`);
+  const soft = written.match(SOFT_CONSEQUENCE);
+  if (soft) failures.push(`Conséquence molle (« ${soft[0]} ») : dis l'effet observable — client qui attend, retard de livraison, double saisie, relance oubliée, devis qui part tard.`);
+  const hypothesis = written.match(VISIBLE_HYPOTHESIS);
+  if (hypothesis) failures.push(`Hypothèse visible (« ${hypothesis[0]} ») : affirme ce que tu sais, ou n'en parle pas.`);
+  const cliches = written.match(ENDING_CLICHES) ?? [];
+  if (cliches.length > 1) failures.push(`${cliches.length} clichés de fin (${cliches.join(", ")}) : un seul par mail.`);
+  const repeated = clichesOf(written).filter((value) => (context.usedCliches ?? []).includes(value));
+  if (repeated.length) failures.push(`« ${repeated[0]} » est déjà dans un autre mail du jour : formule le bénéfice autrement.`);
 
   // --- Proposition : une phrase, un bénéfice, pas une liste d'étapes.
   const proposal = sentencesOf(parts.proposal);

@@ -6,5 +6,7 @@
   { "match": "%SPI ENERGIE%" },
   { "match": "%AGCEI%" },
   { "match": "%LYPSIS%" },
-  { "match": "%ACTUEL VERANDA%" }
+  { "match": "%ACTUEL VERANDA%" },
+  { "match": "%BLANCHARD ET BLAZQUEZ%" },
+  { "match": "%PRAT SERVICE%" }
 ]

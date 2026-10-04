@@ -1,5 +1,5 @@
 import type { AskFn } from "@/lib/ai/chat";
-import { REFERENCE_MAILS, TARGET_EXAMPLE } from "./references";
+import { CALIBRATION, COWORK_REFERENCES, REFERENCE_MAILS, TARGET_EXAMPLE } from "./references";
 
 /**
  * JUGE LLM (modèle léger, rôle `judge`) : une note sur 10 avec une grille
@@ -13,8 +13,8 @@ import { REFERENCE_MAILS, TARGET_EXAMPLE } from "./references";
 export const PASS_SCORE = 9;
 
 export const GRID = [
-  { id: "accroche", points: 3, rule: "Un fait concret et propre à CETTE entreprise (activité, sites, clientèle, façon dont arrivent les demandes), puis sa conséquence opérationnelle. Deux phrases courtes. 0 si elle cite une offre d'emploi, une donnée de registre, ou explique au prospect son propre métier." },
-  { id: "proposition", points: 2, rule: "Une phrase, un bénéfice métier compréhensible par le dirigeant (temps gagné, erreurs ou retards évités). 0 si c'est une liste d'étapes techniques ou du jargon." },
+  { id: "accroche", points: 3, rule: "Un FAIT PROPRE vérifiable (nombre de sites ou de fournils, gamme précise, type de clients, zone, produit phare), posé comme CONTEXTE, puis une conséquence OBSERVABLE (client qui attend, retard de livraison, double saisie, relance oubliée, devis qui part tard). 3 = les deux, nets. 2 = fait propre mais conséquence un peu générique. 1 = conséquence molle (« prend du temps », « peut prendre du temps ») ou fait trop vague. 0 = ouverture par le secteur (« Dans le commerce de gros »), description du métier (« X travaille dans… », « Vous vendez / fabriquez… »), offre d'emploi, donnée de registre, ou pain supposé." },
+  { id: "proposition", points: 2, rule: "Une phrase, ce qui se fait tout seul chez eux et le bénéfice métier. 1 si une hypothèse est visible (« si vos demandes… ») ou si elle empile les clichés (« sans ressaisie ni oubli »). 0 si c'est une liste d'étapes techniques ou du jargon." },
   { id: "preuve", points: 1, rule: "Le lien de démo correspond au sujet de l'accroche." },
   { id: "clarte", points: 2, rule: "Mots simples du métier du prospect, phrases courtes, aucun jargon (flux, workflow, sigles), se lit d'une traite. Pas de formule creuse." },
   { id: "naturel", points: 1, rule: "On croirait le mail écrit à la main par un indépendant ; ton direct et poli, sans superlatif ni flatterie." },
@@ -35,17 +35,27 @@ export interface JudgeVerdict {
 export function buildJudgePrompt(): string {
   const grid = GRID.map((criterion) => `- ${criterion.id} (${criterion.points} pt) : ${criterion.rule}`).join("\n");
   const references = REFERENCE_MAILS.map((mail) => `[${mail.company}]\n${mail.body}`).join("\n\n");
+  const cowork = COWORK_REFERENCES.map((mail) => `[${mail.company}]\n${mail.body}`).join("\n\n");
+  const calibration = CALIBRATION.map(
+    (item) => `[${item.company}] ${item.score}/10 — ${item.why}\n  Accroche : ${item.hook}\n  Proposition : ${item.proposal}`,
+  ).join("\n");
   return `Tu relis des mails de prospection à froid qu'un indépendant (automatisation et IA pour PME) enverra à des dirigeants de PME françaises.
 Tu notes chaque mail sur 10 avec cette grille, en justifiant chaque point retiré :
 ${grid}
 
-Seuil : 9/10 = envoyable tel quel, sans retouche. Sois exigeant : un mail correct mais générique vaut 6 ou 7.
+Seuil : 9/10 = envoyable tel quel, sans retouche. Sois exigeant : un mail correct mais générique vaut 6 ou 7. Dans le doute entre deux notes, prends la plus basse.
 La salutation, la ligne « Exemple testable en une minute : <lien> » et la demande finale sont imposées : ne les reproche pas, sauf si le lien ne correspond pas au sujet.
 
 MAIL CIBLE — 9/10, le niveau attendu :
 ${TARGET_EXAMPLE}
 
-RÉFÉRENCES — mails réellement envoyés, retenus pour la justesse de leur accroche. Ils datent d'un ancien gabarit : « flux », « Je suis Axel Remillat… » et l'absence de lien y sont des défauts que la grille actuelle sanctionne.
+RÉFÉRENCES 10/10 (réécrites par le chef de projet) :
+${cowork}
+
+ÉTALONNAGE — notes données par le chef de projet ; tu dois retrouver ces notes à ±0,5 :
+${calibration}
+
+RÉFÉRENCES ANCIENNES — mails réellement envoyés, retenus pour la justesse de leur accroche. Ils datent d'un ancien gabarit : « flux », « Je suis Axel Remillat… » et l'absence de lien y sont des défauts que la grille actuelle sanctionne.
 ${references}
 
 Réponds UNIQUEMENT en JSON :
