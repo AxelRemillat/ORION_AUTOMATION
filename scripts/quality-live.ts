@@ -91,6 +91,7 @@ const isBrief = (value: unknown): value is StrategyBrief =>
 
 export interface PreparedMail {
   outcome: QualityOutcome | { error: string };
+  brief?: StrategyBrief;
   civilities: Record<string, "M" | "F" | "?">;
   greeting: string;
 }
@@ -146,5 +147,5 @@ export async function prepareMail(prospect: Prospect, userId: string): Promise<P
     forbiddenNames: factsResult.foreignEntities,
     offerNumbers: offerNumbers(offer),
   });
-  return { outcome, civilities, greeting: salutation };
+  return { outcome, civilities, greeting: salutation, brief };
 }
