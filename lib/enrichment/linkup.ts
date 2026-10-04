@@ -11,6 +11,8 @@
 import { repairMojibake } from "./charset";
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
+import { LINKUP_OPERATIONS, linkupCacheKey, linkupGate } from "@/lib/linkup/gate";
+import { supabaseLinkupStore } from "@/lib/linkup/store";
 import { linkupFetchCost } from "@/lib/usage/pricing";
 import type { Result } from "./http";
 
@@ -119,11 +121,18 @@ export async function fetchWebResults(company: {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };
 
+  // Plafond du jour et cache 90 jours, comme la recherche de site (lib/linkup/gate.ts).
+  const store = supabaseLinkupStore();
+  const query = buildQuery(company);
+  const gate = await linkupGate<WebResult[]>(store, query);
+  if (gate.status === "cache") return { ok: true, data: gate.value };
+  if (gate.status === "blocked") return { ok: false, error: gate.reason };
+
   const response = await searchWithRetry(key, company);
 
   // Linkup ne facture pas les requetes en echec : on ne journalise que le succes.
   if (response.ok) {
-    await recordUnitUsage({ service: "linkup", operation: "search", units: 1 });
+    await recordUnitUsage({ service: "linkup", operation: LINKUP_OPERATIONS.enrich, units: 1 });
   }
   if (!response.ok) return response;
 
@@ -139,6 +148,7 @@ export async function fetchWebResults(company: {
       date: item.publishedDate ?? item.date,
     }));
 
+  await store.write(linkupCacheKey(query), results).catch(() => undefined);
   return { ok: true, data: results };
 }
 
@@ -165,6 +175,9 @@ const PAGE_CHARS = 2_500;
 export async function fetchPage(url: string, prospectId?: string | null): Promise<Result<PageContent>> {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };
+  const gate = await linkupGate<PageContent>(supabaseLinkupStore(), url, new Date(), "fetch");
+  if (gate.status === "cache") return { ok: true, data: gate.value };
+  if (gate.status === "blocked") return { ok: false, error: gate.reason };
 
   const response = await fetchJson<{ markdown?: string }>(
     "https://api.linkup.so/v1/fetch",
@@ -179,7 +192,7 @@ export async function fetchPage(url: string, prospectId?: string | null): Promis
   if (response.ok) {
     await recordUnitUsage({
       service: "linkup",
-      operation: "fetch",
+      operation: LINKUP_OPERATIONS.fetch,
       units: 1,
       unitCost: linkupFetchCost(),
       prospectId,
@@ -190,7 +203,9 @@ export async function fetchPage(url: string, prospectId?: string | null): Promis
   const markdown = repairMojibake(response.data.markdown ?? "").replace(/\n{3,}/g, "\n\n").trim();
   if (!markdown) return { ok: false, error: "page vide" };
 
-  return { ok: true, data: { url, markdown: markdown.slice(0, PAGE_CHARS) } };
+  const page = { url, markdown: markdown.slice(0, PAGE_CHARS) };
+  await supabaseLinkupStore().write(linkupCacheKey(`fetch:${url}`), page).catch(() => undefined);
+  return { ok: true, data: page };
 }
 
 /**

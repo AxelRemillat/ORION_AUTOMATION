@@ -5,6 +5,7 @@ import { hunterStatus } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
 import { chatJson, type AskFn } from "@/lib/ai/chat";
 import { findContact } from "@/lib/contact-finder";
+import { hasMx } from "@/lib/contact-finder/mx";
 import { buildFacts } from "@/lib/emails/derived-facts";
 import { hookReadiness } from "@/lib/emails/hook-readiness";
 import { runStrategist } from "@/lib/emails/strategist";
@@ -123,7 +124,12 @@ export function liveDigDeps(db: Db, userId: string, runId: string): DigDeps {
     findContact: async (prospectId) => {
       // Le site a été cherché AVANT (étape « sites », complétion) : pas de
       // Linkup ici, il ne sert qu'à la recherche de site plafonnée.
-      const contact = await findContact(prospectId, { linkup: 0 });
+      let contact = await findContact(prospectId, { linkup: 0 });
+      // Une adresse dont le domaine n'a pas de MX ne recevra jamais le mail.
+      const domain = contact.email?.split("@")[1];
+      if (contact.email && domain && (await hasMx(domain)) === false) {
+        contact = { ...contact, email: undefined, email_type: undefined, found_by: `${contact.found_by} (écartée : domaine sans MX)` };
+      }
       if (contact.email) {
         await db.from("prospects").update({ email: contact.email }).eq("id", prospectId).is("email", null);
       }
