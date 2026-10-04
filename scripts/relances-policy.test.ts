@@ -96,6 +96,45 @@ async function main() {
     check("BRIOL DIFFUSION : refus, aucun appel OpenAI, aucun brouillon", !result.ok && /opposé/.test(result.error) && written === 0 && db.rows("messages").length === 1, result);
   }
 
+
+  console.log("\n5. Opposition NON VÉRIFIÉE = bloquant (04/10 : ARTFLEX, BOUVET CARTIER)");
+  {
+    const { verifyFollowUpOppositions } = await import("../lib/outbox/opposition-backfill");
+    check("règle : non vérifiée → relance refusée", followUpBlock({ status: "contacte", key_figures: {} }) === "opposition non vérifiée");
+    check("règle : vérifiée (INPI) et non opposée → permise", followUpBlock({ status: "contacte", key_figures: { opposition_checked: true, opposition_source: "inpi" } }) === null);
+
+    const body = `Bonjour,\n\nCorps.\n\n${OPT_OUT_SENTENCE}\n\nAxel Remillat`;
+    const artflex = prospect("ARTFLEX", { key_figures: {} });
+    const db = new FakeDb({ prospects: [artflex], messages: [sentIntro(artflex.id)], inbound_messages: [] });
+    const relance = { id: "a-r1", user_id: USER, prospect_id: artflex.id, type: "relance_1", status: "draft", body, subject: "Re: Objet", deleted_at: null, send_status: "draft", thread_id: "t" };
+    const refused = await checkSendRules(db as unknown as Db, relance as unknown as OutboxMessage, "contact@artflex.fr", new Date("2026-10-05T08:00:00Z"));
+    check("serveur : relance vers une fiche non vérifiée refusée (programmation, envoi, tick)", Boolean(refused && !refused.ok && refused.status === 409 && /non vérifiée/.test(refused.error)), refused);
+    const reply = await checkSendRules(db as unknown as Db, { ...relance, id: "a-rep", type: "reponse" } as unknown as OutboxMessage, "contact@artflex.fr", new Date("2026-10-05T08:00:00Z"));
+    check("serveur : une RÉPONSE reste possible", !reply || reply.ok || !/non vérifiée/.test(reply.error), reply);
+
+    // Préparation : vérification des prospects contactés (INPI simulé).
+    const bouvet = prospect("BOUVET CARTIER IMMOBILIER", { key_figures: {}, siren: "329096846" });
+    const silent = prospect("MUET SARL", { key_figures: {}, siren: "111111111" });
+    const base = new FakeDb({ prospects: [{ ...artflex, siren: "520644386" }, bouvet, silent], prospect_events: [] });
+    const verified: string[] = [];
+    const report = await verifyFollowUpOppositions(base as unknown as Db, USER, {
+      verify: async (siren) => {
+        verified.push(siren);
+        if (siren === "111111111") return { ok: false, error: "quota INPI du jour atteint" };
+        return { ok: true, refuses: siren === "329096846", source: "inpi" };
+      },
+      limit: 40,
+      deadline: Date.now() + 60_000,
+      now: new Date("2026-10-04T15:00:00Z"),
+    });
+    const figures = (pid: string) => (base.rows("prospects").find((row) => row.id === pid)?.key_figures ?? {}) as Record<string, unknown>;
+    check("ARTFLEX : vérifiée (INPI), non opposée → relance de nouveau permise", figures(artflex.id).opposition_checked === true && followUpBlock({ status: "contacte", key_figures: figures(artflex.id) }) === null);
+    check("BOUVET : opposée → relance « bloquée » (rien supprimé)", figures(bouvet.id).refuses_prospecting === true && followUpBlock({ status: "contacte", key_figures: figures(bouvet.id) }) === "opposé à la prospection" && base.rows("prospects").length === 3);
+    check("sans réponse du registre : reste « non vérifiée », bloquée, retentée au run suivant", figures(silent.id).opposition_checked === false && followUpBlock({ status: "contacte", key_figures: figures(silent.id) }) === "opposition non vérifiée");
+    check("résultats écrits dans l'historique (2 vérifications réussies)", base.rows("prospect_events").filter((row) => row.kind === "opposition").length === 2 && report.opposed === 1 && report.failed === 1, report);
+    const again = await verifyFollowUpOppositions(base as unknown as Db, USER, { verify: async (siren) => (verified.push(siren), { ok: false, error: "x" }), limit: 40, deadline: Date.now() + 60_000 });
+    check("déjà vérifiées : jamais revérifiées (seule la muette est retentée)", again.checked === 1);
+  }
   console.log(failures === 0 ? "\nTous les tests des relances passent.\n" : `\n${failures} test(s) en échec.\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

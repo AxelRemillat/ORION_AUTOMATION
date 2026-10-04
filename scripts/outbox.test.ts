@@ -52,7 +52,7 @@ function n8n(status = 200) {
 
 const prospect = (id: string, over: Record<string, unknown> = {}) => ({
   id, user_id: "u1", company_name: id.toUpperCase(), siren: null, website: null, email: null, sector: null,
-  size_range: null, city: null, source: "auto", signals: [], key_figures: {}, pain_point: null,
+  size_range: null, city: null, source: "auto", signals: [], key_figures: { pappers_read: true }, pain_point: null,
   status: "a_contacter", created_at: T0.toISOString(), updated_at: T0.toISOString(), deleted_at: null,
   do_not_contact: false, ...over,
 });

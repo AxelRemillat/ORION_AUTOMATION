@@ -7,7 +7,7 @@ import { blockReason, normalizeSubject, preflight, type PreflightResult } from "
 import { buildDeliverability, DELIVERABILITY_COLUMNS, type SentRow } from "./deliverability";
 import { offWeekend } from "./paris-time";
 import { RELANCE_TYPES, replySinceLastSend } from "./relances";
-import { followUpBlock, followUpRefusal } from "./follow-up-policy";
+import { followUpBlock, followUpRefusal, oppositionVerified } from "./follow-up-policy";
 
 /**
  * LE chemin d'envoi d'un mail — manuel (/api/emails/send) comme programmé
@@ -116,6 +116,11 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
   // seule une réponse à un mail qu'il nous a écrit reste possible.
   if (message.type !== "reponse" && row.key_figures?.refuses_prospecting === true) {
     return fail("blocked", "Prospect opposé à la prospection commerciale : envoi refusé.", 409);
+  }
+  // Opposition NON VÉRIFIÉE : aucune intro ni relance (programmation, envoi
+  // manuel, tick n8n) tant que le registre n'a pas été lu (INPI d'abord).
+  if (message.type !== "reponse" && !oppositionVerified(row.key_figures)) {
+    return fail("blocked", "Opposition à la prospection non vérifiée : vérification au registre (INPI) nécessaire avant tout envoi.", 409);
   }
 
   // Une relance ne part jamais vers un prospect opposé, « ne plus contacter »,
