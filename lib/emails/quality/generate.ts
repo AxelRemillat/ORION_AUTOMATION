@@ -7,7 +7,7 @@ import { judgeMail, PASS_SCORE, type JudgeVerdict } from "./judge";
 import { checkMail, type RuleResult } from "./rules";
 import { assemble, ctaFor, type MailParts } from "./template";
 import { buildWriterPrompt, parseParts } from "./writer";
-import { mailReadiness } from "./readiness";
+import { avecAllowed, mailReadiness } from "./readiness";
 
 /**
  * GÉNÉRATION QUALITÉ — objectif « envoyable sans retouche » (≥ 9/10).
@@ -37,6 +37,8 @@ export interface QualityInput {
   offerNumbers?: readonly number[];
   /** Clichés de fin des autres mails du jour : on varie. */
   usedCliches?: readonly string[];
+  /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
+  dayOpenings?: { total: number; avec: number };
   /** Site connu : sans lui, « profil insuffisant » dit qu'il n'y a rien à lire. */
   website?: string | null;
 }
@@ -85,7 +87,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own: ready.own, activity: input.activity, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, feedback }),
+      buildWriterPrompt({ brief: input.brief, facts, own: ready.own, activity: input.activity, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings), feedback }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -97,8 +99,11 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     }
     // La démo suit ce que le mail DIT (AGCEI, itération 2 : mail sur les devis,
     // démo e-mails choisie d'après un pain « stocks »). Repli : le pain du brief.
-    const written = demoFor(`${parts.subject} ${parts.hook} ${parts.proposal}`);
-    const chosen = written.key === "general" ? demo : written;
+    // La démo illustre la phrase « J'automatise… » d'abord, puis l'objet et
+    // l'accroche, puis le pain du brief (finition Cowork : SPI ENERGIE).
+    const fromProposal = demoFor(parts.proposal);
+    const fromText = demoFor(`${parts.subject} ${parts.hook}`);
+    const chosen = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo;
     const core = assemble(parts, { greeting: input.greeting, demo: chosen, cta });
     const rules = checkMail(parts, core, {
       greeting: input.greeting,
@@ -108,6 +113,8 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       forbiddenNames: input.forbiddenNames,
       offerNumbers: input.offerNumbers,
       usedCliches: input.usedCliches,
+      demo: chosen.key,
+      dayOpenings: input.dayOpenings,
     });
     // Le juge ne note qu'un mail qui passe le garde-fou : inutile de payer pour
     // une note que la règle a déjà tranchée.

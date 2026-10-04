@@ -37,6 +37,7 @@ import type { MessageOrigin, Prospect } from "@/types";
 import { offerNumbers } from "@/app/api/emails/generate/pipeline";
 import { generateQualityDraft } from "@/lib/emails/quality/generate";
 import { clichesOf } from "@/lib/emails/quality/rules";
+import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import { askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
@@ -666,6 +667,10 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     .neq("prospect_id", prospect.id)
     .gte("created_at", dayStart);
   const usedCliches = [...new Set(((todays ?? []) as { body: string }[]).flatMap((row) => clichesOf(row.body)))];
+  const dayOpenings = {
+    total: (todays ?? []).length,
+    avec: ((todays ?? []) as { body: string }[]).filter((row) => opensWithAvec(hookOfBody(row.body))).length,
+  };
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -680,6 +685,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       forbiddenNames: factsResult.foreignEntities,
       offerNumbers: offerNumbers(loaded.offer),
       usedCliches,
+      dayOpenings,
       website: prospect.website,
     }),
   );
@@ -698,7 +704,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     if (stale) {
       await ctx.db
         .from("messages")
-        .update({ quality_reason: draft.blocked })
+        .update({ quality_reason: draft.blocked, quality_score: null })
         .eq("id", stale)
         .eq("status", "draft")
         .eq("edited_by_hand", false);

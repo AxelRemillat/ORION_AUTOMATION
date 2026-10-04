@@ -29,6 +29,8 @@ export interface WriterInput {
   cta: string;
   /** Clichés de fin déjà servis aujourd'hui (« sans ressaisie »…). */
   usedCliches?: readonly string[];
+  /** Quota d'ouvertures « Avec… » atteint pour la journée (1 mail sur 3). */
+  avoidAvec?: boolean;
   /** Consignes de réécriture (validateur, puis juge). */
   feedback?: string | null;
 }
@@ -69,14 +71,15 @@ ${other || "- (rien de plus)"}
    Phrase 1 : un FAIT PROPRE ci-dessus (nombre de sites ou de fournils, gamme précise, type de clients, zone, produit phare),
    posé comme CONTEXTE de la tâche : « Avec un catalogue qui mêle X et Y, chaque commande… », « Avec quatre fournils et des clients en restauration, … ».
    Phrase 2 : la conséquence OBSERVABLE — un client qui attend, une livraison en retard, une double saisie, une relance oubliée, un devis qui part tard.
-   OUVERTURES INTERDITES : « Dans le/la <secteur> », « <Nom> travaille dans / est spécialisé dans / vend / fabrique », « Vous vendez / fabriquez / êtes ».
+${input.avoidAvec ? "   N'OUVRE PAS par « Avec » (déjà un mail sur trois aujourd'hui) : « Chez … », « Entre … et … », « Quand … », ou le fait en sujet (« Vos quatre fournils livrent … »).\n" : ""}   OUVERTURES INTERDITES : « Dans le/la <secteur> », « <Nom> travaille dans / est spécialisé dans / vend / fabrique », « Vous vendez / fabriquez / êtes ».
    CONSÉQUENCES INTERDITES : « prend du temps », « peut prendre du temps », « est chronophage », « demande de l'énergie ».
    INTERDIT AUSSI : l'offre d'emploi ou « vous recrutez » ; une donnée de registre (effectif, chiffre d'affaires, date de création) ;
    « sur votre site » ; le point-virgule ; toute hypothèse visible (« si vos demandes… », « éventuellement »).
 2. PROPOSITION — UNE phrase de ${LIMITS.proposalWords} mots au plus, qui commence par « J'automatise ce type de tâche pour des PME : ».
    Ce qui se fait tout seul chez eux (une ou deux actions concrètes), et ce que ça change (ce qui est signalé, ce qui part tout de suite, ce que le client reçoit).
    AU PLUS UN cliché du type « sans ressaisie » / « sans oubli »${input.usedCliches?.length ? ` — et PAS ceux déjà employés aujourd'hui : ${input.usedCliches.join(", ")}` : ""}. Le plus souvent, aucun.
-   Pas d'étapes techniques, pas de liste, pas d'hypothèse. Elle colle à la démo « ${input.demo.label} ».
+   Pas d'étapes techniques, pas de liste, pas d'hypothèse. Elle décrit CE QUE MONTRE la démo « ${input.demo.label} » :
+   le lien posé ensuite doit illustrer exactement cette phrase (devis → préparer le devis ; tri, aiguillage, commandes → les e-mails reçus).
 3. OBJET — 2 à 6 mots, vocabulaire métier, majuscule initiale puis minuscules (« Commandes des restaurants »). Ni forme juridique, ni « Automatisation de ».
 
 MOTS INTERDITS : ${FORBIDDEN_WORDS.join(", ")}, et tout sigle qu'ils n'emploient pas eux-mêmes. Aucune URL, aucune question, aucun chiffre absent des faits, pas de salutation ni de signature.

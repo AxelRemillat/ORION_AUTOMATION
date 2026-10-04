@@ -1,6 +1,7 @@
 import { knownNumbers, type DerivedFact } from "@/lib/emails/derived-facts";
 import { numbersIn, validateSubject } from "@/lib/emails/validate";
-import { ALLOWED_DEMO_URLS } from "./demo-links";
+import { ALLOWED_DEMO_URLS, demoFor, DEMO_LINKS, type DemoLink } from "./demo-links";
+import { avecAllowed, opensWithAvec } from "./readiness";
 import { countWords, PROOF_PREFIX, sentencesOf, type MailParts } from "./template";
 
 /**
@@ -115,6 +116,10 @@ export interface RuleContext {
   offerNumbers?: readonly number[];
   /** Clichés de fin déjà servis dans les autres mails du jour : à ne pas reprendre. */
   usedCliches?: readonly string[];
+  /** Démo retenue : elle doit illustrer la phrase « J'automatise… ». */
+  demo?: DemoLink["key"];
+  /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
+  dayOpenings?: { total: number; avec: number };
 }
 
 export interface RuleResult {
@@ -161,6 +166,21 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
 
   const repeated3 = repeatedGroups(`${parts.subject}. ${written}`);
   if (repeated3.length) failures.push(`« ${repeated3[0]} » revient plus de deux fois : varie (pronom, synonyme, ou supprime une occurrence).`);
+
+  // --- La démo illustre ce que dit la proposition (SPI ENERGIE : tri des
+  // e-mails dans la phrase, agent devis dans le lien).
+  if (context.demo) {
+    const said = demoFor(parts.proposal);
+    if (said.key !== "general" && said.key !== context.demo) {
+      failures.push(`Démo incohérente : la proposition parle de « ${said.label} » mais le lien montre « ${DEMO_LINKS[context.demo].label} ». Aligne la phrase sur la démo, ou l'inverse.`);
+    }
+    if (said.key === "general" && context.demo === "devis") {
+      failures.push("Démo incohérente : le lien montre l'agent devis, mais la proposition ne parle pas de préparer un devis.");
+    }
+  }
+  if (opensWithAvec(parts.hook) && !avecAllowed(context.dayOpenings)) {
+    failures.push("Ouverture « Avec… » déjà trop fréquente aujourd'hui (au plus un mail sur trois) : ouvre autrement (« Chez… », « Entre… et… », « Quand… », ou le fait en sujet).");
+  }
 
   // --- Proposition : une phrase, un bénéfice, pas une liste d'étapes.
   const proposal = sentencesOf(parts.proposal);
