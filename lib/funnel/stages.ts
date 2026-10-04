@@ -1,3 +1,4 @@
+import { recordProspectEvent } from "@/lib/history/record";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HUNTER_EPUISE } from "@/lib/hunter/gate";
 import { cappedScore, subsidiaryBadge } from "@/lib/enrichment/subsidiary";
@@ -399,6 +400,7 @@ export async function recheckOppositions(
       })
       .eq("id", row.prospect_id!)
       .eq("user_id", userId);
+    await recordProspectEvent(db, { prospectId: row.prospect_id!, userId, kind: "opposition", data: { refuses: check.refuses, source: check.source } });
     const verified = { ...contact, opposition_unverified: false, opposition_rechecked_run: runId };
     if (check.refuses) {
       await updateCandidate(db, row.id, {

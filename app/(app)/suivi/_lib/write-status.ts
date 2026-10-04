@@ -1,3 +1,4 @@
+import { recordProspectEvent } from "@/lib/history/record";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, ProspectStatus } from "@/types";
 
@@ -16,6 +17,8 @@ export async function writeProspectStatus(
   prospectId: string,
   status: ProspectStatus,
 ): Promise<WriteStatusResult> {
+  // Statut d'avant : l'historique de la fiche raconte « de → vers ».
+  const { data: before } = await supabase.from("prospects").select("status").eq("id", prospectId).maybeSingle();
   const { data, error } = await supabase
     .from("prospects")
     .update({ status })
@@ -25,6 +28,8 @@ export async function writeProspectStatus(
   if (error) return { ok: false, error: error.message };
   // RLS ou corbeille : aucune ligne touchée, l'écran ne doit pas croire le contraire.
   if (!data?.length) return { ok: false, error: "Prospect introuvable ou dans la corbeille.", notFound: true };
+  const from = (before as { status?: string } | null)?.status ?? null;
+  if (from !== status) await recordProspectEvent(supabase, { prospectId, kind: "status", data: { from, to: status } });
 
   // Le statut est écrit : un échec ici ne doit pas faire annuler le déplacement
   // à l'écran (comportement historique : les relances restent ouvertes).

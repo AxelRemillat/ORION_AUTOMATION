@@ -1,3 +1,4 @@
+import { recordProspectEvent } from "@/lib/history/record";
 import type { Db } from "@/lib/trash/scope";
 
 /**
@@ -39,6 +40,7 @@ export async function confirmOppositionManually(
     .eq("id", prospectId)
     .eq("user_id", userId);
   if (error) return { ok: false, error: error.message };
+  await recordProspectEvent(db, { prospectId, kind: "opposition", data: { refuses: false, source: "manuel" }, at: now.toISOString() });
 
   // Le bandeau de l'entonnoir ne la compte plus parmi les « non vérifiées ».
   const { data: rows } = await db
