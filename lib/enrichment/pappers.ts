@@ -270,7 +270,7 @@ export async function fetchPappers(
     return { ok: false, error: "Pappers non nécessaire pour cette fiche (sobriété : annuaire et INPI suffisent)" };
   }
 
-  // PLAFOND DU JOUR (PAPPERS_DAILY_BUDGET, défaut 40, minuit Paris) : au-delà,
+  // PLAFOND DU JOUR (PAPPERS_DAILY_BUDGET, défaut 24, minuit Paris) : au-delà,
   // aucun appel — l'enrichissement passe au repli gratuit (INPI + Recherche
   // d'entreprises), la vérification d'opposition à l'INPI.
   const gate = await (options.allowance ?? defaultAllowance)().catch(() => ({ allowed: true }) as { allowed: boolean; reason?: string });

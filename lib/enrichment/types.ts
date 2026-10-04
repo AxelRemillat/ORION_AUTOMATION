@@ -52,6 +52,8 @@ export interface CompanyBase {
  * exploitables même sans clé Pappers.
  */
 export interface BaseFigures {
+  /** SIREN de la société mère (dirigeant personne morale), lu dans l'annuaire. */
+  parent_company_siren?: string | null;
   /** Date de creation complete (AAAA-MM-JJ) : base du calcul d'age. */
   founded_on: string | null;
   /** Code INSEE brut de tranche d'effectif : sert aux estimations. */

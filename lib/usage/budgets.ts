@@ -3,7 +3,7 @@ import { parisToUtc, utcToParis } from "@/lib/outbox/paris-time";
 /**
  * PLAFONDS DE DÉPENSE RÉELS (03/10/2026).
  *
- *   - Pappers : PAPPERS_DAILY_BUDGET crédits par jour (défaut 40), remis à zéro
+ *   - Pappers : PAPPERS_DAILY_BUDGET crédits par jour (défaut 24), remis à zéro
  *     à minuit, heure de Paris. Au-delà, l'appel Pappers n'est PAS fait : les
  *     appelants passent au repli gratuit (Recherche d'entreprises + INPI) ou
  *     reportent au lendemain.
@@ -16,7 +16,8 @@ import { parisToUtc, utcToParis } from "@/lib/outbox/paris-time";
  * Code pur ici ; la lecture en base est dans budgets-server.ts.
  */
 
-export const DEFAULT_PAPPERS_DAILY_BUDGET = 40;
+/** ~500 crédits par mois ≈ 24 par jour ouvré (05/10/2026) ; PAPPERS_DAILY_BUDGET le surcharge. */
+export const DEFAULT_PAPPERS_DAILY_BUDGET = 24;
 export const DEFAULT_OPENAI_MONTHLY_BUDGET_EUR = 15;
 export const OPENAI_ALERT_RATIO = 0.8;
 

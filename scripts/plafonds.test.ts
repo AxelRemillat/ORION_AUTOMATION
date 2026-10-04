@@ -34,7 +34,7 @@ const NOW = new Date("2026-10-03T10:00:00Z"); // samedi 12 h à Paris
 async function main() {
   console.log("\n1. Pappers : plafond par jour (minuit Paris)");
   {
-    check("défaut : 40 crédits / jour", pappersDailyBudget({}) === DEFAULT_PAPPERS_DAILY_BUDGET && DEFAULT_PAPPERS_DAILY_BUDGET === 40);
+    check("défaut : 24 crédits / jour (≈ 500 / mois)", pappersDailyBudget({}) === DEFAULT_PAPPERS_DAILY_BUDGET && DEFAULT_PAPPERS_DAILY_BUDGET === 24);
     check("PAPPERS_DAILY_BUDGET=0 : Pappers coupé", !pappersGate(0, pappersDailyBudget({ PAPPERS_DAILY_BUDGET: "0" })).allowed);
     check("39/40 : permis ; 40/40 : refusé, motif lisible", pappersGate(39, 40).allowed && !pappersGate(40, 40).allowed && /40\/40/.test((pappersGate(40, 40) as { reason: string }).reason));
     check("minuit Paris (UTC+2 en octobre)", parisDayStart(NOW).toISOString() === "2026-10-02T22:00:00.000Z");
@@ -102,7 +102,7 @@ async function main() {
     const list = budgets({}, 50, { pappersUsedToday: 12, openai: { spent: 3.2, cap: 15, ratio: 3.2 / 15 } });
     const pappers = list.find((b) => b.label.startsWith("Pappers — plafond"));
     const openai = list.find((b) => b.label.startsWith("OpenAI — plafond"));
-    check("Pappers : 40 crédits / jour, utilisés aujourd'hui", pappers?.value === "40 crédits · 12 utilisés aujourd'hui", pappers);
+    check("Pappers : 24 crédits / jour, utilisés aujourd'hui", pappers?.value === "24 crédits · 12 utilisés aujourd'hui", pappers);
     check("OpenAI : 15 € / mois, dépense et pourcentage", openai?.value === "15,00 € · 3,20 € dépensés (21 %)", openai);
   }
 
