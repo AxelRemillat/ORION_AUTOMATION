@@ -39,8 +39,12 @@ export interface CompletionDeps {
   findContact: (prospectId: string) => Promise<ContactResult>;
   /** Motif si Hunter est bloqué (crédits, budget du jour), `null` sinon. */
   hunterBlocked?: () => Promise<string | null>;
-  /** Site de la fiche : connu, ou résolu et ÉCRIT sur la fiche ; `null` sinon. */
-  resolveSite?: (row: SignalCandidateRow) => Promise<{ website: string; found: boolean } | null>;
+  /**
+   * Site de la fiche : connu, ou résolu et ÉCRIT sur la fiche ; `unreadable` :
+   * un domaine du nom existe mais refuse les lectures automatiques (403 —
+   * SAIREM, 05/10) ; `null` : rien.
+   */
+  resolveSite?: (row: SignalCandidateRow) => Promise<{ website: string; found: boolean } | { unreadable: string } | null>;
   /** Lecture du profil métier (site tout juste trouvé). */
   readProfile?: (prospectId: string) => Promise<void>;
   /** Le domaine reçoit-il du courrier ? `null` = incertain (on garde). */
@@ -64,7 +68,11 @@ export async function completeOne(
 ): Promise<{ found: boolean; email: string | null; website: string | null; unreachable: boolean }> {
   const previous = (row.contact as ContactJson | null) ?? {};
   // 1. Le SITE d'abord : sans domaine, ni la page contact ni Hunter ne peuvent rien.
-  const site = input.deps.resolveSite ? await input.deps.resolveSite(row).catch(() => null) : null;
+  const resolved = input.deps.resolveSite ? await input.deps.resolveSite(row).catch(() => null) : null;
+  const site = resolved && "website" in resolved ? resolved : null;
+  // Site protégé contre les robots : on ne contourne pas la protection ; une
+  // personne, elle, peut l'ouvrir — la fiche reste « À compléter ».
+  const unreadable = resolved && "unreadable" in resolved ? resolved.unreadable : null;
   let contact = await input.deps.findContact(row.prospect_id!).catch(() => null);
   // 2. Une adresse sur un domaine sans MX ne recevra jamais le mail.
   const domain = contact?.email?.split("@")[1];
@@ -89,11 +97,12 @@ export async function completeOne(
             retried_at: (input.now ?? new Date()).toISOString(),
           }),
       ...(site ? { website: site.website } : {}),
+      ...(unreadable ? { site_unreadable: unreadable } : {}),
     },
   });
   // 4. Trois tentatives sans site ni email : « Non joignable ».
   const attempts = starved ? attemptsOf(previous) : attemptsOf(previous) + 1;
-  const unreachable = !contact?.email && !site && attempts >= UNREACHABLE_AFTER;
+  const unreachable = !contact?.email && !site && !unreadable && attempts >= UNREACHABLE_AFTER;
   if (unreachable && input.deps.markUnreachable) {
     await input.deps.markUnreachable(row.prospect_id!, `${attempts} tentatives sans site ni email`).catch(() => undefined);
   }
