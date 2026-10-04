@@ -3,6 +3,7 @@ import { openAiBudget } from "@/lib/usage/budgets-server";
 import type { OpenAiBudgetState } from "@/lib/usage/budgets";
 import { liveDigDeps } from "@/lib/funnel/live";
 import { verifyQueueOppositions } from "@/lib/today/opposition";
+import { verifyFollowUpOppositions } from "@/lib/outbox/opposition-backfill";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import { draftFollowUp } from "@/lib/outbox/follow-up";
 import { draftReply } from "@/lib/outbox/reply-generate";
@@ -74,6 +75,24 @@ async function oppositionStep(ctx: StepContext): Promise<StepOutcome> {
     progress: progress(
       `Opposition : ${report.checked} fiche(s) vérifiée(s), ${report.opposed} opposée(s) écartée(s)${report.failed ? `, ${report.failed} sans réponse` : ""}`,
       2,
+    ),
+  };
+}
+
+/**
+ * Opposition des prospects DÉJÀ CONTACTÉS dont une relance est possible :
+ * vérifiée AVANT l'étape des relances (une relance non vérifiée est bloquée).
+ */
+async function followUpOppositionStep(ctx: StepContext): Promise<StepOutcome> {
+  const report = await verifyFollowUpOppositions(ctx.db, ctx.userId, {
+    verify: (siren) => verifyOpposition(siren, "inpi-first"),
+    limit: OPPOSITIONS_PER_RUN,
+    deadline: deadline(),
+  });
+  return {
+    progress: progress(
+      `Opposition (relances) : ${report.checked} vérifiée(s), ${report.opposed} opposée(s)${report.failed ? `, ${report.failed} sans réponse` : ""}`,
+      3,
     ),
   };
 }
@@ -206,6 +225,7 @@ export const prepareHandler: JobHandler = {
   steps: [
     prepareRun,
     oppositionStep,
+    followUpOppositionStep,
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
     openAiGuarded(triageStep),

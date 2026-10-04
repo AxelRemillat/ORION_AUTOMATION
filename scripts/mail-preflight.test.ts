@@ -173,7 +173,7 @@ const rule = (result: ReturnType<typeof preflight>, id: string) => result.checks
     const T0 = parisToUtc("2026-09-29", "08:30") as Date; // mardi
     const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
     const prospect = (id: string, over: Record<string, unknown> = {}) => ({
-      id, user_id: "u1", company_name: id.toUpperCase(), website: null, email: null, key_figures: {}, status: "contacte",
+      id, user_id: "u1", company_name: id.toUpperCase(), website: null, email: null, key_figures: { pappers_read: true }, status: "contacte",
       deleted_at: null, do_not_contact: false, created_at: T0.toISOString(), ...over,
     });
     const mail = (id: string, prospectId: string, fixture: (typeof SENT_0928)[keyof typeof SENT_0928], over: Record<string, unknown> = {}) => ({
@@ -258,8 +258,8 @@ const rule = (result: ReturnType<typeof preflight>, id: string) => result.checks
     });
     const fake = new FakeDb({
       prospects: [
-        { id: "p1", user_id: "u1", company_name: "P1", email: "p@x.fr", key_figures: {}, website: null, status: "contacte", deleted_at: null, do_not_contact: false },
-        { id: "p2", user_id: "u1", company_name: "P2", email: "p@x.fr", key_figures: {}, website: null, status: "contacte", deleted_at: null, do_not_contact: false },
+        { id: "p1", user_id: "u1", company_name: "P1", email: "p@x.fr", key_figures: { pappers_read: true }, website: null, status: "contacte", deleted_at: null, do_not_contact: false },
+        { id: "p2", user_id: "u1", company_name: "P2", email: "p@x.fr", key_figures: { pappers_read: true }, website: null, status: "contacte", deleted_at: null, do_not_contact: false },
       ],
       messages: [
         { id: "intro1", prospect_id: "p1", user_id: "u1", type: "intro", status: "sent", sent_at: "2026-09-28T07:00:00.000Z", body: "x", deleted_at: null, send_status: "sent" },
