@@ -7,6 +7,7 @@ import { isEmail } from "@/lib/mail-preflight/recipient";
 import { discard, saveDraft, scheduleBatch, undoDiscard, type CoreResult, type DraftEdit, type ScheduleRequest } from "@/lib/today/actions-core";
 import { loadCapacity } from "@/lib/today/capacity";
 import { completeOne } from "@/lib/today/complete";
+import { liveCompletionDeps } from "@/lib/today/complete-live";
 import { exclusionOf } from "@/lib/today/items";
 import { draftIfReady } from "@/lib/today/auto-draft";
 import { draftReply } from "@/lib/outbox/reply-generate";
@@ -79,7 +80,7 @@ export async function completeToday(input: { prospectId: string; candidateId: st
   if (input.candidateId) {
     const { data } = await ctx.db.from("signal_candidates").select("*").eq("id", input.candidateId).maybeSingle();
     if (!data) return { ok: false, error: "Fiche introuvable." };
-    const outcome = await completeOne(ctx.db, data as SignalCandidateRow, { deps: { findContact: deps.findContact }, runId: `manuel-${Date.now()}` });
+    const outcome = await completeOne(ctx.db, data as SignalCandidateRow, { deps: liveCompletionDeps(ctx.db, ctx.userId, "manuel"), runId: `manuel-${Date.now()}` });
     if (outcome.email) await draftIfReady(ctx.db, ctx.userId, input.prospectId).catch(() => null);
     return done({ ok: true, email: outcome.email });
   }

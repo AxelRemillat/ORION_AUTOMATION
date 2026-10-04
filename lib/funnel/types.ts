@@ -35,6 +35,8 @@ export interface SignalFacts {
   jobTitle?: string | null;
   city?: string | null;
   postalCode?: string | null;
+  /** Site de l'entreprise donné par l'offre France Travail : première piste de site. */
+  employerUrl?: string | null;
 }
 
 export interface HarvestedSignal {
