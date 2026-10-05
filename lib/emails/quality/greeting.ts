@@ -1,4 +1,4 @@
-import { addresseeOf, civilityFor, usagePerson, type Person } from "@/lib/emails/salutation";
+import { addresseeOf, civilityFor, isCompleteName, usagePerson, type Person } from "@/lib/emails/salutation";
 import type { AskFn } from "@/lib/ai/chat";
 
 /**
@@ -61,7 +61,9 @@ export function buildQualityGreeting(input: GreetingInput, cache: CivilityCache 
   const person = greetingPerson(input);
   if (!person) return "Bonjour,";
   const civility = civilityOf(person.first, cache);
-  return civility ? `Bonjour ${civility} ${person.last},` : "Bonjour,";
+  if (!civility) return "Bonjour,";
+  // Nom coupé ou douteux (« Danancher- ») : la civilité seule, jamais un nom tronqué.
+  return isCompleteName(person.last) ? `Bonjour ${civility} ${person.last},` : `Bonjour ${civility},`;
 }
 
 /** Prénom qu'il faudrait demander au modèle (inconnu de la table et du cache). */
