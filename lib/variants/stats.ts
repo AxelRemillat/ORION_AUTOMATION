@@ -9,6 +9,7 @@ import { isBounce } from "@/lib/settings/volumes";
 export const SIGNIFICANT_SENDS = 30;
 
 export const VARIANT_ATTRIBUTES = [
+  { key: "family", label: "Famille de mail" },
   { key: "hook_type", label: "Type d'accroche" },
   { key: "pain", label: "Pain" },
   { key: "demo", label: "Démo citée" },
@@ -30,6 +31,7 @@ export interface SentVariant {
   subject_style?: string | null;
   opening_word?: string | null;
   length?: number | null;
+  family?: string | null;
 }
 
 export interface InboundLite {
