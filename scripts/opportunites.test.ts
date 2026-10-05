@@ -60,7 +60,7 @@ async function main() {
     const shape =
       item.platform === "codeur"
         ? text.endsWith(`\n\nAxel Remillat`) && core.includes("visible dans mon portfolio Codeur (") && !/axelremillat|https?:/.test(text)
-        : text.endsWith("Axel Remillat · AI & automation for small businesses · axelremillat.com") && core.includes(`src=${item.platform}`);
+        : text.endsWith("Axel Remillat · AI & automation for small businesses") && core.includes(`src=${item.platform}`);
     check(`positif ${item.platform} « ${item.title.slice(0, 40)} » (${countWords(core)} mots)`, rules.ok && shape, rules.failures.join(" | "));
   }
   const caught = PROPOSAL_NEGATIVES.map((item) => {
@@ -77,9 +77,16 @@ async function main() {
   console.log("\n4b. Coordonnées et signatures par plateforme (CGU Codeur)");
   {
     check("Codeur : signature = nom seul", proposalSignature("codeur", "fr") === "Axel Remillat");
-    check("Upwork : signature anglaise, sans téléphone", proposalSignature("upwork", "en") === "Axel Remillat · AI & automation for small businesses · axelremillat.com");
-    check("autres plateformes FR : lien /pme, sans téléphone", proposalSignature("malt", "fr").endsWith("axelremillat.com/pme") && !/\d{2}\s?\d{2}\s?\d{2}/.test(proposalSignature("malt", "fr")));
-    check("Codeur : démo citée par son titre de portfolio, sans lien", demoLine("codeur", "fr", "factures") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (Factures et relances de paiement automatisées).");
+    check("Upwork : signature anglaise, sans site ni téléphone", proposalSignature("upwork", "en") === "Axel Remillat · AI & automation for small businesses");
+    check("Malt et ComeUp : signature = nom seul", proposalSignature("malt", "fr") === "Axel Remillat" && proposalSignature("comeup", "fr") === "Axel Remillat");
+    check("« Autre » (FR) : lien /pme, sans téléphone", proposalSignature("autre", "fr").endsWith("axelremillat.com/pme") && !/\d{2}\s?\d{2}\s?\d{2}/.test(proposalSignature("autre", "fr")));
+    check("Codeur : démo factures citée par son titre exact, sans lien", demoLine("codeur", "fr", "factures") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (Extraction automatique de factures).");
+    check("Malt : même règle, portfolio Malt", demoLine("malt", "fr", "devis") === "Une démo d'un cas proche est visible dans mon portfolio Malt (Agent IA de devis par métier).");
+    check("fichier clients sans e-mail : aucune démo citée (jamais ORION)", demoLine("codeur", "fr", "fichier", "Nettoyer un export CSV de 20 000 clients avant migration") === null);
+    check("fichier clients reçu par e-mail : tri des e-mails", demoLine("codeur", "fr", "fichier", "Dédoublonner les contacts reçus par e-mail chaque jour") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (Tri automatique des e-mails entrants).");
+    const noDemo = assembleProposal(PROPOSAL_POSITIVES[3], { language: "fr", demo: "fichier", platform: "comeup", context: "Nettoyer un export CSV" });
+    check("sans démo : la proposition s'assemble sans ligne vide ni lien", !/portfolio|axelremillat/.test(noDemo.text) && !/\n\s*\n\s*\n/.test(noDemo.core));
+    check("ComeUp : URL refusée comme sur Codeur", contactFailures("voir axelremillat.com", "comeup").some((line) => /ComeUp : aucune URL/.test(line)));
     const codeur = (text: string) => contactFailures(text, "codeur");
     check("Codeur : URL refusée (https://…)", codeur("Voir https://exemple.fr").length > 0);
     check("Codeur : domaine nu refusé (axelremillat.com)", codeur("Ma démo sur axelremillat.com").length > 0);

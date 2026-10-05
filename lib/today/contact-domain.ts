@@ -4,6 +4,7 @@
  * airplane-delivery.fr — peut-être une autre entreprise). Tant qu'Axel n'a
  * pas confirmé ce contact, la fiche reste « À compléter ».
  *
+ * Un même nom à l'extension près (imagine-optic.com ↔ .fr) est accepté d'office.
  * Les messageries grand public (gmail, orange…) ne comptent pas : une petite
  * entreprise y a souvent son adresse, ce n'est pas un indice d'erreur.
  */
@@ -30,6 +31,9 @@ export function contactDomainMismatch(email: string | null | undefined, website:
   const emailDomain = registrableDomain((email ?? "").split("@")[1]);
   const siteDomain = registrableDomain(website);
   if (!emailDomain || !siteDomain || WEBMAIL.has(emailDomain) || emailDomain === siteDomain) return null;
+  // Même nom à l'extension près (imagine-optic.com ↔ imagine-optic.fr) : même entreprise, accepté
+  // d'office (Cowork, 05/10/2026) — et seulement dans ce cas.
+  if (emailDomain.split(".")[0] === siteDomain.split(".")[0]) return null;
   return { emailDomain, siteDomain };
 }
 
