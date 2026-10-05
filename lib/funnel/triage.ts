@@ -207,15 +207,30 @@ async function askBatch(ask: TriageAsk, batch: readonly TriageInput[]) {
   return [];
 }
 
+/** Réponse BRUTE du modèle pour un signal, avant les règles du code. */
+export type TriageRaw = z.infer<typeof ITEM>;
+
+/**
+ * UN lot (20 signaux) : réponses brutes par id. Sert au tri découpé en étapes
+ * (lib/funnel/stages.ts) : chaque lot est sauvegardé dès qu'il est trié.
+ */
+export async function askTriageBatch(ask: TriageAsk, batch: readonly TriageInput[]): Promise<Map<string, TriageRaw>> {
+  const items = await askBatch(ask, batch);
+  return new Map(items.map((item) => [item.id, item]));
+}
+
 /** Tri de tous les signaux filtrés, par lots de 20. */
 export async function triage(ask: TriageAsk, inputs: readonly TriageInput[]): Promise<TriageOutcome[]> {
-  const outcomes: TriageOutcome[] = [];
+  const raws = new Map<string, TriageRaw>();
   for (let index = 0; index < inputs.length; index += TRIAGE_BATCH) {
-    const batch = inputs.slice(index, index + TRIAGE_BATCH);
-    const items = await askBatch(ask, batch);
-    const byId = new Map(items.map((item) => [item.id, item]));
-    outcomes.push(...batch.map((input) => settle(input, byId.get(input.id))));
+    for (const [id, item] of await askTriageBatch(ask, inputs.slice(index, index + TRIAGE_BATCH))) raws.set(id, item);
   }
+  return settleAll(inputs, raws);
+}
+
+/** Règles du code puis quotas, sur l'ENSEMBLE du run une fois tout trié. */
+export function settleAll(inputs: readonly TriageInput[], raws: ReadonlyMap<string, TriageRaw | null | undefined>): TriageOutcome[] {
+  const outcomes = inputs.map((input) => settle(input, raws.get(input.id) ?? undefined));
   // Pains passe-partout plafonnés, une offre par entreprise, puis variété : un
   // seul type de signal ne peut pas rafler les retenus (cf. quota.ts).
   const familyOf = new Map(inputs.map((input) => [input.id, signalFamily(input.signal)]));

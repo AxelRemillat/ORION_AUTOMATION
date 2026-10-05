@@ -17,7 +17,7 @@ import type { InboundMessage, Prospect } from "@/types";
 import { createJob } from "../store";
 import { EMPTY_PROGRESS } from "../types";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
-import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, SITE_STEPS, siteStep, STEP_BUDGET_MS, triageStep } from "./funnel";
+import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, SITE_STEPS, siteStep, STEP_BUDGET_MS, TRIAGE_STEPS, triageStep } from "./funnel";
 import { closeRunOnFailure, prepareRun, runIdOf } from "./search-shared";
 
 /** Variante de `search_signals` qui prépare « Aujourd'hui » (voir handlers/index.ts). */
@@ -277,7 +277,8 @@ export const prepareHandler: JobHandler = {
     followUpOppositionStep,
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
-    openAiGuarded(triageStep),
+    // Le tri juste après le filtre (étape 14) : un job en cours y reprend.
+    ...Array.from({ length: TRIAGE_STEPS }, (_, i) => openAiGuarded(triageStep(i))),
     // Trois étapes de 240 s : ~40 retenus par run (France Travail élargi, 05/10/2026).
     ...Array.from({ length: SITE_STEPS }, () => siteStep),
     ...Array.from({ length: DIG_STEPS }, (_, i) => openAiGuarded(digStep(i, DIG_STEPS))),
@@ -285,7 +286,7 @@ export const prepareHandler: JobHandler = {
     widenStep,
     whenWidened(harvestStep),
     ...Array.from({ length: FILTER_STEPS }, (_, i) => whenWidened(filterStep(i))),
-    whenWidened(openAiGuarded(triageStep)),
+    ...Array.from({ length: TRIAGE_STEPS }, (_, i) => whenWidened(openAiGuarded(triageStep(i)))),
     whenWidened(siteStep),
     ...Array.from({ length: WIDEN_DIG_STEPS }, (_, i) => whenWidened(openAiGuarded(digStep(i, WIDEN_DIG_STEPS)))),
     openAiGuarded(completeStep),

@@ -125,11 +125,22 @@ export async function siteStep(ctx: StepContext): Promise<StepOutcome> {
   };
 }
 
-export async function triageStep(ctx: StepContext): Promise<StepOutcome> {
-  const runId = runIdOf(ctx);
-  const { triaged, retained } = await runTriageStage(ctx.db, ctx.userId, runId, liveTriageAsk);
-  return { progress: progress(`Tri : ${retained} retenus sur ${triaged}`, 55) };
-}
+/**
+ * Étapes de tri : ~20 s par lot de 20, ~10 lots par étape de 240 s. Cinq
+ * étapes couvrent ~1 000 filtrés ; une étape sans rien à trier est immédiate.
+ */
+export const TRIAGE_STEPS = 5;
+
+export const triageStep = (index: number, total = TRIAGE_STEPS) =>
+  async function triage(ctx: StepContext): Promise<StepOutcome> {
+    const runId = runIdOf(ctx);
+    const { triaged, retained, pending, total: all } = await runTriageStage(ctx.db, ctx.userId, runId, liveTriageAsk, {
+      deadline: Date.now() + STEP_BUDGET_MS,
+      final: index === total - 1,
+    });
+    if (pending) return { progress: progress(`Tri : ${triaged} / ${all} signaux triés`, 45 + Math.round(((index + 1) / total) * 10)) };
+    return { progress: progress(`Tri : ${retained} retenus sur ${triaged}`, 55) };
+  };
 
 export const digStep = (index: number, total = DIG_STEPS) =>
   async function dig(ctx: StepContext): Promise<StepOutcome> {
@@ -189,7 +200,7 @@ export const signalFunnelHandler: JobHandler = {
     prepareRun,
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
-    triageStep,
+    ...Array.from({ length: TRIAGE_STEPS }, (_, i) => triageStep(i)),
     // Trois étapes de 240 s : ~40 retenus par run (France Travail élargi, 05/10/2026).
     ...Array.from({ length: SITE_STEPS }, () => siteStep),
     ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i)),
