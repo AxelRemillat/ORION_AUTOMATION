@@ -82,7 +82,9 @@ async function main() {
     const existing = (drafts?.[0] as { id: string } | undefined)?.id;
     let messageId = existing ?? null;
     if (existing) {
-      await replaceDraft({ db: db as never, userId }, existing, { subject: result.subject, body: result.body, ...quality }, { auto: true, reason: "complétion automatique (05/10/2026)" });
+      const saved = await replaceDraft({ db: db as never, userId }, existing, { subject: result.subject, body: result.body, ...quality }, { auto: true, reason: "complétion automatique (05/10/2026)" });
+      // Validé, programmé ou retouché : gardé tel quel, sa variante aussi.
+      if (saved === "locked" || saved === "edited") messageId = null;
     } else {
       const { data: inserted } = await db.from("messages").insert({ prospect_id: now.id, user_id: userId, type: "intro", status: "draft", subject: result.subject, body: result.body, ...quality }).select("id").single();
       messageId = (inserted as { id: string } | null)?.id ?? null;

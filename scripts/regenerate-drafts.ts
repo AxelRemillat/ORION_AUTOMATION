@@ -94,6 +94,11 @@ async function main() {
       { subject: outcome.subject, body: outcome.body, quality_score: outcome.score, quality_reason: outcome.needsReview ? outcome.reviewReason : null },
       { auto: true, reason: "régénération gabarit qualité (03/10/2026)" },
     );
+    if (saved === "locked") {
+      report.skipped += 1;
+      console.log(`- ${item.companyName} : validé ou programmé pendant la régénération, gardé tel quel`);
+      continue;
+    }
     if (saved !== "edited") await recordDraftVariant(db, { messageId: item.messageId!, userId, brief, outcome });
     // Civilités résolues : gardées sur la fiche, la question ne se repose pas.
     if (Object.keys(civilities).length) {

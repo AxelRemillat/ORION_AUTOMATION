@@ -776,6 +776,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
         reason: params.auto ? "régénération automatique" : "régénération demandée",
       });
       if (saved === "edited") warnings.push({ source: "openai", message: "Brouillon retouché à la main : il n'est pas réécrit automatiquement." });
+      if (saved === "locked") warnings.push({ source: "openai", message: "Brouillon validé ou programmé : il n'est pas réécrit automatiquement." });
       messageId = existing;
     } else {
       const { data, error } = await ctx.db
