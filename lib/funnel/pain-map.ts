@@ -62,6 +62,11 @@ const RULES: readonly PainRule[] = [
   { pattern: /magasinier|gestionnaire de stock|gestionnaire des stocks|preparateur de commandes/, pain: "gestion du stock" },
   { pattern: /assistant(e)? (administratif|administrative|rh)|assistant(e)? ressources humaines|gestionnaire rh/, pain: "dossiers administratifs et onboarding" },
   { pattern: /service client|charge(e)? de clientele|relation client/, pain: "tri des demandes clients" },
+  // Élargi le 05/10/2026 avec les codes ROME de France Travail (lib/signals/france-travail.ts).
+  { pattern: /gestionnaire (de |des )?commandes|gestion des commandes/, pain: "saisie des commandes et des devis" },
+  { pattern: /office manager|assistant(e)? de direction|assistant(e)? (de |du )?(dirigeant|gerant|pdg)/, pain: "production des documents et classement" },
+  { pattern: /support client|support technique|\bsav\b|apres[- ]vente|hotline|helpdesk/, pain: "tri des demandes clients" },
+  { pattern: /logisticien|affreteur|affretement|exploitant(e)? transport|gestionnaire (de |du )?transport/, pain: "suivi des approvisionnements et des expéditions" },
 ];
 
 function normalize(value: string): string {

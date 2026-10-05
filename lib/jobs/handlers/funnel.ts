@@ -34,6 +34,8 @@ export const FUNNEL_KIND = "funnel";
 /** 600 identités à ~1 par seconde (avec les 429 de l'annuaire) : 8 étapes de 240 s. */
 // 10 étapes de 240 s : 1 800 identités annuaire à ~1 par seconde.
 export const FILTER_STEPS = 10;
+/** Étapes de recherche de site (gratuite, puis Linkup plafonné) : chacune reprend où la précédente s'est arrêtée. */
+export const SITE_STEPS = 3;
 export const DIG_PER_STEP = 4;
 const DIG_STEPS = 5;
 /** Marge avant la coupure d'une fonction (300 s). */
@@ -188,7 +190,8 @@ export const signalFunnelHandler: JobHandler = {
     harvestStep,
     ...Array.from({ length: FILTER_STEPS }, (_, i) => filterStep(i)),
     triageStep,
-    siteStep,
+    // Trois étapes de 240 s : ~40 retenus par run (France Travail élargi, 05/10/2026).
+    ...Array.from({ length: SITE_STEPS }, () => siteStep),
     ...Array.from({ length: DIG_STEPS }, (_, i) => digStep(i)),
     finishStep,
   ],
