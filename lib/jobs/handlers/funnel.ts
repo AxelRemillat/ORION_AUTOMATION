@@ -4,7 +4,7 @@ import { harvest } from "@/lib/funnel/harvest";
 import { liveDigDeps, liveTriageAsk } from "@/lib/funnel/live";
 import { cleanPrefs, readPrefs, type FunnelPrefs } from "@/lib/funnel/settings";
 import { runDigStage, runFilterStage, runTriageStage } from "@/lib/funnel/stages";
-import { candidatesOf, countFunnel, insertHarvest, yieldBySource } from "@/lib/funnel/store";
+import { candidatesOf, countFunnel, insertHarvest, reopenUnexamined, yieldBySource } from "@/lib/funnel/store";
 import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { runSiteStage } from "@/lib/funnel/site-priority";
@@ -58,9 +58,11 @@ export async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   await ctx.progress(progress(`Moisson France Travail et BODACC · ${zone}`, 10));
   const collected = await harvest({ departements: prefs.departements, days: prefs.days });
   const inserted = await insertHarvest(ctx.db, ctx.userId, runId, collected.signals);
+  // Les signaux laissés « non examinés » par un run précédent sont repris ici.
+  const reopened = await reopenUnexamined(ctx.db, ctx.userId, runId, collected.signals.map((signal) => signal.hash));
   return {
     state: { runId, startedAt: ctx.job.state.startedAt ?? new Date().toISOString(), warnings: collected.warnings },
-    progress: progress(`${collected.signals.length} signaux moissonnés, ${inserted} nouveaux`, 20, {
+    progress: progress(`${collected.signals.length} signaux moissonnés, ${inserted} nouveaux, ${reopened} repris (non examinés)`, 20, {
       scanned: collected.signals.length,
       signals: 0,
       sheets: 0,
