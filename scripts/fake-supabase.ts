@@ -100,6 +100,11 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
   lte(column: string, value: string) { return this.where((row) => String(row[column]) <= value); }
   gt(column: string, value: string) { return this.where((row) => String(row[column]) > value); }
   gte(column: string, value: string) { return this.where((row) => String(row[column]) >= value); }
+  /** `%` = n'importe quelle suite, insensible à la casse (comme PostgREST). */
+  ilike(column: string, pattern: string) {
+    const regex = new RegExp(`^${pattern.split("%").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`, "i");
+    return this.where((row) => typeof row[column] === "string" && regex.test(row[column] as string));
+  }
   /** Seul le PREMIER ordre compte (les suivants départagent : sans effet ici). */
   order(column: string, options: { ascending?: boolean } = {}) {
     if (!this.sort) this.sort = { column, ascending: options.ascending !== false };

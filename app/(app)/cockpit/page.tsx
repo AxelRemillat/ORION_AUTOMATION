@@ -55,6 +55,9 @@ export default async function CockpitPage({
   const gmailFailures = messages.filter(
     (message) => message.send_status === "failed" && !message.deleted_at && isGmailAuthError(message.send_error),
   ).length;
+  // Challenges anti-spam pas encore validés : signalés tant que « Validé » n'est pas coché
+  // (Axel ne regarde pas Gmail, la boîte ORION est son seul point de contrôle).
+  const antispamPending = mailbox.received.filter((entry) => entry.autoKind === "antispam" && !entry.validated).length;
   const date = DATE_FORMAT.format(new Date());
   const subtitle = unread
     ? `${unread} réponse${unread > 1 ? "s" : ""} à traiter. Commencez par là.`
@@ -77,6 +80,20 @@ export default async function CockpitPage({
           </span>
           <Link href="/cockpit/mails?onglet=envoyes" className="font-medium underline-offset-2 hover:underline">
             Voir les envois en échec
+          </Link>
+        </div>
+      )}
+
+      {antispamPending > 0 && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warn/45 bg-warn/15 px-4 py-3 text-[13px] text-warn-ink">
+          <span>
+            <strong>
+              {antispamPending} mail{antispamPending > 1 ? "s" : ""} bloqué{antispamPending > 1 ? "s" : ""} par un anti-spam : à valider
+            </strong>{" "}
+            — ouvrez le lien de validation, puis cochez « Validé ».
+          </span>
+          <Link href="/cockpit/mails?onglet=recus" className="font-medium underline-offset-2 hover:underline">
+            Voir les mails reçus
           </Link>
         </div>
       )}

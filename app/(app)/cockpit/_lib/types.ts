@@ -1,4 +1,5 @@
 import type { InboundCategory } from "@/types";
+import type { AutoReplyKind } from "@/lib/inbound/auto-reply";
 
 /**
  * Types du Cockpit encore en usage : l'aperçu de la boîte mail. Les types de
@@ -27,4 +28,10 @@ export interface InboxEntry {
   unread: boolean;
   /** Prospect marqué « ne plus contacter ». */
   doNotContact: boolean;
+  /** Réponse automatique (challenge anti-spam, absence) : pas une réponse du prospect. */
+  autoKind: AutoReplyKind | null;
+  /** Challenge anti-spam : lien de validation, sur le domaine de l'expéditeur uniquement. */
+  validationLink: string | null;
+  /** Challenge anti-spam marqué « Validé » (mail délivré). */
+  validated: boolean;
 }

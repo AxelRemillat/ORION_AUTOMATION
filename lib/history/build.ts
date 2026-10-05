@@ -2,6 +2,7 @@ import { PROSPECT_STATUS_META } from "@/lib/constants";
 import { followUpBlock } from "@/lib/outbox/follow-up-policy";
 import { offWeekend, utcToParis } from "@/lib/outbox/paris-time";
 import { isBounce } from "@/lib/settings/volumes";
+import { autoReplyKind, isProspectReply } from "@/lib/inbound/auto-reply";
 import type { ProspectStatus } from "@/types";
 
 /**
@@ -75,6 +76,9 @@ export function excerptOf(body: string | null | undefined, max = 180): string | 
 
 function inboundBadge(message: { from_email: string; subject?: string | null; body?: string | null; category?: string | null }): { label: string; tone: HistoryTone } {
   if (isBounce(message)) return { label: "rebond", tone: "lost" };
+  const auto = autoReplyKind(message);
+  if (auto === "antispam") return { label: "validation anti-spam", tone: "warn" };
+  if (auto === "absence") return { label: "réponse auto", tone: "neutral" };
   if (message.category === "refus" || /^\s*stop\b/i.test(message.body ?? "")) return { label: "refus", tone: "lost" };
   return { label: "réponse", tone: "good" };
 }
@@ -111,7 +115,7 @@ export function buildHistory(row: HistoryRow, now = new Date()): { events: Histo
 
   // Relances : prévues, soldées, ou BLOQUÉES (même règle que l'envoi).
   const lastSent = messages.filter((message) => message.status === "sent").map((message) => message.sent_at ?? message.created_at).sort().at(-1) ?? "";
-  const replied = inbound.some((message) => !isBounce(message) && message.received_at > lastSent);
+  const replied = inbound.some((message) => isProspectReply(message) && message.received_at > lastSent);
   const blocked = followUpBlock(row, { replied });
   for (const reminder of row.reminders ?? []) {
     const due = offWeekend(new Date(reminder.due_at)).toISOString();
@@ -129,6 +133,7 @@ export function buildHistory(row: HistoryRow, now = new Date()): { events: Histo
     else if (event.kind === "dnc") push({ ...base, title: data.on === false ? "Retiré de « ne plus contacter »" : "Ajouté à « ne plus contacter »", tone: data.on === false ? "neutral" : "lost" });
     else if (event.kind === "opposition") push({ ...base, title: `Opposition vérifiée (${data.source === "inpi" ? "INPI" : data.source === "pappers" ? "Pappers" : "à la main"}) : ${data.refuses ? "opposée" : "non opposée"}`, tone: data.refuses ? "lost" : "good" });
     else if (event.kind === "send_failed") push({ ...base, title: String(data.title ?? "Envoi en échec"), detail: data.detail ? String(data.detail) : null, tone: "lost" });
+    else if (event.kind === "antispam") push({ ...base, title: String(data.title ?? "Validation anti-spam"), tone: /annulée/.test(String(data.title ?? "")) ? "neutral" : "good" });
     else if (event.kind === "note") push({ ...base, title: "Note", body: String(data.text ?? ""), excerpt: excerptOf(String(data.text ?? "")), tone: "neutral" });
     else push({ ...base, title: String(data.title ?? `${event.channel} · ${event.kind}`), detail: data.detail ? String(data.detail) : null, tone: "info" });
   }
@@ -167,7 +172,7 @@ export function buildHistory(row: HistoryRow, now = new Date()): { events: Histo
   events.sort((a, b) => b.at.localeCompare(a.at) || rank(a) - rank(b) || a.id.localeCompare(b.id));
 
   const sent = messages.filter((message) => message.status === "sent" && message.type !== "note").length;
-  const received = inbound.filter((message) => !isBounce(message)).length;
+  const received = inbound.filter(isProspectReply).length;
   const contacts = [...messages.filter((m) => m.status === "sent").map((m) => m.sent_at ?? m.created_at), ...inbound.map((m) => m.received_at)].sort();
   const lastContactAt = contacts.at(-1) ?? null;
   const lastContactDays = lastContactAt ? Math.max(0, Math.floor((now.getTime() - Date.parse(lastContactAt)) / 86_400_000)) : null;

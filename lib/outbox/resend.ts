@@ -1,5 +1,5 @@
 import { recordProspectEvent } from "@/lib/history/record";
-import { isBounce } from "@/lib/settings/volumes";
+import { isProspectReply } from "@/lib/inbound/auto-reply";
 import type { Db } from "@/lib/trash/scope";
 import { scheduleMessage } from "./scheduler";
 import { readableSendError } from "./send-errors";
@@ -58,7 +58,7 @@ export async function prepareResend(db: Db, input: { userId: string; messageId: 
     .eq("prospect_id", message.prospect_id)
     .is("deleted_at", null);
   const replies = (inbound ?? []) as { from_email: string; subject?: string | null; body?: string | null; category?: string | null }[];
-  if (replies.some((reply) => !isBounce(reply) && (reply.category === "refus" || STOP.test(reply.body ?? "") || STOP.test(reply.subject ?? "")))) {
+  if (replies.some((reply) => isProspectReply(reply) && (reply.category === "refus" || STOP.test(reply.body ?? "") || STOP.test(reply.subject ?? "")))) {
     return { ok: false, error: "Le prospect a répondu « stop » : renvoi refusé." };
   }
 

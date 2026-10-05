@@ -1,3 +1,4 @@
+import { autoReplyKind, isProspectReply } from "@/lib/inbound/auto-reply";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toCard } from "@/lib/funnel/view";
 import { readAll } from "@/lib/supabase/read-all";
@@ -60,7 +61,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     db.from("jobs").select("type, status, target").eq("user_id", userId).in("status", ["queued", "running"]),
     loadOffer(db, userId),
     // Toutes les réponses reçues (traitées ou non) : une relance ne part jamais vers qui a répondu.
-    db.from("inbound_messages").select("prospect_id, received_at").eq("user_id", userId).is("deleted_at", null).not("prospect_id", "is", null),
+    db.from("inbound_messages").select("prospect_id, received_at, from_email, subject, body").eq("user_id", userId).is("deleted_at", null).not("prospect_id", "is", null),
   ]);
 
   const prospects = new Map(((prospectsRes.data ?? []) as Prospect[]).map((row) => [row.id, row]));
@@ -86,11 +87,14 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     discardedToday: Boolean(discard && parisDay(discard.created_at) === today),
   });
 
-  const replies = (repliesRes.data ?? []) as { prospect_id: string; received_at: string }[];
+  // Réponses automatiques (anti-spam, absence) écartées : elles n'arrêtent pas les relances.
+  const replies = ((repliesRes.data ?? []) as { prospect_id: string; received_at: string; from_email: string; subject?: string | null; body?: string | null }[]).filter(isProspectReply);
   const raw: RawTodayItem[] = [];
 
   // 1. Réponses à traiter.
   for (const inbound of (inboundRes.data ?? []) as InboundMessage[]) {
+    // Réponse automatique : rien à répondre (elle se traite depuis la boîte mail du Cockpit).
+    if (autoReplyKind(inbound)) continue;
     const draft = messages.find((row) => row.reply_to_inbound_id === inbound.id && row.status === "draft") ?? null;
     const state = classify(discardFor((row) => row.inbound_id === inbound.id));
     if (state.excluded) continue;

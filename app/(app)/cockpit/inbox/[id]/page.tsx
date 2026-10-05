@@ -11,6 +11,8 @@ import { MailTrashButton } from "@/components/outbox/mail-trash-button";
 import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
 import { ReplyComposer } from "./reply-composer";
 import { ThreadView, type ThreadEntry } from "./thread-view";
+import { AntispamControls } from "@/components/outbox/antispam-controls";
+import { AUTO_REPLY_LABEL, antispamLink, autoReplyKind } from "@/lib/inbound/auto-reply";
 
 export const metadata = { title: "Réponse reçue — ORION" };
 
@@ -66,6 +68,9 @@ export default async function InboxThreadPage({ params }: { params: { id: string
   // Seuls les messages réellement partis font partie du fil : un brouillon
   // jamais envoyé n'a pas été lu par l'interlocuteur.
   const replyDraft = await currentReplyDraft(supabase, inbound.id).catch(() => null);
+  // Réponse automatique (anti-spam, absence) : pas de « Répondre » IA.
+  const auto = autoReplyKind(inbound);
+  const figures = (prospect?.key_figures ?? {}) as Record<string, unknown>;
 
   const entries: ThreadEntry[] = [
     ...messages
@@ -120,13 +125,29 @@ export default async function InboxThreadPage({ params }: { params: { id: string
 
       <div className="flex flex-col gap-6">
         <ThreadView entries={entries} />
-        <ReplyComposer
-          key={replyDraft?.id ?? "new"}
-          inboundId={inbound.id}
-          prospectId={inbound.prospect_id}
-          defaultTo={inbound.from_email}
-          draft={replyDraft}
-        />
+        {auto ? (
+          <div className="rounded-lg border border-line bg-surface p-4 text-[13px] text-muted">
+            <p>
+              <strong className="text-text">{AUTO_REPLY_LABEL[auto]}</strong> : ce n&apos;est pas le prospect qui écrit. Ce mail ne compte pas
+              comme réponse et n&apos;arrête pas les relances.
+            </p>
+            {auto === "antispam" && (
+              <AntispamControls
+                inboundId={inbound.id}
+                link={antispamLink(inbound)}
+                validated={Boolean(figures.antispam_inbound_id === inbound.id && figures.antispam_validated_at)}
+              />
+            )}
+          </div>
+        ) : (
+          <ReplyComposer
+            key={replyDraft?.id ?? "new"}
+            inboundId={inbound.id}
+            prospectId={inbound.prospect_id}
+            defaultTo={inbound.from_email}
+            draft={replyDraft}
+          />
+        )}
       </div>
     </>
   );
