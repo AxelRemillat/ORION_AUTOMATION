@@ -351,6 +351,11 @@ async function main() {
     const saved = await replaceDraft({ db: db as unknown as Db, userId: "u" }, "m2", { subject: "Généré", body: "Généré" }, { auto: true, reason: "régénération automatique" });
     check("retouché à la main : jamais réécrit automatiquement", saved === "edited" && db.rows("messages")[0]?.body === "Retouché par Axel" && db.rows("message_versions").length === 0);
   }
+  for (const [label, lock] of [["validé", { validated_at: "2026-10-05T09:45:00Z" }], ["programmé", { scheduled_at: "2026-10-05T10:05:00Z" }]] as const) {
+    const db = new FakeDb({ messages: [{ id: "m4", user_id: "u", status: "draft", send_status: "draft", subject: "Vu par Axel", body: "Texte validé", edited_by_hand: false, deleted_at: null, ...lock }], message_versions: [] });
+    const saved = await replaceDraft({ db: db as unknown as Db, userId: "u" }, "m4", { subject: "Généré", body: "Généré" }, { auto: true, reason: "régénération automatique" });
+    check(`${label} par Axel : jamais réécrit automatiquement`, saved === "locked" && db.rows("messages")[0]?.body === "Texte validé" && db.rows("message_versions").length === 0);
+  }
   {
     const db = new FakeDb({ messages: [{ id: "m3", user_id: "u", status: "draft", send_status: "draft", subject: "Objet", body: "Bonjour,\n\nTexte.", edited_by_hand: false, deleted_at: null }] });
     await saveDraft(db as unknown as Db, "u", { messageId: "m3", subject: "Objet", core: "Bonjour,\n\nTexte.", optOut: false, signature: null }, true);
