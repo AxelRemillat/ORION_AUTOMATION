@@ -27,9 +27,10 @@ export function naturalCase(value: string): string {
   return value
     .trim()
     .split(/\s+/)
-    .map((word, index) => {
+    .map((word, index, words) => {
       const lower = word.toLowerCase();
-      if (index > 0 && particles.has(lower)) return lower;
+      // Particule en tête d'un nom de plusieurs mots aussi : « Monsieur de La Fontaine ».
+      if (particles.has(lower) && (index > 0 || words.length > 1)) return lower;
       return lower.replace(/(^|[-'’])(\p{L})/gu, (_, sep: string, letter: string) => sep + letter.toUpperCase());
     })
     .join(" ");
@@ -45,6 +46,24 @@ const isUpper = (word: string) => word.length > 1 && word === word.toUpperCase()
  * - noms du registre en capitales : « Jean LE GALL » → « Le Gall » ;
  * - sinon, le dernier mot est le nom, le premier le prénom.
  */
+const NAME_PARTICLES = new Set(["de", "du", "des", "d'", "d’", "van", "von", "le", "la"]);
+
+/**
+ * Un nom d'usage COMPLET ? Le 05/10/2026, FONDERIE DE LA BRUCHE est sortie
+ * « Bonjour Madame Danancher-, » : la fiche portait « Danancher-(attard) »
+ * (registre : « DANANCHER (ATTARD) »), et le retrait des parenthèses laissait
+ * un nom coupé. Un nom qui finit ou commence par un trait d'union ou une
+ * apostrophe, qui garde une parenthèse ou un chiffre, n'est pas sûr : on
+ * salue alors par la seule civilité (« Bonjour Madame, »).
+ */
+export function isCompleteName(last: string | null | undefined): boolean {
+  const value = (last ?? "").trim();
+  if (value.length < 2) return false;
+  if (/^[-'’]|[-'’]$/.test(value)) return false;
+  if (/[()[\]\d]/.test(value)) return false;
+  return /\p{L}{2}/u.test(value);
+}
+
 export function usagePerson(fullName: string | null | undefined): Person | null {
   if (!fullName?.trim()) return null;
   let text = fullName.replace(/\s*\(.*?\)\s*/g, " ").replace(/\s+/g, " ").trim();
@@ -63,8 +82,18 @@ export function usagePerson(fullName: string | null | undefined): Person | null 
 
   // Registre : prénoms en casse naturelle, NOM en capitales.
   const upperStart = words.findIndex((word, index) => index > 0 && isUpper(word) && words.slice(index).every(isUpper));
+  // Casse naturelle : un nom à particule commence à la particule (« Jean de La Fontaine »).
+  const particleStart = words.findIndex((word, index) => index > 0 && index < words.length - 1 && NAME_PARTICLES.has(word.toLowerCase()));
   const first = words[0];
-  const last = usage ?? (upperStart > 0 ? words.slice(upperStart).join(" ") : words.length > 1 ? words[words.length - 1] : null);
+  const last =
+    usage ??
+    (upperStart > 0
+      ? words.slice(upperStart).join(" ")
+      : particleStart > 0
+        ? words.slice(particleStart).join(" ")
+        : words.length > 1
+          ? words[words.length - 1]
+          : null);
   if (!last) return null;
   return { first: naturalCase(first), last: naturalCase(last) };
 }
@@ -125,7 +154,10 @@ export function addresseeOf(email: string | null | undefined): Person | null {
   const local = (email ?? "").trim().toLowerCase().split("@")[0];
   if (!local || GENERIC_LOCAL.test(local)) return null;
 
-  const parts = local.split(/[._-]+/).filter(Boolean);
+  // « jean.vacherand-granger@ » : le point sépare prénom et nom, le trait
+  // d'union appartient au NOM composé (avant : « Granger » seul).
+  const dotted = /[._]/.test(local);
+  const parts = local.split(dotted ? /[._]+/ : /[._-]+/).filter(Boolean);
   if (!parts.length) return null;
   // « jbenes » sans séparateur : on ne sait pas où finit le prénom.
   if (parts.length === 1) return parts[0].length >= 4 ? { first: "", last: naturalCase(parts[0]) } : null;
@@ -141,6 +173,7 @@ export function salutationFor(fullName: string | null | undefined): string {
   const person = usagePerson(fullName);
   if (!person) return "Bonjour,";
   const civility = civilityFor(person.first);
+  if (civility && !isCompleteName(person.last)) return `Bonjour ${civility},`;
   /*
    * JAMAIS le prénom seul, jamais « Bonjour Prénom Nom ».
    *

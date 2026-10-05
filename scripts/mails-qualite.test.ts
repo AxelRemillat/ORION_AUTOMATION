@@ -95,6 +95,16 @@ async function main() {
   check("AKTID (aktid@aktid.fr, pas de dirigeant) → « Bonjour, »", buildQualityGreeting({ email: "aktid@aktid.fr" }) === "Bonjour,");
   check("prénom mixte ou inconnu (« ? ») → « Bonjour, »", buildQualityGreeting(ivanov, { gradimir: "?" }) === "Bonjour,");
   check("nominatif sans prénom (j.benes@) → « Bonjour, »", buildQualityGreeting({ email: "j.benes@briol-diffusion.fr", leaderPerson: "Séverine Nassif" }) === "Bonjour,");
+  // Noms composés, à trait d'union, à particule : jamais tronqués (FONDERIE DE LA BRUCHE, 05/10/2026).
+  const fonderie = { email: "contact@fonderiebruche.fr", leaderPerson: "Virginie Danancher-(attard)", contactName: "Virginie Danancher-(attard)" };
+  check("FONDERIE : « Danancher-(attard) » → « Bonjour Madame, », jamais « Danancher- »", buildQualityGreeting(fonderie) === "Bonjour Madame,", buildQualityGreeting(fonderie));
+  check("nom finissant par « - » → civilité seule", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Virginie Danancher-" }) === "Bonjour Madame,");
+  check("registre « Marie VACHERAND-GRANGER » → nom entier", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Marie VACHERAND-GRANGER" }) === "Bonjour Madame Vacherand-Granger,");
+  check("adresse « marie.vacherand-granger@ » → nom entier", buildQualityGreeting({ email: "marie.vacherand-granger@x.fr" }) === "Bonjour Madame Vacherand-Granger,", buildQualityGreeting({ email: "marie.vacherand-granger@x.fr" }));
+  check("« Jean de La Fontaine » → « Monsieur de La Fontaine »", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Jean de La Fontaine" }) === "Bonjour Monsieur de La Fontaine,", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Jean de La Fontaine" }));
+  check("« Jean DE LA FONTAINE » (registre) → « Monsieur de La Fontaine »", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Jean DE LA FONTAINE" }) === "Bonjour Monsieur de La Fontaine,");
+  check("« Yann LE GALL » reste « Le Gall »", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Yann LE GALL" }) === "Bonjour Monsieur Le Gall,");
+  check("« Danancher-Attard » complet → gardé", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Virginie DANANCHER-ATTARD" }) === "Bonjour Madame Danancher-Attard,");
 
   console.log("\n3. Preuve : une démo par pain, URL vérifiée");
   check("devis → /agent", demoFor("préparer les devis de menuiserie").path === "/agent");
