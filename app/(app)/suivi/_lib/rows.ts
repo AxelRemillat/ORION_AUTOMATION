@@ -27,6 +27,8 @@ export interface ProspectRow {
   sendState: ProspectSendState | null;
   /** « Non joignable » : trois tentatives sans site ni email (motif), `null` sinon. */
   unreachable: string | null;
+  /** Famille du dernier mail d'intro (F1 à F4), `null` si inconnue. */
+  family?: string | null;
 }
 
 export interface ProspectSendState {
@@ -97,12 +99,21 @@ export interface DueReminderRow {
   dueAt: string;
 }
 
+/** Famille du mail d'intro le plus récent qui en porte une. */
+function familyOfLatestIntro(messages: readonly Message[], families: ReadonlyMap<string, string>): string | null {
+  const intros = messages.filter((message) => message.type === "intro" && families.has(message.id));
+  intros.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  return intros[0] ? (families.get(intros[0].id) ?? null) : null;
+}
+
 /** Assemble les lignes du pipeline à partir des quatre tables. */
 export function buildRows(
   prospects: Prospect[],
   messages: Message[],
   reminders: Reminder[],
   deals: Deal[],
+  /** Famille de chaque mail (message_variants.family), par id de message. */
+  families: ReadonlyMap<string, string> = new Map(),
 ): ProspectRow[] {
   const messagesByProspect = new Map<string, Message[]>();
   for (const message of messages) {
@@ -150,6 +161,7 @@ export function buildRows(
       actionFacts: facts,
       sendState: prospectSendState(own),
       unreachable: (prospect.key_figures as { unreachable?: { reason?: string } } | null)?.unreachable?.reason ?? null,
+      family: familyOfLatestIntro(own, families),
     };
   });
 }

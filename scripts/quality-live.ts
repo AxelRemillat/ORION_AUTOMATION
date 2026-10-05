@@ -58,6 +58,7 @@ const { incomingLeader } = require("@/lib/emails/incoming-leader") as typeof imp
 import type { AskFn } from "@/lib/ai/chat";
 import type { StrategyBrief } from "@/lib/emails/strategist";
 import type { QualityBlocked, QualityOutcome } from "@/lib/emails/quality/generate";
+import type { MailFamily } from "@/lib/emails/quality/families";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const businessProfile = require("@/lib/jobs/business-profile") as typeof import("@/lib/jobs/business-profile");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -113,7 +114,7 @@ export interface PreparedMail {
 export async function prepareMail(
   prospect: Prospect,
   userId: string,
-  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean; dayOpenings?: { total: number; avec: number } } = {},
+  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean; dayOpenings?: { total: number; avec: number }; family?: MailFamily } = {},
 ): Promise<PreparedMail> {
   const ask = liveAsk(prospect.id);
   // Comme le job : site inconnu → recherche GRATUITE (domaines du nom, validés
@@ -182,6 +183,7 @@ export async function prepareMail(
     prospectId: prospect.id,
     companyName: brief.companyName || singleCompanyName(prospect.company_name),
     activity: profile?.offer ?? prospect.sector ?? null,
+    sector: prospect.sector ?? null,
     prospectText: [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" "),
     greeting: salutation,
     signature: signatureFor(offer),
@@ -190,6 +192,7 @@ export async function prepareMail(
     usedCliches: options.usedCliches,
     dayOpenings: options.dayOpenings,
     website: prospect.website,
+    family: options.family,
   });
   return { outcome, civilities, greeting: salutation, brief, profileNote, foundSite };
 }

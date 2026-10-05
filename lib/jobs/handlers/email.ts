@@ -680,6 +680,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       prospectId: prospect.id,
       companyName: brief.companyName || singleCompanyName(prospect.company_name),
       activity: profile?.offer ?? prospect.sector ?? null,
+      sector: prospect.sector ?? null,
       prospectText: [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" "),
       greeting: buildQualityGreeting(greetingInput, civilities),
       signature: signatureFor(loaded.offer),

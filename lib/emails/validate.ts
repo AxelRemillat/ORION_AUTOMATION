@@ -945,7 +945,8 @@ export function validateEmail(draft: EmailDraft, context: ValidationContext): Va
 export function validateSubject(subject: string, _companyName?: string): string[] {
   const failures: string[] = [];
   const trimmed = subject.trim();
-  const words = trimmed.split(/\s+/).filter(Boolean);
+  // « Qui trie vos commandes ? » : le « ? » précédé de l'espace française n'est pas un mot.
+  const words = trimmed.split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word));
 
   if (words.length < 2 || words.length > 6) {
     failures.push(`Objet de ${words.length} mot(s) : la cible est 2 à 6.`);

@@ -10,8 +10,21 @@ import { DueReminders } from "./_components/due-reminders";
 import { PipelineBoard } from "./_components/pipeline-board";
 import { countValued, sumPipeline } from "./_lib/estimates";
 import { buildRows, type DueReminderRow } from "./_lib/rows";
+import { FamilyStats } from "./_components/family-stats";
+import { loadVariantStats } from "@/lib/variants/load";
 
 export const metadata = { title: "Pipeline · ORION" };
+
+/** Famille (message_variants.family) de chaque intro ; colonne absente ou lecture en échec : aucune. */
+async function introFamilies(supabase: ReturnType<typeof createClient>, ids: string[]): Promise<Map<string, string>> {
+  const families = new Map<string, string>();
+  for (let index = 0; index < ids.length; index += 150) {
+    const { data, error } = await supabase.from("message_variants").select("message_id, family").in("message_id", ids.slice(index, index + 150)).not("family", "is", null);
+    if (error) return families;
+    for (const row of (data ?? []) as { message_id: string; family: string | null }[]) if (row.family) families.set(row.message_id, row.family);
+  }
+  return families;
+}
 
 /** Fin de journée : une relance due aujourd'hui doit apparaître dès le matin. */
 function endOfToday() {
@@ -32,7 +45,10 @@ export default async function SuiviPage() {
     { orderBy: "updated_at", openRemindersOnly: true },
   );
 
-  const rows = buildRows(prospects, messages, reminders, deals);
+  // Expérience n° 2 : famille de chaque intro (badge) et taux par famille (tableau).
+  const families = await introFamilies(supabase, messages.filter((message) => message.type === "intro").map((message) => message.id));
+  const { stats } = await loadVariantStats(supabase);
+  const rows = buildRows(prospects, messages, reminders, deals, families);
   const byId = new Map(prospects.map((prospect) => [prospect.id, prospect]));
   const limit = endOfToday();
 
@@ -77,6 +93,9 @@ export default async function SuiviPage() {
       />
       <DueReminders reminders={due} />
       <PipelineBoard rows={rows} />
+      <div className="mt-6">
+        <FamilyStats rows={stats.family ?? []} />
+      </div>
     </>
   );
 }

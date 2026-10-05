@@ -14,13 +14,15 @@ import { checkMail } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
 import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
 import { subjectArm, subjectArmProblem } from "../lib/emails/quality/experiment";
-import { buildWriterPrompt } from "../lib/emails/quality/writer";
+import { buildWriterPrompt, parseParts } from "../lib/emails/quality/writer";
 import { recordDraftVariant } from "../lib/emails/quality/variant";
 import { avecAllowed, hookOfBody, isBlockedReason, mailReadiness, nameFact, opensWithAvec } from "../lib/emails/quality/readiness";
 import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-finder/free-site";
 import { bySite } from "../lib/funnel/site-priority";
 import { repeatedGroups } from "../lib/emails/quality/rules";
 import { parseVerdict } from "../lib/emails/quality/judge";
+import { allowedFamilies, assembleFamily, bareDemoUrl, F2_INTRO, F4_WHO, familyFor } from "../lib/emails/quality/families";
+import { DEMO_LINKS } from "../lib/emails/quality/demo-links";
 import { FOND_NEGATIVES, VALIDATED_POSITIVES } from "../lib/emails/quality/calibration-set";
 import { numbersIn } from "../lib/emails/validate";
 import { replaceDraft } from "../lib/emails/quality/versions";
@@ -161,7 +163,7 @@ async function main() {
   } as unknown as StrategyBrief;
   const OWN_FACT = { id: "F1", key: "business_locations", label: "Implantations", value: "quatre fournils", source: "Site officiel", hookTier: 1, bodyUsable: true } as unknown as DerivedFact;
   const isDraft = (outcome: unknown): outcome is QualityOutcome => Boolean(outcome && typeof outcome === "object" && "body" in outcome);
-  const base = { brief, facts: [OWN_FACT], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme" };
+  const base = { brief, facts: [OWN_FACT], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme", family: "F1" as const };
   const scripted = (writer: string[], judge: string[]): { ask: AskFn; calls: string[] } => {
     const calls: string[] = [];
     const ask: AskFn = async (role) => {
@@ -221,7 +223,7 @@ async function main() {
     const unsure = mailReadiness({ facts: [OWN_FACT], brief: doubtful });
     check("pain au conditionnel → « pain incertain »", !unsure.ok && unsure.reason.startsWith("pain incertain"));
     const { ask, calls } = scripted([], []);
-    const blocked = await generateQualityDraft({ ...base, facts: [], ask });
+    const blocked = await generateQualityDraft({ ...base, facts: [], activity: null, ask });
     check("bloqué : aucun appel au modèle", "blocked" in blocked && calls.length === 0, JSON.stringify(blocked));
   }
   {
@@ -362,6 +364,66 @@ async function main() {
   check("étiquette « À revoir »", tags.includes("À revoir"));
   check("bloquante : la fiche ne va pas dans « Nouveaux »", !isComplete(tags, true));
   check("note ≥ 9 : rien ne change", isComplete(tagsOf({ email: "a@b.fr", emailDoubtful: false, oppositionUnverified: false, website: "x", hasBusinessProfile: true, hasDraft: true, draftPending: false, qualityReview: false }), true));
+
+  console.log("\nFamilles de mails (expérience n° 2)");
+  {
+    // Attribution : stable, uniforme, F1/F3 exclues sans fait solide.
+    const counts: Record<string, number> = { F1: 0, F2: 0, F3: 0, F4: 0 };
+    for (let index = 0; index < 400; index += 1) counts[familyFor(`prospect-${index}`)] += 1;
+    check("attribution stable par prospect", familyFor("p-x") === familyFor("p-x"));
+    check("attribution ~uniforme sur 4 familles (400 prospects)", Object.values(counts).every((count) => count > 70 && count < 130), JSON.stringify(counts));
+    const thin = new Set(Array.from({ length: 100 }, (_, index) => familyFor(`p-${index}`, allowedFamilies(false))));
+    check("sans fait solide : F2 ou F4 seulement", [...thin].every((family) => family === "F2" || family === "F4") && thin.size === 2, [...thin].join(","));
+
+    // Gabarits et lien suivi.
+    const emails = DEMO_LINKS.emails;
+    const f2 = assembleFamily("F2", { subject: "Demandes de prix", hook: "Pour une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Concrètement, chaque commande reçue serait triée et sa confirmation préparée pour votre validation." }, { greeting: GREETING, demo: emails, cta });
+    check("F2 : présentation imposée en tête", f2.split("\n\n")[1] === F2_INTRO);
+    check("F2 : démo « proche de ce que vous pourriez avoir chez vous » + &f=F2", f2.includes("Une démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&f=F2"));
+    const f4 = assembleFamily("F4", { subject: "Devis de tôlerie", hook: "Elle lit une demande de coffret sur mesure et prépare un brouillon de devis à vérifier.", proposal: F4_WHO }, { greeting: GREETING, demo: DEMO_LINKS.devis, cta });
+    check("F4 : le lien en première ligne, ?f=F4 sur /agent", f4.split("\n\n")[1] === "Une démo testable en une minute : axelremillat.com/agent?f=F4");
+    check("F4 : qui je suis en une ligne, posé par le code", f4.split("\n\n")[3] === F4_WHO);
+    check("URL suivie reconnue par la liste blanche", ALLOWED_DEMO_URLS.includes(bareDemoUrl("axelremillat.com/automatisations?demo=email&f=F3")));
+
+    // Règles par famille.
+    const f3Parts = { subject: "Vos délais de commande ?", hook: "Qui confirme aujourd'hui les délais des commandes de vos clients en restauration ?", proposal: "J'automatise ce suivi : chaque commande reçue par e-mail est repérée et sa confirmation préparée." };
+    const f3Body = assembleFamily("F3", f3Parts, { greeting: GREETING, demo: emails, cta });
+    const f3 = checkMail(f3Parts, f3Body, { ...ruleContext, family: "F3", subjectArm: "question", demo: "emails" });
+    check(`F3 : question d'ouverture permise, ≤ 55 mots (${countWords(f3Body)})`, f3.ok, f3.failures.join(" | "));
+    const f3Long = checkMail({ ...f3Parts, proposal: `${f3Parts.proposal.slice(0, -1)}, puis rangée dans votre suivi des commandes avec les références, les quantités et la date de livraison prévue.` }, assembleFamily("F3", { ...f3Parts, proposal: `${f3Parts.proposal.slice(0, -1)}, puis rangée dans votre suivi des commandes avec les références, les quantités et la date de livraison prévue.` }, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F3", subjectArm: "question", demo: "emails" });
+    check("F3 : au-delà de 55 mots → refusé", !f3Long.ok && f3Long.failures.some((line) => /55 au plus/.test(line)), f3Long.failures.join(" | "));
+    const f1Question = checkMail(f3Parts, assemble(f3Parts, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, demo: "emails" });
+    check("F1 : une question dans l'accroche reste refusée", !f1Question.ok && f1Question.failures.some((line) => /Aucune question/.test(line)));
+    const f2Parts = { subject: "Commandes de restauration", hook: "Dans une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Concrètement, chaque commande reçue serait triée et sa confirmation préparée pour votre validation." };
+    const f2Check = checkMail(f2Parts, assembleFamily("F2", f2Parts, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "emails" });
+    check("F2 : partir de l'activité (« Dans une boulangerie qui… ») est permis", f2Check.ok, f2Check.failures.join(" | "));
+
+    // Rédacteur et juge par famille.
+    check("F4 : le modèle n'écrit pas la ligne « qui je suis »", parseParts(JSON.stringify({ subject: "Devis", hook: "Elle lit une demande." }), "F4")?.proposal === F4_WHO);
+    check("F3 : grille du juge propre (question 4, phrase 3, clarté 2, naturel 1)", parseVerdict(JSON.stringify({ criteria: { question: 4, phrase: 3, clarte: 2, naturel: 1, fait: 2 } }), "F3")?.score === 10);
+    const f2Prompt = buildWriterPrompt({ brief, facts: [OWN_FACT], own: [], activity: "Boulangerie bio", companyName: "Le Pain de Belledonne", demo: emails, greeting: GREETING, cta, family: "F2" });
+    check("F2 : le rédacteur voit la présentation imposée et la démo « proche de chez vous »", f2Prompt.includes(F2_INTRO) && f2Prompt.includes("Une démo proche"));
+
+    // Routage : pain incertain → F2 ou F4, jamais F1 ; sans activité → bloqué.
+    const doubtful = { ...brief, pain: { ...brief.pain, task: "suivi des commandes, à confirmer" } } as typeof brief;
+    const f2Good = JSON.stringify(f2Parts);
+    const f4Good = JSON.stringify({ subject: "Commandes de restauration", hook: "Elle lit une commande de pain reçue par e-mail et prépare sa confirmation, prête à valider.", proposal: "" });
+    const routed: string[] = [];
+    for (const prospectId of ["p-a", "p-b", "p-c", "p-d", "p-e", "p-f"]) {
+      const { ask } = scripted([f2Good, f4Good, f2Good, f4Good], [verdictJson(10), verdictJson(10), verdictJson(10)]);
+      const outcome = await generateQualityDraft({ ...base, family: undefined, brief: doubtful, prospectId, ask });
+      routed.push(isDraft(outcome) ? outcome.family : "blocked" in outcome ? "bloqué" : "erreur");
+    }
+    check("pain incertain + activité → F2 ou F4, jamais F1/F3", routed.every((family) => family === "F2" || family === "F4"), routed.join(","));
+    const { ask: none, calls: noCalls } = scripted([], []);
+    const noActivity = await generateQualityDraft({ ...base, family: undefined, brief: doubtful, activity: null, ask: none });
+    check("pain incertain sans activité → bloqué, aucun appel", "blocked" in noActivity && noCalls.length === 0);
+
+    // Enregistrement de la famille.
+    const variants = new FakeDb({ message_variants: [] });
+    await recordDraftVariant(variants, { messageId: "m-fam", userId: "u", outcome: { subject: "Vos délais ?", body: f3Body, demo: emails.path, subjectStyle: "question", family: "F3" } });
+    check("famille enregistrée dans message_variants", variants.rows("message_variants")[0]?.family === "F3", JSON.stringify(variants.rows("message_variants")[0]));
+  }
 
   console.log("\nCalibrage : les mails validés par Axel passent les règles du code");
   {

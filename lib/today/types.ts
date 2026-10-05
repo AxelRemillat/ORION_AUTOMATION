@@ -95,6 +95,8 @@ export interface TodayItem {
   draftPending: boolean;
   /** Note /10 du juge qualité (petit badge sur la carte) ; `null` = brouillon d'avant. */
   quality?: number | null;
+  /** Famille du mail (expérience n° 2 : F1 à F4), badge sur la carte. */
+  family?: string | null;
   /**
    * La lecture du site pour le profil métier a échoué : pas de brouillon
    * automatique tant que le site n'est pas corrigé ou le profil complété.
