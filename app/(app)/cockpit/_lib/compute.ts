@@ -6,6 +6,7 @@
  */
 import type { InboundMessage, Prospect } from "@/types";
 import type { InboxEntry } from "./types";
+import { antispamLink, autoReplyKind } from "@/lib/inbound/auto-reply";
 
 /** Extrait lisible du corps d'un email : une seule ligne, sans blancs parasites. */
 function excerptOf(body: string, max = 160): string {
@@ -28,6 +29,7 @@ const MAX_INBOX = 30;
 export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[], max = MAX_INBOX): InboxEntry[] {
   const names = new Map(prospects.map((prospect) => [prospect.id, prospect.company_name]));
   const blocked = new Set(prospects.filter((prospect) => prospect.do_not_contact).map((prospect) => prospect.id));
+  const figures = new Map(prospects.map((prospect) => [prospect.id, (prospect.key_figures ?? {}) as Record<string, unknown>]));
 
   return inbound
     .filter((message) => !message.deleted_at)
@@ -45,5 +47,12 @@ export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[], m
       receivedAt: message.received_at,
       unread: !message.handled,
       doNotContact: Boolean(message.prospect_id && blocked.has(message.prospect_id)),
+      autoKind: autoReplyKind(message),
+      validationLink: antispamLink(message),
+      validated: Boolean(
+        message.prospect_id &&
+          figures.get(message.prospect_id)?.antispam_inbound_id === message.id &&
+          figures.get(message.prospect_id)?.antispam_validated_at,
+      ),
     }));
 }

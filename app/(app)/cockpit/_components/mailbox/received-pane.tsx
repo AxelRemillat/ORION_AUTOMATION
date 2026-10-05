@@ -8,6 +8,7 @@ import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
 import { formatParisDateTime } from "@/lib/outbox/paris-time";
 import type { InboxEntry } from "../../_lib/types";
 import { CategoryBadge } from "./category-badge";
+import { AntispamControls } from "@/components/outbox/antispam-controls";
 
 /**
  * Onglet « Reçus » : la liste à gauche, la lecture à droite, avec les actions
@@ -42,7 +43,7 @@ export function ReceivedPane({ entries }: { entries: InboxEntry[] }) {
                   <span className={`truncate text-[13px] ${entry.unread ? "font-semibold text-text" : "font-medium text-muted"}`}>
                     {entry.label}
                   </span>
-                  <CategoryBadge category={entry.category} />
+                  <CategoryBadge category={entry.category} auto={entry.autoKind} />
                 </div>
                 {entry.subject && <p className="mt-0.5 truncate text-[12px] font-medium text-muted">{entry.subject}</p>}
                 <p className="mt-0.5 truncate text-[12px] text-faint">{entry.excerpt}</p>
@@ -66,21 +67,31 @@ export function ReceivedPane({ entries }: { entries: InboxEntry[] }) {
                 </p>
                 <p className="font-data mt-0.5 text-[11px] text-faint">{formatParisDateTime(selected.receivedAt)}</p>
               </div>
-              <CategoryBadge category={selected.category} />
+              <CategoryBadge category={selected.category} auto={selected.autoKind} />
             </div>
 
             <p className="scrollbar-thin mt-4 max-h-64 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-muted">
               {selected.body}
             </p>
 
+            {selected.autoKind === "antispam" && (
+              <AntispamControls inboundId={selected.id} link={selected.validationLink} validated={selected.validated} />
+            )}
+            {selected.autoKind === "absence" && (
+              <p className="mt-4 text-[12px] text-faint">Réponse automatique : pas une réponse du prospect, les relances continuent.</p>
+            )}
+
             <div className="mt-5 flex flex-wrap items-center gap-2">
-              <Link
-                href={`/cockpit/inbox/${selected.id}`}
-                className="inline-flex items-center gap-2 rounded-lg border border-warn/45 bg-warn/10 px-3 py-1.5 text-[13px] font-medium text-warn-ink motion-safe:transition-colors"
-              >
-                <Sparkles className="h-4 w-4" aria-hidden />
-                Répondre
-              </Link>
+              {/* Réponse automatique : personne à qui répondre, pas de « Répondre » IA. */}
+              {!selected.autoKind && (
+                <Link
+                  href={`/cockpit/inbox/${selected.id}`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-warn/45 bg-warn/10 px-3 py-1.5 text-[13px] font-medium text-warn-ink motion-safe:transition-colors"
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                  Répondre
+                </Link>
+              )}
               {selected.prospectId && (
                 <Link href={`/suivi/${selected.prospectId}`} className="text-[13px] text-muted hover:text-text">
                   Fiche prospect

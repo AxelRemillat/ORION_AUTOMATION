@@ -1,5 +1,7 @@
 import { PROSPECT_STATUS_META } from "@/lib/constants";
 import { PROSPECT_STATUSES, type ProspectStatus } from "@/types";
+import { isBounce } from "@/lib/inbound/bounce";
+import { isProspectReply } from "@/lib/inbound/auto-reply";
 
 /**
  * Réglages › Données — les volumes, en code pur.
@@ -14,7 +16,7 @@ import { PROSPECT_STATUSES, type ProspectStatus } from "@/types";
 export interface VolumeInput {
   prospects: { status: ProspectStatus; do_not_contact?: boolean | null }[];
   messages: { status: string; type?: string | null; gmail_message_id?: string | null; send_status?: string | null }[];
-  inbound: { from_email: string; subject?: string | null }[];
+  inbound: { from_email: string; subject?: string | null; body?: string | null }[];
   /** Étiquettes des fiches de « Aujourd'hui » (lib/today). */
   tags: string[];
 }
@@ -34,12 +36,7 @@ export interface Volumes {
   bounceRate: number | null;
 }
 
-const BOUNCE_SENDER = /^(mailer-daemon|postmaster|mail-daemon|noreply-dmarc)@/i;
-const BOUNCE_SUBJECT = /delivery status notification|undeliverable|undelivered mail|mail delivery (failed|subsystem)|non remis|échec de (la )?remise|returned mail/i;
-
-export function isBounce(message: { from_email: string; subject?: string | null }): boolean {
-  return BOUNCE_SENDER.test(message.from_email.trim()) || BOUNCE_SUBJECT.test(message.subject ?? "");
-}
+export { isBounce } from "@/lib/inbound/bounce";
 
 export function buildVolumes(input: VolumeInput): Volumes {
   const sent = input.messages.filter((message) => message.status === "sent").length;
@@ -57,7 +54,8 @@ export function buildVolumes(input: VolumeInput): Volumes {
     doNotContact: input.prospects.filter((prospect) => prospect.do_not_contact).length,
     sent,
     failed: input.messages.filter((message) => message.send_status === "failed").length,
-    replies: input.inbound.filter((message) => !isBounce(message)).length,
+    // Réponses automatiques (anti-spam, absence) exclues : ce ne sont pas des réponses.
+    replies: input.inbound.filter(isProspectReply).length,
     bounces,
     bounceRate: sent > 0 ? bounces / sent : null,
   };

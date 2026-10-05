@@ -1,3 +1,4 @@
+import { autoReplyKind } from "@/lib/inbound/auto-reply";
 import { verifyOpposition } from "@/lib/enrichment/opposition";
 import { openAiBudget, pappersAllowance } from "@/lib/usage/budgets-server";
 import { candidatesOf } from "@/lib/funnel/store";
@@ -145,6 +146,7 @@ async function repliesStep(ctx: StepContext): Promise<StepOutcome> {
   let written = 0;
   for (const inbound of (data ?? []) as InboundMessage[]) {
     if (Date.now() > end) break;
+    if (autoReplyKind(inbound)) continue; // anti-spam, absence : pas de réponse IA
     const outcome = await draftReply(ctx.db, { userId: ctx.userId, inbound }).catch(() => null);
     if (outcome?.ok && !("existing" in outcome)) written += 1;
   }

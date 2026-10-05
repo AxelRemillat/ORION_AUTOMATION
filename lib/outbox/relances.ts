@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/trash/scope";
 import type { MessageType } from "@/types";
+import { isProspectReply } from "@/lib/inbound/auto-reply";
 
 /**
  * Relances et réponses : une relance ne part JAMAIS vers quelqu'un qui a
@@ -55,12 +56,14 @@ export async function replySinceLastSend(db: Db, userId: string, prospectId: str
   if (!lastSent) return null;
   const { data: replies } = await db
     .from("inbound_messages")
-    .select("received_at")
+    .select("received_at, from_email, subject, body")
     .eq("user_id", userId)
     .eq("prospect_id", prospectId)
     .is("deleted_at", null)
     .gte("received_at", lastSent)
     .order("received_at", { ascending: false })
-    .limit(1);
-  return (replies?.[0] as { received_at?: string } | undefined)?.received_at ?? null;
+    .limit(20);
+  // Une réponse automatique (anti-spam, absence) n'arrête pas les relances.
+  const rows = (replies ?? []) as { received_at: string; from_email: string; subject?: string | null; body?: string | null }[];
+  return rows.find((row) => isProspectReply(row))?.received_at ?? null;
 }
