@@ -104,6 +104,24 @@ export const PROPOSAL_NEGATIVES: ProposalReference[] = [
   compose({
     platform: "codeur",
     language: "fr",
+    title: "Automatiser le tri des e-mails de commande (Gmail → Google Sheets)",
+    ad: "60 à 80 e-mails de commande par jour sur Gmail à recopier dans un Google Sheets.",
+    budget: "500 à 1 000 €",
+    demo: "emails",
+    reading:
+      "Vous recevez 60 à 80 commandes par jour dans Gmail et votre équipe recopie le client, les références et les quantités dans un Google Sheets. Vous voulez que ces lignes se remplissent seules.",
+    steps: [
+      "Lecture des e-mails de commande et extraction du client, des références, des quantités et de la date.",
+      "Ajout d'une ligne par commande dans votre Google Sheets, avec signalement des commandes incomplètes.",
+      "Une semaine d'essai sur vos vrais e-mails, puis une courte notice pour votre équipe.",
+    ],
+    framing: "Délai : deux semaines, entre 700 et 950 €. Voyez un exemple sur axelremillat.com/automatisations ou écrivez-moi à axel@axelremillat.com.",
+    question: "Vos commandes arrivent-elles surtout dans le corps du mail ou en pièce jointe PDF ?",
+    why: "Codeur : URL et adresse e-mail dans la proposition — interdit par la plateforme (risque de suppression du compte).",
+  }),
+  compose({
+    platform: "codeur",
+    language: "fr",
     title: "Automatiser le tri des e-mails de commande",
     ad: "60 à 80 e-mails de commande par jour sur Gmail à recopier dans un Google Sheets.",
     budget: "500 à 1 000 €",
