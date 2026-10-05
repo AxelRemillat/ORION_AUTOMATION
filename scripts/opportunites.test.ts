@@ -4,7 +4,7 @@
  */
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { assembleProposal, checkProposal, generateProposal, parseProposalVerdict, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
+import { assembleProposal, checkProposal, contactFailures, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
 import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
@@ -20,7 +20,6 @@ function check(name: string, condition: boolean, detail = "") {
   }
 }
 
-const SIGNATURE = "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme";
 
 async function main() {
   console.log("\n1. Saisie");
@@ -56,19 +55,47 @@ async function main() {
 
   console.log("\n4. Règles : les positifs du calibrage passent, les négatifs sont attrapés");
   for (const item of PROPOSAL_POSITIVES) {
-    const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform, signature: SIGNATURE });
-    const rules = checkProposal(item, core, { language: item.language, budget: item.budget });
-    check(`positif ${item.platform} « ${item.title.slice(0, 40)} » (${countWords(core)} mots)`, rules.ok && text.endsWith(SIGNATURE) && core.includes(`src=${item.platform}`), rules.failures.join(" | "));
+    const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform });
+    const rules = checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform }, text);
+    const shape =
+      item.platform === "codeur"
+        ? text.endsWith(`\n\nAxel Remillat`) && core.includes("visible dans mon portfolio Codeur (") && !/axelremillat|https?:/.test(text)
+        : text.endsWith("Axel Remillat · AI & automation for small businesses · axelremillat.com") && core.includes(`src=${item.platform}`);
+    check(`positif ${item.platform} « ${item.title.slice(0, 40)} » (${countWords(core)} mots)`, rules.ok && shape, rules.failures.join(" | "));
   }
   const caught = PROPOSAL_NEGATIVES.map((item) => {
-    const { core } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform, signature: SIGNATURE });
-    return checkProposal(item, core, { language: item.language, budget: item.budget });
+    const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform });
+    return checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform }, text);
   });
-  check("négatifs : tous refusés par les règles (longueur, flatterie, chiffres inventés, jargon, prix sans budget)", caught.every((rules) => !rules.ok), caught.map((rules) => rules.failures[0]).join(" | "));
-  check("chiffres inventés attrapés (« 30 PME », « 40 % »)", caught[1].failures.some((line) => /non prouvés/.test(line)));
-  check("prix sans budget attrapé", caught[1].failures.some((line) => /Budget absent/.test(line)));
-  check("jargon attrapé (leverage)", caught[2].failures.some((line) => /Jargon/.test(line)));
-  check("flatterie attrapée (« Super projet »)", caught[0].failures.some((line) => /Flatterie/.test(line)));
+  check("négatifs : tous refusés par les règles (coordonnées Codeur, longueur, flatterie, chiffres inventés, jargon, prix sans budget)", caught.every((rules) => !rules.ok), caught.map((rules) => rules.failures[0]).join(" | "));
+  check("Codeur : URL et e-mail dans la proposition attrapés", caught[0].failures.some((line) => /Codeur : aucune URL/.test(line)) && caught[0].failures.some((line) => /Adresse e-mail/.test(line)), caught[0].failures.join(" | "));
+  check("chiffres inventés attrapés (« 30 PME », « 40 % »)", caught[2].failures.some((line) => /non prouvés/.test(line)));
+  check("prix sans budget attrapé", caught[2].failures.some((line) => /Budget absent/.test(line)));
+  check("jargon attrapé (leverage)", caught[3].failures.some((line) => /Jargon/.test(line)));
+  check("flatterie attrapée (« Super projet »)", caught[1].failures.some((line) => /Flatterie/.test(line)));
+
+  console.log("\n4b. Coordonnées et signatures par plateforme (CGU Codeur)");
+  {
+    check("Codeur : signature = nom seul", proposalSignature("codeur", "fr") === "Axel Remillat");
+    check("Upwork : signature anglaise, sans téléphone", proposalSignature("upwork", "en") === "Axel Remillat · AI & automation for small businesses · axelremillat.com");
+    check("autres plateformes FR : lien /pme, sans téléphone", proposalSignature("malt", "fr").endsWith("axelremillat.com/pme") && !/\d{2}\s?\d{2}\s?\d{2}/.test(proposalSignature("malt", "fr")));
+    check("Codeur : démo citée par son titre de portfolio, sans lien", demoLine("codeur", "fr", "factures") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (Factures et relances de paiement automatisées).");
+    const codeur = (text: string) => contactFailures(text, "codeur");
+    check("Codeur : URL refusée (https://…)", codeur("Voir https://exemple.fr").length > 0);
+    check("Codeur : domaine nu refusé (axelremillat.com)", codeur("Ma démo sur axelremillat.com").length > 0);
+    check("Codeur : www refusé", codeur("www.monsite.fr").length > 0);
+    check("Codeur : e-mail refusé", codeur("écrivez à axel@exemple.fr").some((line) => /e-mail/.test(line)));
+    check("Codeur : téléphone refusé (07 49 72 71 92)", codeur("Appelez le 07 49 72 71 92").some((line) => /Téléphone/.test(line)));
+    check("Codeur : téléphone international refusé (+33 7 49 72 71 92)", codeur("+33 7 49 72 71 92").some((line) => /Téléphone/.test(line)));
+    check("Codeur : texte propre accepté", codeur("Une démo d'un cas proche est visible dans mon portfolio Codeur (Agent IA de devis par métier).").length === 0);
+    const upwork = (text: string) => contactFailures(text, "upwork");
+    check("Upwork : lien de démo autorisé", upwork("A one-minute demo: axelremillat.com/agent?src=upwork").length === 0);
+    check("Upwork : e-mail, téléphone et calendrier refusés", upwork("mail me at axel@exemple.fr").length > 0 && upwork("call +33 7 49 72 71 92").length > 0 && upwork("book here: calendly.com/axel").length > 0);
+    const price = (framing: string, budget: string | null = "1 000 à 2 000 €") => checkProposal({ ...PROPOSAL_POSITIVES[0], framing }, assembleProposal({ ...PROPOSAL_POSITIVES[0], framing }, { language: "fr", demo: "emails", platform: "codeur" }).core, { language: "fr", budget, platform: "codeur" });
+    check("Codeur : 1 200–1 900 € sans raison → refusé (repères de lancement)", price("Délai : trois semaines. Budget : entre 1 200 et 1 900 €.").failures.some((line) => /prix de lancement/.test(line)));
+    check("Codeur : 1 200–1 900 € justifié par la complexité → accepté sur ce point", !price("Délai : trois semaines. Entre 1 200 et 1 900 € selon la variété des demandes.").failures.some((line) => /prix de lancement/.test(line)));
+    check("Codeur : 600–950 € → accepté sur ce point", !price("Délai : deux semaines. Entre 600 et 950 €.").failures.some((line) => /prix de lancement/.test(line)));
+  }
 
   console.log("\n5. Boucle : juge ≥ 9, 2 réécritures au plus, meilleur essai gardé");
   {
@@ -83,7 +110,7 @@ async function main() {
       };
       return { ask, calls };
     };
-    const base = { platform: "codeur" as const, language: "fr" as const, title: good.title, body: good.ad, budget: good.budget, need: "Trier les commandes", demo: "emails" as const, signature: SIGNATURE };
+    const base = { platform: "codeur" as const, language: "fr" as const, title: good.title, body: good.ad, budget: good.budget, need: "Trier les commandes", demo: "emails" as const };
     {
       const { ask, calls } = scripted([goodJson], [verdict(10)]);
       const outcome = await generateProposal({ ...base, ask });

@@ -7,12 +7,11 @@
  * Aucune écriture en base (hors journal de coût), aucun envoi.
  */
 import { liveAsk, ownerId, spentSince } from "./quality-live";
-import { judgeProposal, generateProposal, PROPOSAL_PASS, assembleProposal } from "@/lib/opportunities/proposal";
+import { judgeProposal, generateProposal, PROPOSAL_PASS, assembleProposal, checkProposal } from "@/lib/opportunities/proposal";
 import { analyzeOpportunity } from "@/lib/opportunities/analyze";
 import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "@/lib/opportunities/calibration";
 import { proposalLanguage, type Platform } from "@/lib/opportunities/types";
 
-const SIGNATURE = "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme";
 
 const DEMO_ADS: { platform: Platform; title: string; budget: string | null; body: string }[] = [
   {
@@ -38,11 +37,14 @@ async function main() {
   console.log("Calibrage du juge des propositions");
   for (const [label, items, expectPass] of [["positif", PROPOSAL_POSITIVES, true], ["négatif", PROPOSAL_NEGATIVES, false]] as const) {
     for (const item of items) {
-      const { core } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform, signature: SIGNATURE });
-      const verdict = await judgeProposal(ask, { title: item.title, body: item.ad, budget: item.budget, text: core }, "opportunites:calibrage");
-      const ok = verdict !== null && (verdict.score >= PROPOSAL_PASS) === expectPass;
+      const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform });
+      // En production, le juge ne voit que ce qui passe les règles : un négatif est conforme s'il est refusé par l'un OU l'autre.
+      const rules = checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform }, text);
+      const verdict = await judgeProposal(ask, { title: item.title, body: item.ad, budget: item.budget, text: core, platform: item.platform }, "opportunites:calibrage");
+      const judged = verdict !== null && verdict.score >= PROPOSAL_PASS;
+      const ok = expectPass ? rules.ok && judged : !rules.ok || !judged;
       if (!ok) failures += 1;
-      console.log(`  ${ok ? "ok  " : "ÉCART"} ${label} ${item.platform} « ${item.title.slice(0, 50)} » : ${verdict?.score ?? "?"}`);
+      console.log(`  ${ok ? "ok  " : "ÉCART"} ${label} ${item.platform} « ${item.title.slice(0, 50)} » : juge ${verdict?.score ?? "?"} · règles ${rules.ok ? "OK" : `refus (${rules.failures[0]?.slice(0, 60)})`}`);
     }
   }
   const calibrationCost = await spentSince(userId, started);
@@ -64,7 +66,7 @@ async function main() {
         budget: ad.budget,
         need: analysis.need,
         demo: analysis.demo,
-        signature: SIGNATURE,
+        
       });
       const cost = (await spentSince(userId, started)) - before;
       console.log(`\n=== ${ad.platform.toUpperCase()} — ${ad.title}`);

@@ -1,8 +1,6 @@
 import { chatJson, type AskFn } from "@/lib/ai/chat";
 import { getOpenAI } from "@/lib/openai";
 import { recordOpenAiUsage } from "@/lib/usage/record";
-import { loadOffer } from "@/lib/offer/read";
-import { signatureFor } from "@/lib/offer/model";
 import { analyzeOpportunity } from "./analyze";
 import { generateProposal } from "./proposal";
 import { proposalLanguage, type Opportunity } from "./types";
@@ -51,7 +49,6 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
     })
     .eq("id", id);
 
-  const { offer } = await loadOffer(db as never, userId);
   const proposal = await generateProposal({
     ask,
     platform: opportunity.platform,
@@ -61,7 +58,6 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
     budget: opportunity.budget,
     need: analysis.need,
     demo: analysis.demo,
-    signature: signatureFor(offer),
   });
   if ("error" in proposal) return { ok: false, error: proposal.error };
   await db
