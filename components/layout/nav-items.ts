@@ -1,4 +1,4 @@
-import { Gauge, KanbanSquare, Search, Settings, Sun, type LucideIcon } from "lucide-react";
+import { Briefcase, Gauge, KanbanSquare, Search, Settings, Sun, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -31,6 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/cockpit", label: "Cockpit", icon: Gauge, hint: "Vue d'ensemble, activité et consommation" },
   { href: "/recherche", label: "Recherche", icon: Search, hint: "Trouver de nouveaux prospects" },
   { href: "/suivi", label: "Pipeline", icon: KanbanSquare, hint: "Pipeline, relances et deals" },
+  { href: "/opportunites", label: "Opportunités", icon: Briefcase, hint: "Annonces Codeur, Upwork… : analyse et proposition à copier" },
   { href: "/reglages", label: "Réglages", icon: Settings, hint: "Données, coûts, paramètres, intégrations, délivrabilité" },
 ];
 
