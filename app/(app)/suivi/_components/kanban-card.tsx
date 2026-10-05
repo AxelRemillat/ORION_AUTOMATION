@@ -69,8 +69,8 @@ export function KanbanCard({
       </p>
       {row.family && (
         <span
-          title={`Famille de mail : ${FAMILY_LABELS[row.family as MailFamily] ?? row.family}`}
-          className="mr-1 mt-1 inline-block rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 font-data text-[11px] text-primary-ink"
+          title={row.family in FAMILY_LABELS ? `Famille de mail : ${FAMILY_LABELS[row.family as MailFamily]}` : "Intro écrite avant l'expérience des familles"}
+          className={`mr-1 mt-1 inline-block rounded-full border px-2 py-0.5 font-data text-[11px] ${row.family in FAMILY_LABELS ? "border-primary/25 bg-primary/10 text-primary-ink" : "border-line text-faint"}`}
         >
           {row.family}
         </span>

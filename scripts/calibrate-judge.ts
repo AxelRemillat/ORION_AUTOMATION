@@ -9,10 +9,11 @@
  */
 import { liveAsk } from "./quality-live";
 import { judgeMail, PASS_SCORE, PROMPT_POSITIVES } from "@/lib/emails/quality/judge";
-import { FOND_NEGATIVES, VALIDATED_POSITIVES, type ReferenceMail } from "@/lib/emails/quality/calibration-set";
+import { FAMILY_REFERENCES, FOND_NEGATIVES, VALIDATED_POSITIVES, type ReferenceMail } from "@/lib/emails/quality/calibration-set";
+import { assembleFamily, F4_WHO } from "@/lib/emails/quality/families";
 import { CALIBRATION } from "@/lib/emails/quality/references";
 import { assemble, CTA_VARIANTS } from "@/lib/emails/quality/template";
-import { demoForProposal } from "@/lib/emails/quality/demo-links";
+import { demoForProposal, DEMO_LINKS } from "@/lib/emails/quality/demo-links";
 
 const runsIndex = process.argv.indexOf("--runs");
 const runs = runsIndex >= 0 ? Math.max(1, Number(process.argv[runsIndex + 1]) || 1) : 1;
@@ -45,6 +46,16 @@ async function main() {
       const ok = value !== null && value < PASS_SCORE;
       if (!ok) failures += 1;
       console.log(`  ${ok ? "ok  " : "ÉCHEC"} négatif ${mail.company} : ${value ?? "?"}`);
+    }
+    // Familles F2 et F4 : cas réels relus le 05/10 (originaux sous 9, réécritures 9 ou plus).
+    for (const item of FAMILY_REFERENCES) {
+      const parts = { subject: item.subject, hook: item.hook, proposal: item.family === "F4" ? F4_WHO : item.proposal };
+      const body = assembleFamily(item.family, parts, { greeting: "Bonjour Madame Martin,", demo: item.family === "F4" ? DEMO_LINKS.factures : DEMO_LINKS.emails, cta: CTA_VARIANTS[0] });
+      const verdict = await judgeMail(liveAsk(null), { subject: item.subject, body, company: item.company, facts: item.facts, family: item.family }, `qualite:calibrage:${run}`);
+      const value = verdict?.score ?? null;
+      const ok = value !== null && (item.expected === "positif" ? value >= PASS_SCORE : value < PASS_SCORE);
+      if (!ok) failures += 1;
+      console.log(`  ${ok ? "ok  " : "ÉCHEC"} ${item.family} ${item.expected} ${item.company} : ${value ?? "?"} — ${item.why}`);
     }
   }
   console.log(failures ? `\n${failures} écart(s) de calibrage.` : "\nCalibrage conforme : positifs ≥ 9, négatifs < 9.");

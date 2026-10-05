@@ -143,7 +143,8 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
       attempts: contact.attempts ?? (contact.retried_at ? 1 : 0),
       weight: candidate?.weight ?? null,
     });
-    raw.push(intro && families.has(intro.id) ? { ...item, family: families.get(intro.id) } : item);
+    // Brouillon d'avant l'expérience n° 2 (#83) : « non attribué », jamais muet.
+    raw.push(intro ? { ...item, family: families.get(intro.id) ?? UNASSIGNED_FAMILY } : item);
   }
 
   return { today, groups: groupToday(raw) };
@@ -153,6 +154,8 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
  * Famille de chaque brouillon d'intro (message_variants.family). Colonne
  * absente (avant migration) ou lecture en échec : aucun badge, rien ne casse.
  */
+export const UNASSIGNED_FAMILY = "non attribué";
+
 async function draftFamilies(db: Db, ids: readonly string[]): Promise<Map<string, string>> {
   const families = new Map<string, string>();
   for (let index = 0; index < ids.length; index += 150) {

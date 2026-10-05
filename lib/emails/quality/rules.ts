@@ -127,6 +127,8 @@ export interface RuleContext {
   subjectArm?: SubjectArm;
   /** Famille du mail (expérience n° 2) : F1 par défaut. */
   family?: MailFamily;
+  /** Ce que l'on sait d'eux (activité, secteur, tâche) : ancrage des faits de F2 et F4. */
+  knownText?: string;
 }
 
 export interface RuleResult {
@@ -137,6 +139,68 @@ export interface RuleResult {
 function wordHit(text: string, word: string): boolean {
   const pattern = new RegExp(`(^|[^\\p{L}])${normalize(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "u");
   return pattern.test(normalize(text));
+}
+
+/**
+ * F4 — DÉMO HONNÊTE (Cowork, 05/10/2026, DUPONT-BEAUDEUX) : « Elle lit une
+ * commande de vêtements professionnels et prépare la facture » laissait croire
+ * que la démo avait été faite sur LEUR métier. Elle est générique : on décrit
+ * un cas TYPE, puis on dit que le même principe s'appliquerait chez eux.
+ */
+export const F4_TYPE_CASE = /\b(type|g[ée]n[ée]rique)\b/i;
+export const F4_TRANSPOSE = /(m[êe]me principe|s['’]appliquerait|pourrait s['’]appliquer|s['’]adapterait)/i;
+
+/**
+ * F2 — PREMIÈRE PERSONNE, VOIX ACTIVE (AIRPLANE DELIVERY : « les demandes…
+ * sont triées, puis une commande… est préparée » — on ne sait pas qui fait quoi).
+ */
+export const F2_FIRST_PERSON = /^\s*(je |j['’])/i;
+export const PASSIVE_VOICE = /\b(est|sont|serait|seraient|sera|seront|soit|soient)\s+(automatiquement\s+|ensuite\s+|alors\s+|directement\s+)?[a-zàâçéèêëîïôûùüÿœ]+(é|ée|és|ées)\b/i;
+
+/**
+ * F2 et F4 — AUCUN FAIT NON SOURCÉ : les mots précis qui décrivent leur
+ * activité (« avions régionaux ») doivent venir de ce que l'on sait d'eux
+ * (site, registre, profil). Au-delà d'un mot introuvable, on refuse.
+ */
+const GENERIC_WORDS = new Set(
+  "entreprise entreprises demande demandes commande commandes client clients clientes devis facture factures fournisseur fournisseurs livraison livraisons reponse reponses relance relances retard retards delais delai confirmation confirmations reference references quantites quantite verifier verification preparer preparation prepare preparee souvent chaque attente attendre intervention interventions rendez equipe equipes dossier dossiers document documents message messages courriel courriels mail mails e-mail e-mails boite reception service services suivi tableau tableur outil outils planning automatisation automatise automatiser propose proposer valider validation validee brouillon brouillons ressaisie saisie saisir information informations donnees tache taches activite metier metiers secteur production fabrication atelier ateliers chantier chantiers stock stocks article articles produit produits catalogue tarif tarifs prix paiement paiements encaissement relancer classer classement trier triees aiguiller aiguillage orienter traitement traiter commerciale commercial administratif administrative gestion gestionnaire semaine journee matin quotidien regulierement rapidement directement concretement exemple principe appliquerait correspondante correspondant adaptee adaptees habituelle habituellement".split(" "),
+)
+const plainWord = (word: string) => word.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+export function unsourcedTerms(text: string, known: string): string[] {
+  const knownStems = new Set(plainWord(known).split(/[^a-z0-9]+/).filter((word) => word.length >= 5).map((word) => word.slice(0, 6)));
+  const words = plainWord(text).split(/[^a-z0-9-]+/).filter((word) => word.length >= 7 && !GENERIC_WORDS.has(word));
+  return [...new Set(words.filter((word) => !knownStems.has(word.slice(0, 6))))];
+}
+
+/**
+ * Le passage qui DÉCRIT leur activité : l'ouverture de F2 (jusqu'à la
+ * première virgule : « Pour une entreprise de maintenance d'avions
+ * régionaux ») ou, en F4, ce qui suit « s'appliquerait à ». Les verbes et le
+ * reste de la phrase ne sont pas des faits sur eux.
+ */
+export function activityClause(family: MailFamily, hook: string): string {
+  if (family === "F4") return hook.split(/s['’]appliquerait\s+(?:à|aux|au)\s+/i)[1] ?? "";
+  return (sentencesOf(hook)[0] ?? "").split(",")[0] ?? "";
+}
+
+function familyFailures(family: MailFamily, parts: MailParts, context: RuleContext): string[] {
+  const failures: string[] = [];
+  if (family === "F4") {
+    if (!F4_TYPE_CASE.test(parts.hook) || !F4_TRANSPOSE.test(parts.hook)) {
+      failures.push("F4 — démo honnête : la démo est générique. Décris un cas TYPE (« Elle lit une commande type et prépare la facture à valider ») puis « le même principe s'appliquerait à vos … ». Ne laisse jamais croire qu'elle a été faite sur leur métier.");
+    }
+  }
+  if (family === "F2") {
+    if (!F2_FIRST_PERSON.test(parts.proposal)) failures.push("F2 : la proposition commence à la première personne (« Je mets en place… », « J'automatise… », « Je construis… »).");
+    const passive = parts.proposal.match(PASSIVE_VOICE);
+    if (passive) failures.push(`F2 : voix passive (« ${passive[0]} ») — dis qui fait quoi, à la première personne.`);
+  }
+  if ((family === "F2" || family === "F4") && context.knownText !== undefined) {
+    const unsourced = unsourcedTerms(activityClause(family, parts.hook), `${context.knownText} ${context.prospectText} ${context.facts.map((fact) => fact.value).join(" ")}`);
+    if (unsourced.length >= 2) failures.push(`Faits non sourcés (${unsourced.slice(0, 3).join(", ")}) : ne décris leur activité qu'avec ce que l'on sait d'eux (site, registre).`);
+  }
+  return failures;
 }
 
 export function checkMail(parts: MailParts, body: string, context: RuleContext): RuleResult {
@@ -158,10 +222,13 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   } else if (hook.length > LIMITS.hookSentences) failures.push(`Accroche en ${hook.length} phrases : deux au plus (le fait, puis sa conséquence).`);
   for (const sentence of [...hook, ...sentencesOf(parts.proposal)]) {
     const words = countWords(sentence);
-    if (sentence !== parts.proposal.trim() && words > LIMITS.sentenceWords) {
-      failures.push(`Phrase de ${words} mots (« ${sentence.slice(0, 60)}… ») : 20 au plus, coupe-la.`);
+    // F4 : la formule « … type … ; le même principe s'appliquerait à … » tient en une phrase plus longue.
+    const sentenceMax = family === "F4" ? 32 : LIMITS.sentenceWords;
+    if (sentence !== parts.proposal.trim() && words > sentenceMax) {
+      failures.push(`Phrase de ${words} mots (« ${sentence.slice(0, 60)}… ») : ${sentenceMax} au plus, coupe-la.`);
     }
-    if (/;/.test(sentence)) failures.push(`Point-virgule (« ${sentence.slice(0, 50)}… ») : fais deux phrases courtes ou supprimes-en une.`);
+    // F4 : la formule attendue (« … ; le même principe s'appliquerait à … ») porte un point-virgule.
+    if (family !== "F4" && /;/.test(sentence)) failures.push(`Point-virgule (« ${sentence.slice(0, 50)}… ») : fais deux phrases courtes ou supprimes-en une.`);
   }
 
   // --- Règles Cowork : décrire n'est pas accrocher, « prend du temps » n'est pas une conséquence.
@@ -247,6 +314,7 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   if (total > max) failures.push(`${total} mots : ${max} au plus pour ce mail (${min} à ${max}). Retire environ ${total - max + 5} mots.`);
   if (total < min) failures.push(`${total} mots : ${min} au moins pour ce mail, développe un peu.`);
 
+  failures.push(...familyFailures(family, parts, context));
   failures.push(...validateSubject(parts.subject, context.companyName));
   const arm = context.subjectArm ? subjectArmProblem(parts.subject, context.subjectArm) : null;
   if (arm) failures.push(arm);

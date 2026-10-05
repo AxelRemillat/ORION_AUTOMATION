@@ -130,6 +130,24 @@ export async function setTodayContact(input: { prospectId: string; candidateId: 
   return done({ ok: true });
 }
 
+/**
+ * « Contact à vérifier » : Axel confirme que l'adresse (hors du domaine du site)
+ * est bien celle de l'entreprise. La confirmation vaut pour CETTE adresse.
+ */
+export async function confirmTodayContact(input: { prospectId: string }): Promise<CoreResult> {
+  const ctx = await session();
+  if (!ctx) return SESSION;
+  const { data } = await ctx.db.from("prospects").select("email, key_figures").eq("id", input.prospectId).maybeSingle();
+  const row = data as { email?: string | null; key_figures?: Record<string, unknown> | null } | null;
+  if (!row?.email) return { ok: false, error: "Aucune adresse à confirmer." };
+  const { error } = await ctx.db
+    .from("prospects")
+    .update({ key_figures: { ...(row.key_figures ?? {}), contact_confirmed: { email: row.email, at: new Date().toISOString() } } })
+    .eq("id", input.prospectId);
+  if (error) return { ok: false, error: error.message };
+  return done({ ok: true });
+}
+
 /** Brouillon de réponse manquant : même générateur que la préparation du matin. */
 export async function draftReplyToday(inboundId: string): Promise<CoreResult> {
   const ctx = await session();

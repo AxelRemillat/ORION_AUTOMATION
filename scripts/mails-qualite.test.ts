@@ -10,7 +10,7 @@ import { offTargetReason } from "../lib/funnel/off-target";
 import { filterSignal } from "../lib/funnel/filter";
 import { buildQualityGreeting, unknownFirstName } from "../lib/emails/quality/greeting";
 import { ALLOWED_DEMO_URLS, demoFor, demoForProposal } from "../lib/emails/quality/demo-links";
-import { checkMail } from "../lib/emails/quality/rules";
+import { checkMail, unsourcedTerms } from "../lib/emails/quality/rules";
 import { assemble, countWords, ctaFor, CTA_VARIANTS } from "../lib/emails/quality/template";
 import { generateQualityDraft, type QualityOutcome } from "../lib/emails/quality/generate";
 import { subjectArm, subjectArmProblem } from "../lib/emails/quality/experiment";
@@ -20,13 +20,14 @@ import { avecAllowed, hookOfBody, isBlockedReason, mailReadiness, nameFact, open
 import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-finder/free-site";
 import { bySite } from "../lib/funnel/site-priority";
 import { repeatedGroups } from "../lib/emails/quality/rules";
-import { parseVerdict } from "../lib/emails/quality/judge";
+import { buildJudgePrompt, parseVerdict } from "../lib/emails/quality/judge";
 import { allowedFamilies, assembleFamily, bareDemoUrl, F2_INTRO, F4_WHO, familyFor } from "../lib/emails/quality/families";
 import { DEMO_LINKS } from "../lib/emails/quality/demo-links";
 import { FOND_NEGATIVES, VALIDATED_POSITIVES } from "../lib/emails/quality/calibration-set";
 import { numbersIn } from "../lib/emails/validate";
 import { replaceDraft } from "../lib/emails/quality/versions";
 import { tagsOf, isComplete } from "../lib/today/tags";
+import { contactConfirmed, contactDomainMismatch, registrableDomain } from "../lib/today/contact-domain";
 import { saveDraft } from "../lib/today/actions-core";
 import type { AskFn } from "../lib/ai/chat";
 import type { DerivedFact } from "../lib/emails/derived-facts";
@@ -382,13 +383,13 @@ async function main() {
 
     // Gabarits et lien suivi.
     const emails = DEMO_LINKS.emails;
-    const f2 = assembleFamily("F2", { subject: "Demandes de prix", hook: "Pour une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Concrètement, chaque commande reçue serait triée et sa confirmation préparée pour votre validation." }, { greeting: GREETING, demo: emails, cta });
+    const f2 = assembleFamily("F2", { subject: "Demandes de prix", hook: "Pour une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Je mets en place le tri de chaque commande reçue et je prépare sa confirmation, que vous validez." }, { greeting: GREETING, demo: emails, cta });
     check("F2 : présentation imposée en tête", f2.split("\n\n")[1] === F2_INTRO);
-    check("F2 : démo « proche de ce que vous pourriez avoir chez vous » + &f=F2", f2.includes("Une démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&f=F2"));
+    check("F2 : démo « proche de ce que vous pourriez avoir chez vous » + &v=2 discret (jamais « F2 » en clair)", f2.includes("Une démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2") && !/F[1-4]/.test(f2));
     const f4 = assembleFamily("F4", { subject: "Devis de tôlerie", hook: "Elle lit une demande de coffret sur mesure et prépare un brouillon de devis à vérifier.", proposal: F4_WHO }, { greeting: GREETING, demo: DEMO_LINKS.devis, cta });
-    check("F4 : le lien en première ligne, ?f=F4 sur /agent", f4.split("\n\n")[1] === "Une démo testable en une minute : axelremillat.com/agent?f=F4");
+    check("F4 : le lien en première ligne, ?v=4 sur /agent", f4.split("\n\n")[1] === "Une démo testable en une minute : axelremillat.com/agent?v=4");
     check("F4 : qui je suis en une ligne, posé par le code", f4.split("\n\n")[3] === F4_WHO);
-    check("URL suivie reconnue par la liste blanche", ALLOWED_DEMO_URLS.includes(bareDemoUrl("axelremillat.com/automatisations?demo=email&f=F3")));
+    check("URL suivie reconnue par la liste blanche", ALLOWED_DEMO_URLS.includes(bareDemoUrl("axelremillat.com/automatisations?demo=email&v=3")) && ALLOWED_DEMO_URLS.includes(bareDemoUrl("axelremillat.com/agent?v=4")));
 
     // Règles par famille.
     const f3Parts = { subject: "Vos délais de commande ?", hook: "Qui confirme aujourd'hui les délais des commandes de vos clients en restauration ?", proposal: "J'automatise ce suivi : chaque commande reçue par e-mail est repérée et sa confirmation préparée." };
@@ -399,9 +400,44 @@ async function main() {
     check("F3 : au-delà de 55 mots → refusé", !f3Long.ok && f3Long.failures.some((line) => /55 au plus/.test(line)), f3Long.failures.join(" | "));
     const f1Question = checkMail(f3Parts, assemble(f3Parts, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, demo: "emails" });
     check("F1 : une question dans l'accroche reste refusée", !f1Question.ok && f1Question.failures.some((line) => /Aucune question/.test(line)));
-    const f2Parts = { subject: "Commandes de restauration", hook: "Dans une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Concrètement, chaque commande reçue serait triée et sa confirmation préparée pour votre validation." };
+    const f2Parts = { subject: "Commandes de restauration", hook: "Dans une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Je mets en place le tri de chaque commande reçue et je prépare sa confirmation, que vous validez." };
     const f2Check = checkMail(f2Parts, assembleFamily("F2", f2Parts, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "emails" });
     check("F2 : partir de l'activité (« Dans une boulangerie qui… ») est permis", f2Check.ok, f2Check.failures.join(" | "));
+
+    // Relecture Cowork + Axel (05/10) : démo honnête (F4), première personne active (F2), faits sourcés.
+    const f4Rule = (hook: string) =>
+      checkMail({ subject: "Factures clients", hook, proposal: F4_WHO }, assembleFamily("F4", { subject: "Factures clients", hook, proposal: F4_WHO }, { greeting: GREETING, demo: DEMO_LINKS.factures, cta }), {
+        ...ruleContext,
+        prospectText: "vêtements professionnels",
+        family: "F4",
+        subjectArm: "metier",
+        demo: "factures",
+        knownText: "Fabrication de vêtements professionnels",
+      });
+    const dishonest = f4Rule("Elle lit une commande de vêtements professionnels et prépare la facture client à valider.");
+    check("F4 : démo présentée comme faite sur leur métier → refusée (DUPONT-BEAUDEUX)", !dishonest.ok && dishonest.failures.some((line) => /démo honnête/.test(line)), dishonest.failures.join(" | "));
+    const honest = f4Rule("Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels.");
+    check("F4 : cas type + « le même principe s'appliquerait » → accepté", honest.ok, honest.failures.join(" | "));
+    const f2Rule = (proposal: string) =>
+      checkMail({ ...f2Parts, proposal }, assembleFamily("F2", { ...f2Parts, proposal }, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "emails", knownText: "Boulangerie bio, commandes des restaurants" });
+    const passive = f2Rule("Concrètement, les demandes de pièces reçues par e-mail sont triées, puis une commande fournisseur est préparée pour votre validation.");
+    check("F2 : passif sans première personne → refusé (AIRPLANE DELIVERY)", !passive.ok && passive.failures.some((line) => /première personne/.test(line)) && passive.failures.some((line) => /voix passive/.test(line)), passive.failures.join(" | "));
+    const active = f2Rule("Je mets en place le tri de chaque commande reçue et je prépare sa confirmation, que vous validez.");
+    check("F2 : première personne, voix active, faits sourcés → accepté", active.ok, active.failures.join(" | "));
+    check("faits non sourcés repérés (« compagnie aéronautique régionale » absente de ce que l'on sait)", unsourcedTerms("Pour une compagnie aéronautique régionale, chaque intervention attend.", "boulangerie bio commandes").length >= 2);
+    check("faits sourcés (« avions régionaux » lus sur le site) : rien à signaler", unsourcedTerms("En maintenance d'avions régionaux, chaque pièce compte.", "Maintenance en base, pièces détachées pour avions régionaux").length === 0);
+    check("juges F2 et F4 : les cas réels sont montrés en contre-exemples", buildJudgePrompt("F4").includes("commande de vêtements professionnels et prépare la facture") && buildJudgePrompt("F2").includes("revient souvent, avec une intervention qui attend"));
+
+    // Contact à vérifier : e-mail hors du domaine du site (AIRPLANE DELIVERY).
+    check("domaine enregistrable : www.shop.exemple.fr → exemple.fr", registrableDomain("https://www.shop.exemple.fr/contact") === "exemple.fr");
+    check("AIRPLANE : contact@airplane.aero ≠ airplane-delivery.fr → à vérifier", contactDomainMismatch("contact@airplane.aero", "https://airplane-delivery.fr")?.emailDomain === "airplane.aero");
+    check("même domaine (sous-domaine du site) : rien à vérifier", contactDomainMismatch("jean@mail.exemple.fr", "https://www.exemple.fr") === null);
+    check("messagerie grand public (gmail) : pas un indice d'erreur", contactDomainMismatch("boulangerie.martin@gmail.com", "https://boulangerie-martin.fr") === null);
+    const airplaneFigures = { contact_confirmed: { email: "contact@airplane.aero", at: "2026-10-05" } };
+    check("confirmation liée à l'adresse : confirmée", contactConfirmed(airplaneFigures, "Contact@Airplane.aero"));
+    check("nouvelle adresse : la confirmation ne vaut plus", !contactConfirmed(airplaneFigures, "ventes@airplane.aero"));
+    const toCheck = tagsOf({ email: "contact@airplane.aero", emailDoubtful: false, contactToCheck: true, oppositionUnverified: false, website: "x", hasBusinessProfile: true, hasDraft: true, draftPending: false });
+    check("« Contact à vérifier » : bloquant, jamais dans « Nouveaux »", toCheck.includes("Contact à vérifier") && !isComplete(toCheck, true));
 
     // Rédacteur et juge par famille.
     check("F4 : le modèle n'écrit pas la ligne « qui je suis »", parseParts(JSON.stringify({ subject: "Devis", hook: "Elle lit une demande." }), "F4")?.proposal === F4_WHO);
@@ -412,7 +448,7 @@ async function main() {
     // Routage : pain incertain → F2 ou F4, jamais F1 ; sans activité → bloqué.
     const doubtful = { ...brief, pain: { ...brief.pain, task: "suivi des commandes, à confirmer" } } as typeof brief;
     const f2Good = JSON.stringify(f2Parts);
-    const f4Good = JSON.stringify({ subject: "Commandes de restauration", hook: "Elle lit une commande de pain reçue par e-mail et prépare sa confirmation, prête à valider.", proposal: "" });
+    const f4Good = JSON.stringify({ subject: "Commandes de restauration", hook: "Elle lit une commande type et prépare sa confirmation à valider ; le même principe s'appliquerait à vos commandes de pain pour la restauration.", proposal: "" });
     const routed: string[] = [];
     for (const prospectId of ["p-a", "p-b", "p-c", "p-d", "p-e", "p-f"]) {
       const { ask } = scripted([f2Good, f4Good, f2Good, f4Good], [verdictJson(10), verdictJson(10), verdictJson(10)]);
