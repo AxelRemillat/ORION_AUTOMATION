@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Clock, PenLine } from "lucide-react";
 import { formatDate, formatEur } from "@/lib/utils";
 import { TrashButton } from "@/components/trash/trash-button";
 import { SendStateBadge } from "@/components/outbox/send-state-badge";
+import { FAMILY_LABELS, type MailFamily } from "@/lib/emails/quality/families";
 import type { ActionUrgency } from "../_lib/next-action";
 import type { ProspectRow } from "../_lib/rows";
 
@@ -66,6 +67,14 @@ export function KanbanCard({
       <p className="mt-0.5 truncate text-[12px] text-faint">
         {[row.sector, row.city].filter(Boolean).join(" · ") || "—"}
       </p>
+      {row.family && (
+        <span
+          title={`Famille de mail : ${FAMILY_LABELS[row.family as MailFamily] ?? row.family}`}
+          className="mr-1 mt-1 inline-block rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 font-data text-[11px] text-primary-ink"
+        >
+          {row.family}
+        </span>
+      )}
       {row.unreachable && (
         <span title={row.unreachable} className="mt-1 inline-block rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-muted">
           Non joignable

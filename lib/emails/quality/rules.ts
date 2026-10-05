@@ -3,7 +3,9 @@ import { numbersIn, validateSubject } from "@/lib/emails/validate";
 import { ALLOWED_DEMO_URLS, demoForProposal, DEMO_LINKS, type DemoLink } from "./demo-links";
 import { avecAllowed, opensWithAvec } from "./readiness";
 import { subjectArmProblem, type SubjectArm } from "./experiment";
-import { countWords, PROOF_PREFIX, sentencesOf, type MailParts } from "./template";
+import { countWords, sentencesOf, type MailParts } from "./template";
+import { bareDemoUrl, demoTextOf, FAMILY_LIMITS, type MailFamily } from "./families";
+import { DEMO_HOST } from "./demo-links";
 
 /**
  * GARDE-FOU DÉTERMINISTE du gabarit qualité. Chaque message est une consigne
@@ -18,10 +20,10 @@ export const LIMITS = {
   hookSentences: 2,
   sentenceWords: 20,
   proposalWords: 32,
-  /** Corps (salutation → demande), sans mention « stop » ni signature. */
-  minWords: 50,
-  targetWords: 90,
-  maxWords: 110,
+  /** Corps (salutation → demande), sans mention « stop » ni signature : 60 à 90 mots (05/10/2026). */
+  minWords: 60,
+  targetWords: 80,
+  maxWords: 90,
 } as const;
 
 /** Mots que le prospect n'emploie pas, ou qui sonnent « éditeur de logiciel ». */
@@ -123,6 +125,8 @@ export interface RuleContext {
   dayOpenings?: { total: number; avec: number };
   /** Expérience n° 1 : style d'objet imposé. */
   subjectArm?: SubjectArm;
+  /** Famille du mail (expérience n° 2) : F1 par défaut. */
+  family?: MailFamily;
 }
 
 export interface RuleResult {
@@ -137,7 +141,9 @@ function wordHit(text: string, word: string): boolean {
 
 export function checkMail(parts: MailParts, body: string, context: RuleContext): RuleResult {
   const failures: string[] = [];
-  const written = `${parts.hook}\n${parts.proposal}`;
+  const family = context.family ?? "F1";
+  // F4 : la ligne « qui je suis » est posée par le code, seule la description de la démo est écrite par le modèle.
+  const written = family === "F4" ? parts.hook : `${parts.hook}\n${parts.proposal}`;
 
   // --- Salutation : posée par le code, on vérifie qu'elle n'est pas doublée.
   if (!body.startsWith(context.greeting)) failures.push(`Salutation : le mail doit commencer par « ${context.greeting} ».`);
@@ -146,7 +152,10 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   // --- Accroche : 2 phrases au plus, 20 mots chacune.
   const hook = sentencesOf(parts.hook);
   if (!hook.length) failures.push("Accroche vide : un fait concret sur l'entreprise, puis sa conséquence.");
-  if (hook.length > LIMITS.hookSentences) failures.push(`Accroche en ${hook.length} phrases : deux au plus (le fait, puis sa conséquence).`);
+  if (family === "F3") {
+    // F3 : UNE question courte sur qui gère la tâche.
+    if (hook.length !== 1 || !parts.hook.trim().endsWith("?")) failures.push("F3 : l'ouverture est UNE question courte, qui finit par « ? » (« Qui s'occupe de … chez vous ? »).");
+  } else if (hook.length > LIMITS.hookSentences) failures.push(`Accroche en ${hook.length} phrases : deux au plus (le fait, puis sa conséquence).`);
   for (const sentence of [...hook, ...sentencesOf(parts.proposal)]) {
     const words = countWords(sentence);
     if (sentence !== parts.proposal.trim() && words > LIMITS.sentenceWords) {
@@ -156,7 +165,8 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   }
 
   // --- Règles Cowork : décrire n'est pas accrocher, « prend du temps » n'est pas une conséquence.
-  const opening = parts.hook.trim().match(DESCRIPTIVE_OPENING) ?? parts.hook.trim().match(NAME_DESCRIBES);
+  // F1 seulement : F2 et F4 partent justement de l'activité (« Dans une entreprise qui… »).
+  const opening = family === "F1" ? (parts.hook.trim().match(DESCRIPTIVE_OPENING) ?? parts.hook.trim().match(NAME_DESCRIBES)) : null;
   if (opening) failures.push(`Accroche descriptive (« ${opening[0].trim()} ») : pose un FAIT PROPRE comme contexte (sites, gamme, clientèle), pas une description de leur métier ou de leur secteur.`);
   const soft = written.match(SOFT_CONSEQUENCE);
   if (soft) failures.push(`Conséquence molle (« ${soft[0]} ») : dis l'effet observable — client qui attend, retard de livraison, double saisie, relance oubliée, devis qui part tard.`);
@@ -173,7 +183,7 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   // --- La démo illustre ce que dit la proposition (SPI ENERGIE : tri des
   // e-mails dans la phrase, agent devis dans le lien).
   if (context.demo) {
-    const said = demoForProposal(parts.proposal);
+    const said = demoForProposal(demoTextOf(family, parts));
     if (said.key !== "general" && said.key !== context.demo) {
       failures.push(`Démo incohérente : la proposition parle de « ${said.label} » mais le lien montre « ${DEMO_LINKS[context.demo].label} ». Aligne la phrase sur la démo, ou l'inverse.`);
     }
@@ -185,12 +195,13 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
     failures.push("Ouverture « Avec… » déjà trop fréquente aujourd'hui (au plus un mail sur trois) : ouvre autrement (« Chez… », « Entre… et… », « Quand… », ou le fait en sujet).");
   }
 
-  // --- Proposition : une phrase, un bénéfice, pas une liste d'étapes.
-  const proposal = sentencesOf(parts.proposal);
+  // --- Proposition : une phrase, un bénéfice, pas une liste d'étapes (F4 : ligne imposée, rien à vérifier).
+  const proposal = family === "F4" ? [parts.proposal] : sentencesOf(parts.proposal);
   if (proposal.length !== 1) failures.push(`Proposition en ${proposal.length} phrases : une seule.`);
   const proposalWords = countWords(parts.proposal);
   if (proposalWords > LIMITS.proposalWords) failures.push(`Proposition de ${proposalWords} mots : ${LIMITS.proposalWords} au plus.`);
-  const steps = (parts.proposal.match(/,|\bpuis\b|\bensuite\b|\bet enfin\b/gi) ?? []).length;
+  // « Concrètement, … » (F2) n'est pas une étape.
+  const steps = family === "F4" ? 0 : (parts.proposal.replace(/^\s*concr[èe]tement\s*,/i, "").match(/,|\bpuis\b|\bensuite\b|\bet enfin\b/gi) ?? []).length;
   if (steps >= 3) failures.push("Proposition : c'est une liste d'étapes techniques. Dis le bénéfice (temps gagné, erreurs ou retards évités).");
 
   // --- Vocabulaire.
@@ -208,12 +219,14 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   if (SITE_AS_SOURCE.test(written)) failures.push("Ne cite pas leur site comme source (« sur votre site… ») : dis le fait.");
   if (VAGUE_PROOF.test(written)) failures.push("Pas de « exemples testables sur mon site » : la preuve est la ligne avec le lien, posée à part.");
   if (/https?:\/\/|www\.|axelremillat/i.test(written)) failures.push("Aucune URL dans l'accroche ni la proposition : le lien de démo est posé par le code.");
-  if (/\?/.test(written)) failures.push("Aucune question hors de la demande finale.");
+  // F3 : la question d'ouverture est permise, aucune autre.
+  const questions = family === "F3" ? `${parts.hook.trim().replace(/\?$/, "")}\n${parts.proposal}` : written;
+  if (/\?/.test(questions)) failures.push("Aucune question hors de la demande finale.");
 
   // --- Preuve : présente, et vers une démo qui existe.
-  const proof = body.split("\n").find((line) => line.startsWith(PROOF_PREFIX));
-  const url = proof?.slice(PROOF_PREFIX.length).trim();
-  if (!url || !ALLOWED_DEMO_URLS.includes(url)) failures.push("Lien de démo absent ou inconnu.");
+  const proof = body.split("\n").find((line) => line.includes(DEMO_HOST));
+  const url = proof?.slice(proof.indexOf(DEMO_HOST)).trim();
+  if (!url || !ALLOWED_DEMO_URLS.includes(bareDemoUrl(url))) failures.push("Lien de démo absent ou inconnu.");
 
   // --- Nombres : seulement ceux des faits (15 minutes vient de la demande).
   const known = knownNumbers(context.facts);
@@ -230,8 +243,9 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
 
   // --- Longueur totale.
   const total = countWords(body);
-  if (total > LIMITS.maxWords) failures.push(`${total} mots : ${LIMITS.maxWords} au plus (cible 60 à 90). Retire environ ${total - LIMITS.targetWords} mots.`);
-  if (total < LIMITS.minWords) failures.push(`${total} mots : trop court, l'accroche doit poser un fait et sa conséquence.`);
+  const { min, max } = FAMILY_LIMITS[family];
+  if (total > max) failures.push(`${total} mots : ${max} au plus pour ce mail (${min} à ${max}). Retire environ ${total - max + 5} mots.`);
+  if (total < min) failures.push(`${total} mots : ${min} au moins pour ce mail, développe un peu.`);
 
   failures.push(...validateSubject(parts.subject, context.companyName));
   const arm = context.subjectArm ? subjectArmProblem(parts.subject, context.subjectArm) : null;

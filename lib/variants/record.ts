@@ -30,6 +30,8 @@ export interface MessageVariant {
   subjectStyle?: string | null;
   openingWord?: string | null;
   length?: number | null;
+  /** Famille du mail (expérience n° 2 : F1 à F4). */
+  family?: string | null;
 }
 
 type Writer = { from: (table: string) => { upsert: (row: Record<string, unknown>, options: { onConflict: string }) => PromiseLike<{ error: unknown }> } };
@@ -48,6 +50,7 @@ export async function recordMessageVariant(db: unknown, variant: MessageVariant)
         subject_style: clean(variant.subjectStyle),
         opening_word: clean(variant.openingWord, 40),
         length: variant.length ?? null,
+        ...(variant.family ? { family: clean(variant.family, 8) } : {}),
         ...(variant.userId ? { user_id: variant.userId } : {}),
       },
       { onConflict: "message_id" },

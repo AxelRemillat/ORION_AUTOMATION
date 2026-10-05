@@ -19,6 +19,8 @@
     "test:emails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/emails.test.js",
     "iterate:quality": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/iterate-quality.js",
     "complete:fiches": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/complete-fiches.js",
+    "calibrate:judge": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/calibrate-judge.js",
+    "eval:families": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-families.js",
     "eval:quality": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-quality.js",
     "regenerate:drafts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/regenerate-drafts.js",
     "eval:mails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-mails.js",

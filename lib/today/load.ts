@@ -123,6 +123,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
   // 3 et 4. Nouvelles fiches : celles de l'entonnoir, et les intros en attente.
   const candidates = new Map(((candidatesRes.data ?? []) as SignalCandidateRow[]).map((row) => [row.prospect_id as string, row]));
   const withIntroDraft = messages.filter((row) => row.type === "intro" && row.status === "draft").map((row) => row.prospect_id);
+  const families = await draftFamilies(db, messages.filter((row) => row.type === "intro" && row.status === "draft").map((row) => row.id));
   for (const prospectId of new Set([...candidates.keys(), ...withIntroDraft])) {
     const prospect = prospects.get(prospectId);
     if (!prospect) continue;
@@ -136,7 +137,7 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
     const state = classify(discardFor((row) => row.prospect_id === prospectId && (row.kind === "nouveau" || row.kind === "a_completer")));
     if (state.excluded) continue;
     const contact = (candidate?.contact ?? {}) as { attempts?: number; retried_at?: string };
-    raw.push(prospectItem({
+    const item = prospectItem({
       prospect,
       card: candidate ? toCard(candidate, now) : null,
       draft: intro,
@@ -145,8 +146,23 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
       draftPending: draftPending.has(prospectId),
       attempts: contact.attempts ?? (contact.retried_at ? 1 : 0),
       weight: candidate?.weight ?? null,
-    }));
+    });
+    raw.push(intro && families.has(intro.id) ? { ...item, family: families.get(intro.id) } : item);
   }
 
   return { today, groups: groupToday(raw) };
+}
+
+/**
+ * Famille de chaque brouillon d'intro (message_variants.family). Colonne
+ * absente (avant migration) ou lecture en échec : aucun badge, rien ne casse.
+ */
+async function draftFamilies(db: Db, ids: readonly string[]): Promise<Map<string, string>> {
+  const families = new Map<string, string>();
+  for (let index = 0; index < ids.length; index += 150) {
+    const { data, error } = await db.from("message_variants").select("message_id, family").in("message_id", ids.slice(index, index + 150)).not("family", "is", null);
+    if (error) return families;
+    for (const row of (data ?? []) as { message_id: string; family: string | null }[]) if (row.family) families.set(row.message_id, row.family);
+  }
+  return families;
 }

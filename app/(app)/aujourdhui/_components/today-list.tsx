@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { FAMILY_LABELS, type MailFamily } from "@/lib/emails/quality/families";
 import { GROUP_LABELS, type TodayItem, type TodayStatus } from "@/lib/today/types";
 import { TODAY_KINDS } from "@/types";
 
@@ -77,6 +78,14 @@ export function TodayList({
                       </p>
                       <p className="truncate text-[12px] text-muted">{item.subline || item.tags.join(" · ")}</p>
                     </div>
+                    {item.family && (
+                      <span
+                        title={`Famille de mail : ${FAMILY_LABELS[item.family as MailFamily] ?? item.family}`}
+                        className="shrink-0 rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-data text-[10px] text-primary-ink"
+                      >
+                        {item.family}
+                      </span>
+                    )}
                     {item.quality != null && (
                       <span
                         title="Note du relecteur automatique (9 = envoyable sans retouche)"

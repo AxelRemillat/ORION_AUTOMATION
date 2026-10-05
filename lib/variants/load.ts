@@ -12,7 +12,7 @@ export async function loadVariantStats(db: unknown): Promise<{ sends: number; st
   const rows = await readAll<Record<string, any>>(() =>
     reader
       .from("message_variants")
-      .select("message_id, hook_type, pain, demo, cta, subject_style, opening_word, length, messages(prospect_id, sent_at, status, deleted_at)")
+      .select("message_id, hook_type, pain, demo, cta, subject_style, opening_word, length, family, messages(prospect_id, sent_at, status, deleted_at)")
       .order("message_id"),
   ).catch(() => []);
   const sent: SentVariant[] = rows
