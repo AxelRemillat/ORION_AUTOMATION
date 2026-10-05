@@ -59,6 +59,48 @@ const FONDS_DE_COMMERCE = /fonds de commerce|reprise d.un fonds|achat d.un fonds
 const BUILDING = ["41", "43"];
 /** Tranches INSEE sous 10 salariés : 0, 1-2, 3-5, 6-9. */
 const UNDER_TEN = new Set(["00", "01", "02", "03"]);
+
+/**
+ * GRANDS GROUPES connus : réseaux dont les agences ou franchisés publient des
+ * offres sous le nom du groupe (« DEKRA France », « CTS (DEKRA) »). La décision
+ * d'achat se prend au siège : hors cible, AVANT toute dépense.
+ */
+const KNOWN_GROUPS =
+  /\b(dekra|bureau veritas|apave|socotec|veolia|suez|vinci|eiffage|bouygues|spie|engie|edf|enedis|grdf|orange|keolis|transdev|onet|elior|sodexo|derichebourg|geodis|kuehne|dhl|db schenker|stef|xpo|lidl|aldi|decathlon|leroy merlin|castorama|saint gobain|point p|rexel|sonepar|thales|safran|airbus|stellantis|renault group|michelin|legrand|schneider electric|bnp paribas|societe generale|credit agricole|axa|allianz|generali|la poste|sncf|ratp)\b/;
+
+/** Catégories INSEE d'une entreprise (au sens économique) de 250 salariés et plus. */
+const GROUP_CATEGORIES = new Set(["ETI", "GE"]);
+
+const plain = (value: string | null | undefined) =>
+  (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ");
+
+/**
+ * Appartenance à un groupe de 250 salariés ou plus — exclusion AVANT dépense
+ * (Cowork, 05/10/2026 : DEKRA France creusé au run 3 ; ESPACE 3000, 30
+ * concessions, catégorie ETI). Trois indices, tous gratuits :
+ *   1. catégorie INSEE ETI ou GE : pour une filiale profilée, c'est celle du
+ *      groupe entier (ESPACE 3000 : 50-99 salariés au SIREN, mais ETI) ;
+ *   2. tête de groupe (dirigeant personne morale) de 250 salariés ou plus, ou
+ *      elle-même ETI / GE ;
+ *   3. groupe connu, dans le nom de l'entreprise, de l'offre ou de la mère.
+ */
+export function largeGroupReason(identity: Identity, signalName?: string | null): string | null {
+  if (identity.category && GROUP_CATEGORIES.has(identity.category)) {
+    return `groupe de 250 salariés ou plus (catégorie INSEE ${identity.category})`;
+  }
+  const parent = identity.parentName ?? "tête de groupe";
+  if (identity.parentCategory && GROUP_CATEGORIES.has(identity.parentCategory)) {
+    return `filiale de ${parent} (catégorie INSEE ${identity.parentCategory})`;
+  }
+  if (identity.parentEffectifCode && TWO_HUNDRED_FIFTY_PLUS.has(identity.parentEffectifCode)) {
+    return `filiale de ${parent} (250 salariés ou plus)`;
+  }
+  for (const name of [identity.name, signalName, identity.parentName]) {
+    const known = plain(name).match(KNOWN_GROUPS);
+    if (known) return `grand groupe connu (${known[1].toUpperCase()})`;
+  }
+  return null;
+}
 /** Tranches de 250 salariés et plus : hors cible (PME de 10 à 249 salariés). */
 const TWO_HUNDRED_FIFTY_PLUS = new Set(["32", "41", "42", "51", "52", "53"]);
 /** Tranches 20 salariés et plus. */
@@ -197,6 +239,8 @@ export function filterSignal(
   if (identity.effectifCode && TWO_HUNDRED_FIFTY_PLUS.has(identity.effectifCode)) {
     return reject("trop grande structure : 250 salariés ou plus (cible 10-249)");
   }
+  const group = largeGroupReason(identity, signal.companyName);
+  if (group) return reject(`grand groupe : ${group} — la décision se prend au siège`);
 
   // Effectif NON DÉCLARÉ : ce n'est pas « on ne sait pas », c'est presque
   // toujours une toute petite structure — sauf si une offre d'emploi prouve

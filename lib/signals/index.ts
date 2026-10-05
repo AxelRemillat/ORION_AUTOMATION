@@ -24,8 +24,11 @@ import { STRENGTH_RANK } from "./bodacc-parse";
 import { exclusionOf } from "./targeting";
 import {
   franceTravailStatus,
+  FT_ROME_CODES,
+  paginatedJobSignals,
   recentJobSignals,
   type EnvLike,
+  type FtHarvestStats,
   type FranceTravailStatus,
   type JobSignal,
 } from "./france-travail";
@@ -266,6 +269,15 @@ export interface SignalSearchCriteria {
   only?: "bodacc" | "france-travail";
   /** Codes ROME de France Travail (l'entonnoir vise le back-office, cf. FUNNEL_ROME_CODES). */
   romeCodes?: readonly string[];
+  /**
+   * Lecture paginée code ROME par code ROME (entonnoir) : plafond total
+   * d'offres lues. Absent : la requête unique historique (2 000 offres).
+   */
+  ftMaxOffers?: number;
+  /** Compteurs de lecture France Travail, remplis par la lecture paginée. */
+  ftStats?: FtHarvestStats;
+  /** Horodatage (ms) d'arrêt de la lecture France Travail. */
+  ftDeadline?: number;
 }
 
 export interface CollectedSignals {
@@ -343,14 +355,24 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
 
   const ftState = sources.find((source) => source.id === "france-travail");
   if (ftState?.available && criteria.only !== "bodacc") {
-    const jobs = await recentJobSignals({
-      departement: criteria.departement,
-      days: Math.min(days, 30),
-      max: MAX_NOTICES_PER_SOURCE,
-      today: criteria.today,
-      env,
-      romeCodes: criteria.romeCodes,
-    });
+    const jobs = criteria.ftMaxOffers
+      ? await paginatedJobSignals({
+          days: Math.min(days, 30),
+          maxOffers: criteria.ftMaxOffers,
+          romeCodes: criteria.romeCodes ?? FT_ROME_CODES,
+          today: criteria.today,
+          env,
+          deadline: criteria.ftDeadline,
+          stats: criteria.ftStats,
+        })
+      : await recentJobSignals({
+          departement: criteria.departement,
+          days: Math.min(days, 30),
+          max: MAX_NOTICES_PER_SOURCE,
+          today: criteria.today,
+          env,
+          romeCodes: criteria.romeCodes,
+        });
     if (jobs.ok) {
       for (const job of jobs.data) signals.push(jobToOfficialSignal(job));
       ftState.count = jobs.data.length;

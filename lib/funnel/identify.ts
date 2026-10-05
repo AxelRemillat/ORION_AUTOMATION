@@ -39,6 +39,12 @@ const sameName = (left: string, right: string) => {
 
 /** Recherche annuaire réelle, avec le limiteur de débit de lib/enrichment. */
 export const annuaireLookup: Lookup = async (signal) => {
+  const found = await findCompany(signal);
+  if (!found.ok || !found.company) return found;
+  return { ok: true, company: await withParent(found.company) };
+};
+
+async function findCompany(signal: HarvestedSignal): Promise<LookupOutcome> {
   if (signal.siren) {
     const page = await searchCompanies({ q: signal.siren }, 1);
     if (!page.ok) return saturated(page.error);
@@ -50,8 +56,73 @@ export const annuaireLookup: Lookup = async (signal) => {
     : undefined;
   const page = await searchCompanies({ q: signal.companyName }, 3, zone ? { zone } : {});
   if (!page.ok) return saturated(page.error);
-  return { ok: true, company: page.data.companies.find((company) => sameName(signal.companyName, company.company_name)) ?? null };
-};
+  const loose = page.data.companies.find((company) => sameName(signal.companyName, company.company_name));
+  if (loose) return { ok: true, company: loose };
+  return communeLookup(signal);
+}
+
+/**
+ * REPLI « nom + commune » quand la recherche par département n'a rien donné.
+ *
+ * Run 3 (05/10/2026) : 98 offres France Travail rejetées « introuvables à
+ * l'annuaire » — le nom publié n'était pas dans les 3 premiers résultats du
+ * département. On relance, gratuitement, sur le code postal de l'offre avec
+ * 10 résultats, et on n'accepte qu'une correspondance UNIQUE et NETTE : nom
+ * normalisé identique ET établissement dans la même commune. Deux candidats
+ * ou aucun : on rejette, on ne devine pas.
+ */
+export async function communeLookup(
+  signal: HarvestedSignal,
+  search: typeof searchCompanies = searchCompanies,
+): Promise<LookupOutcome> {
+  const postalCode = signal.facts.postalCode?.trim();
+  const city = normalizeCity(signal.facts.city);
+  if (!postalCode || !/^\d{5}$/.test(postalCode) || !city) return { ok: true, company: null };
+  const zone = { kind: "code_postal" as const, label: postalCode, param: "code_postal" as const, value: postalCode, departement: departementOf(postalCode) };
+  const page = await search({ q: signal.companyName }, 10, { zone });
+  if (!page.ok) return saturated(page.error);
+  return { ok: true, company: uniqueMatch(signal.companyName, city, page.data.companies) };
+}
+
+/** La seule fiche dont le nom normalisé est IDENTIQUE et la commune la même, sinon `null`. */
+export function uniqueMatch(name: string, city: string, companies: readonly CompanyBase[]): CompanyBase | null {
+  const wanted = simplifyName(name);
+  if (!wanted) return null;
+  const matches = new Map<string, CompanyBase>();
+  for (const company of companies) {
+    if (simplifyName(company.company_name) !== wanted) continue;
+    if (normalizeCity(company.city) !== city) continue;
+    matches.set(company.siren ?? company.company_name, company);
+  }
+  return matches.size === 1 ? [...matches.values()][0] : null;
+}
+
+/**
+ * Tête de groupe, lue GRATUITEMENT : quand l'annuaire publie un dirigeant
+ * personne morale, on lit sa fiche (catégorie, tranche d'effectif). Sert à
+ * exclure les filiales de groupes de 250 salariés et plus AVANT toute dépense.
+ */
+export async function withParent(
+  company: CompanyBase,
+  search: typeof searchCompanies = searchCompanies,
+): Promise<CompanyBase> {
+  const siren = company.figures.parent_company_siren;
+  if (typeof siren !== "string" || !siren || siren === company.siren) return company;
+  const page = await search({ q: siren }, 1);
+  const parent = page.ok ? page.data.companies.find((item) => item.siren === siren) : undefined;
+  if (!parent) return company;
+  return {
+    ...company,
+    figures: {
+      ...company.figures,
+      parent_company_name: parent.company_name,
+      parent_company_category: parent.figures.company_category ?? null,
+      parent_effectif_code: parent.figures.effectif_code ?? null,
+    },
+  };
+}
+
+const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
 
 /**
  * Une erreur de transport n'est pas une absence d'entreprise.
@@ -90,5 +161,9 @@ export function toIdentity(signal: HarvestedSignal, base: CompanyBase): Identity
     revenueYear: figures.revenue_year,
     // Une offre n'est « confirmée » que si l'annuaire a trouvé l'employeur.
     employerConfirmed: signal.source !== "france-travail" || sameName(signal.companyName, base.company_name),
+    category: text(figures.company_category),
+    parentName: text(figures.parent_company_name) ?? base.parent_company ?? null,
+    parentCategory: text(figures.parent_company_category),
+    parentEffectifCode: text(figures.parent_effectif_code),
   };
 }
