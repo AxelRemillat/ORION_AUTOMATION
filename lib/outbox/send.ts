@@ -72,7 +72,8 @@ export type OutboxMessage = Pick<
   Message,
   "id" | "user_id" | "prospect_id" | "type" | "subject" | "body" | "status" | "thread_id"
 > &
-  Pick<Message, "deleted_at" | "send_status" | "reply_to_inbound_id" | "reply_to_gmail_message_id">;
+  Pick<Message, "deleted_at" | "send_status" | "reply_to_inbound_id" | "reply_to_gmail_message_id"> &
+  Partial<Pick<Message, "gmail_message_id">>;
 
 const fail = (kind: SendFailureKind, error: string, status: number): SendResult => ({ ok: false, kind, error, status });
 
@@ -80,6 +81,8 @@ const fail = (kind: SendFailureKind, error: string, status: number): SendResult 
 export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown, now: Date): Promise<SendResult | null> {
   if (!isEmail(to)) return fail("invalid", "Destinataire invalide.", 400);
   if (message.status === "sent") return fail("conflict", "Ce message a déjà été envoyé.", 409);
+  // Anti-doublon : un identifiant d'envoi Gmail prouve que le mail est parti.
+  if (message.gmail_message_id) return fail("conflict", "Ce mail a déjà un identifiant d'envoi Gmail : il est parti, pas de renvoi.", 409);
   if (message.deleted_at) {
     return fail("blocked", "Ce mail est à la corbeille : restaurez-le depuis /corbeille pour l'envoyer.", 409);
   }
@@ -305,7 +308,7 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
 }
 
 export const MESSAGE_COLUMNS =
-  "id, user_id, prospect_id, type, subject, body, status, thread_id, deleted_at, send_status, send_attempts, scheduled_to, reply_to_inbound_id, reply_to_gmail_message_id";
+  "id, user_id, prospect_id, type, subject, body, status, thread_id, deleted_at, send_status, send_attempts, scheduled_to, reply_to_inbound_id, reply_to_gmail_message_id, gmail_message_id";
 
 /**
  * Envoi MANUEL (bouton « Envoyer »). Verrouille le message (`sending`) pour

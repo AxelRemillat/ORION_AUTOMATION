@@ -29,6 +29,7 @@ const ICONS: Record<string, LucideIcon> = {
   "reminder-blocked": Ban,
   cancelled: XCircle,
   failed: XCircle,
+  send_failed: XCircle,
   status: Activity,
   dnc: Ban,
   opposition: ShieldCheck,

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Send } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { formatParisDateTime } from "@/lib/outbox/paris-time";
+import { readableSendError } from "@/lib/outbox/send-errors";
+import { ResendControls } from "@/components/outbox/resend-controls";
 import type { SentItem, ThreadItem } from "@/lib/outbox/mailbox";
 import { ThreadView } from "../../inbox/[id]/thread-view";
 
@@ -62,6 +64,11 @@ export function SentPane({
                   {item.to ? ` · ${item.to}` : ""}
                 </p>
               </button>
+              {item.status === "failed" && (
+                <div className="border-b border-b-line-soft px-4 pb-3">
+                  <ResendControls messageId={item.id} to={item.to} compact />
+                </div>
+              )}
             </li>
           );
         })}
@@ -87,7 +94,16 @@ export function SentPane({
                 </Badge>
               </div>
             </div>
-            {selected.error && <p className="mt-2 text-[12px] text-lost-ink">{selected.error}</p>}
+            {selected.error && (
+              <p className="mt-2 text-[12px] text-lost-ink" title={selected.error}>
+                {readableSendError(selected.error)}
+              </p>
+            )}
+            {selected.status === "failed" && (
+              <div className="mt-3">
+                <ResendControls messageId={selected.id} to={selected.to} />
+              </div>
+            )}
             <p className="mt-4 whitespace-pre-wrap text-[13px] leading-relaxed text-muted">{selected.body}</p>
             <Link href={`/suivi/${selected.prospectId}`} className="mt-4 inline-block text-[13px] font-medium text-primary-ink hover:underline">
               Ouvrir la fiche prospect

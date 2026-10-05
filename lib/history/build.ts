@@ -128,6 +128,7 @@ export function buildHistory(row: HistoryRow, now = new Date()): { events: Histo
     if (event.kind === "status") push({ ...base, title: `Statut : ${statusLabel(data.from)} → ${statusLabel(data.to)}`, tone: "info" });
     else if (event.kind === "dnc") push({ ...base, title: data.on === false ? "Retiré de « ne plus contacter »" : "Ajouté à « ne plus contacter »", tone: data.on === false ? "neutral" : "lost" });
     else if (event.kind === "opposition") push({ ...base, title: `Opposition vérifiée (${data.source === "inpi" ? "INPI" : data.source === "pappers" ? "Pappers" : "à la main"}) : ${data.refuses ? "opposée" : "non opposée"}`, tone: data.refuses ? "lost" : "good" });
+    else if (event.kind === "send_failed") push({ ...base, title: String(data.title ?? "Envoi en échec"), detail: data.detail ? String(data.detail) : null, tone: "lost" });
     else if (event.kind === "note") push({ ...base, title: "Note", body: String(data.text ?? ""), excerpt: excerptOf(String(data.text ?? "")), tone: "neutral" });
     else push({ ...base, title: String(data.title ?? `${event.channel} · ${event.kind}`), detail: data.detail ? String(data.detail) : null, tone: "info" });
   }

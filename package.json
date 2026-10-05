@@ -53,6 +53,7 @@
     "test:plafonds": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/plafonds.test.js",
     "test:historique": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/historique.test.js",
     "test:volume": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/volume.test.js",
+    "test:renvoi": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/resend.test.js",
     "test:funnel-qualite": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel-qualite.test.js",
     "test:contact-report": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-report.test.js",
     "test:completion": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/completion-auto.test.js",
