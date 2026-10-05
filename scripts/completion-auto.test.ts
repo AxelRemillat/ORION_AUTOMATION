@@ -11,7 +11,8 @@ import { completeOne, UNREACHABLE_AFTER, type CompletionDeps } from "../lib/toda
 import { exclusionOf } from "../lib/today/items";
 import { subsidiaryOf } from "../lib/enrichment/subsidiary";
 import { offTargetReason } from "../lib/funnel/off-target";
-import { toJobSignal } from "../lib/signals/france-travail";
+import { FUNNEL_FT_DAYS, FUNNEL_ROME_CODES, toJobSignal } from "../lib/signals/france-travail";
+import { painForJob } from "../lib/funnel/pain-map";
 import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { runSiteStage } from "../lib/funnel/site-priority";
 import { reopenUnexamined } from "../lib/funnel/store";
@@ -195,6 +196,18 @@ async function main() {
     check("signal non examiné : repris dans le run courant, statut brut", reopened === 1 && row("a").run_id === "r2" && row("a").statut === "brut" && row("a").motif_rejet === null);
     check("rejeté pour un autre motif : inchangé", row("b").statut === "rejeté" && row("b").run_id === "r1");
     check("retenu : inchangé, rien n'est supprimé", row("c").statut === "retenu" && db.rows("signal_candidates").length === 3);
+  }
+
+  console.log("\n8. France Travail élargi (toute la France, 30 jours, back-office)");
+  {
+    const codes: readonly string[] = FUNNEL_ROME_CODES;
+    check("codes ROME : assistanat, office manager, ADV, compta, facturation, recouvrement, achats, SAV, logistique", ["M1607", "M1604", "M1432", "D1409", "M1225", "M1611", "D1422", "N1303", "H1108", "N1210", "N1201"].every((code) => codes.includes(code)));
+    check("M1602 (secrétaire de collectivité territoriale en ROME 4) retiré", !codes.includes("M1602"));
+    check("offres de moins de 30 jours", FUNNEL_FT_DAYS === 30);
+    for (const title of ["Office manager", "Assistant de direction", "Technicien support client", "Technicien SAV hotline", "Logisticien", "Affréteur", "Gestionnaire de commandes"]) {
+      check(`intitulé reconnu : ${title}`, painForJob(title) !== null);
+    }
+    check("hors back-office toujours écarté (développeur, chauffeur)", painForJob("Développeur web") === null && painForJob("Chauffeur poids lourd") === null);
   }
 
   console.log(failures === 0 ? "\nTous les tests de complétion passent.\n" : `\n${failures} test(s) en echec.\n`);

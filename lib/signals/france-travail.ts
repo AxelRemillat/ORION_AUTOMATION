@@ -64,19 +64,49 @@ export const FT_ROME_CODES = [
  * 30/09/2026 ne ramenait que 4 offres utiles sur 139 : des développeurs et des
  * ingénieurs, dont l'intitulé ne révèle aucune tâche à automatiser.
  */
+/*
+ * ÉLARGI le 05/10/2026 (Cowork) : France Travail est le levier n° 1 — postes
+ * dont les tâches sont automatisables. Libellés relus dans le référentiel
+ * officiel de l'API (/referentiel/metiers, ROME 4) : M1602 y désigne
+ * désormais « Secrétaire administratif de COLLECTIVITÉ TERRITORIALE » (secteur
+ * public) — il est retiré ; l'assistant(e) administratif/ve est M1607.
+ */
 export const FUNNEL_ROME_CODES = [
-  "D1401", // Assistanat commercial (ADV)
-  "D1407", // Relation technico-commerciale (devis)
-  "M1607", // Secrétariat
-  "M1602", // Opérations administratives
-  "M1203", // Comptabilité
-  "M1101", // Achats
-  "N1103", // Magasinage et préparation de commandes
-  "N1301", // Conception et organisation de la chaîne logistique (approvisionnement)
-  "H1401", // Management et ingénierie gestion industrielle et logistique (planification)
-  "M1501", // Assistanat en ressources humaines
-  "H1502", // Management et ingénierie qualité industrielle
+  // Assistanat administratif et de direction, office management
+  "M1607", // Assistant administratif / Assistante administrative
+  "M1604", // Assistant / Assistante de direction
+  "M1432", // Office manager
+  "M1605", // Secrétaire technique
+  // ADV, assistanat commercial sédentaire, gestion des commandes
+  "D1401", // Assistant commercial / Assistante commerciale
+  "D1409", // Assistant / Assistante administration des ventes
+  "D1432", // Assistant / Assistante service clients
+  "D1407", // Technico-commercial / Technico-commerciale (devis)
+  // Comptabilité, facturation, recouvrement
+  "M1203", // Comptable
+  "M1225", // Aide-comptable
+  "M1213", // Assistant / Assistante comptable
+  "M1608", // Secrétaire comptable
+  "M1611", // Secrétaire facturier / facturière
+  "D1422", // Chargé / Chargée de recouvrement de créances
+  // Stock, approvisionnement, achats
+  "M1101", // Acheteur / Acheteuse
+  "D1431", // Assistant / Assistante achat
+  "N1303", // Approvisionneur / Approvisionneuse logistique
+  "N1209", // Technicien / Technicienne logistique (gestion de stock)
+  // SAV, hotline
+  "H1108", // Technicien / Technicienne support client en industrie
+  "I1404", // Conseiller / Conseillère support technique informatique
+  // Logistique et transport
+  "N1210", // Logisticien / Logisticienne
+  "N1201", // Affréteur / Affréteuse (gestion transport)
+  // Conservés de la liste précédente
+  "M1501", // Assistant / Assistante RH
+  "H1401", // Gestion industrielle et logistique (planification)
 ] as const;
+
+/** Offres France Travail : publiées depuis moins de 30 jours, sur toute la France. */
+export const FUNNEL_FT_DAYS = 30;
 
 /**
  * Ce qu'il faut vraiment pour decider : deux cles, pas tout l'environnement.

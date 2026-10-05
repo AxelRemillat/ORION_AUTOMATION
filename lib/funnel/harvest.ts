@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { collectSignals, type OfficialSignal } from "@/lib/signals";
-import { FUNNEL_ROME_CODES, type EnvLike } from "@/lib/signals/france-travail";
+import { FUNNEL_FT_DAYS, FUNNEL_ROME_CODES, type EnvLike } from "@/lib/signals/france-travail";
 import type { EnrichmentWarning } from "@/lib/enrichment/types";
 import type { FunnelSource, HarvestedSignal, Strength } from "./types";
 
@@ -96,14 +96,17 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
   // dont l'intitulé révèle un pain est le signal le plus direct, et c'est lui
   // qui doit passer si une source vient à manquer de temps ou de débit.
   for (const only of ["france-travail", "bodacc"] as const) {
-    // Aucun département : UNE moisson nationale (« Toute la France »).
-    const zones = criteria.departements.length ? criteria.departements : [""];
+    // France Travail : TOUTE LA FRANCE, offres de moins de 30 jours (Cowork,
+    // 05/10/2026 — levier n° 1). BODACC : les départements réglés (aucun =
+    // toute la France), sa fenêtre et son quota de 20 % ne changent pas.
+    const national = only === "france-travail";
+    const zones = national || !criteria.departements.length ? [""] : criteria.departements;
     for (const departement of zones) {
       const collected = await collectSignals({
         departement,
         tranches: [],
         limit: 0,
-        days,
+        days: national ? FUNNEL_FT_DAYS : days,
         today: criteria.today,
         env: criteria.env,
         only,
