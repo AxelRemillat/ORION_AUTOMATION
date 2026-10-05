@@ -154,6 +154,8 @@ async function main() {
     check("PB SOLUTIONS « assistance technique ou au forfait » : régie, hors cible", Boolean(thirdPartyEmployer({ activity: "Prestations d'ingénierie en assistance technique ou au forfait pour l'industrie." })));
     check("fabricant « assistance technique et SAV de nos machines » : PAS de la régie", thirdPartyEmployer({ activity: "Assistance technique et SAV de nos machines d'emballage." }) === null);
     check("« ingénieurs en régie » : exclu", Boolean(thirdPartyEmployer({ activity: "Nos ingénieurs interviennent en régie chez nos clients." })));
+    check("PB SOLUTIONS, profil réel (ingénierie + assistance technique + recrutement de profils) : exclu", Boolean(thirdPartyEmployer({ activity: "Prestations d’ingénierie industrielle et managériale, assistance technique et recrutement de profils industriels en CDI." })));
+    check("fabricant « assistance technique et maintenance sur site » : PAS exclu", thirdPartyEmployer({ activity: "Fabrication de fours micro-ondes industriels, assistance technique et maintenance sur site." }) === null);
 
     const base = { company_name: "ACME", siren: "123456789", city: "LYON", postal_code: "69001", website: null };
     const rows = [

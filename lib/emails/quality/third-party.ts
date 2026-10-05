@@ -36,7 +36,7 @@ export interface ThirdPartyInput {
 
 /** Activité : mise à disposition, portage, recrutement pour des tiers. */
 const ACTIVITY =
-  /(temps partag[ée]|mise [àa] disposition (de|du) (personnel|salari[ée]s?)|groupement d['’]employeurs|portage salarial|cabinet de recrutement|agence de recrutement|plateforme de recrutement|job ?board|site d['’]emploi|chasseurs? de t[êe]tes|int[ée]rim\b|travail temporaire|recrut(e|ons|ement) pour (le compte de |nos |ses |des )?(clients?|entreprises partenaires))/i;
+  /(temps partag[ée]|mise [àa] disposition (de|du) (personnel|salari[ée]s?)|groupement d['’]employeurs|portage salarial|cabinet de recrutement|agence de recrutement|plateforme de recrutement|job ?board|site d['’]emploi|chasseurs? de t[êe]tes|int[ée]rim\b|travail temporaire|recrut(e|ons|ement) pour (le compte de |nos |ses |des )?(clients?|entreprises partenaires)|recrutement de (profils|candidats|talents|collaborateurs pour))/i;
 
 /**
  * RÉGIE (Cowork, 05/10/2026) : ingénieurs ou techniciens placés chez des clients
@@ -45,7 +45,7 @@ const ACTIVITY =
  * SAV) : il faut un indice de mise à disposition à côté.
  */
 const REGIE =
-  /(\ben r[ée]gie\b|\br[ée]gie (d['’]ing[ée]nieurs?|technique)|assistance technique[^.]{0,80}\b(forfait|ing[ée]nieurs?|consultants?|r[ée]gie|chez (nos|vos|le) clients?)|\b(forfait|ing[ée]nieurs?|consultants?)\b[^.]{0,80}assistance technique)/i;
+  /(\ben r[ée]gie\b|\br[ée]gie (d['’]ing[ée]nieurs?|technique)|assistance technique[^.]{0,80}\b(forfait|ing[ée]ni(?:eurs?|erie)|consultants?|r[ée]gie|chez (nos|vos|le) clients?|recrutement)|\b(forfait|ing[ée]ni(?:eurs?|erie)|consultants?)\b[^.]{0,80}assistance technique)/i;
 
 /** Raison sociale ou domaine : marques de recruteurs (Comptalents, Talents Handicap, …). */
 const NAME =
