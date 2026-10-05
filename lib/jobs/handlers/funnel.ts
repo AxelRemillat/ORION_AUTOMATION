@@ -64,7 +64,7 @@ export async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   const reopened = await reopenUnexamined(ctx.db, ctx.userId, runId, collected.signals.map((signal) => signal.hash));
   return {
     state: { runId, startedAt: ctx.job.state.startedAt ?? new Date().toISOString(), warnings: collected.warnings },
-    progress: progress(`${collected.signals.length} signaux moissonnés, ${inserted} nouveaux, ${reopened} repris (non examinés)`, 20, {
+    progress: progress(`${collected.signals.length} signaux moissonnés, ${inserted} nouveaux, ${reopened} repris (non examinés) · France Travail : ${collected.ft.read} offres lues, ${collected.ft.anonymous} anonymes et ${collected.ft.staffing} d'intermédiaires ignorées`, 20, {
       scanned: collected.signals.length,
       signals: 0,
       sheets: 0,

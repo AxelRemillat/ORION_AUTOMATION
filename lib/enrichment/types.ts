@@ -54,6 +54,10 @@ export interface CompanyBase {
 export interface BaseFigures {
   /** SIREN de la société mère (dirigeant personne morale), lu dans l'annuaire. */
   parent_company_siren?: string | null;
+  /** Fiche annuaire de cette société mère (lib/funnel/identify.ts, withParent). */
+  parent_company_name?: string | null;
+  parent_company_category?: string | null;
+  parent_effectif_code?: string | null;
   /** Date de creation complete (AAAA-MM-JJ) : base du calcul d'age. */
   founded_on: string | null;
   /** Code INSEE brut de tranche d'effectif : sert aux estimations. */

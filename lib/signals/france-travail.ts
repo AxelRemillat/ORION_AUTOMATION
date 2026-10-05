@@ -109,6 +109,197 @@ export const FUNNEL_ROME_CODES = [
 export const FUNNEL_FT_DAYS = 30;
 
 /**
+ * Plafond de LECTURE France Travail par run de l'entonnoir (Cowork, 05/10/2026).
+ *
+ * Avant, une seule requête tous codes confondus, plafonnée à 2 000 offres : les
+ * plus récentes, soit ~3 jours sur 30 (16 437 offres disponibles). La lecture
+ * se fait maintenant code ROME par code ROME, sur toute la fenêtre de 30 jours.
+ */
+export const FUNNEL_FT_MAX_OFFERS = 8_000;
+
+/**
+ * Une requête ne pagine pas au-delà de 3 150 offres (`range` limité à
+ * 3000-3149 par l'API). Au-delà, on fait glisser la fenêtre de dates : la
+ * borne haute devient la date de la plus ancienne offre déjà lue.
+ */
+export const FT_RANGE_LIMIT = 3_150;
+
+/** Compteurs de lecture, pour le rapport du run. */
+export interface FtHarvestStats {
+  /** Offres lues (toutes, avant tout écart). */
+  read: number;
+  /** Offres anonymes (sans nom d'employeur) : ignorées. */
+  anonymous: number;
+  /** Offres d'intermédiaires (intérim, cabinets) : ignorées. */
+  staffing: number;
+  /** Offres lues par code ROME. */
+  byCode: Record<string, number>;
+}
+
+export function emptyFtStats(): FtHarvestStats {
+  return { read: 0, anonymous: 0, staffing: 0, byCode: {} };
+}
+
+/** Une page de recherche : code ROME, fenêtre de dates, tranche `range`. */
+export interface FtPageRequest {
+  code: string;
+  min: string;
+  max: string;
+  start: number;
+  end: number;
+  /** Fenêtre glissée : sa borne haute est la date d'une offre, pas « maintenant ». */
+  slid?: boolean;
+}
+
+export type FtPageFetcher = (request: FtPageRequest) => Promise<{ resultats?: RawOffer[] } | null>;
+
+export interface PaginatedJobQuery {
+  days: number;
+  /** Plafond total d'offres lues, tous codes confondus. */
+  maxOffers: number;
+  romeCodes: readonly string[];
+  today?: Date;
+  env?: EnvLike;
+  /** Horodatage (ms) au-delà duquel on s'arrête avec ce qui est lu. */
+  deadline?: number;
+  /** Rempli au fil de la lecture. */
+  stats?: FtHarvestStats;
+  /** Injecté par les tests ; sinon l'API réelle, avec cache d'un jour. */
+  fetchPage?: FtPageFetcher;
+}
+
+/**
+ * Offres de TOUTE la fenêtre, code ROME par code ROME.
+ *
+ * Le plafond total se répartit entre les codes : chacun a droit à la part
+ * restante divisée par le nombre de codes restants, si bien qu'un petit code
+ * (affréteur, office manager) lit ses 30 jours entiers et que ce qu'il laisse
+ * profite aux gros (assistant administratif, comptable). Offres anonymes et
+ * intermédiaires ignorés, une entreprise (nom + commune) gardée une fois.
+ */
+export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Result<JobSignal[]>> {
+  let fetchPage = query.fetchPage;
+  if (!fetchPage) {
+    const env = query.env ?? process.env;
+    const status = franceTravailStatus(env);
+    if (!status.available) return { ok: false, error: `France Travail — ${status.reason}` };
+    const auth = await accessToken(env);
+    if (!auth.ok) return auth;
+    fetchPage = (request) => fetchFtPage(request, auth.data);
+  }
+
+  const window = creationWindow(query.days, query.today);
+  const stats = query.stats ?? emptyFtStats();
+  const signals: JobSignal[] = [];
+  const seen = new Set<string>();
+  let budget = query.maxOffers;
+  let failures = 0;
+  let pages = 0;
+
+  // État de lecture de chaque code : on peut y revenir à la passe suivante.
+  const cursors = query.romeCodes.map((code) => ({ code, max: window.max, start: 0, oldest: null as string | null, done: false }));
+
+  // Passe après passe : chaque code non épuisé lit sa part du budget restant.
+  // Un code saturé à la première passe (assistant administratif) récupère à la
+  // suivante ce que les petits codes n'ont pas consommé.
+  passes: while (budget > 0) {
+    const open = cursors.filter((cursor) => !cursor.done);
+    if (!open.length) break;
+    let readThisPass = 0;
+    for (let index = 0; index < open.length; index += 1) {
+      const cursor = open[index];
+      const quota = Math.max(1, Math.floor(budget / (open.length - index)));
+      let readForCode = 0;
+
+      while (readForCode < quota && !cursor.done) {
+        if (query.deadline && Date.now() > query.deadline) break passes;
+        if (cursor.start >= FT_RANGE_LIMIT) {
+          // Fenêtre épuisée : on repart de la plus ancienne offre lue.
+          const next = cursor.oldest ? isoSecond(new Date(cursor.oldest)) : null;
+          if (!next || next === cursor.max || next <= window.min) {
+            cursor.done = true;
+            break;
+          }
+          cursor.max = next;
+          cursor.start = 0;
+        }
+        const start = cursor.start;
+        const end = Math.min(start + FT_PAGE_SIZE, start + quota - readForCode, FT_RANGE_LIMIT) - 1;
+        const page = await fetchPage({ code: cursor.code, min: window.min, max: cursor.max, start, end, slid: cursor.max !== window.max });
+        pages += 1;
+        if (!page) {
+          failures += 1;
+          cursor.done = true;
+          break;
+        }
+        const rows = page.resultats ?? [];
+        readForCode += rows.length;
+        for (const row of rows) {
+          const created = row.dateCreation?.trim();
+          if (created && (!cursor.oldest || created < cursor.oldest)) cursor.oldest = created;
+          const signal = toJobSignal(row);
+          if (!signal) {
+            if (!row.entreprise?.nom?.trim()) stats.anonymous += 1;
+            continue;
+          }
+          if (looksLikeStaffingAgency(signal.companyName)) {
+            stats.staffing += 1;
+            continue;
+          }
+          const key = `${signal.companyName.toLowerCase()}|${signal.city ?? ""}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            signals.push(signal);
+          }
+        }
+        if (rows.length < end - start + 1) cursor.done = true;
+        cursor.start = end + 1;
+      }
+      stats.read += readForCode;
+      stats.byCode[cursor.code] = (stats.byCode[cursor.code] ?? 0) + readForCode;
+      budget -= readForCode;
+      readThisPass += readForCode;
+      if (budget <= 0) break passes;
+    }
+    if (!readThisPass) break;
+  }
+
+  if (!signals.length && failures && failures === pages) {
+    return { ok: false, error: "France Travail — offres illisibles" };
+  }
+  return { ok: true, data: signals };
+}
+
+/** Une page réelle de l'API, mise en cache un jour. */
+async function fetchFtPage(request: FtPageRequest, token: string): Promise<SearchResponse | null> {
+  const params = new URLSearchParams({
+    minCreationDate: request.min,
+    maxCreationDate: request.max,
+    codeROME: request.code,
+    range: `${request.start}-${request.end}`,
+    sort: "1",
+  });
+  const url = `${SEARCH_URL}?${params.toString()}`;
+  // La borne haute de la PREMIÈRE fenêtre bouge à chaque appel : on n'en garde
+  // que le jour (comme pour la borne basse) ; une fenêtre glissée, elle, est
+  // fixée par une date d'offre et entre telle quelle dans la clé.
+  const maxKey = request.slid ? request.max : "now";
+  return cached<SearchResponse>(
+    `france-travail:rome:${request.code}:${request.min.slice(0, 10)}:${maxKey}:${request.start}-${request.end}`,
+    async () => {
+      await spacerFor("france-travail", FT_RATE_PER_SECOND).wait();
+      const response = await fetchJson<SearchResponse>(
+        url,
+        { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+        TIMEOUT_MS,
+      );
+      return response.ok ? response.data : null;
+    },
+    CACHE_TTL_MS,
+  );
+}
+
+/**
  * Ce qu'il faut vraiment pour decider : deux cles, pas tout l'environnement.
  * Typer `NodeJS.ProcessEnv` obligeait les tests a fabriquer un faux `NODE_ENV`
  * pour une fonction qui ne le lit pas.
@@ -208,7 +399,7 @@ export interface JobSignal {
   employerUrl?: string | null;
 }
 
-interface RawOffer {
+export interface RawOffer {
   intitule?: string | null;
   dateCreation?: string | null;
   entreprise?: { nom?: string | null; url?: string | null; description?: string | null } | null;

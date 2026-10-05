@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { collectSignals, type OfficialSignal } from "@/lib/signals";
-import { FUNNEL_FT_DAYS, FUNNEL_ROME_CODES, type EnvLike } from "@/lib/signals/france-travail";
+import {
+  emptyFtStats,
+  FUNNEL_FT_DAYS,
+  FUNNEL_FT_MAX_OFFERS,
+  FUNNEL_ROME_CODES,
+  type EnvLike,
+  type FtHarvestStats,
+} from "@/lib/signals/france-travail";
 import type { EnrichmentWarning } from "@/lib/enrichment/types";
 import type { FunnelSource, HarvestedSignal, Strength } from "./types";
 
@@ -83,7 +90,15 @@ export interface Harvest {
   warnings: EnrichmentWarning[];
   /** Signaux lus par source, avant dédoublonnage. */
   bySource: Record<string, number>;
+  /** Lecture France Travail : offres lues, anonymes, intermédiaires. */
+  ft: FtHarvestStats;
 }
+
+/**
+ * Temps accordé à la lecture France Travail : la moisson tient dans une
+ * invocation (300 s) avec BODACC derrière. Au-delà, on garde ce qui est lu.
+ */
+export const FT_READ_BUDGET_MS = 170_000;
 
 /** Moisson sur plusieurs départements, dédoublonnée par empreinte. */
 export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
@@ -91,6 +106,8 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
   const seen = new Map<string, HarvestedSignal>();
   const warnings: EnrichmentWarning[] = [];
   const bySource: Record<string, number> = {};
+  const ft = emptyFtStats();
+  const ftDeadline = Date.now() + FT_READ_BUDGET_MS;
 
   // France Travail EN PREMIER, sur toutes les zones, puis BODACC : une offre
   // dont l'intitulé révèle un pain est le signal le plus direct, et c'est lui
@@ -111,6 +128,8 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
         env: criteria.env,
         only,
         romeCodes: FUNNEL_ROME_CODES,
+        // Lecture paginée code par code, sur les 30 jours, 8 000 offres au plus.
+        ...(national ? { ftMaxOffers: FUNNEL_FT_MAX_OFFERS, ftStats: ft, ftDeadline } : {}),
       });
       warnings.push(...collected.warnings);
       for (const official of collected.signals) {
@@ -120,5 +139,5 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
       }
     }
   }
-  return { signals: [...seen.values()], warnings, bySource };
+  return { signals: [...seen.values()], warnings, bySource, ft };
 }

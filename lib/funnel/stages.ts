@@ -125,6 +125,12 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
   }
 
   let lookups = 0;
+  // Une entreprise = UN signal par run : dix offres (ou une offre et une annonce
+  // BODACC) du même SIREN ne font qu'une cible. Les étapes précédentes du même
+  // run comptent aussi.
+  const sirens = new Set(
+    (await candidatesOf(db, userId, runId, "filtré")).map((row) => row.siren).filter((siren): siren is string => Boolean(siren)),
+  );
   for (const row of [...replay, ...plan.examine.map((item) => item.row)]) {
     if (options.deadline && Date.now() > options.deadline) break;
     const signal = rowToSignal(row);
@@ -141,6 +147,10 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
       await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: "déjà en portefeuille, en corbeille ou exclu" });
       continue;
     }
+    if (identity?.siren && sirens.has(identity.siren)) {
+      await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: "doublon : même entreprise (SIREN) qu'un autre signal du run", siren: identity.siren });
+      continue;
+    }
     const verdict = filterSignal(signal, identity, {
       preferredSectors: options.prefs.preferredSectors,
       excludedSectors: options.prefs.excludedSectors,
@@ -154,6 +164,7 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
       siren: identity?.siren || row.siren,
       identity: identity ? { ...identity, legalOnly: verdict.legalOnly, base: found.company } : null,
     });
+    if (identity?.siren && verdict.status === "filtré") sirens.add(identity.siren);
   }
   const remaining = (await candidatesOf(db, userId, runId, "brut")).length;
   return { lookups, remaining, bySource: plan.bySource };

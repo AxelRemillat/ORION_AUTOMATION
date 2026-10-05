@@ -73,6 +73,15 @@ export interface Identity {
   revenueYear: number | null;
   /** L'employeur d'une offre a été confirmé par l'annuaire (nom + zone). */
   employerConfirmed: boolean;
+  /**
+   * Catégorie INSEE de l'ENTREPRISE au sens économique (PME, ETI, GE) : pour
+   * une filiale profilée, c'est celle du groupe entier.
+   */
+  category?: string | null;
+  /** Tête de groupe : dirigeant personne morale (hors commissaire aux comptes). */
+  parentName?: string | null;
+  parentCategory?: string | null;
+  parentEffectifCode?: string | null;
 }
 
 export interface FilterVerdict {
