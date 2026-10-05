@@ -8,6 +8,8 @@ import { confirmOppositionChecked, unscheduleMail } from "@/lib/outbox/actions";
 import type { SendStatus } from "@/types";
 import { MailTrashButton } from "./mail-trash-button";
 import { ScheduleDialog } from "./schedule-dialog";
+import { ResendControls } from "./resend-controls";
+import { readableSendError } from "@/lib/outbox/send-errors";
 import { SendStateBadge } from "./send-state-badge";
 
 export interface MailSendState {
@@ -96,10 +98,12 @@ export function MailActions({
       <SendStateBadge sendStatus={status} scheduledAt={state.scheduledAt} sendError={state.sendError} />
       {(status === "failed" || status === "blocked") && state.sendError && (
         <span className="max-w-[320px] truncate text-[12px] text-lost-ink" title={state.sendError}>
-          {state.sendError}
+          {readableSendError(state.sendError)}
         </span>
       )}
-      {refusesProspecting ? (
+      {status === "failed" && !refusesProspecting ? (
+        <ResendControls messageId={state.messageId} to={state.scheduledTo ?? defaultTo} onDone={onChanged} />
+      ) : refusesProspecting ? (
         <span className="rounded-full border border-lost/25 bg-lost/10 px-2 py-0.5 text-[12px] text-lost-ink">
           opposé à la prospection : envoi désactivé
         </span>

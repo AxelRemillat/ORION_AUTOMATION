@@ -1,3 +1,4 @@
+import { readableSendError } from "@/lib/outbox/send-errors";
 import { AlertTriangle, CalendarClock, Loader2, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { formatScheduled } from "@/lib/outbox/paris-time";
@@ -36,7 +37,7 @@ export function SendStateBadge({
   }
   if (sendStatus === "blocked") {
     return (
-      <Badge tone="danger" className={className} title={sendError ?? undefined}>
+      <Badge tone="danger" className={className} title={readableSendError(sendError) ?? undefined}>
         <ShieldAlert className="h-3 w-3" aria-hidden />
         Bloqué avant envoi
       </Badge>

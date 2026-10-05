@@ -7,6 +7,7 @@ import { deleteMessageForever, restoreMessage, trashMessage } from "./trash";
 import { deleteInboundForever, restoreInbound, trashInbound } from "./inbound-trash";
 import { setDoNotContact } from "./do-not-contact";
 import { confirmOppositionManually } from "./opposition-check";
+import { prepareResend, resendNow } from "./resend";
 import { draftIfReady } from "@/lib/today/auto-draft";
 import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
@@ -125,4 +126,23 @@ export async function confirmOppositionChecked(prospectId: string): Promise<Mail
   // Opposition vérifiée : si c'était le dernier manque, le brouillon part tout seul.
   if (result.ok) await draftIfReady(db, id, prospectId).catch(() => null);
   return done(result);
+}
+
+/**
+ * « Renvoyer » un mail en échec, tout de suite. Action MANUELLE : même contenu,
+ * même destinataire, mêmes contrôles qu'un envoi manuel (lib/outbox/resend.ts).
+ */
+export async function resendMail(messageId: string): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  const result = await resendNow(createClient(), { userId: id, messageId });
+  return done(result.ok ? { ok: true } : { ok: false, error: result.error });
+}
+
+/** Avant « Programmer » un mail en échec : garde-fous, trace dans l'historique, tentatives à 0. */
+export async function prepareResendMail(messageId: string): Promise<{ ok: true; messageId: string } | { ok: false; error: string }> {
+  const id = await userId();
+  if (!id) return { ok: false, error: "Session expirée. Reconnectez-vous." };
+  const prepared = await prepareResend(createClient(), { userId: id, messageId });
+  return prepared.ok ? { ok: true, messageId: prepared.messageId } : prepared;
 }

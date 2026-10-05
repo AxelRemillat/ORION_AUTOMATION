@@ -8,6 +8,8 @@ import { ActivityCard } from "./_components/activity/activity-card";
 import { buildAllPeriods, parseSeriesParam } from "./_lib/series";
 import { PilotageCard } from "./_components/pilotage/pilotage-card";
 import { loadPilotage } from "@/lib/usage/pilotage";
+import Link from "next/link";
+import { GMAIL_AUTH_MESSAGE, isGmailAuthError } from "@/lib/outbox/send-errors";
 import { readPrefs } from "@/lib/funnel/settings";
 
 export const metadata = { title: "Cockpit — ORION" };
@@ -49,6 +51,10 @@ export default async function CockpitPage({
   const mailbox = buildMailbox({ prospects, messages, inbound });
   const recentSent = mailbox.sent.slice(0, 10);
   const unread = mailbox.counts.nonLus;
+  // Mails en échec parce que la connexion Gmail de n8n a expiré : bandeau rouge.
+  const gmailFailures = messages.filter(
+    (message) => message.send_status === "failed" && !message.deleted_at && isGmailAuthError(message.send_error),
+  ).length;
   const date = DATE_FORMAT.format(new Date());
   const subtitle = unread
     ? `${unread} réponse${unread > 1 ? "s" : ""} à traiter. Commencez par là.`
@@ -63,6 +69,17 @@ export default async function CockpitPage({
         subtitle={subtitle}
         date={date.charAt(0).toUpperCase() + date.slice(1)}
       />
+
+      {gmailFailures > 0 && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-lost/25 bg-lost/10 px-4 py-3 text-[13px] text-lost-ink">
+          <span>
+            <strong>{gmailFailures} mail{gmailFailures > 1 ? "s" : ""} en échec</strong> — {GMAIL_AUTH_MESSAGE}.
+          </span>
+          <Link href="/cockpit/mails?onglet=envoyes" className="font-medium underline-offset-2 hover:underline">
+            Voir les envois en échec
+          </Link>
+        </div>
+      )}
 
       <MailboxPanel
         received={mailbox.received.slice(0, 30)}
