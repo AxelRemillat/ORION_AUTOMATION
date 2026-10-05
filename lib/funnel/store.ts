@@ -37,6 +37,33 @@ export async function insertHarvest(db: Db, userId: string, runId: string, signa
   return inserted;
 }
 
+/**
+ * REPRISE des signaux « non examinés » (plafond du run précédent atteint).
+ *
+ * La moisson ne réécrit pas un signal déjà vu : un signal laissé « non examiné »
+ * au run précédent restait donc clos à jamais. Le 05/10, le second run n'a rien
+ * trouvé de neuf (mêmes signaux une heure plus tard) et les 465 signaux non
+ * examinés de la veille n'ont jamais été repris — relever le plafond ne servait
+ * à rien. Ils rejoignent maintenant le run courant (même ligne, statut « brut ») ;
+ * rien n'est supprimé, et un signal rejeté pour un autre motif ne bouge pas.
+ */
+export async function reopenUnexamined(db: Db, userId: string, runId: string, hashes: readonly string[]): Promise<number> {
+  let reopened = 0;
+  for (let index = 0; index < hashes.length; index += 200) {
+    const { data, error } = await db
+      .from("signal_candidates")
+      .update({ run_id: runId, statut: "brut", motif_rejet: null })
+      .eq("user_id", userId)
+      .eq("statut", "rejeté")
+      .like("motif_rejet", `${NOT_EXAMINED}%`)
+      .in("hash", hashes.slice(index, index + 200))
+      .select("id");
+    if (error) throw new Error(`reprise des signaux non examinés impossible : ${error.message}`);
+    reopened += data?.length ?? 0;
+  }
+  return reopened;
+}
+
 /** Taille d'une page de lecture : l'API renvoie au plus 1 000 lignes par requête. */
 const PAGE = 1000;
 

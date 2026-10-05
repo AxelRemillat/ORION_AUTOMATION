@@ -14,6 +14,7 @@ import { offTargetReason } from "../lib/funnel/off-target";
 import { toJobSignal } from "../lib/signals/france-travail";
 import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { runSiteStage } from "../lib/funnel/site-priority";
+import { reopenUnexamined } from "../lib/funnel/store";
 import type { ContactDeps } from "../lib/contact-finder/finder";
 import type { Db } from "../lib/trash/scope";
 import type { Prospect, SignalCandidateRow } from "../types";
@@ -180,6 +181,20 @@ async function main() {
     const fetchStore: LinkupGateStore = { read: async () => null, write: async () => undefined, usedSince: async (_since, kind) => (kind === "fetch" ? 59 : 30) };
     check("lectures de page : plafond à part (60), les recherches à 30/30 ne les bloquent pas", (await linkupGate(fetchStore, "https://acme.fr", new Date(), "fetch")).status === "call");
     check("recherches : toujours bloquées à 30/30", (await linkupGate(fetchStore, "acme lyon site officiel")).status === "blocked");
+  }
+
+  console.log("\n7. Reprise des signaux « non examinés » du run précédent");
+  {
+    const db = new FakeDb({ signal_candidates: [
+      { id: "a", user_id: "u", run_id: "r1", hash: "h1", statut: "rejeté", motif_rejet: "non examiné : plafond de 600 signaux examinés par run" },
+      { id: "b", user_id: "u", run_id: "r1", hash: "h2", statut: "rejeté", motif_rejet: "entreprise introuvable à l'annuaire" },
+      { id: "c", user_id: "u", run_id: "r1", hash: "h3", statut: "retenu", motif_rejet: null },
+    ] });
+    const reopened = await reopenUnexamined(db as unknown as Db, "u", "r2", ["h1", "h2", "h3"]);
+    const row = (id: string) => db.rows("signal_candidates").find((item) => item.id === id) as Record<string, unknown>;
+    check("signal non examiné : repris dans le run courant, statut brut", reopened === 1 && row("a").run_id === "r2" && row("a").statut === "brut" && row("a").motif_rejet === null);
+    check("rejeté pour un autre motif : inchangé", row("b").statut === "rejeté" && row("b").run_id === "r1");
+    check("retenu : inchangé, rien n'est supprimé", row("c").statut === "retenu" && db.rows("signal_candidates").length === 3);
   }
 
   console.log(failures === 0 ? "\nTous les tests de complétion passent.\n" : `\n${failures} test(s) en echec.\n`);

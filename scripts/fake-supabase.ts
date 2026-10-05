@@ -71,6 +71,8 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
     return this.where((row) => (row[column] ?? null) !== value);
   }
   in(column: string, values: unknown[]) { return this.where((row) => values.includes(row[column])); }
+  /** `like` PostgREST, motif de préfixe seulement (« texte% »). */
+  like(column: string, pattern: string) { return this.where((row) => String(row[column] ?? "").startsWith(pattern.replace(/%$/, ""))); }
   /**
    * Filtre PostgREST `or` : « a.is.null,b.lt.X,c.in.(x,y),d->>k.eq.v ».
    * Juste ce que lib/jobs emploie ; un opérateur inconnu ne retient rien.
