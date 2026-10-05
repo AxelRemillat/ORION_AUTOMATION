@@ -56,52 +56,80 @@ const DEMO_LINE: Record<Language, string> = {
 };
 
 /**
- * CODEUR (Cowork, 05/10/2026) : la plateforme interdit « toute information
- * permettant de vous contacter en dehors de Codeur », et ses CGU prévoient la
- * suppression du compte sans recours. Aucune URL, aucun e-mail, aucun
- * téléphone : la démo est désignée par le TITRE d'un projet de son portfolio
- * Codeur, et la signature est le nom seul.
+ * CODEUR, MALT, COMEUP (Cowork, 05/10/2026) : ces plateformes interdisent tout
+ * moyen de contact hors plateforme (Codeur : suppression du compte sans
+ * recours). Aucune URL, aucun e-mail, aucun téléphone, aucun lien de
+ * rendez-vous : la démo est désignée par le TITRE EXACT d'une réalisation du
+ * portfolio, et la signature est le nom seul.
  */
-export const CODEUR_PORTFOLIO_TITLES = [
-  "Tri automatique des e-mails entrants",
-  "Factures et relances de paiement automatisées",
+export const NO_CONTACT_PLATFORMS: readonly Platform[] = ["codeur", "malt", "comeup"];
+export const isNoContactPlatform = (platform: Platform) => NO_CONTACT_PLATFORMS.includes(platform);
+
+/** Titres EXACTS des réalisations du portfolio (Codeur). */
+export const PORTFOLIO_TITLES = [
   "Agent IA de devis par métier",
+  "Tri automatique des e-mails entrants",
+  "Extraction automatique de factures",
   "ORION : application de prospection B2B par IA",
 ] as const;
+export type PortfolioTitle = (typeof PORTFOLIO_TITLES)[number];
 
-const CODEUR_PORTFOLIO: Record<DemoLink["key"], (typeof CODEUR_PORTFOLIO_TITLES)[number]> = {
-  emails: "Tri automatique des e-mails entrants",
-  sav: "Tri automatique des e-mails entrants",
-  reporting: "Tri automatique des e-mails entrants",
-  general: "Tri automatique des e-mails entrants",
-  factures: "Factures et relances de paiement automatisées",
-  devis: "Agent IA de devis par métier",
-  // Fichier clients à nettoyer : le plus proche est l'application de prospection (données d'entreprises).
-  fichier: "ORION : application de prospection B2B par IA",
-};
+const EMAIL_NEED = /e-?mails?|courriels?|gmail|outlook|bo[iî]te (de r[ée]ception|mail)|\bmails?\b/i;
 
-/** Signature par plateforme : nom seul sur Codeur ; jamais de téléphone ni d'e-mail ; anglais sur Upwork. */
-export function proposalSignature(platform: Platform, language: Language): string {
-  if (platform === "codeur") return "Axel Remillat";
-  return language === "en" ? "Axel Remillat · AI & automation for small businesses · axelremillat.com" : "Axel Remillat · Automatisation & IA pour PME · axelremillat.com/pme";
+/**
+ * Réalisation à citer pour une démo, ou `null` : un fichier clients à
+ * nettoyer n'est illustré par aucune réalisation — sauf le tri des e-mails
+ * quand le besoin passe par l'e-mail. ORION n'illustre pas le nettoyage.
+ */
+export function portfolioTitle(demo: DemoLink["key"], context = ""): PortfolioTitle | null {
+  switch (demo) {
+    case "devis":
+      return "Agent IA de devis par métier";
+    case "factures":
+      return "Extraction automatique de factures";
+    case "fichier":
+      return EMAIL_NEED.test(context) ? "Tri automatique des e-mails entrants" : null;
+    default:
+      return "Tri automatique des e-mails entrants";
+  }
 }
 
-/** La ligne de démo : titre du portfolio sur Codeur, lien suivi ailleurs. */
-export function demoLine(platform: Platform, language: Language, demo: DemoLink["key"]): string {
-  if (platform === "codeur") return `Une démo d'un cas proche est visible dans mon portfolio Codeur (${CODEUR_PORTFOLIO[demo]}).`;
+const PLATFORM_NAMES: Partial<Record<Platform, string>> = { codeur: "Codeur", malt: "Malt", comeup: "ComeUp" };
+
+/**
+ * Signature par plateforme : nom seul là où le contact hors plateforme est
+ * interdit ; Upwork sans site (lien de contact avant contrat déconseillé),
+ * en anglais ; jamais de téléphone ni d'e-mail.
+ */
+export function proposalSignature(platform: Platform, language: Language): string {
+  if (isNoContactPlatform(platform)) return "Axel Remillat";
+  if (platform === "upwork" || language === "en") return "Axel Remillat · AI & automation for small businesses";
+  return "Axel Remillat · Automatisation & IA pour PME · axelremillat.com/pme";
+}
+
+/** La ligne de démo : titre du portfolio (plateformes sans contact), lien suivi ailleurs ; `null` = aucune démo citée. */
+export function demoLine(platform: Platform, language: Language, demo: DemoLink["key"], context = ""): string | null {
+  if (isNoContactPlatform(platform)) {
+    const title = portfolioTitle(demo, context);
+    return title ? `Une démo d'un cas proche est visible dans mon portfolio ${PLATFORM_NAMES[platform]} (${title}).` : null;
+  }
   return `${DEMO_LINE[language]} ${opportunityDemoUrl(demo, platform)}`;
 }
 
 const clean = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /** Corps de la proposition (sans signature), puis la signature de la plateforme. */
-export function assembleProposal(parts: ProposalParts, frame: { language: Language; demo: DemoLink["key"]; platform: Platform }): { core: string; text: string } {
+export function assembleProposal(
+  parts: ProposalParts,
+  frame: { language: Language; demo: DemoLink["key"]; platform: Platform; context?: string },
+): { core: string; text: string } {
   const steps = parts.steps.map((step, index) => `${index + 1}. ${clean(step).replace(/^\d+[.)]\s*/, "")}`).join("\n");
-  const core = [clean(parts.reading), steps, demoLine(frame.platform, frame.language, frame.demo), clean(parts.framing), clean(parts.question)].join("\n\n");
+  const demo = demoLine(frame.platform, frame.language, frame.demo, frame.context ?? parts.reading);
+  const core = [clean(parts.reading), steps, demo, clean(parts.framing), clean(parts.question)].filter((block): block is string => Boolean(block)).join("\n\n");
   return { core, text: `${core}\n\n${proposalSignature(frame.platform, frame.language)}` };
 }
 
-// --- Coordonnées : interdites partout, toute URL interdite sur Codeur ----------
+// --- Coordonnées : interdites partout, toute URL interdite sur Codeur, Malt, ComeUp ---
 
 export const CONTACT_EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)+/;
 export const CONTACT_PHONE = /(\+\d{2,3}[\s.-]?|\b0)[1-9](?:[\s.-]?\d{2}){4}\b/;
@@ -117,9 +145,9 @@ export function contactFailures(text: string, platform: Platform): string[] {
   if (phone) failures.push(`Téléphone (« ${phone[0]} ») : aucune coordonnée dans une proposition.`);
   const calendar = text.match(CALENDAR_LINK);
   if (calendar) failures.push(`Lien de prise de rendez-vous (« ${calendar[0]} ») : interdit.`);
-  if (platform === "codeur") {
+  if (isNoContactPlatform(platform)) {
     const url = text.match(ANY_URL);
-    if (url) failures.push(`Codeur : aucune URL (« ${url[0]} ») — la plateforme interdit tout moyen de contact hors Codeur ; cite la démo par son titre de portfolio.`);
+    if (url) failures.push(`${PLATFORM_NAMES[platform]} : aucune URL (« ${url[0]} ») — la plateforme interdit tout moyen de contact hors plateforme ; la démo est citée par son titre de portfolio.`);
   }
   return failures;
 }
@@ -186,7 +214,7 @@ export function checkProposal(
     failures.push("Budget absent de l'annonce : pas de prix, pose une question de cadrage (volume, délai, outils).");
   }
   if (/https?:\/\/|www\.|axelremillat/i.test(written)) failures.push("Aucune URL dans le texte : le lien de démo est posé par le code.");
-  if (/portfolio Codeur|d[ée]mo d['’]un cas proche|one-minute demo/i.test(written)) failures.push("La ligne de démo est posée par le code : ne la répète pas dans le texte.");
+  if (/mon portfolio|d[ée]mo d['’]un cas proche|one-minute demo/i.test(written)) failures.push("La ligne de démo est posée par le code : ne la répète pas dans le texte.");
   if (context.language === "en" && (written.match(FRENCH_MARKERS) ?? []).length > 3) failures.push("La proposition doit être entièrement en anglais (Upwork).");
   return { ok: failures.length === 0, failures };
 }
@@ -206,7 +234,7 @@ LA RÉPONSE FINALE AURA EXACTEMENT CETTE FORME (le code ajoute la ligne de démo
 2. <STEP 2>
 3. <STEP 3>
 
-${input.platform === "codeur" ? "<LIGNE DE DÉMO — posée par le code : le titre d'un projet du portfolio Codeur. Ne l'écris pas, ne la répète pas.>" : `${DEMO_LINE[input.language]} <lien vers la démo « ${DEMO_LINKS[input.demo].label} »>`}
+${isNoContactPlatform(input.platform) ? "<LIGNE DE DÉMO — posée par le code : le titre d'une réalisation du portfolio. Ne l'écris pas, ne la répète pas.>" : `${DEMO_LINE[input.language]} <lien vers la démo « ${DEMO_LINKS[input.demo].label} »>`}
 
 <FRAMING — 1 ou 2 phrases>
 
@@ -218,7 +246,7 @@ ${input.platform === "codeur" ? "<LIGNE DE DÉMO — posée par le code : le tit
 - "framing" : ${budget ? `un délai réaliste et une fourchette de prix cohérente avec le budget annoncé (${budget})${input.platform === "codeur" ? ` ET avec les repères du profil Codeur : 45 €/h, prix de lancement 300–600 € pour une tâche simple, 600–1 200 € pour un workflow complet. Au-delà de 1 200 €, seulement si la complexité le justifie, et dis pourquoi dans la phrase` : ""}.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
 - "question" : UNE question pour qualifier le besoin (ce qui conditionne la solution), qui finit par « ? ».
 
-INTERDITS : expérience, clients ou références inventés (« j'ai déjà aidé… », « mes clients »), chiffres de résultats non prouvés (« -50 % de temps »), flatterie (« super projet »), jargon (workflow, pipeline, leverage, seamless…), toute URL, toute adresse e-mail, tout téléphone, tout lien de prise de rendez-vous, toute signature.${input.platform === "codeur" ? " Sur Codeur, aucun moyen de contact hors de la plateforme : ni site, ni lien, ni coordonnée." : ""}
+INTERDITS : expérience, clients ou références inventés (« j'ai déjà aidé… », « mes clients »), chiffres de résultats non prouvés (« -50 % de temps »), flatterie (« super projet »), jargon (workflow, pipeline, leverage, seamless…), toute URL, toute adresse e-mail, tout téléphone, tout lien de prise de rendez-vous, toute signature.${isNoContactPlatform(input.platform) ? " Sur cette plateforme, aucun moyen de contact hors plateforme : ni site, ni lien, ni coordonnée." : ""}
 La réponse complète (sans la signature) fait ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots — budget : "reading" 40 à 55 mots, chaque étape 14 à 20 mots, "framing" 20 à 30 mots, "question" 12 à 20 mots.
 
 EXEMPLES ATTENDUS (autres annonces — n'en reprends aucune phrase) :
@@ -249,7 +277,7 @@ export const PROPOSAL_GRID = [
   { id: "lecture", points: 3, rule: "La reformulation reprend les éléments CONCRETS de l'annonce (outil, volume, documents, résultat attendu) : on voit qu'elle a été lue. 3 = précise. 1 = générique (« automatiser vos tâches »). 0 = hors sujet." },
   { id: "approche", points: 3, rule: "Trois étapes concrètes, dans l'ordre, liées au besoin (ce qui sera fait, avec quels outils). 3 = un client sait ce qu'il achète. 1 = vague. 0 = jargon ou liste creuse." },
   { id: "cadrage", points: 2, rule: "Délai et fourchette cohérents avec le budget annoncé (sur Codeur, avec les repères du profil : 45 €/h, 300–600 € tâche simple, 600–1 200 € workflow complet ; au-delà seulement si la complexité est dite), ou — sans budget — une question de cadrage utile ; et une question de qualification qui conditionne vraiment la solution. 2 = utiles. 1 = convenues ou prix au-dessus des repères sans raison. 0 = absentes ou prix sans budget." },
-  { id: "ton", points: 2, rule: "Direct, poli, sans flatterie, sans jargon, sans expérience ni résultat inventés, sans coordonnées. 2 = on croirait un indépendant sérieux. 0 = flatterie, promesse chiffrée, références inventées, ou — sur CODEUR — la moindre URL, adresse e-mail ou téléphone (interdits par la plateforme)." },
+  { id: "ton", points: 2, rule: "Direct, poli, sans flatterie, sans jargon, sans expérience ni résultat inventés, sans coordonnées. 2 = on croirait un indépendant sérieux. 0 = flatterie, promesse chiffrée, références inventées, ou — sur CODEUR, MALT ou COMEUP — la moindre URL, adresse e-mail ou téléphone (interdits par la plateforme)." },
 ] as const;
 
 export interface ProposalVerdict {
@@ -263,7 +291,7 @@ export function buildProposalJudgePrompt(): string {
   const positives = PROPOSAL_POSITIVES.slice(0, 2).map((item) => `[${item.platform}] ${item.title}\n${item.text}`).join("\n\n");
   const negatives = PROPOSAL_NEGATIVES.map((item) => `- ${item.why}`).join("\n");
   return `Tu relis la réponse qu'un indépendant (IA et automatisation pour PME) va poster sur une plateforme freelance.
-La forme est vérifiée par un programme (longueur, ligne de démo — un titre de portfolio sur Codeur, où les liens sont interdits —, signature) : ne la reproche pas. Note le FOND sur 10 :
+La forme est vérifiée par un programme (longueur, ligne de démo — un titre de portfolio sur Codeur, Malt et ComeUp, où les liens sont interdits, éventuellement absente —, signature) : ne la reproche pas. Note le FOND sur 10 :
 ${grid}
 
 Seuil : 9/10 = à poster telle quelle. Une réponse correcte mais générique vaut 6 ou 7.
@@ -336,7 +364,7 @@ export async function generateProposal(input: ProposalInput): Promise<ProposalOu
       feedback = 'La réponse n\'était pas le JSON demandé : {"reading","steps":[3],"framing","question"}.';
       continue;
     }
-    const { core, text } = assembleProposal(parts, { language: input.language, demo: input.demo, platform: input.platform });
+    const { core, text } = assembleProposal(parts, { language: input.language, demo: input.demo, platform: input.platform, context: `${input.need} ${input.body}` });
     const rules = checkProposal(parts, core, { language: input.language, budget: input.budget, platform: input.platform }, text);
     // Le juge ne note qu'une proposition qui passe les règles.
     const verdict = rules.ok ? await judgeProposal(input.ask, { title: input.title, body: input.body, budget: input.budget, text: core, platform: input.platform }, `opportunites:juge:${round}`) : null;

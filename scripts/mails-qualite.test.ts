@@ -432,6 +432,8 @@ async function main() {
     check("domaine enregistrable : www.shop.exemple.fr → exemple.fr", registrableDomain("https://www.shop.exemple.fr/contact") === "exemple.fr");
     check("AIRPLANE : contact@airplane.aero ≠ airplane-delivery.fr → à vérifier", contactDomainMismatch("contact@airplane.aero", "https://airplane-delivery.fr")?.emailDomain === "airplane.aero");
     check("même domaine (sous-domaine du site) : rien à vérifier", contactDomainMismatch("jean@mail.exemple.fr", "https://www.exemple.fr") === null);
+    check("IMAGINE OPTIC : même nom à l'extension près (.com ↔ .fr) → accepté", contactDomainMismatch("contact@imagine-optic.com", "https://www.imagine-optic.fr") === null);
+    check("nom proche mais différent (airplane ↔ airplane-delivery) : toujours à vérifier", contactDomainMismatch("contact@airplane.aero", "https://airplane-delivery.fr") !== null);
     check("messagerie grand public (gmail) : pas un indice d'erreur", contactDomainMismatch("boulangerie.martin@gmail.com", "https://boulangerie-martin.fr") === null);
     const airplaneFigures = { contact_confirmed: { email: "contact@airplane.aero", at: "2026-10-05" } };
     check("confirmation liée à l'adresse : confirmée", contactConfirmed(airplaneFigures, "Contact@Airplane.aero"));
