@@ -24,7 +24,7 @@ const TYPE_CHIP = { intro: "Intro", relance: "Relance, même fil", reponse: "Ré
 export const EDITOR_ID = "today-editor";
 
 /** Le panneau de complétion ne sert que s'il manque un contact ou un site — pas un simple brouillon. */
-const CONTACT_TAGS = new Set(["Email manquant", "Email non vérifié", "Site introuvable"]);
+const CONTACT_TAGS = new Set(["Email manquant", "Email non vérifié", "Contact à vérifier", "Site introuvable"]);
 const needsContact = (item: TodayItem) => item.tags.some((tag) => CONTACT_TAGS.has(tag));
 
 export function TodayPane({

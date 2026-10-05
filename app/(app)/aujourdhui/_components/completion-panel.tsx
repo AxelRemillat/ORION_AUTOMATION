@@ -5,7 +5,7 @@ import { Phone, Sparkles } from "lucide-react";
 import { Button, Input, Label, useToast } from "@/components/ui";
 import { completionLabel } from "@/lib/today/tags";
 import type { TodayItem } from "@/lib/today/types";
-import { completeToday, setTodayContact } from "../actions";
+import { completeToday, confirmTodayContact, setTodayContact } from "../actions";
 
 /**
  * Fiche « À compléter » : ce qui manque, ce qu'ORION a déjà tenté, et deux
@@ -17,7 +17,7 @@ export function CompletionPanel({ item, onDone }: { item: TodayItem; onDone: () 
   const toast = useToast();
   const [email, setEmail] = useState(item.contact.email ?? "");
   const [website, setWebsite] = useState(item.website ?? "");
-  const [busy, setBusy] = useState<"orion" | "save" | null>(null);
+  const [busy, setBusy] = useState<"orion" | "save" | "confirm" | null>(null);
   if (!item.prospectId) return null;
   const prospectId = item.prospectId;
 
@@ -45,8 +45,28 @@ export function CompletionPanel({ item, onDone }: { item: TodayItem; onDone: () 
     onDone();
   }
 
+  async function confirm() {
+    setBusy("confirm");
+    const result = await confirmTodayContact({ prospectId });
+    setBusy(null);
+    if (!result.ok) return toast.error(result.error);
+    toast.success("Contact confirmé.");
+    onDone();
+  }
+
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-warn/25 bg-warn/5 p-3">
+      {item.tags.includes("Contact à vérifier") && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-text">
+          <p>
+            Contact à vérifier : l&apos;adresse <span className="font-data">{item.contact.email}</span> n&apos;est pas sur le domaine du site
+            {item.website ? <span className="font-data"> {item.website.replace(/^https?:\/\//, "")}</span> : null}.
+          </p>
+          <Button size="sm" variant="outline" loading={busy === "confirm"} onClick={confirm}>
+            C&apos;est bien leur contact
+          </Button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[13px] font-medium text-text">À compléter · {completionLabel(item.attempts)}</p>
         <Button size="sm" variant="secondary" loading={busy === "orion"} onClick={complete}>

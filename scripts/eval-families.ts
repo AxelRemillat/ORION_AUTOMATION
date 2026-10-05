@@ -12,13 +12,13 @@ import { flatten } from "@/lib/today/group";
 import type { MailFamily } from "@/lib/emails/quality/families";
 import type { Prospect } from "@/types";
 
-const BUDGET_EUR = 0.2;
+const BUDGET_EUR = 0.3;
 const count = Math.max(1, Number(process.argv[2]) || 4);
 
 async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
-  const items = flatten((await loadToday(db as never, userId)).groups).filter((item) => item.kind === "nouveau" && item.prospectId).slice(Number(process.argv[3]) || 0, (Number(process.argv[3]) || 0) + count);
+  const items = flatten((await loadToday(db as never, userId)).groups).filter((item) => (item.kind === "nouveau" || item.kind === "a_completer") && item.prospectId && item.contact.email).slice(Number(process.argv[3]) || 0, (Number(process.argv[3]) || 0) + count);
   const tally: Record<string, { n: number; ok: number }> = {};
   for (const item of items) {
     const { data } = await db.from("prospects").select("*").eq("id", item.prospectId!).maybeSingle();

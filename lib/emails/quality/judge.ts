@@ -43,9 +43,9 @@ export const GRID = [
  */
 export const FAMILY_GRIDS: Record<Exclude<MailFamily, "F1">, readonly { id: string; points: number; rule: string }[]> = {
   F2: [
-    { id: "besoin", points: 4, rule: `Après la présentation imposée (« ${F2_INTRO} »), le besoin probable : leur activité nommée PRÉCISÉMENT (produits, services, clientèle tirés de ce que l'on sait), puis une tâche qui revient souvent dans ce métier et ce qu'elle produit (client qui attend, devis tardif, double saisie). C'est un besoin PROBABLE, typique du métier, PAS une affirmation à vérifier : ne le qualifie jamais de « supposé », « hypothétique » ou « non établi » ; « peut retarder », « demande souvent » sont corrects. 4 = activité précise et tâche concrète. 2 = activité générique (« dans votre secteur »). 1 = tâche abstraite. 0 = fait inventé, défaut affirmé comme constaté chez eux, ou hypothèse visible.` },
-    { id: "proposition", points: 3, rule: "Ce qui serait mis en place chez eux, concrètement, pour CE besoin. 3 = geste concret + effet. 2 = juste mais générique. 1 = sans lien avec le besoin. 0 = étapes techniques ou jargon." },
-    { id: "clarte", points: 2, rule: "Mots simples du métier, phrases courtes, aucun jargon, se lit d'une traite." },
+    { id: "besoin", points: 4, rule: `Après la présentation imposée (« ${F2_INTRO} »), le besoin probable : leur activité nommée PRÉCISÉMENT (produits, services, clientèle tirés de ce que l'on sait), puis une tâche qui revient souvent dans ce métier et ce qu'elle produit (client qui attend, devis tardif, double saisie). C'est un besoin PROBABLE, typique du métier, PAS une affirmation à vérifier : ne le qualifie jamais de « supposé », « hypothétique » ou « non établi » ; « peut retarder », « demande souvent » sont corrects. Ce qui DÉCRIT leur activité (produits, services, clientèle, « avions régionaux ») DOIT figurer dans « ce que l'on sait d'elle », sinon c'est un fait inventé (0) ; la tâche qui revient et sa conséquence sont, elles, des situations TYPES du métier : elles n'ont pas à y figurer et ne se qualifient jamais de « non sourcées ». 4 = activité précise et tâche concrète, dite simplement. 2 = activité générique (« dans votre secteur »). 1 = tâche abstraite ou tournure lourde (« revient souvent, avec une intervention qui attend »). 0 = fait inventé, défaut affirmé comme constaté chez eux, ou hypothèse visible.` },
+    { id: "proposition", points: 3, rule: "À la PREMIÈRE PERSONNE et à la VOIX ACTIVE (« Je mets en place… », « J'automatise… ») : ce que je ferais chez eux, concrètement, pour CE besoin. 3 = geste concret + effet, on sait qui fait quoi. 1 = voix passive (« les demandes sont triées, puis une commande est préparée ») ou sans lien avec le besoin. 0 = étapes techniques ou jargon." },
+    { id: "clarte", points: 2, rule: "Phrases simples et naturelles, mots du métier, aucun jargon, aucune tournure lourde ou alambiquée. 1 = une tournure maladroite." },
     { id: "naturel", points: 1, rule: "Écrit à la main par un indépendant, direct et poli, sans superlatif ni flatterie." },
   ],
   F3: [
@@ -55,7 +55,7 @@ export const FAMILY_GRIDS: Record<Exclude<MailFamily, "F1">, readonly { id: stri
     { id: "naturel", points: 1, rule: "Direct et poli, sans superlatif ni flatterie." },
   ],
   F4: [
-    { id: "demo", points: 4, rule: `Après le lien (posé en première ligne), ce que la démo fait sur un cas TYPE de leur métier : ce qui entre (demande, commande, facture…) et ce qui en sort, avec leurs mots. 4 = cas concret de leur activité. 2 = description générique de la démo. 0 = promesse vague, fait inventé, ou jargon. La ligne « ${F4_WHO} » est imposée : ne la note pas.` },
+    { id: "demo", points: 4, rule: `Après le lien (posé en première ligne), ce que fait la démo, HONNÊTEMENT : elle est GÉNÉRIQUE, faite sur un cas TYPE, pas sur leur métier ni leurs données. Attendu : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels. » 4 = cas type clair, résultat UTILE et concret (facture, devis, réponse au client, confirmation de délai, commande fournisseur), puis transposition explicite à leur activité. 2 = honnête mais résultat vague ou sans valeur (« prépare son classement dans la catégorie commandes »). 0 = laisse croire que la démo a été faite sur LEUR métier ou LEURS données (« Elle lit une commande de vêtements professionnels et prépare la facture »), promesse vague, fait inventé ou jargon. La ligne « ${F4_WHO} » est imposée : ne la note pas.` },
     { id: "lien", points: 3, rule: "Le cas décrit correspond à leur activité réelle (ce que l'on sait d'eux) et donne envie de cliquer. 3 = évident. 2 = plausible. 1 = lien faible. 0 = hors sujet." },
     { id: "clarte", points: 2, rule: "Mots simples, phrases courtes, aucun jargon." },
     { id: "naturel", points: 1, rule: "Direct et poli, sans superlatif ni flatterie." },
@@ -64,9 +64,25 @@ export const FAMILY_GRIDS: Record<Exclude<MailFamily, "F1">, readonly { id: stri
 
 /** Exemples cibles des familles F2 à F4 (écrits pour le gabarit, pas encore validés par Axel). */
 const FAMILY_TARGETS: Record<Exclude<MailFamily, "F1">, string> = {
-  F2: `Bonjour Monsieur Gatine,\n\n${F2_INTRO}\n\nPour une entreprise qui fabrique des tubes et bouchons en carton, les demandes de prix arrivent avec des références variées. Un message mal aiguillé retarde la réponse au client.\n\nConcrètement, les e-mails reçus seraient triés entre devis et commandes, puis transmis à la bonne personne.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&f=F2\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
-  F3: `Bonjour Monsieur Gomez,\n\nQui confirme aujourd'hui les délais de vos commandes de tôlerie sur mesure ?\n\nJ'automatise ce tri : chaque commande reçue par e-mail est repérée et sa confirmation préparée.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&f=F3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?`,
-  F4: `Bonjour Monsieur Jund,\n\nUne démo testable en une minute : axelremillat.com/agent?f=F4\n\nElle lit une demande de coffret électrique sur mesure et prépare un brouillon de devis, à vérifier par votre deviseur.\n\n${F4_WHO}\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
+  F2: `Bonjour Monsieur Gatine,\n\n${F2_INTRO}\n\nPour une entreprise qui fabrique des tubes et bouchons en carton, les demandes de prix arrivent avec des références variées. Un message mal aiguillé retarde la réponse au client.\n\nJe mets en place le tri de vos e-mails entre devis et commandes, et je transmets chacun à la bonne personne.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
+  F3: `Bonjour Monsieur Gomez,\n\nQui confirme aujourd'hui les délais de vos commandes de tôlerie sur mesure ?\n\nJ'automatise ce tri : chaque commande reçue par e-mail est repérée et sa confirmation préparée.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?`,
+  F4: `Bonjour Monsieur Jund,\n\nUne démo testable en une minute : axelremillat.com/agent?v=4\n\nElle lit une demande de devis type et prépare un brouillon à vérifier ; le même principe s'appliquerait à vos demandes de coffrets électriques sur mesure.\n\n${F4_WHO}\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
+};
+
+/**
+ * CONTRE-EXEMPLES RÉELS des familles F2 et F4 (relecture Cowork + Axel du
+ * 05/10/2026 : premiers mails notés 10/10 trop généreusement).
+ */
+export const FAMILY_NEGATIVES: Record<Exclude<MailFamily, "F1">, { text: string; why: string }[]> = {
+  F2: [
+    { text: "En maintenance d'avions régionaux, vérifier les pièces disponibles et suivre les délais fournisseurs revient souvent, avec une intervention qui attend.", why: "Tournure lourde et maladroite (« revient souvent, avec une intervention qui attend ») : besoin 1 au plus, clarté 1." },
+    { text: "Concrètement, les demandes de pièces reçues par e-mail sont triées, puis une commande fournisseur est préparée pour votre validation.", why: "Voix passive : on ne sait pas qui fait quoi. Proposition 1 au plus." },
+  ],
+  F3: [],
+  F4: [
+    { text: "Elle lit une commande de vêtements professionnels et prépare la facture client à valider.", why: "Laisse croire que la démo a été faite sur LEUR métier alors qu'elle est générique : démo 0." },
+    { text: "Elle lit une commande type et prépare son classement dans la catégorie « commandes » à valider ; le même principe s'appliquerait à vos commandes de plants truffiers.", why: "Honnête, mais le résultat (un classement) n'apporte rien de concret au client : démo 2." },
+  ],
 };
 
 const gridOf = (family: MailFamily): readonly { id: string; points: number; rule: string }[] => (family === "F1" ? GRID : FAMILY_GRIDS[family]);
@@ -122,14 +138,17 @@ Réponds UNIQUEMENT en JSON :
 /** Juge des familles F2 à F4 : même exigence de fond, grille de la famille. */
 function buildFamilyJudgePrompt(family: Exclude<MailFamily, "F1">): string {
   const grid = FAMILY_GRIDS[family].map((criterion) => `- ${criterion.id} (${criterion.points} pt) : ${criterion.rule}`).join("\n");
-  const below = FOND_NEGATIVES.filter((mail) => mail.company !== "PROPOSITION HORS SUJET").map((mail) => `- ${mail.why}`).join("\n");
+  const below = [
+    ...FAMILY_NEGATIVES[family].map((item) => `- « ${item.text} » → ${item.why}`),
+    ...FOND_NEGATIVES.filter((mail) => mail.company !== "PROPOSITION HORS SUJET").map((mail) => `- ${mail.why}`),
+  ].join("\n");
   const json = FAMILY_GRIDS[family].map((criterion) => `"${criterion.id}":0-${criterion.points}`).join(",");
   return `Tu relis des mails de prospection à froid qu'un indépendant (automatisation et IA pour PME) enverra à des dirigeants de PME françaises.
 Ce mail suit la famille « ${FAMILY_LABELS[family]} ». Tu ne notes que le FOND de ce que la famille fait écrire ; la forme (salutation, présentation imposée, lien, demande finale, longueur, objet) est vérifiée par un programme : ne la reproche jamais.
 Note sur 10 avec cette grille, en justifiant chaque point retiré :
 ${grid}
 
-Seuil : 9/10 = envoyable tel quel. Un mail correct mais générique vaut 6 ou 7.
+Seuil : 9/10 = envoyable tel quel. Un mail correct mais générique vaut 6 ou 7. 10/10 est rare : réserve-le à un mail que tu n'aurais rien à reprendre. Chaque point retiré doit correspondre à un défaut nommé dans « reasons » : sans défaut, pas de point retiré.
 
 EXEMPLE CIBLE — 9 ou plus :
 ${FAMILY_TARGETS[family]}

@@ -16,6 +16,7 @@ export type TodayStatus = "todo" | "valide" | "ecarte" | "programme" | "envoye";
 export const TODAY_TAGS = [
   "Email manquant",
   "Email non vérifié",
+  "Contact à vérifier",
   "Opposition non vérifiée",
   "Site introuvable",
   "Profil métier vide",
@@ -30,6 +31,8 @@ export type TodayTag = (typeof TODAY_TAGS)[number];
 export const BLOCKING_TAGS: ReadonlySet<TodayTag> = new Set([
   "Email manquant",
   "Email non vérifié",
+  // E-mail hors du domaine du site, non confirmé par Axel (lib/today/contact-domain.ts).
+  "Contact à vérifier",
   "Opposition non vérifiée",
   "Profil à compléter",
   "Brouillon manquant",

@@ -139,6 +139,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       subjectArm: arm,
       dayOpenings: input.dayOpenings,
       family,
+      knownText: [input.activity, input.sector, input.brief.pain.task, input.brief.pain.automationIdea, factText].filter(Boolean).join(" "),
     });
     // Le juge ne note qu'un mail qui passe le garde-fou : inutile de payer pour
     // une note que la règle a déjà tranchée.

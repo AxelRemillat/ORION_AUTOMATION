@@ -1,3 +1,4 @@
+import { contactConfirmed, contactDomainMismatch } from "./contact-domain";
 import { isBlockedReason } from "@/lib/emails/quality/readiness";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import type { FunnelCard } from "@/lib/funnel/view";
@@ -101,6 +102,7 @@ export function prospectItem(input: {
   const tags = tagsOf({
     email: contact.email,
     emailDoubtful: card?.emailDoubtful ?? false,
+    contactToCheck: Boolean(contactDomainMismatch(contact.email, prospect.website)) && !contactConfirmed(figures, contact.email),
     // Connue seulement si Pappers l'a lue ou si elle a été vérifiée (Pappers,
     // INPI, à la main) : une fiche ancienne sans ces marques n'est PAS sûre.
     oppositionUnverified: !oppositionKnown(prospect.key_figures as Record<string, unknown> | undefined),

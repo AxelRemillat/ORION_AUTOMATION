@@ -135,3 +135,67 @@ export const FOND_NEGATIVES: ReferenceMail[] = [
     why: "Jargon (« intégration centralisée », « efficacité opérationnelle »), aucun geste concret.",
   },
 ];
+
+/**
+ * FAMILLES F2 et F4 — cas RÉELS relus par Cowork et Axel le 05/10/2026 (notés
+ * 10/10 à tort), et leur réécriture attendue. Le juge doit noter les originaux
+ * sous 9 et les réécritures 9 ou plus ; les règles du code attrapent déjà le
+ * passif (F2) et la démo présentée comme faite sur leur métier (F4).
+ */
+export interface FamilyReference {
+  family: "F2" | "F4";
+  company: string;
+  subject: string;
+  hook: string;
+  proposal: string;
+  /** Ce que l'on sait d'eux (vu par le juge). */
+  facts: string;
+  expected: "positif" | "négatif";
+  why: string;
+}
+
+const AIRPLANE_FACTS = "- Activité (leur site) : maintenance en base, peinture aéronautique, équipements et pièces détachées pour avions régionaux";
+const DUPONT_FACTS = "- Activité (leur site) : fabrication et vente de vêtements professionnels et de vêtements de travail pour différents secteurs";
+
+export const FAMILY_REFERENCES: FamilyReference[] = [
+  {
+    family: "F2",
+    company: "AIRPLANE DELIVERY",
+    subject: "Demandes de pièces",
+    hook: "En maintenance d'avions régionaux, vérifier les pièces disponibles et suivre les délais fournisseurs revient souvent, avec une intervention qui attend.",
+    proposal: "Concrètement, les demandes de pièces reçues par e-mail sont triées, puis une commande fournisseur est préparée pour votre validation.",
+    facts: AIRPLANE_FACTS,
+    expected: "négatif",
+    why: "Tournure lourde, proposition au passif.",
+  },
+  {
+    family: "F2",
+    company: "AIRPLANE DELIVERY",
+    subject: "Demandes de pièces",
+    hook: "Pour une entreprise de maintenance et de pièces détachées d'avions régionaux, chaque demande de pièce oblige à vérifier le stock et les délais fournisseurs. Une réponse tardive retarde l'intervention.",
+    proposal: "Je mets en place le tri de vos demandes de pièces et je prépare la commande fournisseur, que vous validez.",
+    facts: AIRPLANE_FACTS,
+    expected: "positif",
+    why: "Activité sourcée, phrases simples, première personne.",
+  },
+  {
+    family: "F4",
+    company: "DUPONT-BEAUDEUX",
+    subject: "Factures clients",
+    hook: "Elle lit une commande de vêtements professionnels et prépare la facture client à valider.",
+    proposal: "",
+    facts: DUPONT_FACTS,
+    expected: "négatif",
+    why: "Laisse croire que la démo a été faite sur leur métier.",
+  },
+  {
+    family: "F4",
+    company: "DUPONT-BEAUDEUX",
+    subject: "Factures clients",
+    hook: "Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels.",
+    proposal: "",
+    facts: DUPONT_FACTS,
+    expected: "positif",
+    why: "Démo honnête : cas type, puis transposition.",
+  },
+];

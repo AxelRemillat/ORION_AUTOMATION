@@ -101,9 +101,11 @@ export interface DueReminderRow {
 
 /** Famille du mail d'intro le plus récent qui en porte une. */
 function familyOfLatestIntro(messages: readonly Message[], families: ReadonlyMap<string, string>): string | null {
-  const intros = messages.filter((message) => message.type === "intro" && families.has(message.id));
-  intros.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
-  return intros[0] ? (families.get(intros[0].id) ?? null) : null;
+  const intros = messages.filter((message) => message.type === "intro");
+  if (!intros.length) return null;
+  const tagged = intros.filter((message) => families.has(message.id)).sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  // Intro écrite avant l'expérience n° 2 (#83) : « non attribué ».
+  return tagged[0] ? (families.get(tagged[0].id) ?? null) : "non attribué";
 }
 
 /** Assemble les lignes du pipeline à partir des quatre tables. */

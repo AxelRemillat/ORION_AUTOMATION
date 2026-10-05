@@ -73,13 +73,20 @@ export function familyFor(prospectId: string, allowed: readonly MailFamily[] = A
 /** Expérience n° 1 en pause : l'objet suit la famille (question pour F3, sujet métier sinon). */
 export const subjectArmFor = (family: MailFamily): SubjectArm => (family === "F3" ? "question" : "metier");
 
-/** URL de démo suivie : `&f=F2` (ou `?f=F2` si le chemin n'a pas de paramètre). */
+/**
+ * URL de démo suivie, DISCRÈTE (Cowork, 05/10/2026) : « &f=F4 » en clair fait
+ * « lien traqué » et peut peser en délivrabilité. La famille tient dans un
+ * chiffre : `?demo=invoice&v=4` (ou `/agent?v=4`). Rien à changer côté portfolio :
+ * un paramètre inconnu est ignoré par la page.
+ */
+export const FAMILY_PARAM: Record<MailFamily, string> = { F1: "1", F2: "2", F3: "3", F4: "4" };
+
 export function familyDemoUrl(demo: DemoLink, family: MailFamily): string {
-  return `${DEMO_HOST}${demo.path}${demo.path.includes("?") ? "&" : "?"}f=${family}`;
+  return `${DEMO_HOST}${demo.path}${demo.path.includes("?") ? "&" : "?"}v=${FAMILY_PARAM[family]}`;
 }
 
-/** URL nue (sans le marqueur de famille), pour la vérifier contre la liste blanche. */
-export const bareDemoUrl = (url: string) => url.replace(/[?&]f=F[1-4]\b/, "");
+/** URL nue (sans le marqueur de famille, ancien `f=F4` compris), pour la vérifier contre la liste blanche. */
+export const bareDemoUrl = (url: string) => url.replace(/[?&](v=[1-4]|f=F[1-4])\b/, "");
 
 export const PROOF_PREFIXES: Record<MailFamily, string> = {
   F1: "Exemple testable en une minute :",

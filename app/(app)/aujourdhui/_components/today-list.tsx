@@ -80,8 +80,11 @@ export function TodayList({
                     </div>
                     {item.family && (
                       <span
-                        title={`Famille de mail : ${FAMILY_LABELS[item.family as MailFamily] ?? item.family}`}
-                        className="shrink-0 rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-data text-[10px] text-primary-ink"
+                        title={item.family in FAMILY_LABELS ? `Famille de mail : ${FAMILY_LABELS[item.family as MailFamily]}` : "Brouillon écrit avant l'expérience des familles"}
+                        className={cn(
+                          "shrink-0 rounded-full border px-1.5 py-0.5 font-data text-[10px]",
+                          item.family in FAMILY_LABELS ? "border-primary/25 bg-primary/10 text-primary-ink" : "border-line text-faint",
+                        )}
                       >
                         {item.family}
                       </span>

@@ -120,7 +120,7 @@ function knownBlock(input: WriterInput): string {
 }
 
 const COMMON_RULES = (input: WriterInput) => `RÈGLES COMMUNES :
-- AUCUN fait inventé : n'affirme sur eux que ce qui est listé ci-dessus. Un besoin est présenté comme courant dans leur métier, jamais comme un défaut constaté chez eux.
+- AUCUN fait inventé : n'affirme sur eux que ce qui est listé ci-dessus ; chaque précision sur leur activité (« avions régionaux », « vêtements professionnels ») doit y figurer. Un besoin est présenté comme courant dans leur métier, jamais comme un défaut constaté chez eux.
 - Jamais l'offre d'emploi ni « vous recrutez », jamais une donnée de registre (effectif, chiffre d'affaires), jamais « sur votre site ».
 - Pas d'hypothèse visible (« si vos… », « peut-être », « éventuellement »), pas de jargon ni de sigle qu'ils n'emploient pas.
 - MOTS INTERDITS : ${FORBIDDEN_WORDS.join(", ")}.
@@ -140,11 +140,12 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
   const parts =
     family === "F2"
       ? `1. "hook" = BESOIN PROBABLE lié à leur activité, UNE ou DEUX phrases de 20 mots au plus : nomme leur activité précisément (« Pour une entreprise qui fabrique des emballages sur mesure, … ») et la tâche qui revient souvent, avec ce qu'elle produit (client qui attend, devis qui part tard, double saisie).
-2. "proposal" = UNE phrase de 22 mots au plus : ce que je mettrais en place chez eux, concrètement (« Concrètement, … sont triées et … préparé pour votre validation. »). Elle décrit ce que montre la démo « ${input.demo.label} ».`
+2. "proposal" = UNE phrase de 22 mots au plus, À LA PREMIÈRE PERSONNE et à la VOIX ACTIVE, qui commence par « Je mets en place », « J'automatise » ou « Je construis » : ce que je ferais chez eux, concrètement (« Je mets en place le tri de vos demandes de pièces et je prépare la commande fournisseur, que vous validez. »). Jamais de passif (« sont triées », « est préparée »). Elle décrit ce que montre la démo « ${input.demo.label} ».
+   Phrases simples et naturelles : pas de tournure lourde (« revient souvent, avec une intervention qui attend »).`
       : family === "F3"
         ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier (« Qui s'occupe de confirmer les délais de vos commandes de pièces sur mesure ? »). Directe, polie, jamais intrusive.
 2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise » : ce qui se fait tout seul pour cette tâche. Elle décrit ce que montre la démo « ${input.demo.label} ».`
-        : `1. "hook" = CE QUE FAIT LA DÉMO sur un cas type de LEUR métier, une ou deux phrases de 20 mots au plus : ce qui entre (une demande, une commande, une facture…) et ce qui en sort, avec leurs mots (« Elle lit une demande de devis de menuiserie et prépare le chiffrage à valider. »). Commence par « Elle » ou « On y voit ». La démo est « ${input.demo.label} ».
+        : `1. "hook" = CE QUE FAIT LA DÉMO, HONNÊTEMENT : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus, sur ce modèle exact : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent, d'après ce que l'on sait d'eux>. » (exemple : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels. »). La démo est « ${input.demo.label} ».
 2. "proposal" = chaîne vide "" (la ligne « qui je suis » est posée par le code).`;
   return `Tu écris, à la place d'Axel Remillat (indépendant, automatisation et IA pour PME), des morceaux d'un mail de prospection à froid pour ${input.companyName}. Le reste est déjà écrit par le code.
 

@@ -14,6 +14,8 @@ export interface TagInput {
   email: string | null;
   /** Adresse gardée sur la seule foi de Hunter, hors du domaine du site. */
   emailDoubtful: boolean;
+  /** Domaine de l'e-mail ≠ domaine du site, et contact non confirmé par Axel. */
+  contactToCheck?: boolean;
   oppositionUnverified: boolean;
   website: string | null;
   /** Profil métier lu sur le site (lib/emails/business-profile.ts). */
@@ -37,6 +39,7 @@ export function tagsOf(input: TagInput): TodayTag[] {
   const tags: TodayTag[] = [];
   if (!input.email) tags.push("Email manquant");
   else if (input.emailDoubtful) tags.push("Email non vérifié");
+  else if (input.contactToCheck) tags.push("Contact à vérifier");
   if (input.oppositionUnverified) tags.push("Opposition non vérifiée");
   if (!input.website) tags.push("Site introuvable");
   // Site connu, profil vide : JAMAIS de brouillon sans l'avoir lu (bloquant).
@@ -68,7 +71,8 @@ export function needsIntroDraft(item: {
   if (item.messageType !== "intro" || item.status !== "todo" || item.messageId || item.draftPending) return false;
   if (!item.contact.email || !item.tags.includes("Brouillon manquant")) return false;
   if (item.profileReadFailed && item.tags.includes("Profil à compléter")) return false;
-  return !item.tags.some((tag) => tag !== "Brouillon manquant" && tag !== "Profil à compléter" && BLOCKING_TAGS.has(tag));
+  // « Contact à vérifier » n'empêche pas d'écrire : le brouillon attend la confirmation dans « À compléter ».
+  return !item.tags.some((tag) => tag !== "Brouillon manquant" && tag !== "Profil à compléter" && tag !== "Contact à vérifier" && BLOCKING_TAGS.has(tag));
 }
 
 /** La fiche peut-elle figurer dans « Nouveaux prospects » ? */
