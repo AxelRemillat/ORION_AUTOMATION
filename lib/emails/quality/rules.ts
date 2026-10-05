@@ -18,10 +18,10 @@ export const LIMITS = {
   hookSentences: 2,
   sentenceWords: 20,
   proposalWords: 32,
-  /** Corps (salutation → demande), sans mention « stop » ni signature. */
-  minWords: 50,
-  targetWords: 90,
-  maxWords: 110,
+  /** Corps (salutation → demande), sans mention « stop » ni signature : 60 à 90 mots (05/10/2026). */
+  minWords: 60,
+  targetWords: 80,
+  maxWords: 90,
 } as const;
 
 /** Mots que le prospect n'emploie pas, ou qui sonnent « éditeur de logiciel ». */

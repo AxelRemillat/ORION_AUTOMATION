@@ -21,6 +21,8 @@ import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-fin
 import { bySite } from "../lib/funnel/site-priority";
 import { repeatedGroups } from "../lib/emails/quality/rules";
 import { parseVerdict } from "../lib/emails/quality/judge";
+import { FOND_NEGATIVES, VALIDATED_POSITIVES } from "../lib/emails/quality/calibration-set";
+import { numbersIn } from "../lib/emails/validate";
 import { replaceDraft } from "../lib/emails/quality/versions";
 import { tagsOf, isComplete } from "../lib/today/tags";
 import { saveDraft } from "../lib/today/actions-core";
@@ -55,8 +57,14 @@ const parts = (over: Partial<{ subject: string; hook: string; proposal: string }
 });
 const verdictJson = (score: number, reason = "accroche générique") =>
   JSON.stringify({
-    // Grille pleine (10), moins ce qui manque, retiré de l'accroche (3 pt au plus).
-    criteria: { accroche: 3 - (10 - score), proposition: 2, preuve: 1, clarte: 2, naturel: 1, demande: 1 },
+    // Grille de fond pleine (10), moins ce qui manque : retiré de la proposition, puis de la conséquence, puis du fait.
+    criteria: {
+      fait: Math.max(0, 2 - Math.max(0, 10 - score - 5)),
+      consequence: Math.max(0, 2 - Math.max(0, 10 - score - 3)),
+      proposition: Math.max(0, 3 - (10 - score)),
+      clarte: 2,
+      naturel: 1,
+    },
     reasons: score >= 9 ? [] : [reason],
     fix: score >= 9 ? null : "Pars d'un fait plus concret.",
   });
@@ -183,7 +191,7 @@ async function main() {
     check("règle cassée → réécrit sans payer le juge", calls.join(",") === "writer,writer,judge" && isDraft(outcome) && !outcome.needsReview, calls.join(","));
   }
   check("demande : une variante stable par prospect", ctaFor("p1") === ctaFor("p1") && CTA_VARIANTS.includes(ctaFor("p2") as never));
-  check("juge : note bornée par la grille", parseVerdict(JSON.stringify({ criteria: { accroche: 9, proposition: 2 }, reasons: [] }))?.score === 5);
+  check("juge : note bornée par la grille (fond seulement)", parseVerdict(JSON.stringify({ criteria: { fait: 9, proposition: 2, preuve: 1, demande: 1 }, reasons: [] }))?.score === 4);
 
   console.log("\n5b. Règles Cowork (itération 1)");
   {
@@ -354,6 +362,20 @@ async function main() {
   check("étiquette « À revoir »", tags.includes("À revoir"));
   check("bloquante : la fiche ne va pas dans « Nouveaux »", !isComplete(tags, true));
   check("note ≥ 9 : rien ne change", isComplete(tagsOf({ email: "a@b.fr", emailDoubtful: false, oppositionUnverified: false, website: "x", hasBusinessProfile: true, hasDraft: true, draftPending: false, qualityReview: false }), true));
+
+  console.log("\nCalibrage : les mails validés par Axel passent les règles du code");
+  {
+    // Le code ne doit jamais être plus sévère qu'Axel : chaque mail validé le 05/10
+    // passe les règles de forme (60 à 90 mots, mots interdits, démo cohérente…).
+    for (const mail of VALIDATED_POSITIVES) {
+      const demo = demoForProposal(mail.proposal);
+      const greeting = "Bonjour Madame Martin,";
+      const body = assemble(mail, { greeting, demo, cta: CTA_VARIANTS[0] });
+      const result = checkMail(mail, body, { greeting, facts: [], prospectText: `${mail.hook} ${mail.proposal}`, companyName: mail.company, offerNumbers: numbersIn(mail.hook), demo: demo.key });
+      check(`validé ${mail.company} (${countWords(body)} mots) : règles OK`, result.ok, result.failures.join(" | "));
+    }
+    check("jeu de référence : 11 positifs, 6 négatifs de fond", VALIDATED_POSITIVES.length === 11 && FOND_NEGATIVES.length === 6);
+  }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
   process.exit(failures === 0 ? 0 : 1);
