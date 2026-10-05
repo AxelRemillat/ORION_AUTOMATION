@@ -18,7 +18,7 @@ import {
   updateCandidate,
   updateCandidates,
 } from "./store";
-import { triage, type TriageAsk } from "./triage";
+import { askTriageBatch, settleAll, TRIAGE_BATCH, type TriageAsk, type TriageRaw } from "./triage";
 import type { Identity, Triage } from "./types";
 import { bySite, siteOf } from "./site-priority";
 
@@ -170,7 +170,34 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
   return { lookups, remaining, bySource: plan.bySource };
 }
 
-export async function runTriageStage(db: Db, userId: string, runId: string, ask: TriageAsk) {
+/** Clé de la réponse brute du modèle, gardée dans `triage` tant que le run n'est pas entièrement trié. */
+const RAW_KEY = "_raw";
+
+const storedRaw = (row: SignalCandidateRow): { asked: boolean; raw: TriageRaw | null } => {
+  const value = row.triage as Record<string, unknown> | null;
+  return value && typeof value === "object" && RAW_KEY in value
+    ? { asked: true, raw: (value[RAW_KEY] as TriageRaw | null) ?? null }
+    : { asked: false, raw: null };
+};
+
+export interface TriageStageOptions {
+  /** Horodatage (ms) : au-delà, on s'arrête et la suite se fait à l'étape suivante. */
+  deadline?: number;
+  /** Dernière étape : on conclut avec ce qui est trié (le reste : « tri indisponible »). */
+  final?: boolean;
+}
+
+/**
+ * ÉTAGE 3. Tri LLM, DÉCOUPÉ en étapes (run 4, 05/10/2026).
+ *
+ * France Travail paginé sur 30 jours donne ~350 filtrés au lieu de ~110 : le
+ * tri d'un bloc dépassait les 300 s de l'invocation, était tué avant d'écrire
+ * quoi que ce soit, et repartait de zéro à chaque reprise (en payant à chaque
+ * fois). Chaque lot de 20 est maintenant sauvegardé dès sa réponse (réponse
+ * brute, statut inchangé) ; les règles et les quotas — qui portent sur
+ * l'ENSEMBLE du run — ne s'appliquent qu'une fois tout trié.
+ */
+export async function runTriageStage(db: Db, userId: string, runId: string, ask: TriageAsk, options: TriageStageOptions = {}) {
   const rows = (await candidatesOf(db, userId, runId, "filtré")).sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   const inputs = rows.map((row) => {
     const identity = row.identity as unknown as Identity & { legalOnly?: boolean };
@@ -181,7 +208,26 @@ export async function runTriageStage(db: Db, userId: string, runId: string, ask:
       verdict: { status: "filtré" as const, reason: null, weight: row.weight ?? 0, badges: row.badges, legalOnly: Boolean(identity?.legalOnly) },
     };
   });
-  const outcomes = await triage(ask, inputs);
+  const raws = new Map<string, TriageRaw | null>();
+  for (const row of rows) {
+    const stored = storedRaw(row);
+    if (stored.asked) raws.set(row.id, stored.raw);
+  }
+  const pending = inputs.filter((input) => !raws.has(input.id));
+  for (let index = 0; index < pending.length; index += TRIAGE_BATCH) {
+    if (options.deadline && Date.now() > options.deadline) break;
+    const batch = pending.slice(index, index + TRIAGE_BATCH);
+    const answers = await askTriageBatch(ask, batch);
+    for (const input of batch) {
+      const raw = answers.get(input.id) ?? null;
+      raws.set(input.id, raw);
+      await updateCandidate(db, input.id, { triage: { [RAW_KEY]: raw } });
+    }
+  }
+  const left = inputs.length - raws.size;
+  if (left > 0 && !options.final) return { triaged: raws.size, retained: 0, pending: left, total: inputs.length };
+
+  const outcomes = settleAll(inputs, raws);
   const badgesOf = new Map(rows.map((row) => [row.id, row.badges ?? []]));
   for (const outcome of outcomes) {
     await updateCandidate(db, outcome.id, {
@@ -193,7 +239,7 @@ export async function runTriageStage(db: Db, userId: string, runId: string, ask:
       ...(outcome.note ? { badges: [...(badgesOf.get(outcome.id) ?? []), outcome.note] } : {}),
     });
   }
-  return { triaged: outcomes.length, retained: outcomes.filter((outcome) => outcome.retained).length };
+  return { triaged: outcomes.length, retained: outcomes.filter((outcome) => outcome.retained).length, pending: 0, total: inputs.length };
 }
 
 export interface DigStageOptions {

@@ -169,7 +169,13 @@ const verdictOf = (key: keyof typeof CASES) => {
           return { id: item.id, utilisable: true, sujet_est_l_entreprise: true, type: "croissance", pain_probable: `pain de ${item.entreprise}`, accroche_possible: "a", score: scores[item.entreprise] ?? 2, raison: "r" };
         }),
       });
-    await runTriageStage(db, "u1", "run1", ask);
+    // Tri découpé en étapes : échéance déjà passée → rien n'est conclu, rien ne bouge.
+    const late = await runTriageStage(db, "u1", "run1", ask, { deadline: Date.now() - 1 });
+    check("tri découpé : échéance passée → statuts inchangés, reprise à l'étape suivante", late.pending > 0 && rows().every((row) => row.statut !== "retenu"), JSON.stringify(late));
+    let asked = 0;
+    const counting: TriageAsk = async (system, user) => { asked += 1; return ask(system, user); };
+    const done = await runTriageStage(db, "u1", "run1", counting, { deadline: Date.now() + 60_000 });
+    check("tri découpé : réponses brutes sauvegardées puis quotas sur l'ensemble", done.pending === 0 && asked === 1 && done.triaged === late.total, JSON.stringify(done));
     const retained = rows().filter((row) => row.statut === "retenu").map((row) => row.company_name).sort();
     check("retenus : score ≥ 4 et sujet = l'entreprise", retained.join(",") === "CHAMPEIL,HUMAN SIGHT,LOGIFLUX", retained.join(","));
 
