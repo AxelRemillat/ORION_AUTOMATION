@@ -8,6 +8,7 @@ import { deleteInboundForever, restoreInbound, trashInbound } from "./inbound-tr
 import { setDoNotContact } from "./do-not-contact";
 import { confirmOppositionManually } from "./opposition-check";
 import { prepareResend, resendNow } from "./resend";
+import { setAntispamValidated } from "@/lib/inbound/auto-reply-server";
 import { draftIfReady } from "@/lib/today/auto-draft";
 import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
@@ -145,4 +146,14 @@ export async function prepareResendMail(messageId: string): Promise<{ ok: true; 
   if (!id) return { ok: false, error: "Session expirée. Reconnectez-vous." };
   const prepared = await prepareResend(createClient(), { userId: id, messageId });
   return prepared.ok ? { ok: true, messageId: prepared.messageId } : prepared;
+}
+
+/**
+ * Case « Validé » d'un challenge anti-spam (Mailinblack…) : le lien a été
+ * cliqué, le mail est délivré. Aucun envoi.
+ */
+export async function validateAntispam(inboundId: string, validated: boolean): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  return done(await setAntispamValidated(createClient(), { userId: id, inboundId, validated }));
 }

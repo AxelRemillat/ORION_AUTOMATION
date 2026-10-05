@@ -5,6 +5,9 @@ import { cancelRelancesOnReply } from "@/lib/outbox/relances";
 import { setDoNotContact } from "@/lib/outbox/do-not-contact";
 import { advanceStatus } from "@/lib/constants";
 import { INBOUND_CATEGORIES, type InboundCategory, type ProspectStatus } from "@/types";
+import { absenceReturnDate, autoReplyKind } from "@/lib/inbound/auto-reply";
+import { findAntispamProspect, shiftFollowUpsAfterReturn } from "@/lib/inbound/auto-reply-server";
+import type { Db } from "@/lib/trash/scope";
 
 /**
  * POST /api/inbound — réception d'un email trié par n8n.
@@ -37,6 +40,9 @@ interface InboundBody {
   message_id?: unknown;
   received_at?: unknown;
   category?: unknown;
+  /** En-tête `Auto-Submitted` (auto-replied, auto-generated), si n8n le transmet. */
+  auto_submitted?: unknown;
+  headers?: unknown;
 }
 
 /** Extrait l'adresse d'un en-tête « Nom <adresse@ex.fr> » ou d'une adresse nue. */
@@ -88,15 +94,29 @@ export async function POST(request: Request) {
 
   const supabase = createAdminClient();
 
+  // Réponse AUTOMATIQUE (challenge anti-spam, absence) : pas une réponse du
+  // prospect. Stockée et affichée, mais sans aucun effet de « réponse ».
+  const headers = payload?.headers && typeof payload.headers === "object" ? (payload.headers as Record<string, unknown>) : {};
+  const autoSubmitted = asText(payload?.auto_submitted ?? headers["auto-submitted"] ?? headers["Auto-Submitted"], 100);
+  const autoKind = autoReplyKind({ from_email: fromEmail, subject: asText(payload?.subject, 500), body, auto_submitted: autoSubmitted });
+
   // --- À qui appartient cet email ? ---------------------------------------
   // Instance mono-compte : le propriétaire est celui du prospect correspondant,
   // ou, à défaut de correspondance, le titulaire du portefeuille.
-  const { data: prospect } = await supabase
+  let { data: prospect } = await supabase
     .from("prospects")
     .select("id, user_id, status, deleted_at")
     .ilike("email", fromEmail)
     .limit(1)
     .maybeSingle();
+  // Challenge anti-spam : l'expéditeur est le service, pas le prospect.
+  if (!prospect && autoKind === "antispam") {
+    const found = await findAntispamProspect(supabase as unknown as Db, { from_email: fromEmail, subject: asText(payload?.subject, 500), body });
+    if (found) {
+      const { data } = await supabase.from("prospects").select("id, user_id, status, deleted_at").eq("id", found.id).maybeSingle();
+      prospect = data;
+    }
+  }
 
   let ownerId = prospect?.user_id ?? null;
   if (!ownerId) {
@@ -156,7 +176,7 @@ export async function POST(request: Request) {
    * tous les envois programmés (lib/outbox/do-not-contact.ts).
    */
   let doNotContact = false;
-  if (prospect && !prospect.deleted_at && category === "refus") {
+  if (prospect && !prospect.deleted_at && category === "refus" && !autoKind) {
     const outcome = await setDoNotContact(supabase as never, prospect.id, true);
     doNotContact = outcome.ok;
   }
@@ -166,16 +186,22 @@ export async function POST(request: Request) {
   // Prospect à la corbeille : l'email reste rattaché (il réapparaît à la
   // restauration) mais le statut ne bouge pas — il sera restauré tel quel.
   // « Ne plus contacter » a déjà posé le statut « perdu » : on n'y touche plus.
-  if (prospect && !prospect.deleted_at && !doNotContact) {
+  if (prospect && !prospect.deleted_at && !doNotContact && !autoKind) {
     newStatus = advanceStatus(prospect.status as ProspectStatus, "repondu");
     if (newStatus) {
       await supabase.from("prospects").update({ status: newStatus }).eq("id", prospect.id);
     }
   }
 
-  // Une réponse annule les relances programmées de ce prospect.
-  const cancelledRelances = prospect
+  // Une réponse annule les relances programmées de ce prospect. Une réponse
+  // automatique non : une absence datée les repousse après le retour, un
+  // challenge anti-spam ne change rien.
+  const cancelledRelances = prospect && !autoKind
     ? await cancelRelancesOnReply(supabase, { userId: ownerId, prospectId: prospect.id, receivedAt })
+    : 0;
+  const returnDate = autoKind === "absence" ? absenceReturnDate({ from_email: fromEmail, subject: asText(payload?.subject, 500), body, received_at: receivedAt }) : null;
+  const shiftedRelances = prospect && !prospect.deleted_at && returnDate
+    ? await shiftFollowUpsAfterReturn(supabase as unknown as Db, { userId: ownerId, prospectId: prospect.id, returnDate })
     : 0;
 
   return NextResponse.json({
@@ -185,6 +211,9 @@ export async function POST(request: Request) {
     matched_prospect_id: prospect?.id ?? null,
     prospect_status: newStatus,
     cancelled_relances: cancelledRelances,
+    auto_reply: autoKind,
+    return_date: returnDate,
+    shifted_relances: shiftedRelances,
     do_not_contact: doNotContact,
   });
 }

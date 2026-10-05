@@ -15,7 +15,7 @@ export async function loadVolumes(db: unknown, userId: string): Promise<Volumes>
   const [prospects, messages, inbound, today] = await Promise.all([
     all("prospects", "id, status, do_not_contact"),
     all("messages", "id, status, type, gmail_message_id, send_status"),
-    all("inbound_messages", "id, from_email, subject"),
+    all("inbound_messages", "id, from_email, subject, body"),
     loadToday(db as never, userId).catch(() => null),
   ]);
   const tags = today ? flatten(today.groups).flatMap((item) => item.tags) : [];

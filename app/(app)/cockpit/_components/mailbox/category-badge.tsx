@@ -1,4 +1,5 @@
 import type { InboundCategory } from "@/types";
+import { AUTO_REPLY_LABEL, type AutoReplyKind } from "@/lib/inbound/auto-reply";
 
 /** Nature d'un mail reçu, triée par n8n : registre chaud de la boîte de réception. */
 const CATEGORY_STYLE: Record<InboundCategory, { label: string; className: string }> = {
@@ -9,8 +10,14 @@ const CATEGORY_STYLE: Record<InboundCategory, { label: string; className: string
   autre: { label: "À lire", className: "border-line bg-surface-2 text-muted" },
 };
 
-export function CategoryBadge({ category }: { category: InboundCategory }) {
-  const style = CATEGORY_STYLE[category] ?? CATEGORY_STYLE.autre;
+/** Réponses automatiques : la nature réelle prime sur le tri de n8n. */
+const AUTO_STYLE: Record<AutoReplyKind, string> = {
+  antispam: "border-warn/45 bg-warn/15 text-warn-ink",
+  absence: "border-line bg-surface-2 text-muted",
+};
+
+export function CategoryBadge({ category, auto = null }: { category: InboundCategory; auto?: AutoReplyKind | null }) {
+  const style = auto ? { label: AUTO_REPLY_LABEL[auto], className: AUTO_STYLE[auto] } : CATEGORY_STYLE[category] ?? CATEGORY_STYLE.autre;
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 ${style.className}`}

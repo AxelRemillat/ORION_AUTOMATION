@@ -1,3 +1,4 @@
+import { autoReplyKind } from "@/lib/inbound/auto-reply";
 import { isBounce } from "@/lib/settings/volumes";
 
 /**
@@ -69,7 +70,8 @@ const isStop = (message: InboundLite) => message.category === "refus" || /^\s*st
 /** Issue d'un envoi : la PREMIÈRE réaction du prospect après l'envoi. */
 export function outcomeOf(sent: SentVariant, inbound: readonly InboundLite[]): "reply" | "bounce" | "stop" | null {
   const after = inbound
-    .filter((message) => message.prospect_id === sent.prospect_id && Date.parse(message.received_at) >= Date.parse(sent.sent_at))
+    // Une réponse automatique (anti-spam, absence) n'est pas une réaction du prospect.
+    .filter((message) => message.prospect_id === sent.prospect_id && Date.parse(message.received_at) >= Date.parse(sent.sent_at) && !autoReplyKind(message))
     .sort((a, b) => a.received_at.localeCompare(b.received_at));
   const first = after[0];
   if (!first) return null;

@@ -1,3 +1,4 @@
+import { AUTO_REPLY_LABEL, autoReplyKind } from "@/lib/inbound/auto-reply";
 import { getOpenAI } from "@/lib/openai";
 import { modelFor, reasoningEffortFor } from "@/lib/ai/models";
 import { buildParams } from "@/lib/ai/params";
@@ -57,6 +58,8 @@ export async function draftReply(
 ): Promise<ReplyDraftResult | { ok: true; messageId: string; existing: true }> {
   const { inbound } = input;
   if (!inbound.prospect_id) return { ok: false, error: "Expéditeur non rattaché à un prospect." };
+  const auto = autoReplyKind(inbound);
+  if (auto) return { ok: false, error: `${AUTO_REPLY_LABEL[auto]} : ce n'est pas le prospect qui écrit, pas de réponse IA.` };
   const existing = await currentReplyDraft(db, inbound.id);
   if (existing) return { ok: true, messageId: existing.id, existing: true };
 

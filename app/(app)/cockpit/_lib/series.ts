@@ -1,3 +1,4 @@
+import { isProspectReply } from "@/lib/inbound/auto-reply";
 import type { Deal, InboundMessage, Message, Prospect } from "@/types";
 
 /**
@@ -125,7 +126,8 @@ export function buildChartData(
       bump("relances", message.sent_at);
     }
   }
-  for (const message of input.inbound) bump("reponses", message.received_at);
+  // Rebonds et réponses automatiques (anti-spam, absence) ne sont pas des réponses.
+  for (const message of input.inbound) if (isProspectReply(message)) bump("reponses", message.received_at);
   for (const prospect of input.prospects) bump("prospects", prospect.created_at);
 
   // La valeur du pipeline est un ETAT, pas un flux : à chaque jour on somme les
