@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { loadCapacity } from "@/lib/today/capacity";
 import { FunnelSettings } from "../../recherche/funnel/funnel-settings";
 import { SendingCard } from "./sending-card";
+import { NotificationsCard } from "./notifications-card";
+import { notifyConfigured, readNotifyPrefs } from "@/lib/notify/ntfy";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Paramètres · Réglages · ORION" };
@@ -18,10 +20,10 @@ export const metadata = { title: "Paramètres · Réglages · ORION" };
 export default async function ParametresPage() {
   const user = await requireUser();
   const db = createClient();
-  const [capacity, loaded] = await Promise.all([loadCapacity(db, user.id), loadOffer(db, user.id)]);
+  const [capacity, loaded, notifyPrefs] = await Promise.all([loadCapacity(db, user.id), loadOffer(db, user.id), readNotifyPrefs(db, user.id)]);
   return (
     <>
-      <PageHeader title="Paramètres" description="Préparation du matin, zones et secteurs, plafond d'envois, signature." />
+      <PageHeader title="Paramètres" description="Préparation du matin, zones et secteurs, plafond d'envois, signature, notifications." />
       <div className="flex flex-col gap-6">
         <Card>
           <CardHeader>
@@ -35,6 +37,7 @@ export default async function ParametresPage() {
           </CardContent>
         </Card>
         <SendingCard capacity={capacity} signature={signatureFor(loaded.offer)} entryUrl={loaded.offer.entry_url ?? null} />
+        <NotificationsCard prefs={notifyPrefs} configured={notifyConfigured()} />
       </div>
     </>
   );
