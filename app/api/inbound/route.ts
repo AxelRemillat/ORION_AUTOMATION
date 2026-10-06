@@ -8,6 +8,7 @@ import { INBOUND_CATEGORIES, type InboundCategory, type ProspectStatus } from "@
 import { absenceReturnDate, autoReplyKind } from "@/lib/inbound/auto-reply";
 import { findAntispamProspect, shiftFollowUpsAfterReturn } from "@/lib/inbound/auto-reply-server";
 import type { Db } from "@/lib/trash/scope";
+import { notifyInbound } from "@/lib/notify/events";
 
 /**
  * POST /api/inbound — réception d'un email trié par n8n.
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
   // ou, à défaut de correspondance, le titulaire du portefeuille.
   let { data: prospect } = await supabase
     .from("prospects")
-    .select("id, user_id, status, deleted_at")
+    .select("id, user_id, status, deleted_at, company_name")
     .ilike("email", fromEmail)
     .limit(1)
     .maybeSingle();
@@ -113,7 +114,7 @@ export async function POST(request: Request) {
   if (!prospect && autoKind === "antispam") {
     const found = await findAntispamProspect(supabase as unknown as Db, { from_email: fromEmail, subject: asText(payload?.subject, 500), body });
     if (found) {
-      const { data } = await supabase.from("prospects").select("id, user_id, status, deleted_at").eq("id", found.id).maybeSingle();
+      const { data } = await supabase.from("prospects").select("id, user_id, status, deleted_at, company_name").eq("id", found.id).maybeSingle();
       prospect = data;
     }
   }
@@ -204,9 +205,20 @@ export async function POST(request: Request) {
     ? await shiftFollowUpsAfterReturn(supabase as unknown as Db, { userId: ownerId, prospectId: prospect.id, returnDate })
     : 0;
 
+  // Notification téléphone (ntfy) : vraie réponse ou anti-spam. Jamais bloquante,
+  // une seule par mail reçu.
+  const notified = await notifyInbound(supabase as unknown as Db, {
+    userId: ownerId,
+    inboundId: inserted.id,
+    prospectId: prospect && !prospect.deleted_at ? prospect.id : null,
+    companyName: prospect?.company_name ?? null,
+    message: { from_email: fromEmail, subject: asText(payload?.subject, 500), body, auto_submitted: autoSubmitted },
+  }).catch(() => null);
+
   return NextResponse.json({
     ok: true,
     stored: true,
+    notified: notified?.sent ?? false,
     inbound_id: inserted.id,
     matched_prospect_id: prospect?.id ?? null,
     prospect_status: newStatus,
