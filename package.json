@@ -30,6 +30,7 @@
     "calibrate:proposals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/calibrate-proposals.js",
     "reanalyze:filtered": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/reanalyze-filtered.js",
     "eval:variance": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/judge-variance.js",
+    "eval:facts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-facts.js",
     "eval:double": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-double.js",
     "eval:proposals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-proposals.js",
     "eval:quality": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-quality.js",
