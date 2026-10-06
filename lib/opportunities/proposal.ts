@@ -107,6 +107,9 @@ export const PORTFOLIO_TITLES = [
 ] as const;
 export type PortfolioTitle = (typeof PORTFOLIO_TITLES)[number];
 
+/** Besoin de prospection : trouver des clients, leur écrire, mails commerciaux. */
+export const PROSPECTION_NEED = /(prospect|recherche de clients?|trouver (des |de nouveaux )?clients|g[ée]n[ée]ration de leads?|\bleads?\b|mails? commerciaux|e-?mails? de prospection|emailing|d[ée]marchage|lead gen)/i;
+
 const EMAIL_NEED = /e-?mails?|courriels?|gmail|outlook|bo[iî]te (de r[ée]ception|mail)|\bmails?\b/i;
 
 /**
@@ -117,6 +120,9 @@ const EMAIL_NEED = /e-?mails?|courriels?|gmail|outlook|bo[iî]te (de r[ée]cepti
 export function portfolioTitle(demo: DemoLink["key"], context = "", kind: ProjectKind = "automatisation"): PortfolioTitle | null {
   // Application web full-stack : ORION (Next.js, Supabase, OpenAI) est la réalisation de référence.
   if (kind === "fullstack") return "ORION : application de prospection B2B par IA";
+  // Recherche de clients, prospection, mails commerciaux : c'est exactement ce que fait ORION
+  // (la règle « pas ORION » ne vaut que pour le nettoyage de fichiers).
+  if (PROSPECTION_NEED.test(context)) return "ORION : application de prospection B2B par IA";
   switch (demo) {
     case "devis":
       return "Agent IA de devis par métier";
@@ -242,6 +248,15 @@ export function checkProposal(
   } else if (kind === "automatisation" && top > CODEUR_LAUNCH_MAX_EUR && !COMPLEXITY.test(`${parts.framing} ${context.ad ?? ""}`)) {
     failures.push(`${top} € au-dessus d'un workflow complet (1 200 €) sans projet multi-systèmes (ERP, connexion, installation) : vise 300–1 200 €.`);
   }
+  // Le texte cite EXACTEMENT le montant et le délai à saisir (« 400 à 480 € » contre 450 € dans le champ).
+  const quoted = developmentAmounts(parts.framing);
+  if (parts.amountEur != null && quoted.length && !quoted.includes(parts.amountEur)) {
+    failures.push(`Le prix du texte (${quoted.join(", ")} €) diffère du montant à saisir (${parts.amountEur} €) : cite exactement ${parts.amountEur} €.`);
+  }
+  const quotedDelay = longestDelayDays(parts.framing);
+  if (parts.delayDays != null && quotedDelay !== null && quotedDelay !== parts.delayDays) {
+    failures.push(`Le délai du texte (${quotedDelay} jours) diffère du délai à saisir (${parts.delayDays} jours) : cite exactement le même.`);
+  }
   const delay = Math.max(longestDelayDays(parts.framing) ?? 0, parts.delayDays ?? 0);
   if (delay > DELAY_CAP_DAYS[kind]) failures.push(`Délai de ${delay} jours : ${kind === "fullstack" ? "6 semaines au plus" : "2 à 3 semaines au plus pour un projet complexe"}.`);
   const monthly = monthlyAmounts(text);
@@ -327,10 +342,17 @@ ${requested.includes("references") ? "\n<REFERENCES — 1 ou 2 phrases>\n" : ""}
 - "steps" : TROIS étapes concrètes et courtes (12 à 22 mots chacune) : ce qui sera fait, dans l'ordre, avec leurs outils.
 - "framing" : ${budget ? `un prix UNIQUE (jamais de fourchette) et un délai, cohérents avec le budget annoncé (${budget}) et le positionnement ci-dessous.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
 - "question" : UNE question pour qualifier le besoin (ce qui conditionne la solution), qui finit par « ? ».
-- PRIX ET DÉLAI — ${pricingGuide(kind)}${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
+- PRIX ET DÉLAI — ${pricingGuide(kind)} Le prix et le délai écrits dans "framing" sont EXACTEMENT "amount_eur" et "delay_days" (même montant, même nombre de jours).${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
 ${requested.length ? `- L'ANNONCE DEMANDE EXPLICITEMENT, DANS CET ORDRE : ${requested.map((item) => REQUESTED_LABELS[item]).join(", ")}. Réponds à CHACUN, dans cet ordre (l'approche = les trois étapes ; prix${requested.includes("couts_mensuels") ? ", coûts mensuels" : ""} et délai dans "framing"${requested.includes("references") ? ` ; les références dans "references"` : ""}).${requested.includes("prix") ? " Le prix est demandé : donne-le même sans budget annoncé." : ""}` : ""}
 ${requested.includes("couts_mensuels") ? `- ${MONTHLY_GUIDE}` : ""}
 ${requested.includes("references") ? `- "references" : HONNÊTETÉ OBLIGATOIRE. Si tu n'as pas de projet sur l'outil cité, dis-le (« Pas encore de projet Sage 100 à vous montrer »), puis cite la démo du portfolio et ORION, l'application d'automatisation mail + IA que j'utilise au quotidien. Jamais de client ni de projet inventé.` : ""}
+
+CE QUE LE CLIENT EXIGE (il reçoit 80 offres et choisit en 30 secondes) — coche TOUT :
+- Une reformulation PRÉCISE de son besoin réel, avec ses mots, ses outils, ses volumes : pas une paraphrase vague.
+- Une réponse explicite à chaque élément qu'il a demandé, dans l'ordre.
+- Trois étapes adaptées à SES outils et contraintes, pas des étapes passe-partout (« définir avec vous », « tester »).
+- La preuve la plus proche de son besoin, et un prix et un délai uniques, crédibles pour son budget.
+- Une question de cadrage qui fait avancer SON devis (volume, outil, format), jamais générique.
 
 INTERDITS : expérience, clients ou références inventés (« j'ai déjà aidé… », « mes clients »), chiffres de résultats non prouvés (« -50 % de temps »), flatterie (« super projet »), jargon (workflow, pipeline, leverage, seamless…), toute URL, toute adresse e-mail, tout téléphone, tout lien de prise de rendez-vous, toute signature.${isNoContactPlatform(input.platform) ? " Sur cette plateforme, aucun moyen de contact hors plateforme : ni site, ni lien, ni coordonnée." : ""}
 ${isNoContactPlatform(input.platform)
@@ -419,6 +441,76 @@ export function parseProposalVerdict(raw: string): ProposalVerdict | null {
   return { score: Math.round(score * 10) / 10, reasons, fix };
 }
 
+/**
+ * SECOND JUGE (Cowork, 06/10/2026) : le CLIENT exigeant, qui reçoit 80 offres
+ * et doit choisir en 30 secondes. Grille d'Axel : une proposition n'est
+ * « prête » que si elle coche TOUT. Les deux juges doivent donner 9 ou plus.
+ */
+export function buildClientJudgePrompt(): string {
+  return `Tu es le CLIENT qui a publié cette annonce. Tu reçois 80 offres et tu choisis en 30 secondes celles que tu lis vraiment.
+Tu notes cette réponse sur 10. Elle ne vaut 9 ou plus QUE si elle coche TOUT :
+1. « Bonjour, » puis une reformulation précise de TON besoin réel (on voit qu'il a lu l'annonce, pas une paraphrase vague).
+2. Une réponse explicite à CHAQUE élément que tu as demandé (approche, prix, coûts mensuels, délai, références…), dans l'ordre.
+3. Une approche en 3 étapes concrètes, adaptées à tes outils et contraintes.
+4. La preuve la plus proche de ton besoin (réalisation du portfolio au titre exact, ou l'application de prospection ORION pour un besoin de prospection ou d'application web) ; références honnêtes, jamais inventées.
+5. UN prix et UN délai, cohérents avec ton budget affiché et avec un indépendant au profil récent.
+6. Une question de cadrage utile, qui fait avancer le devis (pas générique).
+7. Courte (le message privé est limité à 1 000 caractères), signée « Axel Remillat ».
+8. Ton direct et concret, sans flatterie, sans jargon, sans « je suis passionné ».
+Un seul point manqué → 8 au plus. Deux → 6 au plus. Tu n'es pas indulgent : tu as 79 autres offres.
+Réponds UNIQUEMENT en JSON : {"score":0-10,"reasons":["ce qui te ferait passer à l'offre suivante…"],"fix":"consigne de réécriture précise, ou null si 9 ou plus"}`;
+}
+
+export function parseClientVerdict(raw: string): ProposalVerdict | null {
+  try {
+    const value = JSON.parse(raw) as { score?: unknown; reasons?: unknown; fix?: unknown };
+    const score = Number(value.score);
+    if (!Number.isFinite(score)) return null;
+    const reasons = Array.isArray(value.reasons) ? value.reasons.filter((line): line is string => typeof line === "string" && line.trim().length > 0).slice(0, 5) : [];
+    const fix = typeof value.fix === "string" && value.fix.trim() ? value.fix.trim() : null;
+    return { score: Math.max(0, Math.min(10, Math.round(score * 10) / 10)), reasons, fix };
+  } catch {
+    return null;
+  }
+}
+
+export async function judgeProposalClient(
+  ask: AskFn,
+  input: { title: string; body: string; budget: string | null; text: string; platform?: Platform },
+  operation = "opportunites:juge-client",
+): Promise<ProposalVerdict | null> {
+  const raw = await ask(
+    "judge",
+    buildClientJudgePrompt(),
+    `PLATEFORME : ${input.platform ?? "non précisée"}
+TON ANNONCE — ${input.title} (budget : ${input.budget || "non indiqué"})
+${input.body.slice(0, 4000)}
+
+OFFRE REÇUE :
+${input.text}`,
+    0,
+    operation,
+  ).catch(() => "");
+  return parseClientVerdict(raw);
+}
+
+/** Les deux verdicts réunis : la note retenue est la plus basse, les critiques s'additionnent. */
+export function combineVerdicts(first: ProposalVerdict | null, second: ProposalVerdict | null): ProposalVerdict | null {
+  // Un verdict manquant : pas de proposition « prête » (relecture indisponible).
+  if (!first || !second) return null;
+  // Seules les critiques des juges SOUS 9 comptent : un constat positif n'est pas une raison de retravailler.
+  const low = (verdict: ProposalVerdict) => verdict.score < PROPOSAL_PASS;
+  return {
+    score: Math.min(first.score, second.score),
+    reasons: [
+      `relecteur ${first.score}/10, client ${second.score}/10`,
+      ...(low(first) ? first.reasons : []),
+      ...(low(second) ? second.reasons.map((line) => `Client : ${line}`) : []),
+    ].slice(0, 6),
+    fix: [low(first) ? first.fix : null, low(second) && second.fix ? `Client : ${second.fix}` : null].filter(Boolean).join(" ") || null,
+  };
+}
+
 export async function judgeProposal(
   ask: AskFn,
   input: { title: string; body: string; budget: string | null; text: string; platform?: Platform },
@@ -464,7 +556,14 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
     const { core, text } = assembleProposal(parts, { language: input.language, demo: input.demo, platform: input.platform, context: `${input.need} ${input.body}`, kind: input.kind });
     const rules = checkProposal(parts, core, { language: input.language, budget: input.budget, platform: input.platform, kind: input.kind, requested: requestedItems(input.body), ad: input.body }, text);
     // Le juge ne note qu'une proposition qui passe les règles.
-    const verdict = rules.ok ? await judgeProposal(input.ask, { title: input.title, body: input.body, budget: input.budget, text: core, platform: input.platform }, `opportunites:juge:${round}`) : null;
+    // Double juge : le relecteur (grille) ET le client exigeant ; les deux doivent donner 9 ou plus.
+    const judged = rules.ok
+      ? await Promise.all([
+          judgeProposal(input.ask, { title: input.title, body: input.body, budget: input.budget, text: core, platform: input.platform }, `opportunites:juge:${round}`),
+          judgeProposalClient(input.ask, { title: input.title, body: input.body, budget: input.budget, text, platform: input.platform }, `opportunites:juge-client:${round}`),
+        ])
+      : null;
+    const verdict = judged ? combineVerdicts(judged[0], judged[1]) : null;
     attempts.push({ text, rules, verdict, parts });
     if (rules.ok && verdict && verdict.score >= PROPOSAL_PASS) break;
     feedback = rules.ok
@@ -479,7 +578,13 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
     text: best.text,
     score,
     needsReview: !passed,
-    reason: passed ? null : !best.rules.ok ? best.rules.failures[0] : score === null ? "Relecture automatique indisponible : à relire." : `Note ${score}/10 : ${best.verdict?.reasons[0] ?? "sous le seuil de 9"}`,
+    reason: passed
+      ? null
+      : !best.rules.ok
+        ? best.rules.failures[0]
+        : score === null
+          ? "Relecture automatique indisponible : à relire."
+          : `Note ${score}/10 (${best.verdict?.reasons[0] ?? "double relecture"}) : ${best.verdict?.reasons[1] ?? "sous le seuil de 9"}`,
     attempts: attempts.length,
     amountEur: best.parts.amountEur ?? null,
     delayDays: best.parts.delayDays ?? null,

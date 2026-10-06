@@ -17,7 +17,7 @@ import { db, liveAsk, ownerId, spentSince } from "./quality-live";
 import { prefilterReason } from "@/lib/opportunities/prefilter";
 import { analyzeOpportunity } from "@/lib/opportunities/analyze";
 import { generateProposal } from "@/lib/opportunities/proposal";
-import { PROPOSAL_SCORE, TO_REVIEW_SCORE, verdictOf } from "@/lib/opportunities/ingest";
+import { freshScore, PROPOSAL_SCORE, statusAfterAnalysis, verdictOf } from "@/lib/opportunities/ingest";
 import { proposalLanguage, type Opportunity } from "@/lib/opportunities/types";
 
 const BUDGET_EUR = 0.5;
@@ -32,6 +32,15 @@ async function main() {
   const { data, error } = await table.select("*").eq("user_id", userId).eq("platform", "codeur").eq("status", "ignoree").eq("analysis_state", "filtre").gte("created_at", since);
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as Opportunity[];
+
+  // Fiches restées « Ignorée » alors qu'une ré-analyse les a notées 5 ou plus (Codeur 490837, 06/10) :
+  // elles reviennent « À répondre ». Changement de statut seul, rien n'est supprimé.
+  const { data: stuck } = await table.select("id, title, fit_score").eq("user_id", userId).eq("status", "ignoree").eq("analysis_state", "ok").is("filter_reason", null).gte("fit_score", 5);
+  const unstuck = (stuck ?? []) as { id: string; title: string; fit_score: number }[];
+  for (const row of unstuck) {
+    if (!dry) await (db as never as { from: (name: string) => any }).from("opportunities").update({ status: "a_repondre", updated_at: new Date().toISOString() }).eq("id", row.id);
+    console.log(`${dry ? "(à corriger) " : ""}« Ignorée » → « À répondre » : ${row.fit_score}/10 · ${row.title}`);
+  }
   const report = { examined: rows.length, stillFiltered: 0, reanalyzed: 0, alerte: [] as string[], a_voir: [] as string[], ignore: [] as string[], errors: 0 };
 
   for (const row of rows) {
@@ -55,6 +64,7 @@ async function main() {
       report.errors += 1;
       continue;
     }
+    analysis.score = freshScore(analysis.score, row.published_at);
     const now = new Date().toISOString();
     const old = Date.now() - Date.parse(row.published_at ?? row.created_at) > 86_400_000;
     await (db as never as { from: (name: string) => any })
@@ -68,7 +78,7 @@ async function main() {
         analyzed_at: now,
         analysis_state: "ok",
         filter_reason: null,
-        status: analysis.score < TO_REVIEW_SCORE ? "ignoree" : "a_repondre",
+        status: statusAfterAnalysis(row.status, analysis.score) ?? row.status,
         ...(old ? { seen_at: now } : {}),
         updated_at: now,
       })

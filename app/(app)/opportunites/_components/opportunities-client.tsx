@@ -5,7 +5,7 @@ import { Bell, Briefcase, Copy, ExternalLink, Plus, RefreshCw, Send } from "luci
 import { Badge, Button, Card, CardContent, EmptyState, Input, Label, Modal, Select, Textarea, useToast } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { OPPORTUNITY_STATUSES, PLATFORMS, PLATFORM_LABELS, STATUS_LABELS, type Opportunity, type OpportunityStatus, type Platform } from "@/lib/opportunities/types";
-import { ageLabel, BUCKET_LABELS, bucketOf, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
+import { ageLabel, BUCKET_LABELS, bucketOf, staleLabel, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
 
 const EMPTY_FORM = { platform: "codeur" as Platform, url: "", title: "", body: "", budget: "", deadline: "" };
 
@@ -246,6 +246,7 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                     {selected.budget ? ` · ${selected.budget}` : ""}
                   </p>
                   <h2 className="font-display text-lg text-text">{selected.title}</h2>
+                  {staleLabel(selected.published_at) && <p className="mt-1 text-[12px] text-warn-ink">{staleLabel(selected.published_at)}</p>}
                   <div className="mt-2 flex flex-wrap gap-2">
                     {selected.url && openAd(selected)}
                     {selected.proposal && (
@@ -308,7 +309,7 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                         )}
                       </div>
                     </div>
-                    {selected.proposal_reason && <p className="mb-1.5 text-[12px] text-warn-ink">À revoir — {selected.proposal_reason}</p>}
+                    {selected.proposal_reason && <p className="mb-1.5 text-[12px] text-warn-ink">À retravailler — {selected.proposal_reason}</p>}
                     <Textarea
                       key={`${selected.id}:${selected.updated_at}`}
                       defaultValue={selected.proposal}

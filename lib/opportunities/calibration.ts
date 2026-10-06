@@ -36,6 +36,27 @@ const compose = (item: Omit<ProposalReference, "text">): ProposalReference => ({
 });
 
 export const PROPOSAL_POSITIVES: ProposalReference[] = [
+  // Cas RÉEL (06/10/2026) : « Crer des agent ia autonome » — version ORION écrite par Cowork (450 € / 7 j).
+  compose({
+    platform: "codeur",
+    language: "fr",
+    title: "Crer des agent ia autonome",
+    ad: "Crer des agent ia autonome. Détails du projet : Des agent ia qui excute des taches de a a z. Détails des prestations attendues : Recherche de client envoie de mail creation facture et devis. Budget indicatif : Moins de 500 €.",
+    budget: "Moins de 500 €",
+    demo: "emails",
+    kind: "automatisation",
+    amountEur: 450,
+    delayDays: 7,
+    reading:
+      "Vous voulez des agents IA qui trouvent des prospects, leur écrivent et préparent devis et factures. C'est ce que fait l'application que j'utilise chaque jour : elle repère des entreprises, vérifie leurs données, rédige des mails personnalisés et attend ma validation avant tout envoi.",
+    steps: [
+      "Recherche de prospects ciblés et rédaction des mails, envoi après votre validation.",
+      "Préparation automatique des devis à partir de vos modèles.",
+      "Test sur vos vrais cas et prise en main.",
+    ],
+    framing: "Pour votre budget, je propose un premier agent opérationnel en 7 jours. Prix : 450 €. Les factures pourront suivre dans un second temps.",
+    question: "Quels sont votre secteur et vos outils actuels (mail, devis) ?",
+  }),
   // Cas RÉEL (06/10/2026) : version reconstituée d'après la proposition d'Axel — 2 400 € / 15 j, références honnêtes.
   compose({
     platform: "codeur",
@@ -129,6 +150,28 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
 ];
 
 export const PROPOSAL_NEGATIVES: ProposalReference[] = [
+  // Cas RÉEL (06/10/2026) : proposition générée — pas de « Bonjour », prix du texte (400 à 480 €) ≠ champ (450 €), démo hors sujet.
+  compose({
+    platform: "codeur",
+    language: "fr",
+    title: "Crer des agent ia autonome",
+    ad: "Crer des agent ia autonome. Détails du projet : Des agent ia qui excute des taches de a a z. Détails des prestations attendues : Recherche de client envoie de mail creation facture et devis. Budget indicatif : Moins de 500 €.",
+    budget: "Moins de 500 €",
+    demo: "emails",
+    kind: "automatisation",
+    amountEur: 450,
+    delayDays: 7,
+    reading:
+      "Vous souhaitez des agents IA capables d'enchaîner la recherche de prospects, l'envoi d'e-mails et la création de devis et factures. Les outils utilisés et les validations nécessaires avant chaque envoi restent à préciser.",
+    steps: [
+      "Définir avec vous les sources de prospects, les modèles de documents et les actions à valider.",
+      "Créer un premier parcours automatisé avec vos outils existants et un contrôle avant tout envoi.",
+      "Tester ce parcours sur quelques cas réels, corriger les erreurs et documenter son utilisation.",
+    ],
+    framing: "Sous 500 €, je propose un premier parcours ciblé en 5 à 7 jours, pour 400 à 480 € ; l'ensemble nécessiterait un devis distinct.",
+    question: "Quels outils utilisez-vous actuellement pour vos e-mails, devis et factures ?",
+    why: "Prix du texte (400 à 480 €) différent du montant à saisir (450 €), fourchette, délai flou, reformulation qui renvoie le flou au client, démo « tri des e-mails » au lieu d'ORION.",
+  }),
   // Cas RÉEL (06/10/2026) : proposition générée sur l'annonce complète, notée 9 par le juge, ~7 en réalité.
   compose({
     platform: "codeur",

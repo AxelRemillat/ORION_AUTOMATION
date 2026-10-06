@@ -41,6 +41,8 @@ export interface WriterInput {
   family?: MailFamily;
   /** Secteur (libellé), pour F2 et F4 quand le profil est mince. */
   sector?: string | null;
+  /** Rôle du destinataire réellement contacté (poste) : le problème doit le concerner. */
+  contactRole?: string | null;
 }
 
 const factLines = (facts: DerivedFact[]) =>
@@ -74,6 +76,8 @@ ${input.activity ? `- Activité (leur site) : ${input.activity}\n` : ""}
 AUTRES ÉLÉMENTS (contexte seulement, jamais l'accroche) :
 ${other || "- (rien de plus)"}
 - Tâche qui leur coûte : ${brief.pain.task}
+${input.contactRole ? `- Destinataire : ${input.contactRole} — le problème doit concerner SON travail.
+` : ""}
 - Ce qu'on automatiserait : ${brief.pain.automationIdea}
 
 1. ACCROCHE — ${LIMITS.hookSentences} phrases au plus, ${LIMITS.sentenceWords} mots au plus CHACUNE.
@@ -84,15 +88,18 @@ ${input.avoidAvec ? "   N'OUVRE PAS par « Avec » (déjà un mail sur trois auj
    CONSÉQUENCES INTERDITES : « prend du temps », « peut prendre du temps », « est chronophage », « demande de l'énergie ».
    INTERDIT AUSSI : l'offre d'emploi ou « vous recrutez » ; une donnée de registre (effectif, chiffre d'affaires, date de création) ;
    « sur votre site » ; le point-virgule ; toute hypothèse visible (« si vos demandes… », « éventuellement »).
-2. PROPOSITION — UNE phrase de ${LIMITS.proposalWords} mots au plus, qui commence par « J'automatise ce type de tâche pour des PME : ».
-   Ce qui se fait tout seul chez eux (une ou deux actions concrètes), et ce que ça change (ce qui est signalé, ce qui part tout de suite, ce que le client reçoit).
+2. PROPOSITION — UNE phrase de ${LIMITS.proposalWords} mots au plus, À LA PREMIÈRE PERSONNE et à la VOIX ACTIVE, qui commence par « J'automatise », « Je mets en place » ou « Je construis » et nomme LA tâche de l'accroche
+   (« J'automatise ce tri : chaque demande arrive directement à la bonne personne, qui répond le jour même. »). Jamais de passif (« sont triés », « est préparé »).
+   Une action concrète et son RÉSULTAT visible pour eux ou leur client (ce qui arrive, ce qui est signalé, ce que le client reçoit).
    AU PLUS UN cliché du type « sans ressaisie » / « sans oubli »${input.usedCliches?.length ? ` — et PAS ceux déjà employés aujourd'hui : ${input.usedCliches.join(", ")}` : ""}. Le plus souvent, aucun.
    Pas d'étapes techniques, pas de liste, pas d'hypothèse. Elle décrit CE QUE MONTRE la démo « ${input.demo.label} » :
    le lien posé ensuite doit illustrer exactement cette phrase (devis → préparer le devis ; tri, aiguillage, commandes → les e-mails reçus).
 3. ${subjectInstruction(input.subjectArm ?? "metier")}
 
 MOTS INTERDITS : ${FORBIDDEN_WORDS.join(", ")}, et tout sigle qu'ils n'emploient pas eux-mêmes. Aucune URL, aucune question, aucun chiffre absent des faits, pas de salutation ni de signature.
-Le mail complet doit faire 60 à 90 mots : ton accroche + ta proposition ≈ 45 à 60 mots.
+Le mail complet fait 75 mots AU PLUS : ton accroche + ta proposition ≈ 35 à 45 mots. Aucune tournure lourde, aucun mot à double sens dans leur métier, aucun passif inutile.
+
+${REVIEWER_GRID}
 
 EXEMPLES 10/10 (d'autres entreprises — n'en reprends aucune phrase) :
 ${references}
@@ -113,13 +120,26 @@ function knownBlock(input: WriterInput): string {
     own,
     other,
     `- Tâche typique de ce métier : ${input.brief.pain.task}`,
+    input.contactRole ? `- Destinataire : ${input.contactRole} (le besoin doit concerner son travail)` : "",
     `- Ce qu'on automatiserait : ${input.brief.pain.automationIdea}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-const COMMON_RULES = (input: WriterInput) => `RÈGLES COMMUNES :
+/**
+ * La GRILLE DU RELECTEUR SENIOR (Cowork, 06/10/2026), donnée au rédacteur : il
+ * écrit pour être signé, pas pour passer un contrôle.
+ */
+const REVIEWER_GRID = `CE QUI SERA EXIGÉ PAR LE RELECTEUR (consultant B2B senior qui signe le mail) — coche TOUT :
+- Le fait le plus DISTINCTIF que l'on sait d'eux (leurs produits, leur clientèle, un service précis), jamais une catégorie générique (« vos demandes de devis », « votre bureau d'étude »).
+- Un problème concret, crédible, lié à CE fait (une demande qui attend, une référence manquante, un devis qui part tard) — dit en une phrase simple.
+- Ce que je fais, à la 1re personne, et le RÉSULTAT visible pour eux ou leur client (ce qui arrive, ce qui est signalé, ce que le client reçoit) — jamais « prépare un dossier / une fiche / son classement ».
+- Aucun mot à double sens dans leur métier, aucune tournure lourde, phrases courtes.`;
+
+const COMMON_RULES = (input: WriterInput) => `${REVIEWER_GRID}
+
+RÈGLES COMMUNES :
 - AUCUN fait inventé : n'affirme sur eux que ce qui est listé ci-dessus ; chaque précision sur leur activité (« avions régionaux », « vêtements professionnels ») doit y figurer. Un besoin est présenté comme courant dans leur métier, jamais comme un défaut constaté chez eux.
 - Jamais l'offre d'emploi ni « vous recrutez », jamais une donnée de registre (effectif, chiffre d'affaires), jamais « sur votre site ».
 - Pas d'hypothèse visible (« si vos… », « peut-être », « éventuellement »), pas de jargon ni de sigle qu'ils n'emploient pas.
@@ -145,7 +165,7 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
       : family === "F3"
         ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier (« Qui s'occupe de confirmer les délais de vos commandes de pièces sur mesure ? »). Directe, polie, jamais intrusive.
 2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise » : ce qui se fait tout seul pour cette tâche. Elle décrit ce que montre la démo « ${input.demo.label} ».`
-        : `1. "hook" = CE QUE FAIT LA DÉMO, HONNÊTEMENT : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus, sur ce modèle exact : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent, d'après ce que l'on sait d'eux>. » (exemple : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels. »). La démo est « ${input.demo.label} ».
+        : `1. "hook" = CE QUE FAIT LA DÉMO, HONNÊTEMENT : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus, sur ce modèle : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent, d'après ce que l'on sait d'eux>, <ce que ça leur change : qui part plus vite, plus de ressaisie…>. » (exemple : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels, facturées dès la livraison. »). La démo est « ${input.demo.label} ».
 2. "proposal" = chaîne vide "" (la ligne « qui je suis » est posée par le code).`;
   return `Tu écris, à la place d'Axel Remillat (indépendant, automatisation et IA pour PME), des morceaux d'un mail de prospection à froid pour ${input.companyName}. Le reste est déjà écrit par le code.
 

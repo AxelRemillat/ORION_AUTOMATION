@@ -250,6 +250,31 @@ function storedAngle(prospect: Prospect): BriefAngle | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** Famille (message_variants) des mails d'intro du jour. */
+async function todayFamilies(db: StepContext["db"], ids: readonly string[]): Promise<Map<string, string>> {
+  const families = new Map<string, string>();
+  if (!ids.length) return families;
+  const { data } = await (db as unknown as { from: (table: string) => any }).from("message_variants").select("message_id, family").in("message_id", ids.slice(0, 200));
+  for (const row of (data ?? []) as { message_id: string; family: string | null }[]) if (row.family) families.set(row.message_id, row.family);
+  return families;
+}
+
+/** Ouvertures du jour : total, « Avec », et la même chose par famille. */
+export function openingsOf(rows: readonly { id: string; body: string }[], familyOf: ReadonlyMap<string, string>) {
+  const byFamily: Record<string, { total: number; avec: number }> = {};
+  let avec = 0;
+  for (const row of rows) {
+    const opens = opensWithAvec(hookOfBody(row.body));
+    if (opens) avec += 1;
+    const family = familyOf.get(row.id);
+    if (!family) continue;
+    byFamily[family] ??= { total: 0, avec: 0 };
+    byFamily[family].total += 1;
+    if (opens) byFamily[family].avec += 1;
+  }
+  return { total: rows.length, avec, byFamily };
+}
+
 function askFor(prospectId: string): AskFn {
   return (role, system, user, temperature, operation) =>
     chatJson({
@@ -659,19 +684,20 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   const profile = storedProfile(prospect.business_profile);
   // Clichés de fin déjà servis dans les brouillons du jour : le nouveau varie.
   const dayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+  // Tous les mails d'intro du jour (brouillons, validés, programmés, partis) : le
+  // quota « Avec » vaut sur la journée ET par famille (BULLY, CAMEL DIAM : 2 F1 sur 2).
   const { data: todays } = await ctx.db
     .from("messages")
-    .select("body")
+    .select("id, body")
     .eq("user_id", ctx.userId)
     .eq("type", "intro")
-    .eq("status", "draft")
+    .is("deleted_at", null)
     .neq("prospect_id", prospect.id)
     .gte("created_at", dayStart);
-  const usedCliches = [...new Set(((todays ?? []) as { body: string }[]).flatMap((row) => clichesOf(row.body)))];
-  const dayOpenings = {
-    total: (todays ?? []).length,
-    avec: ((todays ?? []) as { body: string }[]).filter((row) => opensWithAvec(hookOfBody(row.body))).length,
-  };
+  const todayRows = (todays ?? []) as { id: string; body: string }[];
+  const usedCliches = [...new Set(todayRows.flatMap((row) => clichesOf(row.body)))];
+  const familyOf = await todayFamilies(ctx.db, todayRows.map((row) => row.id));
+  const dayOpenings = openingsOf(todayRows, familyOf);
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -681,6 +707,8 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       companyName: brief.companyName || singleCompanyName(prospect.company_name),
       activity: profile?.offer ?? prospect.sector ?? null,
       sector: prospect.sector ?? null,
+      // Rôle du contact réellement écrit (ajouté par la complétion), sinon le poste trouvé.
+      contactRole: (typeof figures.contact_role === "string" && figures.contact_role) || (typeof figures.contact_position === "string" && figures.contact_position) || contact?.position || null,
       prospectText: [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" "),
       greeting: buildQualityGreeting(greetingInput, civilities),
       signature: signatureFor(loaded.offer),

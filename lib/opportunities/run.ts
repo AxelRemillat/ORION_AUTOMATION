@@ -4,6 +4,7 @@ import { recordOpenAiUsage } from "@/lib/usage/record";
 import { analyzeOpportunity } from "./analyze";
 import { generateProposal } from "./proposal";
 import { proposalLanguage, type Opportunity } from "./types";
+import { freshScore, statusAfterAnalysis } from "./ingest";
 
 /**
  * Analyse + proposition d'une opportunité, puis écriture sur la ligne.
@@ -36,6 +37,9 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
 
   const analysis = await analyzeOpportunity(ask, opportunity);
   if (!analysis) return { ok: false, error: "Analyse indisponible : réessayez dans un instant." };
+  // Annonce ancienne : jamais d'alerte (6 au plus). Une fiche « Ignorée » re-notée à 5 ou plus revient « À répondre ».
+  analysis.score = freshScore(analysis.score, opportunity.published_at);
+  const status = statusAfterAnalysis(opportunity.status, analysis.score);
   await db
     .from("opportunities")
     .update({
@@ -47,6 +51,7 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
       analyzed_at: new Date().toISOString(),
       analysis_state: "ok",
       filter_reason: null,
+      ...(status ? { status } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

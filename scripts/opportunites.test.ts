@@ -4,17 +4,17 @@
  */
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { assembleProposal, buildProposalJudgePrompt, checkProposal, contactFailures, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
+import { assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
 import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
 import { countWords } from "../lib/emails/quality/template";
 import type { AskFn } from "../lib/ai/chat";
 import { FakeDb } from "./fake-supabase";
-import { ingestOpportunity, parseIngestBody, type IngestBody } from "../lib/opportunities/ingest";
+import { freshScore, ingestOpportunity, parseIngestBody, statusAfterAnalysis, verdictOf, type IngestBody } from "../lib/opportunities/ingest";
 import { prefilterReason } from "../lib/opportunities/prefilter";
 import { requestedItems } from "../lib/opportunities/requests";
-import { ageLabel, bucketOf, unseenAlerts } from "../lib/opportunities/view";
+import { ageLabel, bucketOf, staleLabel, unseenAlerts } from "../lib/opportunities/view";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -73,11 +73,11 @@ async function main() {
     return checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform, kind: item.kind, requested: requestedItems(item.ad), ad: item.ad }, text);
   });
   check("négatifs : tous refusés par les règles (coordonnées Codeur, longueur, flatterie, chiffres inventés, jargon, prix sans budget)", caught.every((rules) => !rules.ok), caught.map((rules) => rules.failures[0]).join(" | "));
-  check("Codeur : URL et e-mail dans la proposition attrapés", caught[1].failures.some((line) => /Codeur : aucune URL/.test(line)) && caught[1].failures.some((line) => /Adresse e-mail/.test(line)), caught[1].failures.join(" | "));
-  check("chiffres inventés attrapés (« 30 PME », « 40 % »)", caught[3].failures.some((line) => /non prouvés/.test(line)));
-  check("prix sans budget attrapé", caught[3].failures.some((line) => /Budget absent/.test(line)));
-  check("jargon attrapé (leverage)", caught[4].failures.some((line) => /Jargon/.test(line)));
-  check("flatterie attrapée (« Super projet »)", caught[2].failures.some((line) => /Flatterie/.test(line)));
+  check("Codeur : URL et e-mail dans la proposition attrapés", caught[2].failures.some((line) => /Codeur : aucune URL/.test(line)) && caught[2].failures.some((line) => /Adresse e-mail/.test(line)), caught[2].failures.join(" | "));
+  check("chiffres inventés attrapés (« 30 PME », « 40 % »)", caught[4].failures.some((line) => /non prouvés/.test(line)));
+  check("prix sans budget attrapé", caught[4].failures.some((line) => /Budget absent/.test(line)));
+  check("jargon attrapé (leverage)", caught[5].failures.some((line) => /Jargon/.test(line)));
+  check("flatterie attrapée (« Super projet »)", caught[3].failures.some((line) => /Flatterie/.test(line)));
 
   console.log("\n4b. Coordonnées et signatures par plateforme (CGU Codeur)");
   {
@@ -89,7 +89,7 @@ async function main() {
     check("Malt : même règle, portfolio Malt", demoLine("malt", "fr", "devis") === "Une démo d'un cas proche est visible dans mon portfolio Malt (Agent IA de devis par métier).");
     check("fichier clients sans e-mail : aucune démo citée (jamais ORION)", demoLine("codeur", "fr", "fichier", "Nettoyer un export CSV de 20 000 clients avant migration") === null);
     check("fichier clients reçu par e-mail : tri des e-mails", demoLine("codeur", "fr", "fichier", "Dédoublonner les contacts reçus par e-mail chaque jour") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (Tri automatique des e-mails entrants).");
-    const noDemo = assembleProposal(PROPOSAL_POSITIVES[4], { language: "fr", demo: "fichier", platform: "comeup", context: "Nettoyer un export CSV" });
+    const noDemo = assembleProposal(PROPOSAL_POSITIVES[5], { language: "fr", demo: "fichier", platform: "comeup", context: "Nettoyer un export CSV" });
     check("sans démo : la proposition s'assemble sans ligne vide ni lien", !/portfolio|axelremillat/.test(noDemo.text) && !/\n\s*\n\s*\n/.test(noDemo.core));
     check("ComeUp : URL refusée comme sur Codeur", contactFailures("voir axelremillat.com", "comeup").some((line) => /ComeUp : aucune URL/.test(line)));
     const codeur = (text: string) => contactFailures(text, "codeur");
@@ -104,7 +104,7 @@ async function main() {
     check("Upwork : lien de démo autorisé", upwork("A one-minute demo: axelremillat.com/agent?src=upwork").length === 0);
     check("Upwork : e-mail, téléphone et calendrier refusés", upwork("mail me at axel@exemple.fr").length > 0 && upwork("call +33 7 49 72 71 92").length > 0 && upwork("book here: calendly.com/axel").length > 0);
     // Positionnement de prix (06/10/2026) : UN montant, plafonds, délai, coûts mensuels.
-    const base = PROPOSAL_POSITIVES[1];
+    const base = PROPOSAL_POSITIVES[2];
     const price = (framing: string, options: { budget?: string | null; kind?: "automatisation" | "fullstack"; ad?: string; amountEur?: number } = {}) => {
       const parts = { ...base, framing, amountEur: options.amountEur };
       const { core, text } = assembleProposal(parts, { language: "fr", demo: "emails", platform: "codeur", kind: options.kind });
@@ -120,15 +120,15 @@ async function main() {
     check("montant suggéré au-delà du plafond refusé", price("Prix : 900 €. Délai : 15 jours.", { amountEur: 6000 }).some((line) => /positionnement/.test(line)));
     check("coûts mensuels « 100 à 250 €/mois » refusés", price("Prix : 900 €. Délai : 15 jours. Maintenance : 100 à 250 €/mois.").some((line) => /irréalistes/.test(line)));
     check("coûts mensuels réalistes (15 €, 10 à 30 €, 90 €/mois) acceptés, sans fausse fourchette", !price("Prix : 900 €. Coûts mensuels : hébergement 15 €, API IA 10 à 30 € selon le volume, maintenance en option 90 €/mois. Délai : 15 jours.").some((line) => /irréalistes|Fourchette/.test(line)));
-    check("toujours « Bonjour, » en tête (FR), « Hello, » (EN)", assembleProposal(base, { language: "fr", demo: "emails", platform: "codeur" }).text.startsWith("Bonjour,") && assembleProposal(PROPOSAL_POSITIVES[3], { language: "en", demo: "sav", platform: "upwork" }).text.startsWith("Hello,"));
+    check("toujours « Bonjour, » en tête (FR), « Hello, » (EN)", assembleProposal(base, { language: "fr", demo: "emails", platform: "codeur" }).text.startsWith("Bonjour,") && assembleProposal(PROPOSAL_POSITIVES[4], { language: "en", demo: "sav", platform: "upwork" }).text.startsWith("Hello,"));
   }
 
   console.log("\n4c. Éléments demandés par l'annonce (Sage 100, cas réel)");
   {
-    const sage = PROPOSAL_POSITIVES[0];
+    const sage = PROPOSAL_POSITIVES[1];
     check("éléments demandés détectés dans l'ordre", requestedItems(sage.ad).join(",") === "approche,prix,couts_mensuels,delai,references", requestedItems(sage.ad).join(","));
-    check("annonce sans liste : rien d'imposé", requestedItems(PROPOSAL_POSITIVES[1].ad).length === 0);
-    const negative = caught[0].failures.join(" | ");
+    check("annonce sans liste : rien d'imposé", requestedItems(PROPOSAL_POSITIVES[2].ad).length === 0);
+    const negative = caught[1].failures.join(" | ");
     check("Sage (proposition actuelle) : fourchette, délai, coûts mensuels et références sans réponse attrapés", /Fourchette/.test(negative) && /Délai de 42/.test(negative) && /irréalistes/.test(negative) && /références/.test(negative), negative);
     const { core, text } = assembleProposal(sage, { language: "fr", demo: sage.demo, platform: "codeur", kind: sage.kind, context: sage.ad });
     check(`Sage (version d'Axel, 2 400 € / 15 j) : règles OK, ${text.length} caractères`, checkProposal(sage, core, { language: "fr", budget: sage.budget, platform: "codeur", kind: sage.kind, requested: requestedItems(sage.ad), ad: sage.ad }, text).ok);
@@ -168,14 +168,19 @@ async function main() {
 
   console.log("\n5. Boucle : juge ≥ 9, 2 réécritures au plus, meilleur essai gardé");
   {
-    const good = PROPOSAL_POSITIVES[1];
+    const good = PROPOSAL_POSITIVES[2];
     const goodJson = JSON.stringify({ reading: good.reading, steps: good.steps, framing: good.framing, question: good.question });
-    const verdict = (score: number) => JSON.stringify({ criteria: { lecture: Math.min(3, score - 7 + 0), approche: 3, cadrage: 2, ton: 2 }, reasons: score >= 9 ? [] : ["reformulation générique"], fix: score >= 9 ? null : "Reprends les éléments de l'annonce." });
+    const verdict = (score: number) => JSON.stringify({ score, criteria: { lecture: Math.min(3, score - 7 + 0), approche: 3, cadrage: 2, ton: 2 }, reasons: score >= 9 ? [] : ["reformulation générique"], fix: score >= 9 ? null : "Reprends les éléments de l'annonce." });
     const scripted = (writer: string[], judge: string[]) => {
       const calls: string[] = [];
-      const ask: AskFn = async (role) => {
+      // Double juge : le client (second appel du tour) reçoit la même note que le relecteur.
+      let last = "";
+      const ask: AskFn = async (role, system) => {
+        if (role === "judge" && /Tu es le CLIENT/.test(system)) return last;
         calls.push(role);
-        return role === "writer" ? writer.shift() ?? "" : judge.shift() ?? "";
+        if (role === "writer") return writer.shift() ?? "";
+        last = judge.shift() ?? "";
+        return last;
       };
       return { ask, calls };
     };
@@ -271,7 +276,7 @@ async function main() {
       amount_eur: 900,
       delay_days: 21,
     });
-    const verdictJson = JSON.stringify({ criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
+    const verdictJson = JSON.stringify({ score: 10, criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
     const calls: string[] = [];
     const ask: AskFn = async (role, _system, user, _temperature, operation) => {
       calls.push(operation);
@@ -337,7 +342,7 @@ async function main() {
     check("… puis l'analyse et la proposition se terminent en arrière-plan", finished.fit_score === 9 && finished.analysis_state === "ok" && typeof finished.proposal === "string", JSON.stringify({ score: finished.fit_score, state: finished.analysis_state }));
 
     // Message privé Codeur : 1 000 caractères au plus.
-    const long = { ...PROPOSAL_POSITIVES[1], reading: `${PROPOSAL_POSITIVES[1].reading} ${"Détail supplémentaire sur le besoin. ".repeat(20)}` };
+    const long = { ...PROPOSAL_POSITIVES[2], reading: `${PROPOSAL_POSITIVES[2].reading} ${"Détail supplémentaire sur le besoin. ".repeat(20)}` };
     const longText = assembleProposal(long, { language: "fr", demo: "emails", platform: "codeur" });
     check("Codeur : plus de 1 000 caractères → refusé (message privé)", checkProposal(long, longText.core, { language: "fr", budget: "500 €", platform: "codeur" }, longText.text).failures.some((line) => /1000|1 000/.test(line)));
 
@@ -354,6 +359,60 @@ async function main() {
     check("« vue » enregistrée par le suivi", buildOpportunityPatch({ seen: true }, { status: "a_repondre", sent_at: null, replied_at: null }, new Date("2026-10-06T09:00:00Z")).ok);
     const pasted = buildOpportunityPatch({ body: "Annonce complète collée par Axel, avec tous les détails du besoin et du contexte." }, { status: "a_repondre", sent_at: null, replied_at: null });
     check("annonce complète collée : n'est plus un extrait", pasted.ok && pasted.patch.description_truncated === false);
+  }
+
+  console.log("\n8. Relecture du 06/10 (propositions, fraîcheur, statut, filtre OuiGlass)");
+  {
+    // Proposition « Crer des agent ia autonome » : prix du texte ≠ champ, démo ORION.
+    const agentsNegative = caught[0].failures.join(" | ");
+    check("prix du texte (400 à 480 €) ≠ montant à saisir (450 €) → refusé", /diffère du montant à saisir/.test(agentsNegative) || /Fourchette/.test(agentsNegative), agentsNegative);
+    const exact = { ...PROPOSAL_POSITIVES[0] };
+    const exactText = assembleProposal(exact, { language: "fr", demo: exact.demo, platform: "codeur", context: exact.ad });
+    check("version ORION de Cowork : règles OK, prix du texte = champ (450 €)", checkProposal(exact, exactText.core, { language: "fr", budget: exact.budget, platform: "codeur", requested: requestedItems(exact.ad), ad: exact.ad }, exactText.text).ok, checkProposal(exact, exactText.core, { language: "fr", budget: exact.budget, platform: "codeur", ad: exact.ad }, exactText.text).failures.join(" | "));
+    check("besoin de prospection → démo ORION", exactText.text.includes("(ORION : application de prospection B2B par IA)"));
+    check("démo ORION aussi pour « envoi de mails commerciaux »", portfolioTitle("emails", "Nous voulons automatiser l'envoi de mails commerciaux à nos leads") === "ORION : application de prospection B2B par IA");
+    check("nettoyage de fichier : jamais ORION", portfolioTitle("fichier", "Nettoyer un export CSV clients") === null);
+    check("toute proposition commence par « Bonjour, »", PROPOSAL_POSITIVES.filter((item) => item.language === "fr").every((item) => assembleProposal(item, { language: "fr", demo: item.demo, platform: item.platform }).text.startsWith("Bonjour,\n\n")));
+    check("délai du texte ≠ délai à saisir → refusé", checkProposal({ ...exact, framing: "Prix : 450 €. Délai : 10 jours." }, assembleProposal({ ...exact, framing: "Prix : 450 €. Délai : 10 jours." }, { language: "fr", demo: "emails", platform: "codeur" }).core, { language: "fr", budget: exact.budget, platform: "codeur" }).failures.some((line) => /délai à saisir/.test(line)));
+    check("double juge : un verdict manquant → pas « prête »", combineVerdicts({ score: 10, reasons: [], fix: null }, null) === null && combineVerdicts({ score: 10, reasons: [], fix: null }, { score: 8, reasons: ["prix flou"], fix: "x" })?.score === 8);
+    check("juge client : persona « 80 offres, 30 secondes » et grille d'Axel", /80 offres/.test(buildClientJudgePrompt()) && /Bonjour/.test(buildClientJudgePrompt()));
+
+    // Fraîcheur : annonce de plus de 7 jours → jamais d'alerte.
+    const now = new Date("2026-10-06T16:00:00Z");
+    check("annonce de 14 jours notée 9 → plafonnée à 6 (à voir)", freshScore(9, "2026-09-22T08:42:00Z", now) === 6 && verdictOf(freshScore(9, "2026-09-22T08:42:00Z", now)) === "a_voir");
+    check("annonce du jour notée 9 → reste en alerte", freshScore(9, "2026-10-06T13:29:41Z", now) === 9);
+    check("bandeau « Ancienne annonce (14 j) : faible chance de réponse »", staleLabel("2026-09-22T08:42:00Z", now) === "Ancienne annonce (14 j) : faible chance de réponse" && staleLabel("2026-10-05T08:00:00Z", now) === null);
+    check("âge affiché = publication, pas la ré-analyse", ageLabel("2026-10-06T13:29:41Z", now) === "il y a 3 h");
+
+    // Statut après (ré)analyse.
+    check("« Ignorée » re-notée 8 → « À répondre »", statusAfterAnalysis("ignoree", 8) === "a_repondre");
+    check("« Ignorée » re-notée 4 → inchangée", statusAfterAnalysis("ignoree", 4) === null);
+    check("« Envoyée » jamais modifiée par une ré-analyse", statusAfterAnalysis("envoyee", 2) === null && statusAfterAnalysis("envoyee", 9) === null);
+
+    // Non-régression : « Agent IA, et refonte site web » (Codeur 490837, OuiGlass) — intranet métier + agents IA.
+    const OUIGLASS = {
+      platform: "codeur",
+      external_id: "490837",
+      url: "https://www.codeur.com/projects/490837-agent-ia-et-refonte-site-web",
+      title: "Agent IA , et refonte site web",
+      description:
+        "Bonjour, Je me présente : Alexandre Bernard, gérant de la société OuiGlass. Je détiens aujourd'hui 8 agences de vitrage automobile et j'ai développé en interne, il y a maintenant plusieurs mois, un intranet métier (planning, stock, flotte, SAV) que je souhaite refondre, avec des agents IA pour les factures et les dossiers assureurs…",
+      description_truncated: true,
+      budget_text: "1 000 € à 10 000 €",
+      categories: ["Création de site internet", "Développement spécifique", "Migration ou refonte de site", "SaaS", "ChatGPT"],
+      published_at: "2026-10-06T13:29:41.000Z",
+    };
+    check("OuiGlass : le pré-filtre ne l'écarte plus (intranet, agents IA)", prefilterReason({ title: OUIGLASS.title, description: OUIGLASS.description, categories: OUIGLASS.categories, budgetText: OUIGLASS.budget_text }) === null);
+    check("site vitrine sans aucun signal métier : toujours filtré", prefilterReason({ title: "Refonte de site", description: "Refonte de notre site vitrine de 6 pages", categories: ["Migration ou refonte de site"], budgetText: null }) !== null);
+    const ouiDb = new FakeDb({ opportunities: [] });
+    const ouiAsk: AskFn = async (_role, system) =>
+      /Tu es le CLIENT/.test(system)
+        ? JSON.stringify({ score: 9, reasons: [], fix: null })
+        : /analyses une annonce/.test(system)
+          ? JSON.stringify({ score: 9, reasons: ["Intranet métier à refondre", "Agents IA factures et assureurs", "Budget adapté"], need: "Refondre l'intranet et ajouter des agents IA.", demo: "factures", language: "fr", kind: "fullstack" })
+          : JSON.stringify({ score: 10, criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
+    const oui = await ingestOpportunity({ db: ouiDb as never, userId: "u1", ask: ouiAsk, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-06T13:35:00Z") }, (parseIngestBody(OUIGLASS) as { ok: true; value: IngestBody }).value);
+    check("OuiGlass → alerte (texte exact du flux, catégories « refonte de site » comprises)", oui.verdict === "alerte" && !oui.filtered, JSON.stringify(oui));
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);
