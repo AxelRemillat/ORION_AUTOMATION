@@ -61,7 +61,7 @@ export const MONTHLY_CAP_EUR = 150;
 export function pricingGuide(kind: ProjectKind): string {
   return kind === "fullstack"
     ? `UN montant unique : MVP ou outil interne simple 1 200 à 2 500 €, application plus complète 2 500 à 4 000 € AU PLUS ; si l'annonce raisonne en jours, TJM ${DAILY_RATE_EUR} €. Délai réaliste (2 à 6 semaines).`
-    : "UN montant unique : tâche simple 300 à 600 €, workflow complet 600 à 1 200 €, projet multi-systèmes complexe (ERP/Sage, lecture de sites avec connexion, installation) 1 500 à 3 000 € AU PLUS. Délai : 1 à 2 semaines, 2 à 3 semaines pour le complexe — jamais 4 à 6 semaines.";
+    : "UN montant unique : traitement ponctuel de quelques jours (tri, nettoyage d'un lot de fichiers) 200 à 300 €, tâche simple 300 à 600 €, workflow complet 600 à 1 200 €, projet multi-systèmes complexe (ERP/Sage, lecture de sites avec connexion, installation) 1 500 à 3 000 € AU PLUS. Délai : 1 à 2 semaines, 2 à 3 semaines pour le complexe — jamais 4 à 6 semaines.";
 }
 
 export const MONTHLY_GUIDE = "Coûts mensuels réalistes et détaillés : hébergement environ 15 €/mois, API IA 10 à 30 €/mois selon le volume, maintenance en option 90 €/mois.";

@@ -33,6 +33,8 @@ export interface TagInput {
    * insuffisant, pain incertain).
    */
   qualityReview?: boolean;
+  /** Porte « faits » (Cowork #31) : aucun fait distinctif, mail volontairement non rédigé. */
+  factsInsufficient?: boolean;
 }
 
 export function tagsOf(input: TagInput): TodayTag[] {
@@ -47,9 +49,10 @@ export function tagsOf(input: TagInput): TodayTag[] {
   if (!input.hasBusinessProfile) tags.push(input.website ? "Profil à compléter" : "Profil métier vide");
   // Bloqué faute de matière : « À revoir », pas « Brouillon manquant » — sinon
   // la préparation relancerait la rédaction à chaque run, pour rien.
-  if (!input.hasDraft && !input.draftPending && !input.qualityReview) tags.push("Brouillon manquant");
+  if (!input.hasDraft && !input.draftPending && !input.qualityReview && !input.factsInsufficient) tags.push("Brouillon manquant");
   if (input.subsidiary) tags.push("Filiale de groupe");
-  if (input.qualityReview) tags.push("À revoir");
+  if (input.factsInsufficient) tags.push("Faits insuffisants");
+  else if (input.qualityReview) tags.push("À revoir");
   return tags;
 }
 

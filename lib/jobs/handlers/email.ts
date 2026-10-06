@@ -39,7 +39,9 @@ import { generateQualityDraft } from "@/lib/emails/quality/generate";
 import { recordDraftVariant } from "@/lib/emails/quality/variant";
 import { clichesOf } from "@/lib/emails/quality/rules";
 import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
-import { askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
+import { acquireAvecLock, closeAvec, type AvecLock, type LockDb } from "@/lib/emails/quality/avec-lock";
+import { factsGate, keyFactsOf } from "@/lib/emails/quality/facts-gate";
+import { addresseeHintOf, askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
 import { storedProfile } from "@/lib/emails/business-profile";
@@ -531,6 +533,31 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
     throw new JobError(readiness.reason, false, 409, { needsFeeding: true, canForce: true });
   }
 
+  // --- PORTE « FAITS » (Cowork #31) -------------------------------------
+  //
+  // Aucun fait propre à l'entreprise ET lié à un process (key_figures.facts,
+  // distinctivité ≥ 2) : pas de stratège, pas de rédacteur, aucun coût. Le
+  // job se termine sans échec ; la fiche passe en « Faits insuffisants ».
+  // Fiche sans champ `facts` (d'avant) : rien ne change.
+  if (!params.force) {
+    const { data: fresh } = await ctx.db.from("prospects").select("key_figures").eq("id", prospect.id).maybeSingle();
+    const current = ((fresh as { key_figures?: Record<string, unknown> | null } | null)?.key_figures ?? prospect.key_figures ?? {}) as Record<string, unknown>;
+    const gate = factsGate(current);
+    if (!gate.ok) {
+      await ctx.db
+        .from("prospects")
+        .update({ key_figures: { ...current, mail_review: { reason: gate.reason, at: new Date().toISOString() } } })
+        .eq("id", prospect.id);
+      // L'ancien brouillon « Nouveaux » quitte la file, texte inchangé ; jamais un brouillon retouché, validé ou programmé.
+      const stale = await latestIntroDraft(ctx, prospect.id);
+      if (stale) {
+        await ctx.db.from("messages").update({ quality_reason: gate.reason, quality_score: null }).eq("id", stale).eq("status", "draft").eq("edited_by_hand", false);
+      }
+      warnings.push({ source: "openai", message: gate.reason });
+      return { state: { warnings }, done: true };
+    }
+  }
+
   for (const rejected of factsResult.rejectedSignals.filter(
     (item) => item.reason === "homonyme probable" || item.reason === "autre entreprise",
   )) {
@@ -638,7 +665,21 @@ export async function latestIntroDraft(
   return own?.id ?? null;
 }
 
+/**
+ * Quota « Avec » atomique (Cowork #31) : le verrou est pris AVANT de compter
+ * les ouvertures du jour et relâché APRÈS l'enregistrement du brouillon. Sans
+ * lui, le job rédige sans « Avec ».
+ */
 async function draftStep(ctx: StepContext): Promise<StepOutcome> {
+  const lock: AvecLock = await acquireAvecLock(ctx.db as unknown as LockDb, ctx.userId, ctx.job.id).catch(() => ({ held: false, reason: "indisponible" }) as const);
+  try {
+    return await draftStepWith(ctx, lock);
+  } finally {
+    if (lock.held) await lock.release().catch(() => undefined);
+  }
+}
+
+async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutcome> {
   const params = paramsOf(ctx);
   const prospect = await loadProspect(ctx, params.prospectId);
   const brief = ctx.job.state.brief as StrategyBrief | undefined;
@@ -678,6 +719,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     addressee: incomingLeader(figures)?.fullName ?? null,
     // La personne contactée est connue (contact nominatif) : la salutation est la sienne.
     contactIsRecipient: Boolean(prospect.contact_name && (contact?.email ?? prospect.email) === prospect.email),
+    addresseeHint: addresseeHintOf(figures),
   };
   const unknown = unknownFirstName(greetingInput, civilities);
   if (unknown) {
@@ -702,7 +744,8 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
   const todayRows = (todays ?? []) as { id: string; body: string }[];
   const usedCliches = [...new Set(todayRows.flatMap((row) => clichesOf(row.body)))];
   const familyOf = await todayFamilies(ctx.db, todayRows.map((row) => row.id));
-  const dayOpenings = openingsOf(todayRows, familyOf);
+  const counted = openingsOf(todayRows, familyOf);
+  const dayOpenings = lock.held ? counted : closeAvec(counted);
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -722,6 +765,7 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       usedCliches,
       dayOpenings,
       website: prospect.website,
+      keyFacts: keyFactsOf(figures as Record<string, unknown>),
     }),
   );
   if ("error" in draft) throw new JobError(draft.error, true, 502);

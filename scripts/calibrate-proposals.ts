@@ -7,9 +7,9 @@
  * Aucune écriture en base (hors journal de coût), aucun envoi.
  */
 import { liveAsk, ownerId, spentSince } from "./quality-live";
-import { judgeProposal, generateProposal, PROPOSAL_PASS, assembleProposal, checkProposal } from "@/lib/opportunities/proposal";
+import { judgeProposal, judgeProposalClient, combineVerdicts, generateProposal, PROPOSAL_PASS, assembleProposal, checkProposal } from "@/lib/opportunities/proposal";
 import { analyzeOpportunity } from "@/lib/opportunities/analyze";
-import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "@/lib/opportunities/calibration";
+import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "@/lib/opportunities/calibration";
 import { requestedItems } from "@/lib/opportunities/requests";
 import { proposalLanguage, type Platform } from "@/lib/opportunities/types";
 
@@ -47,6 +47,18 @@ async function main() {
       if (!ok) failures += 1;
       console.log(`  ${ok ? "ok  " : "ÉCART"} ${label} ${item.platform} « ${item.title.slice(0, 50)} » : juge ${verdict?.score ?? "?"} · règles ${rules.ok ? "OK" : `refus (${rules.failures[0]?.slice(0, 60)})`}`);
     }
+  }
+  // Les 3 propositions RÉELLEMENT envoyées par Axel (Cowork #31) : les deux juges doivent leur donner 9 ou plus.
+  console.log("Propositions envoyées par Axel (double juge)");
+  for (const item of AXEL_SENT) {
+    const [relecteur, client] = await Promise.all([
+      judgeProposal(ask, { title: item.title, body: item.ad, budget: item.budget, text: item.text, platform: "codeur" }, "opportunites:calibrage"),
+      judgeProposalClient(ask, { title: item.title, body: item.ad, budget: item.budget, text: item.text, platform: "codeur" }, "opportunites:calibrage-client"),
+    ]);
+    const verdict = combineVerdicts(relecteur, client);
+    const ok = verdict !== null && verdict.score >= PROPOSAL_PASS;
+    if (!ok) failures += 1;
+    console.log(`  ${ok ? "ok  " : "ÉCART"} « ${item.title.slice(0, 50)} » (${item.text.length} car.) : relecteur ${relecteur?.score ?? "?"} · client ${client?.score ?? "?"}${ok ? "" : ` — ${verdict?.reasons.slice(1, 3).join(" ; ")}`}`);
   }
   const calibrationCost = await spentSince(userId, started);
 

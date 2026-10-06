@@ -34,6 +34,8 @@ export interface ModelCapabilities {
   supportsJsonSchema: boolean;
   /** Nom du paramètre de budget de sortie. */
   maxOutputParam: "max_tokens" | "max_completion_tokens";
+  /** `seed` refusé (appris à chaud d'un 400) ; absent = accepté. */
+  rejectsSeed?: boolean;
 }
 
 /**
@@ -119,6 +121,11 @@ export interface BuildParamsInput {
   reasoningEffort?: ReasoningEffort;
   /** Budget de sortie, posé sous le nom que le modèle attend. */
   maxOutputTokens?: number;
+  /**
+   * Graine d'échantillonnage. Les modèles de raisonnement refusent
+   * `temperature` : la graine fixe est ce qui reste pour stabiliser un juge.
+   */
+  seed?: number;
 }
 
 export type ChatParams = Record<string, unknown> & { model: string };
@@ -142,6 +149,9 @@ export function buildParams(input: BuildParamsInput): ChatParams {
   }
   if (input.maxOutputTokens !== undefined) {
     params[capabilities.maxOutputParam] = input.maxOutputTokens;
+  }
+  if (input.seed !== undefined && !capabilities.rejectsSeed) {
+    params.seed = input.seed;
   }
   return params;
 }
@@ -216,6 +226,8 @@ export function capabilityToDrop(param: string | undefined): Partial<ModelCapabi
       return { maxOutputParam: "max_tokens" };
     case "response_format":
       return { supportsJsonSchema: false };
+    case "seed":
+      return { rejectsSeed: true };
     default:
       return null;
   }

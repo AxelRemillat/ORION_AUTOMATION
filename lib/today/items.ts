@@ -1,5 +1,6 @@
 import { contactConfirmed, contactDomainMismatch } from "./contact-domain";
 import { isBlockedReason } from "@/lib/emails/quality/readiness";
+import { isFactsInsufficient } from "@/lib/emails/quality/facts-gate";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import type { FunnelCard } from "@/lib/funnel/view";
 import type { InboundMessage, Message, Prospect } from "@/types";
@@ -117,6 +118,7 @@ export function prospectItem(input: {
     draftPending: input.draftPending,
     subsidiary,
     qualityReview: Boolean(draft?.quality_reason) || (!draft && Boolean(mailReview)),
+    factsInsufficient: isFactsInsufficient(draft?.quality_reason) || (!draft && isFactsInsufficient(mailReview)),
   });
   return {
     key: `prospect:${prospect.id}`,
@@ -139,8 +141,8 @@ export function prospectItem(input: {
     optOut: split.optOut,
     signature: split.signature,
     why: [
-      draft?.quality_reason && `À revoir — ${draft.quality_reason}`,
-      !draft && mailReview && `À revoir — ${mailReview}`,
+      draft?.quality_reason && (isFactsInsufficient(draft.quality_reason) ? draft.quality_reason : `À revoir — ${draft.quality_reason}`),
+      !draft && mailReview && (isFactsInsufficient(mailReview) ? mailReview : `À revoir — ${mailReview}`),
       card?.pain && `Pain : ${card.pain}`,
       card?.hook && `Accroche : ${card.hook}`,
       score != null && `Score ${score}/5${subsidiary && rawScore !== score ? ` (plafonné : ${rawScore}/5)` : ""}`,

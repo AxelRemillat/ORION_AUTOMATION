@@ -181,6 +181,10 @@ export function parseVerdict(raw: string, family: MailFamily = "F1"): JudgeVerdi
   }
   const reasons = Array.isArray(value.reasons) ? value.reasons.filter((line): line is string => typeof line === "string" && line.trim().length > 0).slice(0, 6) : [];
   const fix = typeof value.fix === "string" && value.fix.trim() ? value.fix.trim() : null;
+  // Faits vérifiés fournis (Cowork #31) : un fait cité hors de la liste est une invention → 6 au plus.
+  if ((parsed as { fait_dans_la_liste?: unknown }).fait_dans_la_liste === false) {
+    return { score: Math.min(Math.round(score * 10) / 10, INVENTED_FACT_MAX), criteria, reasons: [INVENTED_FACT_REASON, ...reasons].slice(0, 6), fix: fix ?? "Appuie l'accroche sur l'un des faits vérifiés de la fiche, et seulement sur eux." };
+  }
   return { score: Math.round(score * 10) / 10, criteria, reasons, fix };
 }
 
@@ -239,19 +243,34 @@ export function parseSeniorVerdict(raw: string): JudgeVerdict | null {
   }
 }
 
+/**
+ * Lectures du relecteur senior par mail (Cowork #31). gpt-6 refuse
+ * `temperature: 0` et la graine ne suffit pas : sur 15 fiches × 3 passages,
+ * le relecteur oscillait (8 / 9 / 9) et 4 verdicts sur 15 changeaient. La
+ * MÉDIANE de trois lectures parallèles est la note retenue : sans biais (ni
+ * meilleure ni pire des trois), seuil inchangé.
+ */
+export const SENIOR_SAMPLES = 3;
+
+/** Le verdict de note médiane (verdicts illisibles écartés) ; `null` si aucun. */
+export function medianVerdict(verdicts: readonly (JudgeVerdict | null)[]): JudgeVerdict | null {
+  const read = verdicts.filter((verdict): verdict is JudgeVerdict => Boolean(verdict)).sort((a, b) => a.score - b.score);
+  if (!read.length) return null;
+  // Nombre pair (une lecture illisible) : la plus basse des deux du milieu — prudence.
+  return read[Math.floor((read.length - 1) / 2)];
+}
+
 export async function judgeMailSenior(
   ask: AskFn,
   input: { subject: string; body: string; company: string; facts: string; contactRole?: string | null },
   operation = "qualite:juge-senior",
+  samples = SENIOR_SAMPLES,
 ): Promise<JudgeVerdict | null> {
-  const raw = await ask(
-    "judge",
-    buildSeniorJudgePrompt(),
-    `Entreprise : ${input.company}\nDestinataire : ${input.contactRole?.trim() || "rôle inconnu"}\nCe que l'on sait d'elle :\n${input.facts}\n\nMAIL À SIGNER\nObjet : ${input.subject}\n\n${input.body}`,
-    0,
-    operation,
-  ).catch(() => "");
-  return parseSeniorVerdict(raw);
+  const user = `Entreprise : ${input.company}\nDestinataire : ${input.contactRole?.trim() || "rôle inconnu"}\nCe que l'on sait d'elle :\n${input.facts}\n\nMAIL À SIGNER\nObjet : ${input.subject}\n\n${input.body}`;
+  const raws = await Promise.all(
+    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildSeniorJudgePrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(() => "")),
+  );
+  return medianVerdict(raws.map(parseSeniorVerdict));
 }
 
 /** Les deux verdicts réunis : note la plus basse, critiques additionnées ; un verdict manquant → aucun. */
@@ -265,16 +284,28 @@ export function combineJudges(first: JudgeVerdict | null, second: JudgeVerdict |
   };
 }
 
+export const INVENTED_FACT_MAX = 6;
+export const INVENTED_FACT_REASON = "Le fait cité sur l'entreprise ne figure pas dans ses faits vérifiés (invention).";
+
+/**
+ * Vérification du fait cité (Cowork #31), dans le message et non dans le
+ * prompt système (figé) : posée seulement quand la fiche a des faits vérifiés.
+ */
+export function verifiedFactsCheck(verified: readonly string[] | null | undefined): string {
+  if (!verified?.length) return "";
+  return `\n\nFAITS VÉRIFIÉS DE LA FICHE (key_figures.facts) :\n${verified.map((fact) => `- ${fact}`).join("\n")}\nVÉRIFICATION : ce que le mail affirme sur l'entreprise (son activité, ses produits, ses clients, son process) doit venir de ces faits vérifiés. Ajoute au JSON "fait_cite":"le fait sur lequel s'appuie le mail" et "fait_dans_la_liste":true|false (false si ce fait ne figure pas, même reformulé, parmi les faits vérifiés).`;
+}
+
 export async function judgeMail(
   ask: AskFn,
-  input: { subject: string; body: string; company: string; facts: string; family?: MailFamily },
+  input: { subject: string; body: string; company: string; facts: string; family?: MailFamily; verifiedFacts?: readonly string[] | null },
   operation = "qualite:juge",
 ): Promise<JudgeVerdict | null> {
   const family = input.family ?? "F1";
   const raw = await ask(
     "judge",
     buildJudgePrompt(family),
-    `Entreprise : ${input.company}\nCe que l'on sait d'elle :\n${input.facts}\n\nMAIL À NOTER\nObjet : ${input.subject}\n\n${input.body}`,
+    `Entreprise : ${input.company}\nCe que l'on sait d'elle :\n${input.facts}${verifiedFactsCheck(input.verifiedFacts)}\n\nMAIL À NOTER\nObjet : ${input.subject}\n\n${input.body}`,
     0,
     operation,
   ).catch(() => "");

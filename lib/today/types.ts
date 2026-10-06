@@ -24,6 +24,8 @@ export const TODAY_TAGS = [
   "Brouillon manquant",
   "Filiale de groupe",
   "À revoir",
+  // Porte « faits » (Cowork #31) : aucun fait distinctif, aucun mail rédigé.
+  "Faits insuffisants",
 ] as const;
 export type TodayTag = (typeof TODAY_TAGS)[number];
 
@@ -38,6 +40,7 @@ export const BLOCKING_TAGS: ReadonlySet<TodayTag> = new Set([
   "Brouillon manquant",
   // Note du juge qualité sous 9/10 : pas dans « Nouveaux prospects ».
   "À revoir",
+  "Faits insuffisants",
 ]);
 
 export type ContactKind = "nominatif" | "generique" | "aucun";

@@ -95,7 +95,7 @@ const UNCERTAIN_IDEA =
  * une fiche « À revoir »).
  */
 export const isBlockedReason = (reason: string | null | undefined) =>
-  Boolean(reason && /^(profil insuffisant|pain incertain|À revoir — sans site)/.test(reason));
+  Boolean(reason && /^(profil insuffisant|pain incertain|À revoir — sans site|Faits insuffisants)/.test(reason));
 
 /** Une accroche qui ouvre sur « Avec » (« Avec vos quatre fournils… »). */
 export const opensWithAvec = (hook: string) => /^\s*avec\b/i.test(hook);

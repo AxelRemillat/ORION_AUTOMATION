@@ -149,6 +149,87 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
   }),
 ];
 
+/**
+ * Les 3 propositions RÉELLEMENT ENVOYÉES par Axel le 06/10/2026 (Cowork #31) :
+ * modèles de STRUCTURE (Approche → Prix/Délai → Mensuel → Références/démo →
+ * question), de ton, d'honnêteté des références et de prix unique. P1 fait
+ * 988 caractères : à la limite, pas un modèle de longueur. Texte brut tel
+ * qu'envoyé (salutation et signature comprises).
+ * Les annonces de P2 et P3 ne sont pas en base : leur résumé est reconstitué
+ * d'après la proposition, budget non conservé.
+ */
+export interface SentProposal {
+  title: string;
+  ad: string;
+  budget: string | null;
+  amountEur: number;
+  delayDays: number;
+  text: string;
+}
+
+export const AXEL_SENT: SentProposal[] = [
+  {
+    title: PROPOSAL_POSITIVES[1].title,
+    ad: PROPOSAL_POSITIVES[1].ad,
+    budget: PROPOSAL_POSITIVES[1].budget,
+    amountEur: 2400,
+    delayDays: 15,
+    text: `Bonjour,
+
+Approche : un agent n8n surveille le dossier dédié (Outlook/Gmail), extrait les liens, lit chaque page (connexion pro gérée) et en tire la réf. fournisseur via IA. Il interroge Sage 100 en lecture seule (compte SQL dédié), applique votre préfixe et le tarif client, puis produit l'Excel (trouvé / à vérifier / introuvable) et le brouillon de réponse. Chaque erreur est signalée par mail.
+
+Prix : 2 400 € (développement, tests sur vos vrais mails, doc, prise en main). Délai : 15 jours.
+Mensuel : hébergement ~15 €, API IA ~10-30 € selon le volume, maintenance en option 90 €.
+
+Références : pas encore de projet Sage, mais une démo proche dans mon portfolio Codeur (« Agent IA de devis par métier ») et une appli d'automatisation mail + IA que j'utilise chaque jour (ORION).
+
+Si le projet « fichiers de prix fournisseurs » est aussi le vôtre, les deux partagent l'accès Sage : je peux les chiffrer ensemble.
+
+Combien de demandes par semaine, sur combien de sites ?
+
+Axel Remillat`,
+  },
+  {
+    title: "Agent IA pour automatiser le traitement de fichiers de prix fournisseurs (import Sage)",
+    ad: "(Résumé reconstitué.) Distributeur sous Sage : nos fournisseurs publient leurs fichiers de prix Excel (extranet, parfois webservice), chacun dans son format. Nous voulons un outil qui récupère ces fichiers, détecte les mises à jour, reconnaît les colonnes, remplace les références fournisseur par nos références, classe par famille Sage, applique nos remises par code fournisseur et produit les fichiers d'import (.txt et .xlsx), avec un contrôle avant import. Merci d'indiquer votre approche, le prix, les coûts mensuels et le délai.",
+    budget: null,
+    amountEur: 2900,
+    delayDays: 18,
+    text: `Bonjour,
+
+Approche : un outil installé sur votre poste récupère les fichiers Excel (extranet ou webservice si disponible) et détecte les mises à jour. Un LLM via API reconnaît les colonnes quel que soit le format, puis le code remplace les réf. fournisseur par les vôtres, classe par famille Sage et applique vos remises par code fournisseur. Vous validez les prix dans un écran de contrôle (écarts surlignés), puis l'outil génère le .txt et le .xlsx prêts à l'import.
+
+Prix : 2 900 € pour l'outil et 5 premiers fournisseurs, puis 120 € par fournisseur ajouté. Délai : 18 jours.
+Mensuel : API IA ~5-20 € selon le volume, maintenance en option 90 €.
+
+Démo proche dans mon portfolio Codeur : « Extraction automatique de factures ».
+
+Si la demande « prix par mail / Sage 100 » vient aussi de vous, les deux partagent la même table de correspondance : je peux les chiffrer ensemble.
+
+Pouvez-vous m'envoyer 2 fichiers types et votre formule de remise ?
+
+Axel Remillat`,
+  },
+  {
+    title: "Trier et classer des pièces (photos, e-mails, documents) pour un dossier de réclamation",
+    ad: "(Résumé reconstitué.) J'ai un grand nombre de photos, d'e-mails et de documents à rassembler pour un dossier de réclamation. Je cherche quelqu'un pour les trier, les classer par catégorie et par date, les renommer et les ranger proprement pour les transmettre. Indiquez votre prix et votre délai.",
+    budget: null,
+    amountEur: 250,
+    delayDays: 3,
+    text: `Bonjour,
+
+Pour un dossier de réclamation, je peux trier automatiquement vos photos, e-mails et documents avec l'IA : chaque pièce est lue (y compris le texte des photos et PDF), classée par catégorie et par date, renommée clairement, puis rangée dans une arborescence prête à transmettre. Je vous remets aussi un tableau récapitulatif (pièce, date, type, résumé en une ligne) pour retrouver tout en un coup d'œil.
+
+Prix : 250 €. Délai : 3 jours après réception des fichiers.
+
+Une démo proche est visible dans mon portfolio Codeur (« Tri automatique des e-mails entrants »).
+
+Pour cadrer : combien de fichiers environ, et la réclamation vise-t-elle un assureur, un fournisseur ou un litige client (pour adapter les catégories) ?
+
+Axel Remillat`,
+  },
+];
+
 export const PROPOSAL_NEGATIVES: ProposalReference[] = [
   // Cas RÉEL (06/10/2026) : proposition générée — pas de « Bonjour », prix du texte (400 à 480 €) ≠ champ (450 €), démo hors sujet.
   compose({

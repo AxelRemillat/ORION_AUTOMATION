@@ -2,7 +2,7 @@ import type { AskFn } from "@/lib/ai/chat";
 import { countWords } from "@/lib/emails/quality/template";
 import { DEMO_LINKS, type DemoLink } from "@/lib/emails/quality/demo-links";
 import { opportunityDemoUrl } from "./analyze";
-import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "./calibration";
+import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "./calibration";
 import type { Language, Platform } from "./types";
 import {
   DELAY_CAP_DAYS,
@@ -40,6 +40,13 @@ export const PROPOSAL_WORDS = { min: 120, max: 180 } as const;
  * 1 000 caractères (signature comprise) — la proposition y tient : 80 à 140 mots.
  */
 export const PRIVATE_MESSAGE_MAX_CHARS = 1000;
+/**
+ * Au-delà, réécriture de RACCOURCISSEMENT dédiée (Cowork #31), hors des essais
+ * du double juge : la longueur est un contrôle du code, pas une note.
+ */
+export const SHORTEN_ABOVE_CHARS = 980;
+export const SHORTEN_TARGET_CHARS = 900;
+export const SHORTEN_PASSES = 2;
 export const SHORT_PROPOSAL_WORDS = { min: 80, max: 150 } as const;
 const wordsFor = (platform: Platform | undefined) => (platform && ["codeur", "malt", "comeup"].includes(platform) ? SHORT_PROPOSAL_WORDS : PROPOSAL_WORDS);
 
@@ -162,12 +169,19 @@ const clean = (text: string) => text.replace(/\s+/g, " ").trim();
 /** Toujours une salutation (la proposition Sage commençait par « Vous souhaitez… »). */
 export const GREETINGS: Record<Language, string> = { fr: "Bonjour,", en: "Hello," };
 
+const APPROACH_LABEL: Record<Language, string> = { fr: "Approche :", en: "Approach:" };
+
 /** Corps de la proposition (sans signature), puis la signature de la plateforme. */
 export function assembleProposal(
   parts: ProposalParts,
   frame: { language: Language; demo: DemoLink["key"]; platform: Platform; context?: string; kind?: ProjectKind },
 ): { core: string; text: string } {
-  const steps = parts.steps.map((step, index) => `${index + 1}. ${clean(step).replace(/^\d+[.)]\s*/, "")}`).join("\n");
+  const stepTexts = parts.steps.map((step) => clean(step).replace(/^\d+[.)]\s*/, "").replace(/^(approche|approach)\s*:\s*/i, ""));
+  // Codeur, Malt, ComeUp : un paragraphe « Approche : … », comme les propositions envoyées par Axel ;
+  // ailleurs (Upwork…), la liste numérotée.
+  const steps = isNoContactPlatform(frame.platform)
+    ? `${APPROACH_LABEL[frame.language]} ${stepTexts.map((step, index) => (index ? step.charAt(0).toUpperCase() + step.slice(1) : step)).map((step) => (/[.!?]$/.test(step) ? step : `${step}.`)).join(" ")}`
+    : stepTexts.map((step, index) => `${index + 1}. ${step}`).join("\n");
   const demo = demoLine(frame.platform, frame.language, frame.demo, frame.context ?? parts.reading, frame.kind);
   // Ordre des demandes usuelles : approche (étapes), prix · coûts mensuels · délai, références, démo, question.
   const core = [GREETINGS[frame.language], clean(parts.reading), steps, clean(parts.framing), parts.references ? clean(parts.references) : null, demo, clean(parts.question)]
@@ -325,11 +339,9 @@ Langue de la réponse : ${fr ? "FRANÇAIS, vouvoiement" : "ENGLISH, plain and di
 LA RÉPONSE FINALE AURA EXACTEMENT CETTE FORME (le code ajoute la salutation, la ligne de démo et la signature) :
 ${GREETINGS[input.language]}
 
-<READING — 2 phrases>
+<READING — ${isNoContactPlatform(input.platform) ? "1 phrase" : "2 phrases"}>
 
-1. <STEP 1>
-2. <STEP 2>
-3. <STEP 3>
+${isNoContactPlatform(input.platform) ? `${APPROACH_LABEL[input.language]} <STEP 1> <STEP 2> <STEP 3>   (un seul paragraphe de trois PHRASES COMPLÈTES avec un sujet, comme Axel : « un agent surveille le dossier… Il interroge Sage en lecture seule… Vous validez les prix dans un écran de contrôle… » — la 1re commence par une minuscule, jamais d'infinitif seul comme « recenser… »)` : "1. <STEP 1>\n2. <STEP 2>\n3. <STEP 3>"}
 
 ${isNoContactPlatform(input.platform) ? "<LIGNE DE DÉMO — posée par le code : le titre d'une réalisation du portfolio. Ne l'écris pas, ne la répète pas.>" : `${DEMO_LINE[input.language]} <lien vers la démo « ${DEMO_LINKS[input.demo].label} »>`}
 
@@ -340,7 +352,7 @@ ${requested.includes("references") ? "\n<REFERENCES — 1 ou 2 phrases>\n" : ""}
 À ÉCRIRE :
 - "reading" : la reformulation PRÉCISE du besoin, avec les éléments concrets de l'annonce (outil, volume, type de documents, résultat attendu). Montre qu'on a lu. Jamais « j'ai bien lu votre annonce ».
 - "steps" : TROIS étapes concrètes et courtes (12 à 22 mots chacune) : ce qui sera fait, dans l'ordre, avec leurs outils.
-- "framing" : ${budget ? `un prix UNIQUE (jamais de fourchette) et un délai, cohérents avec le budget annoncé (${budget}) et le positionnement ci-dessous.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
+- "framing" : ${isNoContactPlatform(input.platform) && input.language === "fr" ? "forme « Prix : <montant> € (<ce qui est inclus>). Délai : <N> jours. »" + (requested.includes("couts_mensuels") ? " puis « Mensuel : hébergement ~15 €, API IA ~10-30 € selon le volume, maintenance en option 90 €. » (montants à adapter) ;" : " ;") + " " : ""}${budget ? `un prix UNIQUE (jamais de fourchette) et un délai, cohérents avec le budget annoncé (${budget}) et le positionnement ci-dessous.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
 - "question" : UNE question pour qualifier le besoin (ce qui conditionne la solution), qui finit par « ? ».
 - PRIX ET DÉLAI — ${pricingGuide(kind)} Le prix et le délai écrits dans "framing" sont EXACTEMENT "amount_eur" et "delay_days" (même montant, même nombre de jours).${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
 ${requested.length ? `- L'ANNONCE DEMANDE EXPLICITEMENT, DANS CET ORDRE : ${requested.map((item) => REQUESTED_LABELS[item]).join(", ")}. Réponds à CHACUN, dans cet ordre (l'approche = les trois étapes ; prix${requested.includes("couts_mensuels") ? ", coûts mensuels" : ""} et délai dans "framing"${requested.includes("references") ? ` ; les références dans "references"` : ""}).${requested.includes("prix") ? " Le prix est demandé : donne-le même sans budget annoncé." : ""}` : ""}
@@ -362,11 +374,16 @@ ${isNoContactPlatform(input.platform)
   : `La réponse complète (sans la signature) fait ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots — budget : "reading" 40 à 55 mots, chaque étape 14 à 20 mots, "framing" 20 à 30 mots, "question" 12 à 20 mots.`}
 - "amount_eur" et "delay_days" : le montant (nombre, en euros) et le délai (nombre de jours) à saisir dans le formulaire de la plateforme${input.platform === "codeur" ? " — repères Codeur : 300–600 € tâche simple, 600–1 200 € workflow complet, 45 €/h" : ""}${budget ? `, dans le budget annoncé (${budget})` : ", même sans budget annoncé (montant indicatif de lancement)"}.
 
-EXEMPLES ATTENDUS (autres annonces — n'en reprends aucune phrase) :
+${isNoContactPlatform(input.platform) && input.language === "fr"
+  ? `PROPOSITIONS RÉELLEMENT ENVOYÉES PAR AXEL (autres annonces) — imite leur structure, leur ton, leurs références honnêtes et leur prix unique ; n'en reprends aucune phrase. Ici, la ligne « démo proche dans mon portfolio » est posée par le code : ne l'écris pas.
+${AXEL_SENT.slice(1)
+  .map((item) => `--- ${item.title} ---\n${item.text}`)
+  .join("\n\n")}`
+  : `EXEMPLES ATTENDUS (autres annonces — n'en reprends aucune phrase) :
 ${PROPOSAL_POSITIVES.filter((item) => item.language === input.language)
   .slice(0, 1)
   .map((item) => item.text)
-  .join("\n\n")}${feedback ? `\n\nRÉÉCRITURE — la version précédente avait ces défauts, corrige-les tous :\n${feedback}` : ""}
+  .join("\n\n")}`}${feedback ? `\n\nRÉÉCRITURE — la version précédente avait ces défauts, corrige-les tous :\n${feedback}` : ""}
 
 Réponds UNIQUEMENT en JSON : {"reading":"…","steps":["…","…","…"],"framing":"…",${requested.includes("references") ? '"references":"…",' : ""}"question":"…","amount_eur":0,"delay_days":0}`;
 }
@@ -392,8 +409,8 @@ export function parseProposalParts(raw: string): ProposalParts | null {
 
 export const PROPOSAL_GRID = [
   { id: "lecture", points: 3, rule: "La reformulation reprend les éléments CONCRETS de l'annonce (outil, volume, documents, résultat attendu) : on voit qu'elle a été lue. 3 = précise. 1 = générique (« automatiser vos tâches »). 0 = hors sujet." },
-  { id: "approche", points: 3, rule: "Trois étapes concrètes, dans l'ordre, liées au besoin (ce qui sera fait, avec quels outils). 3 = un client sait ce qu'il achète. 1 = vague. 0 = jargon ou liste creuse." },
-  { id: "cadrage", points: 2, rule: "UN prix et UN délai (jamais de fourchette), dans le positionnement d'Axel (profil récent : simple 300–600 €, workflow complet 600–1 200 €, multi-systèmes complexe 1 500–3 000 € en 2 à 3 semaines ; application web 1 200–4 000 €), coûts mensuels réalistes s'ils sont demandés (hébergement ~15 €, API IA 10–30 €, maintenance 90 €/mois) — ou, sans budget ni prix demandé, une question de cadrage utile ; et une question de qualification qui conditionne la solution. 2 = justes. 1 = prix ou délai hors positionnement. 0 = fourchette, prix démesuré ou absent alors que demandé." },
+  { id: "approche", points: 3, rule: "Trois étapes concrètes, dans l'ordre, liées au besoin (ce qui sera fait, avec quels outils) — en liste ou en un paragraphe « Approche : … ». 3 = un client sait ce qu'il achète. 1 = vague. 0 = jargon ou liste creuse." },
+  { id: "cadrage", points: 2, rule: "UN prix et UN délai (jamais de fourchette), dans le positionnement d'Axel (profil récent : traitement ponctuel de quelques jours 200–300 €, simple 300–600 €, workflow complet 600–1 200 €, multi-systèmes complexe 1 500–3 000 € en 2 à 3 semaines ; application web 1 200–4 000 €), coûts mensuels réalistes s'ils sont demandés (hébergement ~15 €, API IA 10–30 €, maintenance 90 €/mois) — ou, sans budget ni prix demandé, une question de cadrage utile ; et une question de qualification qui conditionne la solution. 2 = justes. 1 = prix ou délai hors positionnement. 0 = fourchette, prix démesuré ou absent alors que demandé." },
   { id: "ton", points: 2, rule: "Direct, poli, sans flatterie, sans jargon, sans expérience ni résultat inventés, sans coordonnées. 2 = on croirait un indépendant sérieux. 0 = flatterie, promesse chiffrée, références inventées, ou — sur CODEUR, MALT ou COMEUP — la moindre URL, adresse e-mail ou téléphone (interdits par la plateforme)." },
 ] as const;
 
@@ -405,7 +422,8 @@ export interface ProposalVerdict {
 
 export function buildProposalJudgePrompt(): string {
   const grid = PROPOSAL_GRID.map((criterion) => `- ${criterion.id} (${criterion.points} pt) : ${criterion.rule}`).join("\n");
-  const positives = PROPOSAL_POSITIVES.slice(0, 2).map((item) => `[${item.platform}] ${item.title}\n${item.text}`).join("\n\n");
+  // Les propositions RÉELLEMENT envoyées par Axel (Cowork #31) : repères figés des notes 9+.
+  const positives = AXEL_SENT.map((item) => `[codeur] ${item.title}\n${item.text}`).join("\n\n");
   const negatives = PROPOSAL_NEGATIVES.map((item) => `- ${item.why}`).join("\n");
   return `Tu relis la réponse qu'un indépendant (IA et automatisation pour PME) va poster sur une plateforme freelance.
 La forme est vérifiée par un programme (longueur, ligne de démo — un titre de portfolio sur Codeur, Malt et ComeUp, où les liens sont interdits, éventuellement absente —, signature) : ne la reproche pas. Note le FOND sur 10 :
@@ -449,15 +467,20 @@ export function parseProposalVerdict(raw: string): ProposalVerdict | null {
 export function buildClientJudgePrompt(): string {
   return `Tu es le CLIENT qui a publié cette annonce. Tu reçois 80 offres et tu choisis en 30 secondes celles que tu lis vraiment.
 Tu notes cette réponse sur 10. Elle ne vaut 9 ou plus QUE si elle coche TOUT :
-1. « Bonjour, » puis une reformulation précise de TON besoin réel (on voit qu'il a lu l'annonce, pas une paraphrase vague).
+1. « Bonjour, » puis la preuve qu'il a lu TON besoin réel (tes outils, tes documents, ton résultat attendu), dans une reformulation ou directement dans l'approche — pas une paraphrase vague.
 2. Une réponse explicite à CHAQUE élément que tu as demandé (approche, prix, coûts mensuels, délai, références…), dans l'ordre.
-3. Une approche en 3 étapes concrètes, adaptées à tes outils et contraintes.
+3. Une approche concrète (3 étapes, en liste ou en un paragraphe « Approche : … »), adaptée à tes outils et contraintes.
 4. La preuve la plus proche de ton besoin (réalisation du portfolio au titre exact, ou l'application de prospection ORION pour un besoin de prospection ou d'application web) ; références honnêtes, jamais inventées.
 5. UN prix et UN délai, cohérents avec ton budget affiché et avec un indépendant au profil récent.
 6. Une question de cadrage utile, qui fait avancer le devis (pas générique).
 7. Courte (le message privé est limité à 1 000 caractères), signée « Axel Remillat ».
 8. Ton direct et concret, sans flatterie, sans jargon, sans « je suis passionné ».
 Un seul point manqué → 8 au plus. Deux → 6 au plus. Tu n'es pas indulgent : tu as 79 autres offres.
+
+RÉPONSES RÉELLES QUI COCHENT TOUT (9 ou plus, à d'autres annonces) :
+${AXEL_SENT.slice(1)
+  .map((item) => `--- ${item.title} ---\n${item.text}`)
+  .join("\n\n")}
 Réponds UNIQUEMENT en JSON : {"score":0-10,"reasons":["ce qui te ferait passer à l'offre suivante…"],"fix":"consigne de réécriture précise, ou null si 9 ou plus"}`;
 }
 
@@ -535,6 +558,43 @@ interface Attempt {
   parts: ProposalParts;
 }
 
+/**
+ * Réécriture de RACCOURCISSEMENT (Cowork #31) : même JSON, même prix, même
+ * délai, mêmes réponses aux demandes ; seuls les mots en trop partent. Hors
+ * des essais du double juge.
+ */
+export function buildShortenPrompt(parts: ProposalParts, length: number): string {
+  return `Tu raccourcis la réponse d'Axel Remillat à une annonce freelance. Elle fait ${length} caractères une fois assemblée (salutation, ligne de démo et signature comprises) : la limite du message privé est ${PRIVATE_MESSAGE_MAX_CHARS}. Vise ${SHORTEN_TARGET_CHARS} caractères au plus, soit environ ${Math.max(40, length - SHORTEN_TARGET_CHARS)} caractères à retirer.
+GARDE, sans les changer : le prix (${parts.amountEur ?? "celui du texte"} €), le délai (${parts.delayDays ?? "celui du texte"} jours), les coûts mensuels s'ils y sont, la réponse honnête sur les références, les trois étapes (une phrase chacune) et la question finale.
+COUPE : les répétitions de l'annonce, les adjectifs, les détails techniques secondaires, les parenthèses non indispensables. N'ajoute rien.
+Réponds UNIQUEMENT en JSON, mêmes clés : {"reading":"…","steps":["…","…","…"],"framing":"…",${parts.references ? '"references":"…",' : ""}"question":"…","amount_eur":${parts.amountEur ?? 0},"delay_days":${parts.delayDays ?? 0}}`;
+}
+
+/** Raccourcit tant que le texte dépasse SHORTEN_ABOVE_CHARS (plateformes à message privé limité). */
+async function shortenIfLong(
+  input: ProposalInput,
+  parts: ProposalParts,
+  assemble: (parts: ProposalParts) => { core: string; text: string },
+): Promise<ProposalParts> {
+  let best = parts;
+  let length = assemble(parts).text.length;
+  for (let pass = 0; pass < SHORTEN_PASSES && length > SHORTEN_ABOVE_CHARS; pass += 1) {
+    const raw = await input
+      .ask("writer", buildShortenPrompt(best, length), JSON.stringify({ reading: best.reading, steps: best.steps, framing: best.framing, references: best.references, question: best.question }), 0.3, "opportunites:raccourci")
+      .catch(() => "");
+    const shorter = parseProposalParts(raw);
+    if (!shorter) continue;
+    // Le montant et le délai à saisir ne bougent pas pendant un raccourcissement.
+    const next = { ...shorter, amountEur: best.amountEur, delayDays: best.delayDays };
+    const nextLength = assemble(next).text.length;
+    if (nextLength < length) {
+      best = next;
+      length = nextLength;
+    }
+  }
+  return best;
+}
+
 const rank = (attempt: Attempt) => (attempt.rules.ok ? 100 : 0) - attempt.rules.failures.length + (attempt.verdict?.score ?? 0);
 
 export async function generateProposal(input: ProposalInput & { maxRewrites?: number }): Promise<ProposalOutcome | { error: string }> {
@@ -548,12 +608,14 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
       feedback ? 0.5 : 0.7,
       `opportunites:redaction${feedback ? ":rewrite" : ""}`,
     ).catch(() => "");
-    const parts = parseProposalParts(raw);
-    if (!parts) {
+    const written = parseProposalParts(raw);
+    if (!written) {
       feedback = 'La réponse n\'était pas le JSON demandé : {"reading","steps":[3],"framing","question"}.';
       continue;
     }
-    const { core, text } = assembleProposal(parts, { language: input.language, demo: input.demo, platform: input.platform, context: `${input.need} ${input.body}`, kind: input.kind });
+    const assemble = (draft: ProposalParts) => assembleProposal(draft, { language: input.language, demo: input.demo, platform: input.platform, context: `${input.need} ${input.body}`, kind: input.kind });
+    const parts = isNoContactPlatform(input.platform) ? await shortenIfLong(input, written, assemble) : written;
+    const { core, text } = assemble(parts);
     const rules = checkProposal(parts, core, { language: input.language, budget: input.budget, platform: input.platform, kind: input.kind, requested: requestedItems(input.body), ad: input.body }, text);
     // Le juge ne note qu'une proposition qui passe les règles.
     // Double juge : le relecteur (grille) ET le client exigeant ; les deux doivent donner 9 ou plus.

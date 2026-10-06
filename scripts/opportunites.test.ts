@@ -4,8 +4,8 @@
  */
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
-import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
+import { assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
+import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
 import { countWords } from "../lib/emails/quality/template";
@@ -200,6 +200,40 @@ async function main() {
       const { ask } = scripted([goodJson, goodJson, goodJson], [verdict(7), verdict(8), verdict(7)]);
       const outcome = await generateProposal({ ...base, ask });
       check("toujours < 9 : 3 essais, meilleur gardé (8), « À revoir » avec la raison", "text" in outcome && outcome.needsReview && outcome.attempts === 3 && outcome.score === 8 && /Note 8\/10/.test(outcome.reason ?? ""), JSON.stringify("text" in outcome ? { s: outcome.score, r: outcome.reason } : outcome));
+    }
+    {
+      // Cowork #31 : au-delà de 980 caractères, réécriture de raccourcissement dédiée, HORS des essais du juge.
+      const padded = JSON.stringify({ reading: `${good.reading} ${"Détail de l'annonce repris en entier. ".repeat(14)}`, steps: good.steps, framing: good.framing, question: good.question });
+      const operations: string[] = [];
+      let last = "";
+      const ask: AskFn = async (role, system, _user, _temperature, operation) => {
+        operations.push(operation.replace(/:\d+$/, ""));
+        if (role === "judge" && /Tu es le CLIENT/.test(system)) return last;
+        if (role === "writer") return operation === "opportunites:raccourci" ? goodJson : padded;
+        last = verdict(9);
+        return last;
+      };
+      const outcome = await generateProposal({ ...base, ask });
+      check(
+        "trop longue → raccourcie avant le juge, sans compter d'essai",
+        "text" in outcome && !outcome.needsReview && outcome.attempts === 1 && outcome.text.length <= SHORTEN_ABOVE_CHARS && operations.join(",") === "opportunites:redaction,opportunites:raccourci,opportunites:juge,opportunites:juge-client",
+        JSON.stringify({ ops: operations, len: "text" in outcome ? outcome.text.length : 0 }),
+      );
+    }
+    {
+      // Le raccourcissement échoue : rien au-dessus de 1 000 caractères n'est « prêt », même à 10/10.
+      const padded = JSON.stringify({ reading: `${good.reading} ${"Détail de l'annonce repris en entier. ".repeat(14)}`, steps: good.steps, framing: good.framing, question: good.question });
+      const { ask } = scripted([padded, padded, padded, padded, padded, padded, padded, padded, padded], [verdict(10), verdict(10), verdict(10)]);
+      const outcome = await generateProposal({ ...base, ask });
+      check("raccourcissement raté : jamais « prête » au-delà de 1 000 caractères", "text" in outcome && outcome.needsReview && outcome.text.length > PRIVATE_MESSAGE_MAX_CHARS, JSON.stringify("text" in outcome ? { n: outcome.needsReview, len: outcome.text.length } : outcome));
+    }
+    {
+      const assembled = assembleProposal(good, { language: "fr", demo: "emails", platform: "codeur" }).text;
+      check("Codeur : approche en un paragraphe « Approche : … » (structure des propositions d'Axel)", /\n\nApproche : \S/.test(assembled) && !/\n1\. /.test(assembled), assembled);
+      check("Codeur : chaque étape après la 1re commence par une majuscule (jamais « . créer »)", !/\. [a-zà-ÿ]/.test(assembleProposal({ ...good, steps: ["un agent lit le dossier", "recenser les formats", "produire le fichier"] }, { language: "fr", demo: "emails", platform: "codeur" }).text.split("Approche :")[1].split("\n\n")[0]));
+      check("Upwork : liste numérotée conservée", /\n1\. /.test(assembleProposal(PROPOSAL_POSITIVES[4], { language: "en", demo: "sav", platform: "upwork" }).text));
+      check("propositions envoyées par Axel : 3 repères, P1 à 988 caractères, toutes ≤ 1 000", AXEL_SENT.length === 3 && AXEL_SENT[0].text.length === 988 && AXEL_SENT.every((item) => item.text.length <= PRIVATE_MESSAGE_MAX_CHARS));
+      check("les deux juges ont les propositions d'Axel pour repères", buildProposalJudgePrompt().includes(AXEL_SENT[0].text) && buildClientJudgePrompt().includes(AXEL_SENT[2].text));
     }
     check("juge : note bornée par la grille", parseProposalVerdict(JSON.stringify({ criteria: { lecture: 9, approche: 3 } }))?.score === 6);
     check(`longueur : ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots`, PROPOSAL_WORDS.min === 120 && PROPOSAL_WORDS.max === 180);
