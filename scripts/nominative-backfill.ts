@@ -108,7 +108,10 @@ async function main() {
   let hinted = 0;
   for (const prospect of remaining.filter(isGenericAddress)) {
     const figures = prospect.key_figures ?? {};
-    if (prospect.do_not_contact || figures.refuses_prospecting === true || figures.addressee_hint) continue;
+    const previous = figures.addressee_hint as { name?: string } | undefined;
+    // Un indice d'avant v3 portait tous les prénoms du registre : il est refait.
+    const stale = Boolean(previous?.name && previous.name.split(" ").length > 3);
+    if (prospect.do_not_contact || figures.refuses_prospecting === true || (previous && !stale)) continue;
     const leader = usageName(typeof figures.leader_person === "string" ? figures.leader_person : null);
     const hint = leader ? addresseeHint({ firstName: leader.firstName, lastName: leader.lastName, role: "dirigeant", source: "registre" }) : null;
     if (!hint) continue;
