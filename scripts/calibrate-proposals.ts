@@ -10,6 +10,7 @@ import { liveAsk, ownerId, spentSince } from "./quality-live";
 import { judgeProposal, generateProposal, PROPOSAL_PASS, assembleProposal, checkProposal } from "@/lib/opportunities/proposal";
 import { analyzeOpportunity } from "@/lib/opportunities/analyze";
 import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "@/lib/opportunities/calibration";
+import { requestedItems } from "@/lib/opportunities/requests";
 import { proposalLanguage, type Platform } from "@/lib/opportunities/types";
 
 
@@ -37,9 +38,9 @@ async function main() {
   console.log("Calibrage du juge des propositions");
   for (const [label, items, expectPass] of [["positif", PROPOSAL_POSITIVES, true], ["négatif", PROPOSAL_NEGATIVES, false]] as const) {
     for (const item of items) {
-      const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform });
+      const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform, kind: item.kind, context: item.ad });
       // En production, le juge ne voit que ce qui passe les règles : un négatif est conforme s'il est refusé par l'un OU l'autre.
-      const rules = checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform }, text);
+      const rules = checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform, kind: item.kind, requested: requestedItems(item.ad), ad: item.ad }, text);
       const verdict = await judgeProposal(ask, { title: item.title, body: item.ad, budget: item.budget, text: core, platform: item.platform }, "opportunites:calibrage");
       const judged = verdict !== null && verdict.score >= PROPOSAL_PASS;
       const ok = expectPass ? rules.ok && judged : !rules.ok || !judged;

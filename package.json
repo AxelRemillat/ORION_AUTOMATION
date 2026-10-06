@@ -23,6 +23,7 @@
     "eval:families": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-families.js",
     "test:opportunites": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/opportunites.test.js",
     "calibrate:proposals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/calibrate-proposals.js",
+    "reanalyze:filtered": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/reanalyze-filtered.js",
     "eval:quality": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-quality.js",
     "regenerate:drafts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/regenerate-drafts.js",
     "eval:mails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-mails.js",

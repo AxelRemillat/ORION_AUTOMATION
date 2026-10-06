@@ -1,4 +1,5 @@
 import type { Language, Platform } from "./types";
+import type { ProjectKind } from "./requests";
 
 /**
  * JEU DE CALIBRAGE des propositions (05/10/2026) — écrit par l'agent, À FAIRE
@@ -19,6 +20,11 @@ export interface ProposalReference {
   steps: [string, string, string];
   framing: string;
   question: string;
+  /** Réponse « références » quand l'annonce en demande. */
+  references?: string;
+  kind?: ProjectKind;
+  amountEur?: number;
+  delayDays?: number;
   /** Texte assemblé (sans lien ni signature) pour les exemples des prompts. */
   text: string;
   why?: string;
@@ -26,10 +32,32 @@ export interface ProposalReference {
 
 const compose = (item: Omit<ProposalReference, "text">): ProposalReference => ({
   ...item,
-  text: [item.reading, item.steps.map((step, index) => `${index + 1}. ${step}`).join("\n"), item.framing, item.question].join("\n\n"),
+  text: [item.reading, item.steps.map((step, index) => `${index + 1}. ${step}`).join("\n"), item.framing, item.references, item.question].filter(Boolean).join("\n\n"),
 });
 
 export const PROPOSAL_POSITIVES: ProposalReference[] = [
+  // Cas RÉEL (06/10/2026) : version reconstituée d'après la proposition d'Axel — 2 400 € / 15 j, références honnêtes.
+  compose({
+    platform: "codeur",
+    language: "fr",
+    title: "Agent IA : réponse automatique aux demandes de prix par mail (Sage 100)",
+    ad: "Nous sommes distributeur de fournitures BTP. Nos clients nous envoient par mail des liens vers des produits vendus par nos concurrents, et nous demandent nos prix. Nous voulons automatiser ce traitement avec un agent IA : le commercial range le mail dans un dossier dédié ; l'agent en extrait les liens ; pour chaque lien, il récupère la référence fabricant sur la page (certains sites demandent une connexion avec un compte pro) ; il retrouve l'article dans Sage 100 Gestion commerciale (v12, SQL Server) et notre prix, idéalement le tarif du client ; il génère un Excel récapitulatif et prépare un brouillon de réponse. Contraintes : fonctionnement automatique avec signalement des erreurs, accès à Sage en lecture seule, hébergement et maintenance à prévoir. Merci d'indiquer dans votre devis : votre approche technique ; le prix du développement ; les coûts mensuels (hébergement, API IA, maintenance) ; le délai ; des références similaires (Sage, automatisation mail, IA).",
+    budget: "1 000 € à 10 000 €",
+    demo: "emails",
+    kind: "automatisation",
+    amountEur: 2400,
+    delayDays: 15,
+    reading:
+      "Vous voulez qu'un agent IA traite les demandes de prix reçues par mail : références lues sur les pages concurrentes (compte pro compris), tarifs clients dans Sage 100 v12, Excel et brouillon.",
+    steps: [
+      "Lecture du dossier mail et extraction des liens, avec signalement des erreurs.",
+      "Lecture des pages, connexion comprise, puis recherche dans Sage en lecture seule.",
+      "Excel récapitulatif et brouillon de réponse, testés sur vos vraies demandes.",
+    ],
+    framing: "Prix : 2 400 €. Coûts mensuels : hébergement 15 €, API IA 10 à 30 € selon le volume, maintenance en option 90 €/mois. Délai : 15 jours.",
+    references: "Pas encore de projet Sage 100 à vous montrer : voyez la démo ci-dessous et ORION, l'application d'automatisation mail + IA que j'utilise au quotidien.",
+    question: "Combien de sites concurrents demandent un compte professionnel ?",
+  }),
   compose({
     platform: "codeur",
     language: "fr",
@@ -44,7 +72,7 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
       "Ajout d'une ligne par commande dans votre Google Sheets, et signalement des commandes incomplètes à vérifier.",
       "Une semaine d'essai sur vos vrais e-mails, réglages compris, puis une courte notice pour votre équipe.",
     ],
-    framing: "Délai : environ deux semaines. Budget : entre 700 et 950 € selon le nombre de formats de commande différents.",
+    framing: "Délai : environ deux semaines. Prix : 850 €, pour les formats de commande que vous recevez aujourd'hui.",
     question: "Vos commandes arrivent-elles surtout dans le corps du mail ou en pièce jointe PDF ?",
   }),
   compose({
@@ -61,7 +89,7 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
       "Préparation d'une relance adaptée au retard et à l'historique du client, envoyée après votre validation ou automatiquement.",
       "Un tableau simple des relances faites et des paiements reçus, pour suivre l'encaissement.",
     ],
-    framing: "Pour chiffrer précisément, combien de factures émettez-vous par mois environ ? Le délai indicatif est d'une à deux semaines.",
+    framing: "Pour chiffrer précisément, combien de factures émettez-vous par mois environ ? Le délai indicatif est de 10 jours.",
     question: "Souhaitez-vous valider chaque relance avant envoi, ou seulement les premières ?",
   }),
   compose({
@@ -101,6 +129,26 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
 ];
 
 export const PROPOSAL_NEGATIVES: ProposalReference[] = [
+  // Cas RÉEL (06/10/2026) : proposition générée sur l'annonce complète, notée 9 par le juge, ~7 en réalité.
+  compose({
+    platform: "codeur",
+    language: "fr",
+    title: "Agent IA : réponse automatique aux demandes de prix par mail (Sage 100)",
+    ad: "Nous sommes distributeur de fournitures BTP. Nos clients nous envoient par mail des liens vers des produits vendus par nos concurrents, et nous demandent nos prix. Nous voulons automatiser ce traitement avec un agent IA : le commercial range le mail dans un dossier dédié ; l'agent en extrait les liens ; pour chaque lien, il récupère la référence fabricant sur la page (certains sites demandent une connexion avec un compte pro) ; il retrouve l'article dans Sage 100 Gestion commerciale (v12, SQL Server) et notre prix, idéalement le tarif du client ; il génère un Excel récapitulatif et prépare un brouillon de réponse. Contraintes : fonctionnement automatique avec signalement des erreurs, accès à Sage en lecture seule, hébergement et maintenance à prévoir. Merci d'indiquer dans votre devis : votre approche technique ; le prix du développement ; les coûts mensuels (hébergement, API IA, maintenance) ; le délai ; des références similaires (Sage, automatisation mail, IA).",
+    budget: "1 000 € à 10 000 €",
+    demo: "devis",
+    kind: "automatisation",
+    reading:
+      "Vous souhaitez traiter automatiquement les mails contenant des liens vers des fournitures BTP concurrentes, retrouver les références et tarifs clients dans Sage 100 v12, puis préparer un Excel et un brouillon, sans envoyer le mail.",
+    steps: [
+      "Surveiller le dossier mail et extraire les liens, avec signalement des erreurs de lecture.",
+      "Lire les pages, y compris avec connexion, puis rapprocher les références dans Sage via SQL Server sécurisé.",
+      "Produire l'Excel et le brouillon, puis tester les tarifs clients et les cas introuvables.",
+    ],
+    framing: "Délai : 4 à 6 semaines. Développement : 4 000 à 6 000 €, selon les sites et accès Sage ; hébergement, API et maintenance : 100 à 250 €/mois estimés.",
+    question: "Combien de sites concurrents faut-il couvrir, et combien nécessitent un compte professionnel ?",
+    why: "Fourchette de prix hors positionnement (4 000 à 6 000 €), délai trop long (4 à 6 semaines), coûts mensuels irréalistes (100 à 250 €/mois), références demandées sans réponse.",
+  }),
   compose({
     platform: "codeur",
     language: "fr",
