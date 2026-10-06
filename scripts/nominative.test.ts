@@ -262,6 +262,11 @@ async function main() {
     fake.rows("prospects").push({ ...multi });
     await upgradeToNominative(fake as unknown as Db, multi, deps, { now: new Date("2026-10-06T17:00:00Z") });
     check("schéma construit avec le premier prénom : daniel.frelet@instan.fr", asked[0] === "daniel.frelet@instan.fr", asked);
+    const mixed: UpgradeProspect = { ...multi, id: "p11", key_figures: { ...multi.key_figures, leader_person: "Claude Pierre Jose Binovic" } };
+    const askedMixed: string[] = [];
+    fake.rows("prospects").push({ ...mixed });
+    await upgradeToNominative(fake as unknown as Db, mixed, { ...spy.deps, verify: async (email: string) => { askedMixed.push(email); return { status: "valid" as const, score: 95 }; } }, { now: new Date("2026-10-06T17:00:00Z") });
+    check("casse mixte (« Claude Pierre Jose Binovic ») : nom = dernier mot → claude.binovic@", askedMixed[0] === "claude.binovic@instan.fr", askedMixed);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);

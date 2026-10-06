@@ -20,7 +20,7 @@ import { readAll } from "@/lib/supabase/read-all";
 import { upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
 import { topicOf } from "@/lib/contact-finder/nominative";
 import { addresseeHint, ineligibility, isFreeDraft, isGenericAddress, nominativeShare, type UpgradeProspect } from "@/lib/contact-finder/upgrade";
-import { usageName } from "@/lib/contact-finder/names";
+import { usagePerson } from "@/lib/emails/salutation";
 import type { Db } from "@/lib/trash/scope";
 
 const arg = (name: string, fallback: number) => {
@@ -110,10 +110,10 @@ async function main() {
     const figures = prospect.key_figures ?? {};
     const previous = figures.addressee_hint as { name?: string } | undefined;
     // Un indice d'avant v3 portait tous les prénoms du registre : il est refait.
-    const stale = Boolean(previous?.name && previous.name.split(" ").length > 3);
+    const stale = Boolean(previous?.name && previous.name.split(" ").length > 2);
     if (prospect.do_not_contact || figures.refuses_prospecting === true || (previous && !stale)) continue;
-    const leader = usageName(typeof figures.leader_person === "string" ? figures.leader_person : null);
-    const hint = leader ? addresseeHint({ firstName: leader.firstName, lastName: leader.lastName, role: "dirigeant", source: "registre" }) : null;
+    const leader = usagePerson(typeof figures.leader_person === "string" ? figures.leader_person : null);
+    const hint = leader?.first && leader.last ? addresseeHint({ firstName: leader.first, lastName: leader.last, role: "dirigeant", source: "registre" }) : null;
     if (!hint) continue;
     await db.from("prospects").update({ key_figures: { ...figures, addressee_hint: hint } } as never).eq("id", prospect.id);
     hinted += 1;
