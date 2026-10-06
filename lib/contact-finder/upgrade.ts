@@ -60,9 +60,11 @@ export const NOMINATIVE_RETRY_MS = 90 * 86_400_000;
 /**
  * Version de la stratégie. Une fiche cherchée avec une version ANTÉRIEURE est
  * de nouveau éligible : v2 (06/10/2026) ajoute les noms du site et le schéma
- * d'adresse du domaine — les échecs de la v1 méritent un nouvel essai.
+ * d'adresse du domaine — les échecs de la v1 méritent un nouvel essai. v3 : le
+ * registre donne TOUS les prénoms (« Daniel Claude Christian Marie Frelet ») ;
+ * Email Finder et le schéma ne reçoivent plus que le premier.
  */
-export const NOMINATIVE_VERSION = 2;
+export const NOMINATIVE_VERSION = 3;
 
 /** Dépendances : Hunter, et la lecture (gratuite) des pages équipe/contact du site. */
 export type UpgradeDeps = NominativeDeps & { sitePeople?(domain: string): Promise<SitePerson[]> };
@@ -81,8 +83,14 @@ export interface AddresseeHint {
   source: "site" | "registre";
 }
 
+/** Premier prénom d'usage : « Daniel Claude Christian Marie » → « Daniel » ; « Jean-Pierre » reste entier. */
+export function firstGiven(firstName: string): string {
+  return firstName.trim().split(/\s+/)[0] ?? firstName;
+}
+
 export function addresseeHint(person: { firstName: string; lastName: string; role?: string | null; source: "site" | "registre" } | null): AddresseeHint | null {
   if (!person?.firstName || !person.lastName) return null;
+  person = { ...person, firstName: firstGiven(person.firstName) };
   const civility = civilityFor(person.firstName.split(/[-\s]/)[0] ?? "");
   const name = `${person.firstName} ${person.lastName}`.replace(/\s+/g, " ").trim();
   const prefix = civility === "Monsieur" ? "M. " : civility === "Madame" ? "Mme " : "";
@@ -186,7 +194,8 @@ export async function upgradeToNominative(
 
   const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? null;
   const headcount = typeof figures.headcount === "number" ? figures.headcount : null;
-  const leaderName = leader ? { firstName: leader.firstName, lastName: leader.lastName } : null;
+  // Registre : tous les prénoms sont donnés ; on n'écrit (et ne cherche) qu'avec le premier.
+  const leaderName = leader ? { firstName: firstGiven(leader.firstName), lastName: leader.lastName } : null;
   // Noms + fonctions lus sur le site (gratuit) : des candidats de plus avant Hunter.
   const sitePeople = deps.sitePeople ? await deps.sitePeople(domain).catch(() => []) : [];
   const outcome = await findNominativeContact({ domain, pain, headcount, leader: leaderName, blocked, sitePeople }, deps);

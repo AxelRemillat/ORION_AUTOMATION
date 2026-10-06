@@ -4,7 +4,7 @@
  * `npm run test:nominatif`
  */
 import { contactLine, emailFromPattern, findNominativeContact, targetRoles, topicOf, type HunterPerson, type NominativeDeps, type VerifierStatus } from "../lib/contact-finder/nominative";
-import { addresseeHint, ineligibility, nominativeShare, upgradeToNominative, NOMINATIVE_VERSION, type UpgradeProspect } from "../lib/contact-finder/upgrade";
+import { addresseeHint, firstGiven, ineligibility, nominativeShare, upgradeToNominative, NOMINATIVE_VERSION, type UpgradeProspect } from "../lib/contact-finder/upgrade";
 import { extractPeople } from "../lib/contact-finder/site-people";
 import { groupToday, type RawTodayItem } from "../lib/today/group";
 import { planSchedule } from "../lib/today/plan";
@@ -195,6 +195,7 @@ async function main() {
     check("sans schéma : Email Finder sur le nom lu sur le site", finder.contact?.source === "hunter:email-finder" && noPattern.calls.finder === 1, finder.contact);
 
     check("« À l'attention de M. Pierre Durand »", addresseeHint({ firstName: "Pierre", lastName: "Durand", role: "dirigeant", source: "registre" })?.text === "À l'attention de M. Pierre Durand");
+    check("registre à prénoms multiples : le premier seulement", addresseeHint({ firstName: "Daniel Claude Christian Marie", lastName: "Frelet", source: "registre" })?.text === "À l'attention de M. Daniel Frelet");
     check("« À l'attention de Mme Sophie Martin »", addresseeHint({ firstName: "Sophie", lastName: "Martin", source: "site" })?.text === "À l'attention de Mme Sophie Martin");
   }
 
@@ -244,6 +245,23 @@ async function main() {
       random: () => 0,
     });
     check("quota d'une place : c'est la fiche nominative qui part", plan.planned[0]?.key === "nom-ready" && plan.postponed[0]?.key === "gen-ready", plan);
+  }
+
+  console.log("\n8. Prénoms multiples du registre");
+  {
+    check("« Jean-Pierre » reste entier, « Daniel Claude » → « Daniel »", firstGiven("Jean-Pierre") === "Jean-Pierre" && firstGiven("Daniel Claude Christian Marie") === "Daniel");
+    const fake = new FakeDb({ prospects: [], messages: [], prospect_events: [] } as Record<string, Record<string, unknown>[]>);
+    const spy = hunter({ people: [], pattern: "{first}.{last}" });
+    const asked: string[] = [];
+    const deps = { ...spy.deps, verify: async (email: string) => { asked.push(email); return { status: "valid" as const, score: 95 }; } };
+    const multi: UpgradeProspect = {
+      id: "p10", user_id: "u1", company_name: "INSTAN CARE", email: "accueil@instan.fr", email_type: "generique", website: null,
+      contact_found_by: "site:contact", do_not_contact: false, deleted_at: null, pain_point: "factures", brief: null,
+      key_figures: { opposition_checked: true, leader_person: "Daniel Claude Christian Marie FRELET", headcount: 8 },
+    };
+    fake.rows("prospects").push({ ...multi });
+    await upgradeToNominative(fake as unknown as Db, multi, deps, { now: new Date("2026-10-06T17:00:00Z") });
+    check("schéma construit avec le premier prénom : daniel.frelet@instan.fr", asked[0] === "daniel.frelet@instan.fr", asked);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);
