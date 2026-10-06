@@ -50,7 +50,7 @@ ${WE_DO.map((line) => `- ${line}`).join("\n")}
 CE QU'IL ÉVITE (adéquation faible, 0 à 3) :
 ${WE_AVOID.map((line) => `- ${line}`).join("\n")}
 
-SCORE D'ADÉQUATION 0 à 10 : 8-10 = cœur de métier, livrable clair ; 5-7 = en partie (une brique automatisable dans un projet plus large) ; 0-4 = hors périmètre ou trop flou pour chiffrer.
+SCORE D'ADÉQUATION 0 à 10 : 8-10 = cœur de métier, livrable clair ; 5-7 = en partie (une brique automatisable dans un projet plus large) ; 0-4 = hors périmètre ou trop flou pour chiffrer. Une mission DANS le périmètre (CRM, intégration, automatisation) qui exige une certification ou des références propres à un éditeur (Zoho, Salesforce, HubSpot…) vaut 5 ou 6 : à voir, c'est à Axel de décider — pas moins.
 Trois raisons courtes, factuelles, tirées de l'annonce (jamais inventées).
 Besoin reformulé : une ou deux phrases, en français, ce que le client veut obtenir concrètement.
 Démo la plus pertinente, une clé parmi :

@@ -50,6 +50,15 @@ export function buildOpportunityPatch(
     if (REPLIED_STATUSES.includes(raw.status) && !current.replied_at) patch.replied_at = now.toISOString();
   }
   if ("notes" in raw) patch.notes = text(raw.notes, 5000);
+  // Alerte vue (annonce ouverte ou proposition copiée).
+  if (raw.seen === true) patch.seen_at = now.toISOString();
+  // Annonce COMPLÈTE collée par Axel (le flux RSS n'en donne qu'un extrait) : la régénération repart de là.
+  if ("body" in raw) {
+    const body = text(raw.body, 20_000);
+    if (!body || body.length < 40) return { ok: false, error: "Collez le texte complet de l'annonce (au moins quelques lignes)." };
+    patch.body = body;
+    patch.description_truncated = false;
+  }
   if ("proposal" in raw) {
     const proposal = text(raw.proposal, 10_000);
     if (!proposal) return { ok: false, error: "La proposition ne peut pas être vide." };

@@ -38,7 +38,7 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
     budget: "500 à 1 000 €",
     demo: "emails",
     reading:
-      "Vous recevez 60 à 80 commandes par jour dans Gmail et votre équipe recopie à la main le client, les références, les quantités et la date souhaitée dans un Google Sheets. Vous voulez que ces lignes se remplissent seules, sans erreur de saisie.",
+      "Vous recevez 60 à 80 commandes par jour dans Gmail, et votre équipe recopie le client, les références, les quantités et la date dans un Google Sheets. Vous voulez que ces lignes se remplissent seules.",
     steps: [
       "Lecture automatique des e-mails de commande et des pièces jointes, avec extraction du client, des références, des quantités et de la date.",
       "Ajout d'une ligne par commande dans votre Google Sheets, et signalement des commandes incomplètes à vérifier.",

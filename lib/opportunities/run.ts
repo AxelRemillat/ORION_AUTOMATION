@@ -45,6 +45,8 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
       demo: analysis.demo,
       language: analysis.language,
       analyzed_at: new Date().toISOString(),
+      analysis_state: "ok",
+      filter_reason: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
@@ -62,7 +64,15 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
   if ("error" in proposal) return { ok: false, error: proposal.error };
   await db
     .from("opportunities")
-    .update({ proposal: proposal.text, proposal_score: proposal.score, proposal_reason: proposal.needsReview ? proposal.reason : null, updated_at: new Date().toISOString() })
+    .update({
+      proposal: proposal.text,
+      proposal_score: proposal.score,
+      proposal_reason: proposal.needsReview ? proposal.reason : null,
+      proposal_on_excerpt: opportunity.description_truncated === true,
+      suggested_amount_eur: proposal.amountEur,
+      suggested_delay_days: proposal.delayDays,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id);
   return { ok: true, score: analysis.score, proposalScore: proposal.score };
 }

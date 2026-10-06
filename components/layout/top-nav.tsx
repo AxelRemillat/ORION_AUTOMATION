@@ -16,7 +16,7 @@ import { HOME_ITEM, NAV_ITEMS, type NavItem } from "./nav-items";
  * d'onglets defile horizontalement (pas de menu burger : quatre destinations
  * tiennent a l'ecran et un burger cacherait la structure de l'app).
  */
-export function TopNav({ email, trashCount = 0 }: { email: string; trashCount?: number }) {
+export function TopNav({ email, trashCount = 0, alertCount = 0 }: { email: string; trashCount?: number; alertCount?: number }) {
   const pathname = usePathname();
 
   return (
@@ -47,7 +47,7 @@ export function TopNav({ email, trashCount = 0 }: { email: string; trashCount?: 
           />
 
           {NAV_ITEMS.map((item) => (
-            <Tab key={item.href} item={item} pathname={pathname} />
+            <Tab key={item.href} item={item} pathname={pathname} badge={item.href === "/opportunites" ? alertCount : 0} />
           ))}
         </nav>
 
@@ -106,10 +106,13 @@ function Tab({
   item,
   pathname,
   home = false,
+  badge = 0,
 }: {
   item: NavItem;
   pathname: string;
   home?: boolean;
+  /** Pastille (alertes non vues). */
+  badge?: number;
 }) {
   const { href, label, icon: Icon, hint } = item;
   const active = pathname === href || pathname.startsWith(`${href}/`);
@@ -129,6 +132,11 @@ function Tab({
     >
       <Icon className={cn("h-4 w-4", home && "text-primary")} aria-hidden />
       {label}
+      {badge > 0 && (
+        <span aria-label={`${badge} alerte${badge > 1 ? "s" : ""} non vue${badge > 1 ? "s" : ""}`} className="font-data min-w-[18px] rounded-full bg-good/15 px-1 text-center text-[10px] leading-[18px] text-good-ink ring-1 ring-good/25">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
       {/* Soulignage degrade de l'onglet actif — la signature de marque. */}
       {active && !home && (
         <span

@@ -21,7 +21,8 @@ const PUBLIC_PATHS = ["/login", "/auth"];
  * la chaîne de ticks elle-même). Le middleware n'a rien à ajouter ; il ne
  * ferait que gêner.
  */
-const MACHINE_PATHS = ["/api/inbound", "/api/cron", "/api/jobs/tick"];
+// `x-ingest-secret` (OPPORTUNITIES_INGEST_SECRET) pour la veille Codeur, poussée par n8n.
+const MACHINE_PATHS = ["/api/inbound", "/api/cron", "/api/jobs/tick", "/api/opportunities/ingest"];
 
 const matches = (pathname: string, paths: readonly string[]): boolean =>
   paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
