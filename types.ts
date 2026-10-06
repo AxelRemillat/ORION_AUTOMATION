@@ -54,6 +54,23 @@ export type DealStatus = (typeof DEAL_STATUSES)[number];
 export const INBOUND_CATEGORIES = ["reponse", "question", "relance", "refus", "autre"] as const;
 export type InboundCategory = (typeof INBOUND_CATEGORIES)[number];
 
+/** Notifications téléphone (ntfy) : un interrupteur par type (lib/notify). */
+export type NotificationPrefsRow = {
+  user_id: string;
+  reply: boolean;
+  antispam: boolean;
+  send_failed: boolean;
+  updated_at: string;
+};
+
+/** Anti-doublon des notifications : une ligne par message notifié. */
+export type NotificationLogRow = {
+  key: string;
+  user_id: string;
+  kind: string;
+  created_at: string;
+};
+
 /** Fournisseurs d'API dont la consommation est mesuree. */
 export const API_SERVICES = ["openai", "pappers", "linkup", "hunter"] as const;
 export type ApiService = (typeof API_SERVICES)[number];
@@ -935,6 +952,18 @@ export type Database = {
         Row: UserOffer;
         Insert: UserOfferInsert;
         Update: UserOfferUpdate;
+        Relationships: [];
+      };
+      notification_prefs: {
+        Row: NotificationPrefsRow;
+        Insert: Partial<NotificationPrefsRow>;
+        Update: Partial<NotificationPrefsRow>;
+        Relationships: [];
+      };
+      notification_log: {
+        Row: NotificationLogRow;
+        Insert: Pick<NotificationLogRow, "key" | "kind"> & Partial<NotificationLogRow>;
+        Update: Partial<NotificationLogRow>;
         Relationships: [];
       };
     };

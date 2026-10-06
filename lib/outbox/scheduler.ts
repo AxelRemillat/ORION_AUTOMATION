@@ -1,3 +1,5 @@
+import { notifySendFailed } from "@/lib/notify/events";
+import type { NotifyDeps } from "@/lib/notify/ntfy";
 import type { Db } from "@/lib/trash/scope";
 import { inSendWindow, MIN_GAP_MIN, spacedSlot } from "@/lib/mail-preflight/schedule";
 import { scheduleError } from "./paris-time";
@@ -131,7 +133,7 @@ export interface TickReport {
 }
 
 /** Fait partir les mails programmés échus. Appelé à chaque tick du cron. */
-export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = {}): Promise<TickReport> {
+export async function runDueSends(db: Db, deps: SendDeps & { limit?: number; notify?: NotifyDeps } = {}): Promise<TickReport> {
   const now = deps.now ?? new Date();
   const report: TickReport = { sent: 0, failed: 0, retried: 0, skipped: 0, stuck: 0, blocked: 0, spaced: 0, outsideWindow: false };
 
@@ -146,8 +148,11 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = 
     })
     .eq("send_status", "sending")
     .lt("send_started_at", stuckBefore)
-    .select("id");
+    .select("id, user_id, prospect_id, send_error");
   report.stuck = stuck?.length ?? 0;
+  for (const row of (stuck ?? []) as { id: string; user_id: string; prospect_id: string | null; send_error: string | null }[]) {
+    await notifySendFailed(db, { userId: row.user_id, messageId: row.id, prospectId: row.prospect_id, error: row.send_error }, deps.notify);
+  }
 
   // 2. Hors fenêtre d'envoi : les mails échus attendent, sans être déplacés.
   if (!inSendWindow(now)) {
@@ -218,6 +223,7 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = 
       // Parti mais non enregistré : on le signale, surtout pas de reprise.
       await settle(db, message.id, { send_status: "failed", send_error: result.error });
       report.failed += 1;
+      await notifySendFailed(db, { userId: owner, messageId: message.id, prospectId: message.prospect_id, error: result.error }, deps.notify);
       continue;
     }
 
@@ -235,6 +241,8 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number } = 
         result.kind === "transient" ? `Échec après ${MAX_ATTEMPTS} tentatives : ${result.error}` : result.error;
       await settle(db, message.id, { send_status: "failed", send_error: error });
       report.failed += 1;
+      // Prévenir sur le téléphone (ntfy) ; jamais bloquant.
+      await notifySendFailed(db, { userId: owner, messageId: message.id, prospectId: message.prospect_id, error }, deps.notify);
     }
   }
   return report;
