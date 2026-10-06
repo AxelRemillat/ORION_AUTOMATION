@@ -1,3 +1,5 @@
+import { upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
+import type { Db as LooseDb } from "@/lib/trash/scope";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { verifyOpposition } from "@/lib/enrichment/opposition";
 import { cappedScore, subsidiaryOf } from "@/lib/enrichment/subsidiary";
@@ -132,6 +134,21 @@ export function liveDigDeps(db: Db, userId: string, runId: string): DigDeps {
       }
       if (contact.email) {
         await db.from("prospects").update({ email: contact.email }).eq("id", prospectId).is("email", null);
+      }
+      // Adresse GÉNÉRIQUE : on cherche la personne dont la fonction correspond
+      // au sujet du mail (Hunter, lib/contact-finder/upgrade.ts). Le générique
+      // ne reste qu'en dernier recours. Couvre le creusage ET la complétion.
+      if (contact.email && contact.email_type === "generique") {
+        const upgrade = await upgradeProspectLive(db as unknown as LooseDb, prospectId).catch(() => null);
+        if (upgrade?.status === "upgraded" && upgrade.contact) {
+          contact = {
+            ...contact,
+            email: upgrade.contact.email,
+            email_type: "nominatif",
+            confidence: upgrade.contact.confidence,
+            found_by: `${upgrade.contact.source}+verifier:${upgrade.contact.verifier}`,
+          };
+        }
       }
       return contact;
     },

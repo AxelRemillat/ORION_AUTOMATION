@@ -11,7 +11,7 @@
  *  1. CACHE PAR DOMAINE, 90 JOURS. Une même requête (même domaine, même nom,
  *     même adresse) n'est jamais repayée : la réponse est relue dans
  *     `enrichment_cache` (clé `hunter:…`). Une panne n'est pas mise en cache.
- *  2. BUDGET QUOTIDIEN (`HUNTER_DAILY_BUDGET`, 10 par défaut ; 0 = Hunter
+ *  2. BUDGET QUOTIDIEN (`HUNTER_DAILY_BUDGET`, 80 par défaut ; 0 = Hunter
  *     coupé). Compté sur `api_usage` depuis minuit à Paris : ce qui est
  *     facturé, pas ce qui est tenté.
  *  3. CRÉDITS ÉPUISÉS : après un refus de quota (HTTP 429), plus aucun appel
@@ -25,7 +25,12 @@
  */
 
 export const HUNTER_CACHE_TTL_MS = 90 * 86_400_000;
-export const DEFAULT_HUNTER_DAILY_BUDGET = 10;
+/**
+ * 80 par jour (06/10/2026, contacts nominatifs) : le Starter donne 2 000 crédits
+ * par mois et seuls 9 étaient utilisés — la recherche du BON destinataire (Domain
+ * Search + Finder + Verifier, ~3 crédits par fiche) vaut la dépense.
+ */
+export const DEFAULT_HUNTER_DAILY_BUDGET = 80;
 
 /** Motif affiché quand Hunter n'est pas appelé faute de crédit. */
 export const HUNTER_EPUISE = "Hunter épuisé";

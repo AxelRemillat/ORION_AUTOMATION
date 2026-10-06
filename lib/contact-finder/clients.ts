@@ -136,7 +136,7 @@ async function callLinkup(key: string, query: string) {
  * budget quotidien, arrêt sur crédits épuisés. `billed` : une recherche a
  * réellement été facturée (ni cache, ni blocage, ni panne).
  */
-async function hunter<T>(path: string, params: Record<string, string>): Promise<{ data: T | null; billed: boolean }> {
+export async function hunter<T>(path: string, params: Record<string, string>): Promise<{ data: T | null; billed: boolean }> {
   const key = process.env.HUNTER_API_KEY;
   if (!key) return { data: null, billed: false };
   const gated = await gatedHunterCall<T>(supabaseHunterStore(), hunterCacheKey(path, params), async () => {

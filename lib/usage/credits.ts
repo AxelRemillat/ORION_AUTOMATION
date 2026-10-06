@@ -68,17 +68,20 @@ export function buildCreditTiles(input: {
   pappersExact: Exact | null;
   openaiBudget: number | null;
   now: Date;
+  /** Crédits Hunter facturés aujourd'hui (Paris) et plafond du jour (`HUNTER_DAILY_BUDGET`). */
+  hunterToday?: { used: number; budget: number };
 }): CreditTile[] {
+  const today = input.hunterToday ? ` · aujourd'hui ${input.hunterToday.used} / ${input.hunterToday.budget}` : "";
   const reset = new Date(`${hunterNextReset(input.now)}T12:00:00Z`).toLocaleDateString("fr-FR", { day: "numeric", month: "long", timeZone: "UTC" });
   const hunter: CreditTile = input.hunterExact
     ? {
         key: "hunter", label: "Hunter", remaining: input.hunterExact.remaining, total: input.hunterExact.total ?? HUNTER_MONTHLY_CREDITS,
-        used: input.hunterUsed, unit: "crédits", quality: "exact", basis: `Compte Hunter · remise à zéro le ${reset}`,
+        used: input.hunterUsed, unit: "crédits", quality: "exact", basis: `Compte Hunter · remise à zéro le ${reset}${today}`,
       }
     : {
         key: "hunter", label: "Hunter", remaining: Math.max(0, HUNTER_MONTHLY_CREDITS - input.hunterUsed), total: HUNTER_MONTHLY_CREDITS,
         used: input.hunterUsed, unit: "crédits", quality: "estime",
-        basis: `${HUNTER_MONTHLY_CREDITS} − ${input.hunterUsed} journalisés depuis le 2 · remise à zéro le ${reset}`,
+        basis: `${HUNTER_MONTHLY_CREDITS} − ${input.hunterUsed} journalisés depuis le 2 · remise à zéro le ${reset}${today}`,
       };
   const pappers: CreditTile = input.pappersExact
     ? {

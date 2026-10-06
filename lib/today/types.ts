@@ -46,6 +46,8 @@ export interface TodayContact {
   email: string | null;
   kind: ContactKind;
   name: string | null;
+  /** Poste de la personne contactée (contact nominatif) ; absent = le dirigeant. */
+  role?: string | null;
   /** Téléphone du site ou de l'annuaire : affiché quand l'email reste introuvable. */
   phone: string | null;
 }

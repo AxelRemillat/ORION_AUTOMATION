@@ -63,10 +63,10 @@ async function main() {
   {
     resetHunterGate();
     delete process.env.HUNTER_DAILY_BUDGET;
-    check("budget par défaut : 10", hunterDailyBudget() === DEFAULT_HUNTER_DAILY_BUDGET && DEFAULT_HUNTER_DAILY_BUDGET === 10);
+    check("budget par défaut : 80 (contacts nominatifs, 06/10)", hunterDailyBudget() === DEFAULT_HUNTER_DAILY_BUDGET && DEFAULT_HUNTER_DAILY_BUDGET === 80);
     check("budget paramétrable", hunterDailyBudget({ HUNTER_DAILY_BUDGET: "3" }) === 3);
     check("budget 0 = Hunter coupé", hunterDailyBudget({ HUNTER_DAILY_BUDGET: "0" }) === 0);
-    check("valeur illisible → défaut", hunterDailyBudget({ HUNTER_DAILY_BUDGET: "beaucoup" }) === 10);
+    check("valeur illisible → défaut", hunterDailyBudget({ HUNTER_DAILY_BUDGET: "beaucoup" }) === DEFAULT_HUNTER_DAILY_BUDGET);
 
     check(
       "clé de cache : sans clé d'API, normalisée, triée",

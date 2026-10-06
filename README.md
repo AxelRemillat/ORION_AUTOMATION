@@ -62,7 +62,7 @@ puis se connecter sur `/login`.
 | `INPI_USERNAME` · `INPI_PASSWORD` | serveur | Compte gratuit de l'API RNE de l'INPI (email et mot de passe du portail data.inpi.fr). Repli de l'opposition à la prospection quand Pappers est épuisé (`lib/enrichment/inpi.ts`). Absentes : les fiches creusées sans Pappers sortent « opposition non vérifiée » |
 | `LINKUP_API_KEY` | serveur | Recherche web / signaux |
 | `HUNTER_API_KEY` | serveur | Emails professionnels — compte **Starter** : 2 000 crédits par mois, remis à zéro le 2 du mois |
-| `HUNTER_DAILY_BUDGET` | serveur | Optionnelle — recherches Hunter facturées par jour (défaut 10 ; 0 = Hunter coupé). Le Starter en permet ~65 par jour en moyenne |
+| `HUNTER_DAILY_BUDGET` | serveur | Optionnelle — recherches Hunter facturées par jour (défaut 80 ; 0 = Hunter coupé). Le Starter en permet ~65 par jour en moyenne |
 | `N8N_WEBHOOK_SEND_URL` | serveur | Webhook d'envoi des messages |
 | `CRON_SECRET` | serveur | Secret des crons Vercel (`/api/cron/purge-trash`, purge quotidienne de la corbeille). Sans lui, la route refuse tout et la purge se fait à l'ouverture de `/corbeille` |
 | `NEXT_PUBLIC_BOOKING_URL` | client + serveur | Optionnelle — lien de RDV placé dans le CTA des emails |
