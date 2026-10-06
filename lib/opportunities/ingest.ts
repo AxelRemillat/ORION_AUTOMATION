@@ -22,6 +22,36 @@ export const ALERT_SCORE = 8;
 export const PROPOSAL_SCORE = 7;
 export const TO_REVIEW_SCORE = 5;
 export const DEFAULT_DAILY_LLM_CAP = 60;
+
+/**
+ * FRAÎCHEUR (Cowork, 06/10/2026) : une annonce publiée il y a plus de 7 jours
+ * a peu de chances d'aboutir (des dizaines d'offres déjà reçues) — jamais
+ * d'alerte : score plafonné à 6 (« à voir »).
+ */
+export const STALE_AFTER_DAYS = 7;
+export const STALE_MAX_SCORE = 6;
+
+/** Âge de l'annonce en jours (publication sur la plateforme), `null` si inconnue. */
+export function adAgeDays(publishedAt: string | null | undefined, now = new Date()): number | null {
+  if (!publishedAt || Number.isNaN(Date.parse(publishedAt))) return null;
+  return Math.floor((now.getTime() - Date.parse(publishedAt)) / 86_400_000);
+}
+
+/** Score retenu : plafonné à 6 pour une annonce ancienne. */
+export function freshScore(score: number, publishedAt: string | null | undefined, now = new Date()): number {
+  const age = adAgeDays(publishedAt, now);
+  return age !== null && age > STALE_AFTER_DAYS ? Math.min(score, STALE_MAX_SCORE) : score;
+}
+
+/**
+ * Statut après (ré)analyse : sous 5 → « Ignorée » ; à 5 ou plus, une fiche
+ * « Ignorée » (filtre ou ancienne analyse) revient en « À répondre ». Les
+ * autres statuts (envoyée, réponse…) ne bougent jamais.
+ */
+export function statusAfterAnalysis(current: string | null | undefined, score: number): "ignoree" | "a_repondre" | null {
+  if (score < TO_REVIEW_SCORE) return current === "a_repondre" || current == null ? "ignoree" : null;
+  return current === "ignoree" ? "a_repondre" : null;
+}
 /** Le workflow attend la réponse : au-delà, on répond « en cours » et on finit en arrière-plan. */
 export const INGEST_DEADLINE_MS = 20_000;
 
@@ -104,7 +134,9 @@ const orionUrl = (baseUrl: string, id: string) => `${baseUrl.replace(/\/$/, "")}
 /** Analyse puis écriture ; renvoie l'analyse (ou null si indisponible). */
 async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promise<Analysis | null> {
   const analysis = await analyzeOpportunity(deps.ask, { title: body.title, body: analysisBody(body), budget: body.budget_text, platform: body.platform });
-  const now = (deps.now ?? (() => new Date()))().toISOString();
+  const clock = (deps.now ?? (() => new Date()))();
+  if (analysis) analysis.score = freshScore(analysis.score, body.published_at, clock);
+  const now = clock.toISOString();
   await deps.db
     .from("opportunities")
     .update(
@@ -118,7 +150,7 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promi
             analyzed_at: now,
             analysis_state: "ok",
             // Sous 5 : rangée avec les ignorées (Axel peut toujours la rouvrir).
-            ...(analysis.score < TO_REVIEW_SCORE ? { status: "ignoree" } : {}),
+            ...(statusAfterAnalysis("a_repondre", analysis.score) ? { status: statusAfterAnalysis("a_repondre", analysis.score) } : {}),
             updated_at: now,
           }
         : { analysis_state: "a_analyser", updated_at: now },

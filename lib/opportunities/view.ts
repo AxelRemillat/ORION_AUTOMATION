@@ -32,6 +32,13 @@ export function unseenAlerts<T extends Row>(rows: readonly T[]): T[] {
     .sort((a, b) => (b.published_at ?? b.created_at ?? "").localeCompare(a.published_at ?? a.created_at ?? ""));
 }
 
+/** Annonce de plus de 7 jours (publication sur la plateforme) : « Ancienne annonce (14 j) … », sinon `null`. */
+export function staleLabel(publishedAt: string | null | undefined, now = new Date()): string | null {
+  if (!publishedAt || Number.isNaN(Date.parse(publishedAt))) return null;
+  const days = Math.floor((now.getTime() - Date.parse(publishedAt)) / 86_400_000);
+  return days > 7 ? `Ancienne annonce (${days} j) : faible chance de réponse` : null;
+}
+
 /** « il y a 7 min », « il y a 2 h », « il y a 3 j ». */
 export function ageLabel(iso: string | null | undefined, now = new Date()): string {
   if (!iso) return "";

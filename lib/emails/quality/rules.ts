@@ -122,7 +122,7 @@ export interface RuleContext {
   /** Démo retenue : elle doit illustrer la phrase « J'automatise… ». */
   demo?: DemoLink["key"];
   /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
-  dayOpenings?: { total: number; avec: number };
+  dayOpenings?: { total: number; avec: number; byFamily?: Partial<Record<string, { total: number; avec: number }>> };
   /** Expérience n° 1 : style d'objet imposé. */
   subjectArm?: SubjectArm;
   /** Famille du mail (expérience n° 2) : F1 par défaut. */
@@ -147,8 +147,8 @@ function wordHit(text: string, word: string): boolean {
  * que la démo avait été faite sur LEUR métier. Elle est générique : on décrit
  * un cas TYPE, puis on dit que le même principe s'appliquerait chez eux.
  */
-export const F4_TYPE_CASE = /\b(type|g[ée]n[ée]rique)\b/i;
-export const F4_TRANSPOSE = /(m[êe]me principe|s['’]appliquerait|pourrait s['’]appliquer|s['’]adapterait)/i;
+export const F4_TYPE_CASE = /\b(types?|g[ée]n[ée]riques?|d['’]exemple|fictive?s?)\b/i;
+export const F4_TRANSPOSE = /(m[êe]me principe|appliqu(er|erais|erait|erions) (ce|le m[êe]me) principe|s['’]appliquerai(t|ent)|pourrai(t|ent) s['’]appliquer|s['’]adapterai(t|ent)|de la m[êe]me (fa[çc]on|mani[èe]re)|m[êe]me logique|chez vous, (elle|cela|ce serait))/i;
 
 /**
  * F2 — PREMIÈRE PERSONNE, VOIX ACTIVE (AIRPLANE DELIVERY : « les demandes…
@@ -191,10 +191,15 @@ function familyFailures(family: MailFamily, parts: MailParts, context: RuleConte
       failures.push("F4 — démo honnête : la démo est générique. Décris un cas TYPE (« Elle lit une commande type et prépare la facture à valider ») puis « le même principe s'appliquerait à vos … ». Ne laisse jamais croire qu'elle a été faite sur leur métier.");
     }
   }
+  // F1, F2, F3 : proposition à la 1re personne (grille Cowork du 06/10). Après « J'automatise ce tri : »,
+  // décrire ce qui se passe au passif reste permis (version ANTARES de Cowork, notée 9) ; en F2, la phrase
+  // entière au passif (« les demandes sont triées, puis… », AIRPLANE) est refusée.
+  if (family !== "F4" && !F2_FIRST_PERSON.test(parts.proposal)) {
+    failures.push("La proposition commence à la première personne (« J'automatise… », « Je mets en place… », « Je construis… »).");
+  }
   if (family === "F2") {
-    if (!F2_FIRST_PERSON.test(parts.proposal)) failures.push("F2 : la proposition commence à la première personne (« Je mets en place… », « J'automatise… », « Je construis… »).");
-    const passive = parts.proposal.match(PASSIVE_VOICE);
-    if (passive) failures.push(`F2 : voix passive (« ${passive[0]} ») — dis qui fait quoi, à la première personne.`);
+    const passive = parts.proposal.replace(/^[^:]*:/, "").match(PASSIVE_VOICE);
+    if (passive && !/:/.test(parts.proposal)) failures.push(`Voix passive (« ${passive[0]} ») — dis qui fait quoi, à la première personne et à la voix active.`);
   }
   if ((family === "F2" || family === "F4") && context.knownText !== undefined) {
     const unsourced = unsourcedTerms(activityClause(family, parts.hook), `${context.knownText} ${context.prospectText} ${context.facts.map((fact) => fact.value).join(" ")}`);
@@ -258,7 +263,9 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
       failures.push("Démo incohérente : le lien montre l'agent devis, mais la proposition ne parle pas de préparer un devis.");
     }
   }
-  if (opensWithAvec(parts.hook) && !avecAllowed(context.dayOpenings)) {
+  // Quota « Avec » : un mail sur trois au plus — sur la journée ET au sein de la famille (BULLY, CAMEL DIAM : 2 F1 sur 2).
+  const familyDay = context.dayOpenings?.byFamily?.[family];
+  if (opensWithAvec(parts.hook) && (!avecAllowed(context.dayOpenings) || (familyDay && !avecAllowed(familyDay)))) {
     failures.push("Ouverture « Avec… » déjà trop fréquente aujourd'hui (au plus un mail sur trois) : ouvre autrement (« Chez… », « Entre… et… », « Quand… », ou le fait en sujet).");
   }
 
@@ -294,6 +301,8 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   const proof = body.split("\n").find((line) => line.includes(DEMO_HOST));
   const url = proof?.slice(proof.indexOf(DEMO_HOST)).trim();
   if (!url || !ALLOWED_DEMO_URLS.includes(bareDemoUrl(url))) failures.push("Lien de démo absent ou inconnu.");
+  // Lien COMPLET (ANTARES, 06/10 : « automatisations?v=3 » sans démo → page générique).
+  else if (bareDemoUrl(url) === `${DEMO_HOST}/automatisations`) failures.push("Lien de démo incomplet : il faut une démo précise (?demo=email, invoice, sav… ou /agent), jamais la page générique.");
 
   // --- Nombres : seulement ceux des faits (15 minutes vient de la demande).
   const known = knownNumbers(context.facts);

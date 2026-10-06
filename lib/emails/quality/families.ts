@@ -44,11 +44,16 @@ export const F4_WHO = "Je suis Axel Remillat, freelance en IA et automatisation 
 export const F3_CTA = "Auriez-vous 15 minutes la semaine prochaine pour en parler ?";
 
 /** Corps (salutation → demande), sans « stop » ni signature. */
+/**
+ * Grille Cowork (06/10/2026) : 75 mots au plus, 55 pour F3. F2 garde 5 mots de
+ * plus : sa présentation imposée (18 mots) et sa ligne de démo imposée en
+ * prennent déjà la moitié.
+ */
 export const FAMILY_LIMITS: Record<MailFamily, { min: number; max: number }> = {
-  F1: { min: 60, max: 90 },
-  F2: { min: 60, max: 95 },
+  F1: { min: 45, max: 75 },
+  F2: { min: 50, max: 80 },
   F3: { min: 30, max: 55 },
-  F4: { min: 50, max: 85 },
+  F4: { min: 40, max: 75 },
 };
 
 export function isFamily(value: unknown): value is MailFamily {

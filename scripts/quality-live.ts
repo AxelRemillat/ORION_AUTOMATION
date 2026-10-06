@@ -184,6 +184,7 @@ export async function prepareMail(
     companyName: brief.companyName || singleCompanyName(prospect.company_name),
     activity: profile?.offer ?? prospect.sector ?? null,
     sector: prospect.sector ?? null,
+    recipientRole: prospect.contact_role ?? text(figures.contact_role) ?? text(figures.contact_position),
     prospectText: [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" "),
     greeting: salutation,
     signature: signatureFor(offer),

@@ -111,11 +111,27 @@ const RULES: readonly Rule[] = [
  * automatisation demandée (« synchroniser Shopify avec l'ERP via n8n »), ou
  * application web sur mesure sur la stack d'Axel (sans CMS).
  */
+/**
+ * CŒUR DE CIBLE (Cowork, 06/10/2026 — alerte ratée sur « Agent IA, et refonte
+ * site web », Codeur 490837 : refonte d'un INTRANET métier + agents IA, écartée
+ * par la catégorie « Migration ou refonte de site »). Le moindre de ces signaux,
+ * dans le texte OU les catégories, suspend le filtre « site » : en cas de doute,
+ * c'est l'analyse LLM qui tranche.
+ */
+const CORE_SIGNAL = new RegExp(
+  [
+    "agent", "\\bia\\b", "intelligence artificielle", "automatis", "intranet", "extranet", "outil interne", "application metier", "logiciel",
+    "\\berp\\b", "\\bcrm\\b", "\\bapi\\b", "base de donnees", "\\bsaas\\b", "dashboard", "tableau de bord", "back-?office",
+    "supabase", "react", "next\\.?js", "node\\.?js", "postgres", "firebase", "planning", "gestion de stock", "\\bsav\\b",
+  ].join("|"),
+);
+
 function siteReason(rawText: string, categories: readonly string[], automation: boolean): string | null {
   const text = rawText.replace(NEGATED_CMS, " ");
   const cms = CMS.test(text) || categories.some((category) => CMS.test(category));
   const site = SITE_CREATION.test(text) || categories.some((category) => SITE_CATEGORY.test(category)) || cms;
   if (!site || automation) return null;
+  if (CORE_SIGNAL.test(`${text} ${categories.join(" ")}`)) return null;
   if (!cms && FULLSTACK_SIGNAL.test(text)) return null;
   return cms ? "site ou e-commerce sur CMS (WordPress, Wix, Shopify, Webflow, PrestaShop…)" : "création ou refonte de site vitrine / e-commerce";
 }

@@ -20,7 +20,7 @@ import { avecAllowed, hookOfBody, isBlockedReason, mailReadiness, nameFact, open
 import { candidateDomains, findSiteFree, siteIdentity } from "../lib/contact-finder/free-site";
 import { bySite } from "../lib/funnel/site-priority";
 import { repeatedGroups } from "../lib/emails/quality/rules";
-import { buildJudgePrompt, parseVerdict } from "../lib/emails/quality/judge";
+import { buildJudgePrompt, buildSeniorJudgePrompt, combineJudges, parseVerdict } from "../lib/emails/quality/judge";
 import { allowedFamilies, assembleFamily, bareDemoUrl, F2_INTRO, F4_WHO, familyFor } from "../lib/emails/quality/families";
 import { DEMO_LINKS } from "../lib/emails/quality/demo-links";
 import { FOND_NEGATIVES, VALIDATED_POSITIVES } from "../lib/emails/quality/calibration-set";
@@ -167,9 +167,17 @@ async function main() {
   const base = { brief, facts: [OWN_FACT], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme", family: "F1" as const };
   const scripted = (writer: string[], judge: string[]): { ask: AskFn; calls: string[] } => {
     const calls: string[] = [];
-    const ask: AskFn = async (role) => {
+    // Double juge : le relecteur senior (second appel du tour) rend la même note que la grille.
+    let last = "";
+    const ask: AskFn = async (role, system) => {
+      if (role === "judge" && /consultant B2B senior/.test(system)) {
+        const verdict = parseVerdict(last);
+        return JSON.stringify({ score: verdict?.score ?? 0, reasons: verdict?.reasons ?? [], fix: verdict?.fix ?? null });
+      }
       calls.push(role);
-      return role === "writer" ? writer.shift() ?? "" : judge.shift() ?? "";
+      if (role === "writer") return writer.shift() ?? "";
+      last = judge.shift() ?? "";
+      return last;
     };
     return { ask, calls };
   };
@@ -217,7 +225,7 @@ async function main() {
       proposal: "J'automatise ce type de tâche pour des PME : chaque commande reçue par e-mail est lue, les références disponibles partent en liste de prélèvement et les manquantes vous sont signalées.",
     });
     const refResult = checkMail(ref, assemble(ref, { greeting: "Bonjour Monsieur Ivanov,", demo, cta }), { ...ruleContext, greeting: "Bonjour Monsieur Ivanov," });
-    check("la référence KOMAKS 10/10 de Cowork passe le garde-fou", refResult.ok, refResult.failures.join(" | "));
+    check("la référence KOMAKS 10/10 de Cowork passe le garde-fou (hors longueur, écrite avant la limite de 75 mots)", refResult.failures.filter((line) => !/^\d+ mots :/.test(line)).length === 0, refResult.failures.join(" | "));
     const empty = mailReadiness({ facts: [], brief });
     check("aucun fait propre → « profil insuffisant », aucun appel", !empty.ok && empty.reason.startsWith("profil insuffisant"));
     const doubtful = { ...brief, pain: { ...brief.pain, task: "qualifier les demandes de prix, si ces tâches font partie du poste" } } as typeof brief;
@@ -400,7 +408,7 @@ async function main() {
     check("F3 : au-delà de 55 mots → refusé", !f3Long.ok && f3Long.failures.some((line) => /55 au plus/.test(line)), f3Long.failures.join(" | "));
     const f1Question = checkMail(f3Parts, assemble(f3Parts, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, demo: "emails" });
     check("F1 : une question dans l'accroche reste refusée", !f1Question.ok && f1Question.failures.some((line) => /Aucune question/.test(line)));
-    const f2Parts = { subject: "Commandes de restauration", hook: "Dans une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Je mets en place le tri de chaque commande reçue et je prépare sa confirmation, que vous validez." };
+    const f2Parts = { subject: "Commandes de restauration", hook: "Dans une boulangerie qui livre la restauration, une commande non confirmée laisse le client sans réponse.", proposal: "Je mets en place le tri des commandes et je prépare leur confirmation." };
     const f2Check = checkMail(f2Parts, assembleFamily("F2", f2Parts, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "emails" });
     check("F2 : partir de l'activité (« Dans une boulangerie qui… ») est permis", f2Check.ok, f2Check.failures.join(" | "));
 
@@ -421,8 +429,8 @@ async function main() {
     const f2Rule = (proposal: string) =>
       checkMail({ ...f2Parts, proposal }, assembleFamily("F2", { ...f2Parts, proposal }, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "emails", knownText: "Boulangerie bio, commandes des restaurants" });
     const passive = f2Rule("Concrètement, les demandes de pièces reçues par e-mail sont triées, puis une commande fournisseur est préparée pour votre validation.");
-    check("F2 : passif sans première personne → refusé (AIRPLANE DELIVERY)", !passive.ok && passive.failures.some((line) => /première personne/.test(line)) && passive.failures.some((line) => /voix passive/.test(line)), passive.failures.join(" | "));
-    const active = f2Rule("Je mets en place le tri de chaque commande reçue et je prépare sa confirmation, que vous validez.");
+    check("F2 : passif sans première personne → refusé (AIRPLANE DELIVERY)", !passive.ok && passive.failures.some((line) => /première personne/.test(line)) && passive.failures.some((line) => /voix passive/i.test(line)), passive.failures.join(" | "));
+    const active = f2Rule("Je mets en place le tri des commandes et je prépare leur confirmation.");
     check("F2 : première personne, voix active, faits sourcés → accepté", active.ok, active.failures.join(" | "));
     check("faits non sourcés repérés (« compagnie aéronautique régionale » absente de ce que l'on sait)", unsourcedTerms("Pour une compagnie aéronautique régionale, chaque intervention attend.", "boulangerie bio commandes").length >= 2);
     check("faits sourcés (« avions régionaux » lus sur le site) : rien à signaler", unsourcedTerms("En maintenance d'avions régionaux, chaque pièce compte.", "Maintenance en base, pièces détachées pour avions régionaux").length === 0);
@@ -440,6 +448,21 @@ async function main() {
     check("nouvelle adresse : la confirmation ne vaut plus", !contactConfirmed(airplaneFigures, "ventes@airplane.aero"));
     const toCheck = tagsOf({ email: "contact@airplane.aero", emailDoubtful: false, contactToCheck: true, oppositionUnverified: false, website: "x", hasBusinessProfile: true, hasDraft: true, draftPending: false });
     check("« Contact à vérifier » : bloquant, jamais dans « Nouveaux »", toCheck.includes("Contact à vérifier") && !isComplete(toCheck, true));
+
+    // Relecture du 06/10 : lien de démo complet, quota « Avec » par famille, F3 ambigu.
+    const generic = { subject: "Vos documents ?", hook: "Qui trie et classe les documents qui accompagnent vos commandes clients ?", proposal: "J'automatise ce classement : chaque document reçu est rangé dans le bon dossier." };
+    const genericBody = assembleFamily("F3", generic, { greeting: GREETING, demo: DEMO_LINKS.general, cta });
+    const incomplete = checkMail(generic, genericBody, { ...ruleContext, family: "F3", subjectArm: "question", demo: "general" });
+    check("lien « automatisations?v=3 » sans démo précise → refusé (ANTARES)", genericBody.includes("axelremillat.com/automatisations?v=3") && incomplete.failures.some((line) => /Lien de démo incomplet/.test(line)), incomplete.failures.join(" | "));
+    const avecParts = { ...parts(), hook: "Avec quatre fournils et des clients en restauration, chaque commande doit être confirmée. Un oubli retarde la livraison." };
+    const avecBody = assemble(avecParts, { greeting: GREETING, demo, cta });
+    const familyQuota = checkMail(avecParts, avecBody, { ...ruleContext, family: "F1", dayOpenings: { total: 5, avec: 1, byFamily: { F1: { total: 1, avec: 1 } } } });
+    check("« Avec » : quota d'un sur trois aussi DANS la famille (2 F1 sur 2 → refusé)", familyQuota.failures.some((line) => /Avec/.test(line)), familyQuota.failures.join(" | "));
+    const dayOk = checkMail(avecParts, avecBody, { ...ruleContext, family: "F1", dayOpenings: { total: 5, avec: 1, byFamily: { F1: { total: 2, avec: 0 } } } });
+    check("« Avec » permis quand la journée ET la famille sont sous le quota", !dayOk.failures.some((line) => /Avec/.test(line)), dayOk.failures.join(" | "));
+    check("juge F3 : double sens et lourdeur pénalisés, ANTARES d'origine en contre-exemple", /double sens/i.test(buildJudgePrompt("F3")) && buildJudgePrompt("F3").includes("pièces administratives"));
+    check("relecteur senior : étalonné sur les notes de Cowork (8, 7,5, 6) et ANTARES réécrit (9)", /consultant B2B senior/.test(buildSeniorJudgePrompt()) && buildSeniorJudgePrompt().includes("- 6 :") && buildSeniorJudgePrompt().includes("- 9 :"));
+    check("double juge des mails : un verdict manquant → pas de mail « Nouveau »", combineJudges({ score: 10, criteria: {}, reasons: [], fix: null }, null) === null);
 
     // Rédacteur et juge par famille.
     check("F4 : le modèle n'écrit pas la ligne « qui je suis »", parseParts(JSON.stringify({ subject: "Devis", hook: "Elle lit une demande." }), "F4")?.proposal === F4_WHO);
@@ -477,7 +500,9 @@ async function main() {
       const greeting = "Bonjour Madame Martin,";
       const body = assemble(mail, { greeting, demo, cta: CTA_VARIANTS[0] });
       const result = checkMail(mail, body, { greeting, facts: [], prospectText: `${mail.hook} ${mail.proposal}`, companyName: mail.company, offerNumbers: numbersIn(mail.hook), demo: demo.key });
-      check(`validé ${mail.company} (${countWords(body)} mots) : règles OK`, result.ok, result.failures.join(" | "));
+      // Écrits le 05/10, avant la limite de 75 mots du 06/10 : seule la longueur leur est épargnée.
+      const failuresButLength = result.failures.filter((line) => !/^\d+ mots :/.test(line));
+      check(`validé ${mail.company} (${countWords(body)} mots) : règles OK (hors longueur)`, failuresButLength.length === 0, failuresButLength.join(" | "));
     }
     check("jeu de référence : 11 positifs, 6 négatifs de fond", VALIDATED_POSITIVES.length === 11 && FOND_NEGATIVES.length === 6);
   }

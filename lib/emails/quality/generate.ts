@@ -2,8 +2,8 @@ import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { withOptOut } from "@/lib/mail-preflight/opt-out";
-import { demoFor, demoForProposal } from "./demo-links";
-import { judgeMail, PASS_SCORE, type JudgeVerdict } from "./judge";
+import { DEMO_LINKS, demoFor, demoForProposal } from "./demo-links";
+import { combineJudges, judgeMail, judgeMailSenior, PASS_SCORE, type JudgeVerdict } from "./judge";
 import { checkMail, type RuleResult } from "./rules";
 import { ctaFor, type MailParts } from "./template";
 import { allowedFamilies, assembleFamily, demoTextOf, familyFor, subjectArmFor, type MailFamily } from "./families";
@@ -40,7 +40,7 @@ export interface QualityInput {
   /** Clichés de fin des autres mails du jour : on varie. */
   usedCliches?: readonly string[];
   /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
-  dayOpenings?: { total: number; avec: number };
+  dayOpenings?: { total: number; avec: number; byFamily?: Partial<Record<string, { total: number; avec: number }>> };
   /** Expérience n° 1 : bras du style d'objet (défaut : celui du prospect). */
   subjectArm?: SubjectArm;
   /** Site connu : sans lui, « profil insuffisant » dit qu'il n'y a rien à lire. */
@@ -111,7 +111,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, recipientRole: input.recipientRole, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings), subjectArm: arm, feedback, family }),
+      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -127,7 +127,8 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     // l'accroche, puis le pain du brief (finition Cowork : SPI ENERGIE).
     const fromProposal = demoForProposal(demoTextOf(family, parts));
     const fromText = demoFor(`${parts.subject} ${parts.hook}`);
-    const chosen = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo;
+    // Jamais la page générique (ANTARES, 06/10) : à défaut, la démo des e-mails reçus.
+    const chosen = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo.key !== "general" ? demo : DEMO_LINKS.emails;
     const core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta });
     const rules = checkMail(parts, core, {
       greeting: input.greeting,
@@ -145,8 +146,14 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     });
     // Le juge ne note qu'un mail qui passe le garde-fou : inutile de payer pour
     // une note que la règle a déjà tranchée.
+    // Double juge : la grille de la famille ET le relecteur senior ; les deux doivent donner 9 ou plus.
     const verdict = rules.ok
-      ? await judgeMail(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, family }, `qualite:juge:${attempt}`)
+      ? combineJudges(
+          ...(await Promise.all([
+            judgeMail(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, family }, `qualite:juge:${attempt}`),
+            judgeMailSenior(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, contactRole: input.recipientRole }, `qualite:juge-senior:${attempt}`),
+          ])),
+        )
       : null;
     const body = withOptOut(`${core}\n\n${input.signature}`, input.signature);
     history.push({ parts, body, rules, verdict, demo: chosen.path });
@@ -167,7 +174,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       ? best.rules.failures[0]
       : score === null
         ? "Relecture automatique indisponible : à relire avant envoi."
-        : `Note ${score}/10 : ${best.verdict?.reasons[0] ?? "sous le seuil de 9"}`;
+        : `Note ${score}/10 (double relecture) : ${best.verdict?.reasons[0] ?? "sous le seuil de 9"}`;
   return {
     subject: best.parts.subject,
     body: best.body,

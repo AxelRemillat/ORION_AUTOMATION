@@ -173,7 +173,7 @@ export const FAMILY_REFERENCES: FamilyReference[] = [
     company: "AIRPLANE DELIVERY",
     subject: "Demandes de pièces",
     hook: "Pour une entreprise de maintenance et de pièces détachées d'avions régionaux, chaque demande de pièce oblige à vérifier le stock et les délais fournisseurs. Une réponse tardive retarde l'intervention.",
-    proposal: "Je mets en place le tri de vos demandes de pièces et je prépare la commande fournisseur, que vous validez.",
+    proposal: "Je mets en place le tri de vos demandes de pièces : la commande fournisseur est prête à valider dès la demande reçue.",
     facts: AIRPLANE_FACTS,
     expected: "positif",
     why: "Activité sourcée, phrases simples, première personne.",
@@ -192,10 +192,102 @@ export const FAMILY_REFERENCES: FamilyReference[] = [
     family: "F4",
     company: "DUPONT-BEAUDEUX",
     subject: "Factures clients",
-    hook: "Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels.",
+    hook: "Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels, facturées dès la livraison.",
     proposal: "",
     facts: DUPONT_FACTS,
     expected: "positif",
     why: "Démo honnête : cas type, puis transposition.",
+  },
+];
+
+/**
+ * MAILS RÉELS DU 06/10/2026 NOTÉS PAR COWORK (grille « 9–10 réels ») : sous 9
+ * sauf la version d'ANTARES réécrite. Le double juge (grille de la famille +
+ * relecteur senior) doit retrouver ce partage : < 9 pour les premiers, ≥ 9
+ * pour le dernier positif. Corps tels qu'envoyés ou validés.
+ */
+export interface GradedMail {
+  family: "F1" | "F2" | "F3" | "F4";
+  company: string;
+  subject: string;
+  greeting: string;
+  hook: string;
+  proposal: string;
+  demo: "devis" | "emails" | "factures" | "sav" | "general";
+  coworkScore: number;
+}
+
+export const COWORK_GRADED: GradedMail[] = [
+  {
+    family: "F4",
+    company: "SA SOPRIMA INDUSTRIE",
+    subject: "Demandes de devis",
+    greeting: "Bonjour Monsieur Burgun,",
+    hook: "Elle lit une demande type et prépare un brouillon de devis à valider ; le même principe s'appliquerait à vos demandes de devis pour l’application de produits de freinage et d’étanchéité.",
+    proposal: "",
+    demo: "devis",
+    coworkScore: 8,
+  },
+  {
+    family: "F3",
+    company: "PLIMETAL",
+    subject: "Qui prépare vos demandes de devis ?",
+    greeting: "Bonjour,",
+    hook: "Qui prépare les demandes de devis reçues par e-mail pour votre bureau d’étude ?",
+    proposal: "J’automatise la lecture des e-mails et pièces jointes, le préremplissage des demandes et le signalement des informations manquantes.",
+    demo: "emails",
+    coworkScore: 8,
+  },
+  {
+    family: "F4",
+    company: "ARIC S.A.",
+    subject: "Demandes d’étude d’éclairage",
+    greeting: "Bonjour Monsieur Daric,",
+    hook: "Elle lit une demande type et prépare un brouillon de réponse à valider ; le même principe s’appliquerait à vos demandes d’étude d’éclairage.",
+    proposal: "",
+    demo: "emails",
+    coworkScore: 7.5,
+  },
+  {
+    family: "F1",
+    company: "BULLY- LES CARS JURASSIENS",
+    subject: "Demandes de devis",
+    greeting: "Bonjour Madame,",
+    hook: "Avec les transports à la carte et les demandes de devis en ligne, chaque trajet nécessite des informations précises. Un détail manquant retarde l'envoi du devis au client.",
+    proposal: "J'automatise ce type de tâche pour des PME : les demandes en ligne alimentent votre outil de devis, les informations manquantes sont signalées et une relance est préparée en l'absence de réponse.",
+    demo: "devis",
+    coworkScore: 7.5,
+  },
+  {
+    family: "F1",
+    company: "CAMEL DIAM",
+    subject: "Demandes de devis",
+    greeting: "Bonjour Monsieur Branquart,",
+    hook: "Avec une liste de mobilier pour crèches à sélectionner en ligne, chaque demande de devis réunit plusieurs références à vérifier. Un devis qui part tard laisse le client attendre.",
+    proposal: "J'automatise ce type de tâche pour des PME : les références d'une demande sont relevées et un devis personnalisé est préparé pour votre validation.",
+    demo: "devis",
+    coworkScore: 7.5,
+  },
+  // Version réécrite par Cowork (validée par Axel, partie le 06/10) : POSITIF, 9.
+  {
+    family: "F3",
+    company: "ANTARES-FRANCE",
+    subject: "Qui classe les documents clients ?",
+    greeting: "Bonjour Monsieur,",
+    hook: "Qui trie et classe les documents qui accompagnent vos commandes clients ?",
+    proposal: "J'automatise ce classement : chaque document reçu est lu, rangé dans le bon dossier et les informations manquantes sont signalées avant validation.",
+    demo: "emails",
+    coworkScore: 9,
+  },
+  // Version d'origine (reconstituée d'après la relecture de Cowork : double sens, lourdeur, lien générique) : NÉGATIF, 6.
+  {
+    family: "F3",
+    company: "ANTARES-FRANCE",
+    subject: "Qui gère vos pièces administratives ?",
+    greeting: "Bonjour Monsieur,",
+    hook: "Qui gère les pièces administratives de vos commandes de pièces mécaniques ?",
+    proposal: "J'automatise le tri des documents des dossiers de pièces de précision et leur classement.",
+    demo: "general",
+    coworkScore: 6,
   },
 ];
