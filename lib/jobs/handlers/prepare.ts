@@ -17,7 +17,7 @@ import { flatten } from "@/lib/today/group";
 import { needsIntroDraft } from "@/lib/today/tags";
 import type { InboundMessage, Prospect } from "@/types";
 import { createJob } from "../store";
-import { withHunterRunCap } from "@/lib/hunter/gate";
+import { withHunterRunCap } from "@/lib/hunter/run-cap";
 import { EMPTY_PROGRESS } from "../types";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, SITE_STEPS, siteStep, STEP_BUDGET_MS, TRIAGE_STEPS, triageStep } from "./funnel";

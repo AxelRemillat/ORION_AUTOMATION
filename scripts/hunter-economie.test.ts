@@ -11,7 +11,6 @@
  * Données inventées, aucun réseau. Exécution : `npm run test:hunter`.
  */
 import {
-  withHunterRunCap,
   DEFAULT_HUNTER_DAILY_BUDGET,
   HUNTER_CACHE_TTL_MS,
   gatedHunterCall,
@@ -23,6 +22,7 @@ import {
   type HunterGateStore,
 } from "../lib/hunter/gate";
 import { hunterPolicy } from "../lib/contact-finder/policy";
+import { withHunterRunCap } from "../lib/hunter/run-cap";
 import { digOne, type DigCandidate, type DigDeps } from "../lib/funnel/dig";
 import { runDigStage } from "../lib/funnel/stages";
 import { FakeDb } from "./fake-supabase";

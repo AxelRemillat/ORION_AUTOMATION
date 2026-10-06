@@ -24,20 +24,18 @@
  * sans réseau ni base.
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
-
 export const HUNTER_CACHE_TTL_MS = 90 * 86_400_000;
 
 /**
  * PLAFOND D'UN LOT (Cowork #34) : un job peut borner SES crédits Hunter (ex. 40
- * pour une préparation de mesure), en plus du budget du jour. Porté par le
- * contexte asynchrone de l'étape : seuls les appels faits sous ce contexte sont
- * concernés. Compté sur `api_usage` depuis le début du lot.
+ * pour une préparation de mesure), en plus du budget du jour. Le contexte
+ * asynchrone vit dans lib/hunter/run-cap.ts (serveur seulement : ce fichier-ci
+ * est aussi lu par des composants client) et s'enregistre ici.
  */
-export const hunterRunCap = new AsyncLocalStorage<{ cap: number; since: Date }>();
-
-export function withHunterRunCap<T>(cap: number | null | undefined, since: Date, run: () => Promise<T>): Promise<T> {
-  return typeof cap === "number" && cap >= 0 ? hunterRunCap.run({ cap, since }, run) : run();
+export type RunCap = { cap: number; since: Date };
+let readRunCap: () => RunCap | undefined = () => undefined;
+export function registerRunCapReader(reader: () => RunCap | undefined): void {
+  readRunCap = reader;
 }
 /**
  * 80 par jour (06/10/2026, contacts nominatifs) : le Starter donne 2 000 crédits
@@ -117,7 +115,7 @@ export async function hunterStatus(store: HunterGateStore, now: Date = new Date(
   const budget = hunterDailyBudget();
   const usedToday = await store.usedSince(parisMidnight(now)).catch(() => 0);
   let remaining = Math.max(0, budget - usedToday);
-  const lot = hunterRunCap.getStore();
+  const lot = readRunCap();
   const usedInLot = lot ? await store.usedSince(lot.since).catch(() => 0) : 0;
   if (lot) remaining = Math.min(remaining, Math.max(0, lot.cap - usedInLot));
   const blocked =
