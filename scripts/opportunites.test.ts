@@ -3,8 +3,8 @@
  * Fixtures uniquement, aucun appel réel.
  */
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
-import { opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { assembleProposal, checkProposal, contactFailures, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
+import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
+import { assembleProposal, buildProposalJudgePrompt, checkProposal, contactFailures, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS } from "../lib/opportunities/proposal";
 import { PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
@@ -13,6 +13,7 @@ import type { AskFn } from "../lib/ai/chat";
 import { FakeDb } from "./fake-supabase";
 import { ingestOpportunity, parseIngestBody, type IngestBody } from "../lib/opportunities/ingest";
 import { prefilterReason } from "../lib/opportunities/prefilter";
+import { requestedItems } from "../lib/opportunities/requests";
 import { ageLabel, bucketOf, unseenAlerts } from "../lib/opportunities/view";
 
 let failures = 0;
@@ -60,7 +61,7 @@ async function main() {
   console.log("\n4. Règles : les positifs du calibrage passent, les négatifs sont attrapés");
   for (const item of PROPOSAL_POSITIVES) {
     const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform });
-    const rules = checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform }, text);
+    const rules = checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform, kind: item.kind, requested: requestedItems(item.ad), ad: item.ad }, text);
     const shape =
       item.platform === "codeur"
         ? text.endsWith(`\n\nAxel Remillat`) && core.includes("visible dans mon portfolio Codeur (") && !/axelremillat|https?:/.test(text)
@@ -69,14 +70,14 @@ async function main() {
   }
   const caught = PROPOSAL_NEGATIVES.map((item) => {
     const { core, text } = assembleProposal(item, { language: item.language, demo: item.demo, platform: item.platform });
-    return checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform }, text);
+    return checkProposal(item, core, { language: item.language, budget: item.budget, platform: item.platform, kind: item.kind, requested: requestedItems(item.ad), ad: item.ad }, text);
   });
   check("négatifs : tous refusés par les règles (coordonnées Codeur, longueur, flatterie, chiffres inventés, jargon, prix sans budget)", caught.every((rules) => !rules.ok), caught.map((rules) => rules.failures[0]).join(" | "));
-  check("Codeur : URL et e-mail dans la proposition attrapés", caught[0].failures.some((line) => /Codeur : aucune URL/.test(line)) && caught[0].failures.some((line) => /Adresse e-mail/.test(line)), caught[0].failures.join(" | "));
-  check("chiffres inventés attrapés (« 30 PME », « 40 % »)", caught[2].failures.some((line) => /non prouvés/.test(line)));
-  check("prix sans budget attrapé", caught[2].failures.some((line) => /Budget absent/.test(line)));
-  check("jargon attrapé (leverage)", caught[3].failures.some((line) => /Jargon/.test(line)));
-  check("flatterie attrapée (« Super projet »)", caught[1].failures.some((line) => /Flatterie/.test(line)));
+  check("Codeur : URL et e-mail dans la proposition attrapés", caught[1].failures.some((line) => /Codeur : aucune URL/.test(line)) && caught[1].failures.some((line) => /Adresse e-mail/.test(line)), caught[1].failures.join(" | "));
+  check("chiffres inventés attrapés (« 30 PME », « 40 % »)", caught[3].failures.some((line) => /non prouvés/.test(line)));
+  check("prix sans budget attrapé", caught[3].failures.some((line) => /Budget absent/.test(line)));
+  check("jargon attrapé (leverage)", caught[4].failures.some((line) => /Jargon/.test(line)));
+  check("flatterie attrapée (« Super projet »)", caught[2].failures.some((line) => /Flatterie/.test(line)));
 
   console.log("\n4b. Coordonnées et signatures par plateforme (CGU Codeur)");
   {
@@ -88,7 +89,7 @@ async function main() {
     check("Malt : même règle, portfolio Malt", demoLine("malt", "fr", "devis") === "Une démo d'un cas proche est visible dans mon portfolio Malt (Agent IA de devis par métier).");
     check("fichier clients sans e-mail : aucune démo citée (jamais ORION)", demoLine("codeur", "fr", "fichier", "Nettoyer un export CSV de 20 000 clients avant migration") === null);
     check("fichier clients reçu par e-mail : tri des e-mails", demoLine("codeur", "fr", "fichier", "Dédoublonner les contacts reçus par e-mail chaque jour") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (Tri automatique des e-mails entrants).");
-    const noDemo = assembleProposal(PROPOSAL_POSITIVES[3], { language: "fr", demo: "fichier", platform: "comeup", context: "Nettoyer un export CSV" });
+    const noDemo = assembleProposal(PROPOSAL_POSITIVES[4], { language: "fr", demo: "fichier", platform: "comeup", context: "Nettoyer un export CSV" });
     check("sans démo : la proposition s'assemble sans ligne vide ni lien", !/portfolio|axelremillat/.test(noDemo.text) && !/\n\s*\n\s*\n/.test(noDemo.core));
     check("ComeUp : URL refusée comme sur Codeur", contactFailures("voir axelremillat.com", "comeup").some((line) => /ComeUp : aucune URL/.test(line)));
     const codeur = (text: string) => contactFailures(text, "codeur");
@@ -102,15 +103,72 @@ async function main() {
     const upwork = (text: string) => contactFailures(text, "upwork");
     check("Upwork : lien de démo autorisé", upwork("A one-minute demo: axelremillat.com/agent?src=upwork").length === 0);
     check("Upwork : e-mail, téléphone et calendrier refusés", upwork("mail me at axel@exemple.fr").length > 0 && upwork("call +33 7 49 72 71 92").length > 0 && upwork("book here: calendly.com/axel").length > 0);
-    const price = (framing: string, budget: string | null = "1 000 à 2 000 €") => checkProposal({ ...PROPOSAL_POSITIVES[0], framing }, assembleProposal({ ...PROPOSAL_POSITIVES[0], framing }, { language: "fr", demo: "emails", platform: "codeur" }).core, { language: "fr", budget, platform: "codeur" });
-    check("Codeur : 1 200–1 900 € sans raison → refusé (repères de lancement)", price("Délai : trois semaines. Budget : entre 1 200 et 1 900 €.").failures.some((line) => /prix de lancement/.test(line)));
-    check("Codeur : 1 200–1 900 € justifié par la complexité → accepté sur ce point", !price("Délai : trois semaines. Entre 1 200 et 1 900 € selon la variété des demandes.").failures.some((line) => /prix de lancement/.test(line)));
-    check("Codeur : 600–950 € → accepté sur ce point", !price("Délai : deux semaines. Entre 600 et 950 €.").failures.some((line) => /prix de lancement/.test(line)));
+    // Positionnement de prix (06/10/2026) : UN montant, plafonds, délai, coûts mensuels.
+    const base = PROPOSAL_POSITIVES[1];
+    const price = (framing: string, options: { budget?: string | null; kind?: "automatisation" | "fullstack"; ad?: string; amountEur?: number } = {}) => {
+      const parts = { ...base, framing, amountEur: options.amountEur };
+      const { core, text } = assembleProposal(parts, { language: "fr", demo: "emails", platform: "codeur", kind: options.kind });
+      return checkProposal(parts, core, { language: "fr", budget: options.budget === undefined ? "1 000 à 2 000 €" : options.budget, platform: "codeur", kind: options.kind, ad: options.ad }, text).failures;
+    };
+    check("fourchette de prix refusée (« entre 600 et 950 € »)", price("Délai : deux semaines. Entre 600 et 950 €.").some((line) => /Fourchette/.test(line)));
+    check("prix unique accepté (900 €, 15 jours)", !price("Prix : 900 €. Délai : 15 jours.").some((line) => /Fourchette|positionnement|workflow complet|Délai/.test(line)));
+    check("1 500 € sans projet multi-systèmes → refusé", price("Prix : 1 500 €. Délai : 15 jours.").some((line) => /workflow complet/.test(line)));
+    check("1 500 € pour un projet ERP / Sage → accepté", !price("Prix : 1 500 €. Délai : 15 jours.", { ad: "Intégration avec Sage 100 et lecture de sites avec connexion" }).some((line) => /workflow complet|positionnement/.test(line)));
+    check("4 000 € en automatisation → refusé (3 000 € au plus)", price("Prix : 4 000 €. Délai : 15 jours.", { ad: "Sage" }).some((line) => /positionnement/.test(line)));
+    check("application web : 3 500 € accepté, 5 000 € refusé", !price("Prix : 3 500 €. Délai : 30 jours.", { kind: "fullstack" }).some((line) => /positionnement|Délai/.test(line)) && price("Prix : 5 000 €. Délai : 30 jours.", { kind: "fullstack" }).some((line) => /positionnement/.test(line)));
+    check("délai « 4 à 6 semaines » refusé en automatisation", price("Prix : 900 €. Délai : 4 à 6 semaines.").some((line) => /Délai de 42/.test(line)));
+    check("montant suggéré au-delà du plafond refusé", price("Prix : 900 €. Délai : 15 jours.", { amountEur: 6000 }).some((line) => /positionnement/.test(line)));
+    check("coûts mensuels « 100 à 250 €/mois » refusés", price("Prix : 900 €. Délai : 15 jours. Maintenance : 100 à 250 €/mois.").some((line) => /irréalistes/.test(line)));
+    check("coûts mensuels réalistes (15 €, 10 à 30 €, 90 €/mois) acceptés, sans fausse fourchette", !price("Prix : 900 €. Coûts mensuels : hébergement 15 €, API IA 10 à 30 € selon le volume, maintenance en option 90 €/mois. Délai : 15 jours.").some((line) => /irréalistes|Fourchette/.test(line)));
+    check("toujours « Bonjour, » en tête (FR), « Hello, » (EN)", assembleProposal(base, { language: "fr", demo: "emails", platform: "codeur" }).text.startsWith("Bonjour,") && assembleProposal(PROPOSAL_POSITIVES[3], { language: "en", demo: "sav", platform: "upwork" }).text.startsWith("Hello,"));
+  }
+
+  console.log("\n4c. Éléments demandés par l'annonce (Sage 100, cas réel)");
+  {
+    const sage = PROPOSAL_POSITIVES[0];
+    check("éléments demandés détectés dans l'ordre", requestedItems(sage.ad).join(",") === "approche,prix,couts_mensuels,delai,references", requestedItems(sage.ad).join(","));
+    check("annonce sans liste : rien d'imposé", requestedItems(PROPOSAL_POSITIVES[1].ad).length === 0);
+    const negative = caught[0].failures.join(" | ");
+    check("Sage (proposition actuelle) : fourchette, délai, coûts mensuels et références sans réponse attrapés", /Fourchette/.test(negative) && /Délai de 42/.test(negative) && /irréalistes/.test(negative) && /références/.test(negative), negative);
+    const { core, text } = assembleProposal(sage, { language: "fr", demo: sage.demo, platform: "codeur", kind: sage.kind, context: sage.ad });
+    check(`Sage (version d'Axel, 2 400 € / 15 j) : règles OK, ${text.length} caractères`, checkProposal(sage, core, { language: "fr", budget: sage.budget, platform: "codeur", kind: sage.kind, requested: requestedItems(sage.ad), ad: sage.ad }, text).ok);
+    const dishonest = { ...sage, references: "J'ai déjà réalisé plusieurs intégrations Sage 100 pour des distributeurs." };
+    const dishonestText = assembleProposal(dishonest, { language: "fr", demo: "emails", platform: "codeur" });
+    check("références inventées refusées", !checkProposal(dishonest, dishonestText.core, { language: "fr", budget: sage.budget, platform: "codeur", requested: requestedItems(sage.ad), ad: sage.ad }, dishonestText.text).ok);
+    const missing = { ...sage, references: undefined };
+    const missingText = assembleProposal(missing, { language: "fr", demo: "emails", platform: "codeur" });
+    check("références demandées mais absentes → refusé", checkProposal(missing, missingText.core, { language: "fr", budget: sage.budget, platform: "codeur", requested: requestedItems(sage.ad), ad: sage.ad }, missingText.text).failures.some((line) => /références/.test(line)));
+    check("juge : un élément demandé sans réponse → 6 au plus (règle dans la consigne)", buildProposalJudgePrompt().includes("6 au plus"));
+  }
+
+  console.log("\n4d. Périmètre full-stack (décision d'Axel)");
+  {
+    const passes = (title: string, description: string, categories: string[] = []) => prefilterReason({ title, description, categories, budgetText: "1 000 € à 10 000 €" });
+    check("app RH React / Supabase → dans le périmètre", passes("Application web RH en React et Supabase", "Gestion des congés et des entretiens annuels, back-office et tableau de bord", ["Développement web", "Application web"]) === null);
+    check("CRM sur mesure Next.js → dans le périmètre", passes("CRM sur mesure en Next.js", "Outil interne pour suivre nos clients et nos devis, base PostgreSQL", ["Développement web"]) === null);
+    check("app iOS native → filtrée", /native/.test(passes("Application iOS native en Swift", "Application iPhone de suivi de chantier", ["Application mobile"]) ?? ""));
+    check("site WordPress → filtré", /CMS/.test(passes("Refonte de notre site WordPress", "Site vitrine de 8 pages avec blog", ["Site internet"]) ?? ""));
+    check("site e-commerce Shopify → filtré", /CMS/.test(passes("Boutique Shopify", "Création d'une boutique en ligne Shopify", ["E-commerce"]) ?? ""));
+    check("Laravel / PHP → filtré", /PHP/.test(passes("Développeur Laravel", "Maintenance d'une application Laravel / PHP 8", ["Développement web"]) ?? ""));
+    check("Java → filtré, JavaScript non", /Java/.test(passes("Développeur Java Spring Boot", "API Java", []) ?? "") && passes("Développeur JavaScript Node.js", "API REST Node.js et PostgreSQL", []) === null);
+    check("jeu vidéo → filtré", /jeu/.test(passes("Jeu vidéo Unity", "Développement d'un jeu mobile sous Unity", []) ?? ""));
+    // Cas réels du rattrapage (06/10/2026) : pas d'exclusion sur un simple mot.
+    check("entreprise « Wi-Fi, vidéo et alarme » cherchant une interface IoT → passe", passes("Recherche développeur pour interface IoT", "Nous sommes une société travaillant dans le Wifi, la vidéo et l'alarme sans fil pour des campings", ["IoT"]) === null);
+    check("créer une IA qui appelle les prospects → passe (automatisation)", passes("Prospection telephonique avec IA", "Nous recherchons une société pouvant nous créer une IA qui pourra appeler en automatique des prospects", ["Télémarketing", "Chatbot"]) === null);
+    check("téléprospecteur humain → filtré, même pour un produit IA", /télémarketing/.test(passes("Logiciel de recrutement IA", "Nous recherchons un téléprospecteur B2B pour prendre des rendez-vous autour d'une solution de recrutement propulsée par IA", ["Télémarketing"]) ?? ""));
+    check("site e-commerce « sans Shopify » sur mesure → passe", passes("Recherche développeur", "Création d'un site e-commerce sur mesure, sans Shopify, à partir de ma maquette", ["Site E-commerce", "Développement spécifique"]) === null);
+    check("plateforme web ET mobile → passe (l'analyse décide)", passes("Application de location immobilière", "Plateforme web et mobile de location immobilière avec paiement", ["Application mobile", "Marketplace"]) === null);
+    check("application Apple → filtrée", /native/.test(passes("Recherche développeur mobile", "Je cherche quelqu'un pour créer mon application apple", ["Application mobile", "iOS"]) ?? ""));
+    check("React Native → pas filtré (plafonné à 6 par l'analyse)", passes("Application React Native", "Application mobile multiplateforme React Native et Supabase", ["Application mobile"]) === null);
+    const nineAsk: AskFn = async () => JSON.stringify({ score: 9, reasons: ["a", "b", "c"], need: "App", demo: "general", language: "fr", kind: "fullstack" });
+    const capped = await analyzeOpportunity(nineAsk, { title: "Application React Native", body: "App multiplateforme", budget: null, platform: "codeur" });
+    check("React Native : score plafonné à 6 (à voir)", capped?.score === 6 && capped.kind === "fullstack");
+    check("full-stack : démo de référence ORION sur Codeur", demoLine("codeur", "fr", "general", "", "fullstack") === "Une démo d'un cas proche est visible dans mon portfolio Codeur (ORION : application de prospection B2B par IA).");
   }
 
   console.log("\n5. Boucle : juge ≥ 9, 2 réécritures au plus, meilleur essai gardé");
   {
-    const good = PROPOSAL_POSITIVES[0];
+    const good = PROPOSAL_POSITIVES[1];
     const goodJson = JSON.stringify({ reading: good.reading, steps: good.steps, framing: good.framing, question: good.question });
     const verdict = (score: number) => JSON.stringify({ criteria: { lecture: Math.min(3, score - 7 + 0), approche: 3, cadrage: 2, ton: 2 }, reasons: score >= 9 ? [] : ["reformulation générique"], fix: score >= 9 ? null : "Reprends les éléments de l'annonce." });
     const scripted = (writer: string[], judge: string[]) => {
@@ -208,7 +266,7 @@ async function main() {
         "Préparation de la commande dans Sage 100, à valider par votre équipe avant enregistrement.",
         "Essai sur vos vrais e-mails pendant une semaine, puis ajustements et courte notice.",
       ],
-      framing: "Délai : environ trois semaines, pour un montant entre 800 et 1 000 € selon le nombre de formats.",
+      framing: "Délai : environ trois semaines, pour un montant de 900 €.",
       question: "Vos commandes arrivent-elles dans le corps du mail ou en pièce jointe PDF ?",
       amount_eur: 900,
       delay_days: 21,
@@ -279,7 +337,7 @@ async function main() {
     check("… puis l'analyse et la proposition se terminent en arrière-plan", finished.fit_score === 9 && finished.analysis_state === "ok" && typeof finished.proposal === "string", JSON.stringify({ score: finished.fit_score, state: finished.analysis_state }));
 
     // Message privé Codeur : 1 000 caractères au plus.
-    const long = { ...PROPOSAL_POSITIVES[0], reading: `${PROPOSAL_POSITIVES[0].reading} ${"Détail supplémentaire sur le besoin. ".repeat(20)}` };
+    const long = { ...PROPOSAL_POSITIVES[1], reading: `${PROPOSAL_POSITIVES[1].reading} ${"Détail supplémentaire sur le besoin. ".repeat(20)}` };
     const longText = assembleProposal(long, { language: "fr", demo: "emails", platform: "codeur" });
     check("Codeur : plus de 1 000 caractères → refusé (message privé)", checkProposal(long, longText.core, { language: "fr", budget: "500 €", platform: "codeur" }, longText.text).failures.some((line) => /1000|1 000/.test(line)));
 

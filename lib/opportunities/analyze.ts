@@ -1,6 +1,7 @@
 import type { AskFn } from "@/lib/ai/chat";
 import { DEMO_HOST, DEMO_LINKS, type DemoLink } from "@/lib/emails/quality/demo-links";
 import type { Language, Platform } from "./types";
+import type { ProjectKind } from "./requests";
 
 /**
  * ANALYSE D'ADÉQUATION d'une annonce (modèle léger, un appel).
@@ -19,9 +20,23 @@ export const WE_DO = [
   "SAV et réponses au service client",
   "chatbots et assistants sur documents (RAG)",
   "intégrations API et automatisations n8n",
+  // Full-stack (décision d'Axel, 06/10/2026), sur sa stack :
+  "applications web, SaaS, MVP, CRM ou outils internes sur mesure",
+  "front-end React / Next.js, back-end Node.js / API REST",
+  "bases de données Supabase, PostgreSQL, Firebase ; dashboards",
 ] as const;
 
-export const WE_AVOID = ["développement web ou d'application complet", "design / UI", "SEO pur", "data science lourde (modèles, recherche)"] as const;
+export const WE_AVOID = [
+  "applications mobiles natives (iOS / Android, Swift, Kotlin)",
+  "sites vitrines WordPress / Wix / Shopify / Webflow, e-commerce PrestaShop / Magento / WooCommerce",
+  "PHP / Laravel / Symfony / Windev / .NET / Java",
+  "jeux vidéo, 3D, design, SEO, vidéo",
+  "data science lourde (modèles, recherche)",
+] as const;
+
+/** React Native / Flutter : pas exclus, mais jamais en alerte (à voir, 6 au plus). */
+const CROSS_PLATFORM_MOBILE = /(react native|flutter|\bexpo\b)/i;
+export const CROSS_PLATFORM_MAX_SCORE = 6;
 
 /** Démos proposables, par clé (lien vers axelremillat.com). */
 export const DEMO_KEYS = ["devis", "emails", "factures", "reporting", "fichier", "sav", "general"] as const satisfies readonly DemoLink["key"][];
@@ -32,6 +47,8 @@ export interface Analysis {
   need: string;
   demo: DemoLink["key"];
   language: Language;
+  /** Automatisation / IA, ou application web full-stack. */
+  kind: ProjectKind;
 }
 
 /** Lien de démo suivi par plateforme : `&src=codeur` (ou `?src=` si le chemin n'a pas de paramètre). */
@@ -42,7 +59,7 @@ export function opportunityDemoUrl(demo: DemoLink["key"], platform: Platform): s
 
 export function buildAnalysisPrompt(): string {
   const demos = DEMO_KEYS.map((key) => `- ${key} : ${DEMO_LINKS[key].label}`).join("\n");
-  return `Tu analyses une annonce de mission freelance pour Axel Remillat, indépendant en IA et automatisation de tâches pour les PME.
+  return `Tu analyses une annonce de mission freelance pour Axel Remillat, indépendant en IA et automatisation de tâches pour les PME, qui prend aussi des missions de développement web full-stack sur sa stack (React / Next.js, Node.js, Supabase / PostgreSQL).
 
 CE QU'IL FAIT (adéquation forte) :
 ${WE_DO.map((line) => `- ${line}`).join("\n")}
@@ -53,11 +70,13 @@ ${WE_AVOID.map((line) => `- ${line}`).join("\n")}
 SCORE D'ADÉQUATION 0 à 10 : 8-10 = cœur de métier, livrable clair ; 5-7 = en partie (une brique automatisable dans un projet plus large) ; 0-4 = hors périmètre ou trop flou pour chiffrer. Une mission DANS le périmètre (CRM, intégration, automatisation) qui exige une certification ou des références propres à un éditeur (Zoho, Salesforce, HubSpot…) vaut 5 ou 6 : à voir, c'est à Axel de décider — pas moins.
 Trois raisons courtes, factuelles, tirées de l'annonce (jamais inventées).
 Besoin reformulé : une ou deux phrases, en français, ce que le client veut obtenir concrètement.
+Type : "automatisation" (IA, automatisation, intégration entre outils existants) ou "fullstack" (application web, SaaS, MVP, CRM ou outil interne à développer).
+React Native / Flutter : 6 au plus (à voir).
 Démo la plus pertinente, une clé parmi :
 ${demos}
 Langue de l'annonce : "fr" ou "en".
 
-Réponds UNIQUEMENT en JSON : {"score":0-10,"reasons":["…","…","…"],"need":"…","demo":"<clé>","language":"fr|en"}`;
+Réponds UNIQUEMENT en JSON : {"score":0-10,"reasons":["…","…","…"],"need":"…","demo":"<clé>","language":"fr|en","kind":"automatisation|fullstack"}`;
 }
 
 export function parseAnalysis(raw: string): Analysis | null {
@@ -73,7 +92,8 @@ export function parseAnalysis(raw: string): Analysis | null {
   if (!Number.isFinite(score) || !need || reasons.length === 0) return null;
   const demo = (DEMO_KEYS as readonly string[]).includes(String(value.demo)) ? (value.demo as DemoLink["key"]) : "general";
   const language: Language = value.language === "en" ? "en" : "fr";
-  return { score: Math.max(0, Math.min(10, Math.round(score * 10) / 10)), reasons: reasons.slice(0, 3), need, demo, language };
+  const kind: ProjectKind = value.kind === "fullstack" ? "fullstack" : "automatisation";
+  return { score: Math.max(0, Math.min(10, Math.round(score * 10) / 10)), reasons: reasons.slice(0, 3), need, demo, language, kind };
 }
 
 export async function analyzeOpportunity(ask: AskFn, input: { title: string; body: string; budget: string | null; platform: Platform }): Promise<Analysis | null> {
@@ -84,5 +104,8 @@ export async function analyzeOpportunity(ask: AskFn, input: { title: string; bod
     0,
     "opportunites:analyse",
   ).catch(() => "");
-  return parseAnalysis(raw);
+  const analysis = parseAnalysis(raw);
+  // React Native / Flutter : plafond déterministe, le modèle ne décide pas seul.
+  if (analysis && CROSS_PLATFORM_MOBILE.test(`${input.title} ${input.body}`)) analysis.score = Math.min(analysis.score, CROSS_PLATFORM_MAX_SCORE);
+  return analysis;
 }
