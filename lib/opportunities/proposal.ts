@@ -19,6 +19,13 @@ import type { Language, Platform } from "./types";
 export const PROPOSAL_PASS = 9;
 export const PROPOSAL_REWRITES = 2;
 export const PROPOSAL_WORDS = { min: 120, max: 180 } as const;
+/**
+ * Codeur, Malt, ComeUp : le champ « Message privé » de Codeur est limité à
+ * 1 000 caractères (signature comprise) — la proposition y tient : 80 à 140 mots.
+ */
+export const PRIVATE_MESSAGE_MAX_CHARS = 1000;
+export const SHORT_PROPOSAL_WORDS = { min: 80, max: 140 } as const;
+const wordsFor = (platform: Platform | undefined) => (platform && ["codeur", "malt", "comeup"].includes(platform) ? SHORT_PROPOSAL_WORDS : PROPOSAL_WORDS);
 
 export interface ProposalParts {
   /** Reformulation précise du besoin (montre qu'on a lu). */
@@ -29,6 +36,9 @@ export interface ProposalParts {
   framing: string;
   /** Une question pour qualifier. */
   question: string;
+  /** Montant et délai à saisir dans le formulaire de la plateforme (Codeur les demande). */
+  amountEur?: number | null;
+  delayDays?: number | null;
 }
 
 export interface ProposalInput {
@@ -48,6 +58,9 @@ export interface ProposalOutcome {
   needsReview: boolean;
   reason: string | null;
   attempts: number;
+  /** Montant (€) et délai (jours) suggérés pour le formulaire de la plateforme. */
+  amountEur: number | null;
+  delayDays: number | null;
 }
 
 const DEMO_LINE: Record<Language, string> = {
@@ -195,8 +208,15 @@ export function checkProposal(
   }
   const written = [parts.reading, ...parts.steps, parts.framing, parts.question].join("\n");
   const words = countWords(core);
-  if (words < PROPOSAL_WORDS.min || words > PROPOSAL_WORDS.max) {
-    failures.push(`${words} mots : la proposition fait ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots (signature non comprise).`);
+  const limits = wordsFor(context.platform);
+  if (words < limits.min || words > limits.max) {
+    failures.push(`${words} mots : la proposition fait ${limits.min} à ${limits.max} mots (signature non comprise).`);
+  }
+  if (isNoContactPlatform(platform) && text.length > PRIVATE_MESSAGE_MAX_CHARS) {
+    failures.push(`${text.length} caractères : le message privé Codeur est limité à ${PRIVATE_MESSAGE_MAX_CHARS} (signature comprise). Retire environ ${text.length - PRIVATE_MESSAGE_MAX_CHARS + 40} caractères.`);
+  }
+  if (platform === "codeur" && parts.amountEur != null && parts.amountEur > CODEUR_LAUNCH_MAX_EUR && !COMPLEXITY.test(parts.framing)) {
+    failures.push(`Montant suggéré ${parts.amountEur} € au-dessus des prix de lancement Codeur (≤ 1 200 €) sans raison dite dans la proposition.`);
   }
   if (parts.steps.length !== 3) failures.push(`Approche en ${parts.steps.length} étape(s) : exactement trois étapes concrètes.`);
   if (!parts.reading.trim()) failures.push("Reformulation du besoin absente : reprends précisément ce que demande l'annonce.");
@@ -247,7 +267,10 @@ ${isNoContactPlatform(input.platform) ? "<LIGNE DE DÉMO — posée par le code 
 - "question" : UNE question pour qualifier le besoin (ce qui conditionne la solution), qui finit par « ? ».
 
 INTERDITS : expérience, clients ou références inventés (« j'ai déjà aidé… », « mes clients »), chiffres de résultats non prouvés (« -50 % de temps »), flatterie (« super projet »), jargon (workflow, pipeline, leverage, seamless…), toute URL, toute adresse e-mail, tout téléphone, tout lien de prise de rendez-vous, toute signature.${isNoContactPlatform(input.platform) ? " Sur cette plateforme, aucun moyen de contact hors plateforme : ni site, ni lien, ni coordonnée." : ""}
-La réponse complète (sans la signature) fait ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots — budget : "reading" 40 à 55 mots, chaque étape 14 à 20 mots, "framing" 20 à 30 mots, "question" 12 à 20 mots.
+${isNoContactPlatform(input.platform)
+  ? `La réponse complète fait ${SHORT_PROPOSAL_WORDS.min} à ${SHORT_PROPOSAL_WORDS.max} mots et MOINS DE 1 000 CARACTÈRES signature comprise (limite du message privé) — budget : "reading" 25 à 35 mots, chaque étape 10 à 15 mots, "framing" 12 à 20 mots, "question" 10 à 15 mots.`
+  : `La réponse complète (sans la signature) fait ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots — budget : "reading" 40 à 55 mots, chaque étape 14 à 20 mots, "framing" 20 à 30 mots, "question" 12 à 20 mots.`}
+- "amount_eur" et "delay_days" : le montant (nombre, en euros) et le délai (nombre de jours) à saisir dans le formulaire de la plateforme${input.platform === "codeur" ? " — repères Codeur : 300–600 € tâche simple, 600–1 200 € workflow complet, 45 €/h" : ""}${budget ? `, dans le budget annoncé (${budget})` : ", même sans budget annoncé (montant indicatif de lancement)"}.
 
 EXEMPLES ATTENDUS (autres annonces — n'en reprends aucune phrase) :
 ${PROPOSAL_POSITIVES.filter((item) => item.language === input.language)
@@ -255,7 +278,7 @@ ${PROPOSAL_POSITIVES.filter((item) => item.language === input.language)
   .map((item) => item.text)
   .join("\n\n")}${feedback ? `\n\nRÉÉCRITURE — la version précédente avait ces défauts, corrige-les tous :\n${feedback}` : ""}
 
-Réponds UNIQUEMENT en JSON : {"reading":"…","steps":["…","…","…"],"framing":"…","question":"…"}`;
+Réponds UNIQUEMENT en JSON : {"reading":"…","steps":["…","…","…"],"framing":"…","question":"…","amount_eur":0,"delay_days":0}`;
 }
 
 export function parseProposalParts(raw: string): ProposalParts | null {
@@ -267,7 +290,11 @@ export function parseProposalParts(raw: string): ProposalParts | null {
   }
   const text = (key: string) => (typeof value[key] === "string" ? (value[key] as string).trim() : "");
   const steps = Array.isArray(value.steps) ? value.steps.filter((step): step is string => typeof step === "string" && step.trim().length > 0).map((step) => step.trim()) : [];
-  const parts = { reading: text("reading"), steps, framing: text("framing"), question: text("question") };
+  const number = (key: string) => {
+    const amount = Number(value[key]);
+    return Number.isFinite(amount) && amount > 0 ? Math.round(amount) : null;
+  };
+  const parts = { reading: text("reading"), steps, framing: text("framing"), question: text("question"), amountEur: number("amount_eur"), delayDays: number("delay_days") };
   return parts.reading && steps.length && parts.question ? parts : null;
 }
 
@@ -344,14 +371,15 @@ interface Attempt {
   text: string;
   rules: ProposalRules;
   verdict: ProposalVerdict | null;
+  parts: ProposalParts;
 }
 
 const rank = (attempt: Attempt) => (attempt.rules.ok ? 100 : 0) - attempt.rules.failures.length + (attempt.verdict?.score ?? 0);
 
-export async function generateProposal(input: ProposalInput): Promise<ProposalOutcome | { error: string }> {
+export async function generateProposal(input: ProposalInput & { maxRewrites?: number }): Promise<ProposalOutcome | { error: string }> {
   const attempts: Attempt[] = [];
   let feedback: string | null = null;
-  for (let round = 0; round <= PROPOSAL_REWRITES; round += 1) {
+  for (let round = 0; round <= (input.maxRewrites ?? PROPOSAL_REWRITES); round += 1) {
     const raw = await input.ask(
       "writer",
       buildProposalPrompt(input, feedback),
@@ -368,7 +396,7 @@ export async function generateProposal(input: ProposalInput): Promise<ProposalOu
     const rules = checkProposal(parts, core, { language: input.language, budget: input.budget, platform: input.platform }, text);
     // Le juge ne note qu'une proposition qui passe les règles.
     const verdict = rules.ok ? await judgeProposal(input.ask, { title: input.title, body: input.body, budget: input.budget, text: core, platform: input.platform }, `opportunites:juge:${round}`) : null;
-    attempts.push({ text, rules, verdict });
+    attempts.push({ text, rules, verdict, parts });
     if (rules.ok && verdict && verdict.score >= PROPOSAL_PASS) break;
     feedback = rules.ok
       ? [`Note du relecteur : ${verdict?.score ?? "?"}/10.`, ...(verdict?.reasons ?? []).map((line) => `- ${line}`), verdict?.fix ? `Consigne : ${verdict.fix}` : ""].filter(Boolean).join("\n")
@@ -384,5 +412,7 @@ export async function generateProposal(input: ProposalInput): Promise<ProposalOu
     needsReview: !passed,
     reason: passed ? null : !best.rules.ok ? best.rules.failures[0] : score === null ? "Relecture automatique indisponible : à relire." : `Note ${score}/10 : ${best.verdict?.reasons[0] ?? "sous le seuil de 9"}`,
     attempts: attempts.length,
+    amountEur: best.parts.amountEur ?? null,
+    delayDays: best.parts.delayDays ?? null,
   };
 }

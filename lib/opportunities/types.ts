@@ -59,6 +59,22 @@ export interface Opportunity {
   replied_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Veille automatique (flux RSS Codeur) ou saisie manuelle. */
+  source?: "manuel" | "rss" | string;
+  external_id?: string | null;
+  categories?: string[] | null;
+  published_at?: string | null;
+  /** Le flux ne donne qu'un extrait de l'annonce (~300 caractères). */
+  description_truncated?: boolean;
+  /** ok · pending (en cours) · a_analyser (plafond du jour) · filtre (écartée sans LLM). */
+  analysis_state?: string | null;
+  filter_reason?: string | null;
+  /** Alerte vue (ouverte ou copiée). */
+  seen_at?: string | null;
+  /** Proposition rédigée sur l'extrait du flux : « Brouillon sur extrait ». */
+  proposal_on_excerpt?: boolean;
+  suggested_amount_eur?: number | null;
+  suggested_delay_days?: number | null;
 }
 
 export const isPlatform = (value: unknown): value is Platform => typeof value === "string" && (PLATFORMS as readonly string[]).includes(value);

@@ -23,6 +23,8 @@ function check(name: string, condition: boolean, detail = "") {
 console.log("\n1. Routes machine : exemptées de la redirection");
 {
   check("/api/inbound est une route machine", isMachinePath("/api/inbound"));
+  check("/api/opportunities/ingest (veille Codeur) est une route machine", isMachinePath("/api/opportunities/ingest"));
+  check("/api/opportunites (saisie, session) n'est PAS une route machine", !isMachinePath("/api/opportunites"));
   check("/api/cron/purge-trash aussi", isMachinePath("/api/cron/purge-trash"));
   check("/api/cron seul aussi", isMachinePath("/api/cron"));
   check("/api/jobs/tick est une route machine (pg_cron, sans cookie)", isMachinePath("/api/jobs/tick"));

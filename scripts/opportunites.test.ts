@@ -10,6 +10,10 @@ import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
 import { countWords } from "../lib/emails/quality/template";
 import type { AskFn } from "../lib/ai/chat";
+import { FakeDb } from "./fake-supabase";
+import { ingestOpportunity, parseIngestBody, type IngestBody } from "../lib/opportunities/ingest";
+import { prefilterReason } from "../lib/opportunities/prefilter";
+import { ageLabel, bucketOf, unseenAlerts } from "../lib/opportunities/view";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -151,6 +155,147 @@ async function main() {
     check("Codeur : 3 envoyées, 2 réponses (perdue après réponse comprise), 1 gagnée, 1 200 €", codeur?.sent === 3 && codeur.replies === 2 && codeur.won === 1 && codeur.revenueEur === 1200, JSON.stringify(codeur));
     check("Upwork : ignorée → 0 envoyée", stats.find((row) => row.platform === "upwork")?.sent === 0);
     check("plateformes sans saisie : absentes", !stats.some((row) => row.platform === "malt"));
+  }
+
+  console.log("\n7. Veille Codeur automatique (flux RSS → /api/opportunities/ingest)");
+  {
+    // Cinq items réels anonymisés, tels que le workflow n8n les envoie.
+    const item = (over: Record<string, unknown>) => ({
+      platform: "codeur",
+      url: "https://www.codeur.com/projects/000000-exemple",
+      description_truncated: true,
+      budget_text: "500 € à 1 000 €",
+      published_at: "2026-10-06T08:53:13.000Z",
+      ...over,
+    });
+    const SAGE = item({
+      external_id: "490001",
+      title: "Agent IA pour traiter les e-mails de commande et les saisir dans Sage 100",
+      description: "PME de négoce : nous recevons chaque jour des dizaines d'e-mails de commande à ressaisir dans Sage 100 Gestion commerciale. Nous voulons un agent qui lit les e-mails, extrait les lignes et prépare la saisie…",
+      categories: ["Intelligence artificielle", "Automatisation", "ERP"],
+    });
+    const IOS = item({
+      external_id: "490002",
+      title: "Développement d'une application mobile iOS de réservation",
+      description: "Nous souhaitons créer une application iPhone pour réserver des créneaux dans nos salles, avec paiement en ligne…",
+      categories: ["Application mobile", "iOS"],
+    });
+    const VIDEO = item({
+      external_id: "490003",
+      title: "Création de vidéos IA pour nos réseaux",
+      description: "Nous cherchons un créateur pour produire 20 vidéos courtes générées par IA pour TikTok et Instagram…",
+      categories: ["Vidéo", "Intelligence artificielle"],
+      budget_text: "Moins de 500 €",
+    });
+    const ZOHO = item({
+      external_id: "490004",
+      title: "Expert Zoho CRM certifié — références Zoho exigées",
+      description: "Paramétrage avancé de Zoho CRM (Deluge, blueprints). Merci de joindre trois références de projets Zoho similaires, profil certifié uniquement…",
+      categories: ["CRM", "Admin système, sécurité"],
+    });
+
+    for (const [name, raw] of [["Sage 100", SAGE], ["iOS", IOS], ["vidéo IA", VIDEO], ["Zoho", ZOHO]] as const) {
+      check(`corps n8n lisible (${name})`, parseIngestBody(raw as Record<string, unknown>).ok);
+    }
+    check("corps sans external_id refusé", !parseIngestBody({ platform: "codeur", title: "x" }).ok);
+    check("extrait détecté (« … » final)", (parseIngestBody({ ...SAGE, description_truncated: undefined }) as { ok: true; value: IngestBody }).value.description_truncated);
+
+    const analysisOf = (score: number, demo = "emails") => JSON.stringify({ score, reasons: ["raison 1", "raison 2", "raison 3"], need: "Automatiser la saisie des commandes reçues par e-mail.", demo, language: "fr" });
+    const proposalJson = JSON.stringify({
+      reading: "Vous recevez chaque jour des dizaines d'e-mails de commande à ressaisir dans Sage 100 Gestion commerciale, et vous voulez qu'un agent lise ces e-mails et prépare la saisie.",
+      steps: [
+        "Lecture des e-mails de commande et extraction du client, des références et des quantités.",
+        "Préparation de la commande dans Sage 100, à valider par votre équipe avant enregistrement.",
+        "Essai sur vos vrais e-mails pendant une semaine, puis ajustements et courte notice.",
+      ],
+      framing: "Délai : environ trois semaines, pour un montant entre 800 et 1 000 € selon le nombre de formats.",
+      question: "Vos commandes arrivent-elles dans le corps du mail ou en pièce jointe PDF ?",
+      amount_eur: 900,
+      delay_days: 21,
+    });
+    const verdictJson = JSON.stringify({ criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
+    const calls: string[] = [];
+    const ask: AskFn = async (role, _system, user, _temperature, operation) => {
+      calls.push(operation);
+      if (operation.startsWith("opportunites:analyse")) return /Zoho/.test(user) ? analysisOf(6) : analysisOf(9);
+      return role === "writer" ? proposalJson : verdictJson;
+    };
+    const db = new FakeDb({ opportunities: [] });
+    const deps = { db: db as never, userId: "u1", ask, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-06T09:00:00Z") };
+    const ingest = async (raw: Record<string, unknown>) => ingestOpportunity(deps, (parseIngestBody(raw) as { ok: true; value: IngestBody }).value);
+
+    const sage = await ingest(SAGE);
+    check("Sage 100 agent mail → alerte (score 9)", sage.verdict === "alerte" && sage.score === 9 && sage.reasons.length === 3, JSON.stringify(sage));
+    check("orion_url pointe sur la fiche", sage.orion_url === `https://orion.axelremillat.com/opportunites?id=${sage.id}`);
+    const sageRow = db.rows("opportunities").find((row) => row.id === sage.id) as Record<string, unknown>;
+    check("Sage : proposition rédigée (score ≥ 7), « brouillon sur extrait », montant et délai suggérés", typeof sageRow.proposal === "string" && sageRow.proposal_on_excerpt === true && sageRow.suggested_amount_eur === 900 && sageRow.suggested_delay_days === 21, JSON.stringify({ reason: sageRow.proposal_reason, len: String(sageRow.proposal).length }));
+    check("Sage : proposition Codeur sans URL ni coordonnée, < 1 000 caractères", !/https?:|axelremillat|@/.test(String(sageRow.proposal)) && String(sageRow.proposal).length < 1000 && sageRow.proposal_score === 10, `${String(sageRow.proposal).length} car., ${String(sageRow.proposal_reason)}`);
+
+    const llmBefore = calls.length;
+    const ios = await ingest(IOS);
+    check("app mobile iOS → filtre, sans LLM, gardée pour audit", ios.verdict === "ignore" && ios.filtered === true && calls.length === llmBefore && (db.rows("opportunities").find((row) => row.id === ios.id) as Record<string, unknown>).status === "ignoree", JSON.stringify(ios));
+    const video = await ingest(VIDEO);
+    check("vidéo IA → filtre, sans LLM (même avec la catégorie « Intelligence artificielle »)", video.verdict === "ignore" && video.filtered === true && calls.length === llmBefore, JSON.stringify(video));
+
+    const zoho = await ingest(ZOHO);
+    const zohoRow = db.rows("opportunities").find((row) => row.id === zoho.id) as Record<string, unknown>;
+    check("Zoho CRM exigeant des références Zoho → à voir (score 6), sans proposition", zoho.verdict === "a_voir" && zoho.score === 6 && !zohoRow.proposal, JSON.stringify(zoho));
+    check("catégorie avec virgule interne (« Admin système, sécurité ») : pas de faux filtrage", !zoho.filtered);
+
+    const llmBeforeDuplicate = calls.length;
+    const again = await ingest(SAGE);
+    check("doublon → duplicate:true, même fiche, aucun appel LLM", again.duplicate === true && again.id === sage.id && calls.length === llmBeforeDuplicate && db.rows("opportunities").length === 4, JSON.stringify(again));
+
+    // Pré-filtre : cas limites.
+    check("budget « Moins de 100 € » → filtre", prefilterReason({ title: "Script Python", description: "Petit script", categories: [], budgetText: "Moins de 100 €" }) === "budget inférieur à 150 €");
+    check("budget « Moins de 500 € » → pas filtré sur le budget", prefilterReason({ title: "Automatiser des relances", description: "n8n", categories: [], budgetText: "Moins de 500 €" }) === null);
+    check("formation en présentiel à Lyon → filtre", /formation/.test(prefilterReason({ title: "Formation ChatGPT", description: "Formation en présentiel dans nos locaux à Lyon pour 10 salariés", categories: [], budgetText: null }) ?? ""));
+    check("formation en visio → passe", prefilterReason({ title: "Formation ChatGPT", description: "Formation en visio pour 10 salariés", categories: [], budgetText: null }) === null);
+    check("catégorie « Site internet » mais automatisation Shopify → n8n demandée : passe", prefilterReason({ title: "Synchroniser les commandes Shopify avec notre ERP via n8n", description: "Automatisation des commandes", categories: ["Site internet", "E-commerce"], budgetText: null }) === null);
+    check("création de site WordPress → filtre", /site/.test(prefilterReason({ title: "Création d'un site WordPress vitrine", description: "Site de 5 pages", categories: ["Site internet"], budgetText: null }) ?? ""));
+    check("télémarketing → filtre", /telemarketing|téléphonique/.test(prefilterReason({ title: "Prospection téléphonique B2B", description: "Appels sortants pour prendre des rendez-vous", categories: [], budgetText: null }) ?? ""));
+
+    // Plafond quotidien : au-delà, « À analyser » sans LLM.
+    const capped = new FakeDb({ opportunities: [] });
+    let cappedCalls = 0;
+    const capAsk: AskFn = async () => {
+      cappedCalls += 1;
+      return analysisOf(9);
+    };
+    const cap = await ingestOpportunity({ ...deps, db: capped as never, ask: capAsk, llmCap: 0 }, (parseIngestBody({ ...SAGE, external_id: "490100" }) as { ok: true; value: IngestBody }).value);
+    check("plafond quotidien atteint → « À analyser », aucun appel LLM", cap.verdict === "a_voir" && cappedCalls === 0 && (capped.rows("opportunities")[0] as Record<string, unknown>).analysis_state === "a_analyser", JSON.stringify(cap));
+
+    // Analyse trop lente : réponse « en cours », fin en arrière-plan.
+    const slow = new FakeDb({ opportunities: [] });
+    const later: Promise<unknown>[] = [];
+    const slowAsk: AskFn = async (role, system, user, temperature, operation) => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      return ask(role, system, user, temperature, operation);
+    };
+    const pending = await ingestOpportunity({ ...deps, db: slow as never, ask: slowAsk, deadlineMs: 20, background: (work) => later.push(work) }, (parseIngestBody({ ...SAGE, external_id: "490200" }) as { ok: true; value: IngestBody }).value);
+    check("analyse plus lente que l'échéance → { verdict: a_voir, pending: true }", pending.verdict === "a_voir" && pending.pending === true, JSON.stringify(pending));
+    await Promise.all(later);
+    const finished = slow.rows("opportunities")[0] as Record<string, unknown>;
+    check("… puis l'analyse et la proposition se terminent en arrière-plan", finished.fit_score === 9 && finished.analysis_state === "ok" && typeof finished.proposal === "string", JSON.stringify({ score: finished.fit_score, state: finished.analysis_state }));
+
+    // Message privé Codeur : 1 000 caractères au plus.
+    const long = { ...PROPOSAL_POSITIVES[0], reading: `${PROPOSAL_POSITIVES[0].reading} ${"Détail supplémentaire sur le besoin. ".repeat(20)}` };
+    const longText = assembleProposal(long, { language: "fr", demo: "emails", platform: "codeur" });
+    check("Codeur : plus de 1 000 caractères → refusé (message privé)", checkProposal(long, longText.core, { language: "fr", budget: "500 €", platform: "codeur" }, longText.text).failures.some((line) => /1000|1 000/.test(line)));
+
+    // Vue : alertes non vues, âge.
+    const rows = [
+      { fit_score: 9, status: "a_repondre" as const, seen_at: null, published_at: "2026-10-06T08:50:00Z", created_at: "x" },
+      { fit_score: 9, status: "a_repondre" as const, seen_at: "2026-10-06T09:00:00Z", published_at: "2026-10-06T08:40:00Z", created_at: "x" },
+      { fit_score: 6, status: "a_repondre" as const, seen_at: null, published_at: null, created_at: "x" },
+      { fit_score: null, status: "ignoree" as const, filter_reason: "application mobile (iOS / Android)", seen_at: null, published_at: null, created_at: "x" },
+    ];
+    check("alertes non vues : seulement score ≥ 8 et pas encore vues", unseenAlerts(rows).length === 1);
+    check("classement : alerte / à voir / ignorée (filtre)", bucketOf(rows[0]) === "alertes" && bucketOf(rows[2]) === "a_voir" && bucketOf(rows[3]) === "ignorees" && bucketOf({ fit_score: 3, status: "a_repondre" }) === "ignorees");
+    check("âge lisible : « il y a 7 min »", ageLabel("2026-10-06T08:53:00Z", new Date("2026-10-06T09:00:00Z")) === "il y a 7 min");
+    check("« vue » enregistrée par le suivi", buildOpportunityPatch({ seen: true }, { status: "a_repondre", sent_at: null, replied_at: null }, new Date("2026-10-06T09:00:00Z")).ok);
+    const pasted = buildOpportunityPatch({ body: "Annonce complète collée par Axel, avec tous les détails du besoin et du contexte." }, { status: "a_repondre", sent_at: null, replied_at: null });
+    check("annonce complète collée : n'est plus un extrait", pasted.ok && pasted.patch.description_truncated === false);
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);
