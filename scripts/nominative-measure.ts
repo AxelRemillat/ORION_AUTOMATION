@@ -60,6 +60,13 @@ async function main() {
   console.log(`${rows.length} dernière(s) fiche(s) complétée(s)${period}`);
   console.log(`Taux nominatif : ${Math.round((nominative.length / rows.length) * 100)} % (${nominative.length}/${rows.length})`);
   console.log(`Crédits Hunter : ${credits} au total, ${(credits / rows.length).toFixed(1)} par fiche`);
+  // Faits distinctifs (Cowork #34) et coût OpenAI imputé à ces fiches.
+  const scores = rows.map((row) => (Array.isArray(row.key_figures?.facts) ? Number(row.key_figures?.facts_score ?? 0) : null));
+  const distribution = [0, 1, 2, 3].map((score) => `${score} : ${scores.filter((value) => value === score).length}`).join(" · ");
+  console.log(`facts_score : ${distribution} · sans extraction : ${scores.filter((value) => value === null).length}`);
+  const { data: openai } = await db.from("api_usage").select("cost, prospect_id").eq("service", "openai").in("prospect_id", rows.map((row) => row.id));
+  const eur = ((openai ?? []) as { cost: number | null }[]).reduce((total, row) => total + (Number(row.cost) || 0), 0);
+  console.log(`Coût OpenAI imputé : ${eur.toFixed(3)} € (${(eur / rows.length).toFixed(3)} € par fiche)`);
   console.log("\nSans adresse nominative :");
   for (const row of rows.filter((item) => !nominative.includes(item))) {
     const trace = (row.key_figures?.nominative ?? null) as { steps?: string[]; version?: number } | null;
