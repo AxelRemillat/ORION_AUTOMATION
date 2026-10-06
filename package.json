@@ -20,6 +20,7 @@
     "iterate:quality": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/iterate-quality.js",
     "complete:fiches": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/complete-fiches.js",
     "contacts:nominatifs": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative-backfill.js",
+    "contacts:mesure": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative-measure.js",
     "test:nominatif": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative.test.js",
     "calibrate:judge": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/calibrate-judge.js",
     "eval:families": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-families.js",

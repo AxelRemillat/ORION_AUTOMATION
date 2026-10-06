@@ -74,7 +74,7 @@ async function allowed(url: URL): Promise<boolean> {
  */
 const MAX_HTML_BYTES = 2_000_000;
 
-async function fetchHtml(url: string): Promise<{ html: string; url: string } | null> {
+export async function fetchHtml(url: string): Promise<{ html: string; url: string } | null> {
   let parsed: URL;
   try {
     parsed = new URL(url);

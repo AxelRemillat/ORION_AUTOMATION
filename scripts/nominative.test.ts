@@ -3,8 +3,11 @@
  * Fixtures seulement : Hunter simulé, fausse base, aucun crédit, aucun envoi.
  * `npm run test:nominatif`
  */
-import { contactLine, findNominativeContact, targetRoles, topicOf, type HunterPerson, type NominativeDeps, type VerifierStatus } from "../lib/contact-finder/nominative";
-import { ineligibility, nominativeShare, upgradeToNominative, type UpgradeProspect } from "../lib/contact-finder/upgrade";
+import { contactLine, emailFromPattern, findNominativeContact, targetRoles, topicOf, type HunterPerson, type NominativeDeps, type VerifierStatus } from "../lib/contact-finder/nominative";
+import { addresseeHint, ineligibility, nominativeShare, upgradeToNominative, NOMINATIVE_VERSION, type UpgradeProspect } from "../lib/contact-finder/upgrade";
+import { extractPeople } from "../lib/contact-finder/site-people";
+import { groupToday, type RawTodayItem } from "../lib/today/group";
+import { planSchedule } from "../lib/today/plan";
 import { buildQualityGreeting } from "../lib/emails/quality/greeting";
 import type { Db } from "../lib/trash/scope";
 import { FakeDb } from "./fake-supabase";
@@ -24,13 +27,13 @@ const person = (email: string, position: string | null, confidence: number, over
 };
 
 /** Faux Hunter : compte ses appels. */
-function hunter(options: { people?: HunterPerson[]; finder?: { email: string; score: number } | null; verdicts?: Record<string, { status: VerifierStatus; score: number | null }> } = {}) {
+function hunter(options: { people?: HunterPerson[]; pattern?: string | null; finder?: { email: string; score: number } | null; verdicts?: Record<string, { status: VerifierStatus; score: number | null }> } = {}) {
   const calls = { domainSearch: 0, finder: 0, verifier: 0, departments: [] as string[] };
   const deps: NominativeDeps = {
     async domainSearch(_domain, filters) {
       calls.domainSearch += 1;
       calls.departments = filters.departments;
-      return options.people ?? [];
+      return { people: options.people ?? [], pattern: options.pattern ?? null };
     },
     async emailFinder() {
       calls.finder += 1;
@@ -148,6 +151,99 @@ async function main() {
     check("(avant : « jmartin@ » ne donnait ni prénom ni civilité)", greeting(false) === "Bonjour,", greeting(false));
     const generic = buildQualityGreeting({ email: "contact@acme.fr", leaderPerson: "Pierre DURAND", contactName: null });
     check("adresse générique : le dirigeant reste salué (inchangé)", generic === "Bonjour Monsieur Durand,", generic);
+  }
+
+  console.log("\n5. Noms du site, schéma d'adresse (#32)");
+  {
+    check("schéma {first}.{last} : noms composés et particules", emailFromPattern("{first}.{last}", "Jean-Pierre", "Le Gall", "acme.fr") === "jean-pierre.legall@acme.fr", emailFromPattern("{first}.{last}", "Jean-Pierre", "Le Gall", "acme.fr"));
+    check("schéma {f}{last}, accents retirés", emailFromPattern("{f}{last}", "Émilie", "Durand", "Acme.fr") === "edurand@acme.fr");
+    check("schéma inconnu : rien de deviné", emailFromPattern(null, "Jean", "Dupont", "acme.fr") === null && emailFromPattern("contact", "Jean", "Dupont", "acme.fr") === null);
+
+    const html = `<html><body>
+      <h2>Notre équipe</h2>
+      <div class="card"><h3>Sophie Martin</h3><p>Responsable ADV</p></div>
+      <div class="card"><h3>Marc LEFEBVRE</h3><p>Directeur commercial</p></div>
+      <p>Service Commercial – contact@acme.fr</p>
+      <p>Directeur de la publication : M. Pierre Durand</p>
+      <p>Hébergeur : OVH SAS</p>
+    </body></html>`;
+    const people = extractPeople(html, "https://acme.fr/equipe");
+    const names = people.map((item) => `${item.firstName} ${item.lastName} — ${item.role}`);
+    check("carte d'équipe (nom puis fonction) lue", names.includes("Sophie Martin — Responsable ADV") && names.includes("Marc LEFEBVRE — Directeur commercial"), names);
+    check("mentions légales : « Directeur de la publication : M. Pierre Durand »", people.some((item) => item.lastName === "Durand" && /publication/i.test(item.role)), names);
+    check("« Service Commercial » n'est pas une personne", !people.some((item) => /service/i.test(item.firstName)), names);
+
+    const site = [
+      { firstName: "Sophie", lastName: "Martin", role: "Responsable ADV", url: "https://acme.fr/equipe" },
+      { firstName: "Marc", lastName: "Lefebvre", role: "Directeur commercial", url: "https://acme.fr/equipe" },
+    ];
+    const viaPattern = hunter({ people: [], pattern: "{first}.{last}" });
+    const devis = await findNominativeContact({ domain: "acme.fr", pain: "production des devis", headcount: 60, leader: LEADER, sitePeople: site }, viaPattern.deps);
+    check("devis : le directeur commercial du site, adresse par le schéma, VÉRIFIÉE", devis.contact?.email === "marc.lefebvre@acme.fr" && devis.contact.source === "hunter:pattern" && devis.contact.verifier === "valid", devis.contact);
+    check("… sans Email Finder (le schéma suffit)", viaPattern.calls.finder === 0 && viaPattern.calls.verifier === 1, viaPattern.calls);
+
+    const bad = hunter({ people: [], pattern: "{first}.{last}", verdicts: { "marc.lefebvre@acme.fr": { status: "invalid", score: 0 } } });
+    const next = await findNominativeContact({ domain: "acme.fr", pain: "production des devis", headcount: 60, leader: LEADER, sitePeople: site }, bad.deps);
+    check("adresse devinée « invalid » : jamais gardée, candidat suivant (ADV)", next.contact?.email === "sophie.martin@acme.fr" && next.contact.roleKey === "adv", next.contact);
+
+    const silent = hunter({ people: [], pattern: "{first}.{last}", verdicts: { "marc.lefebvre@acme.fr": { status: "unknown", score: 99 }, "sophie.martin@acme.fr": { status: "unknown", score: 99 } } });
+    const none = await findNominativeContact({ domain: "acme.fr", pain: "production des devis", headcount: 60, leader: null, sitePeople: site }, silent.deps);
+    check("vérification non concluante : aucune adresse devinée utilisée", none.contact === null, none);
+
+    const noPattern = hunter({ people: [], finder: { email: "marc.lefebvre@acme.fr", score: 91 } });
+    const finder = await findNominativeContact({ domain: "acme.fr", pain: "devis", headcount: 60, leader: null, sitePeople: site }, noPattern.deps);
+    check("sans schéma : Email Finder sur le nom lu sur le site", finder.contact?.source === "hunter:email-finder" && noPattern.calls.finder === 1, finder.contact);
+
+    check("« À l'attention de M. Pierre Durand »", addresseeHint({ firstName: "Pierre", lastName: "Durand", role: "dirigeant", source: "registre" })?.text === "À l'attention de M. Pierre Durand");
+    check("« À l'attention de Mme Sophie Martin »", addresseeHint({ firstName: "Sophie", lastName: "Martin", source: "site" })?.text === "À l'attention de Mme Sophie Martin");
+  }
+
+  console.log("\n6. Rattrapage v2 : générique gardée → addressee_hint ; échecs v1 réessayés");
+  {
+    const prospect: UpgradeProspect = {
+      id: "p9", user_id: "u1", company_name: "PARCOME", email: "contact@parcome.fr", email_type: "generique", website: "https://parcome.fr",
+      contact_found_by: "site:contact", do_not_contact: false, deleted_at: null, pain_point: "production des devis", brief: null,
+      key_figures: { opposition_checked: true, leader_person: "Pierre DURAND", headcount: 45, nominative: { checked_at: "2026-10-06T10:00:00Z" } },
+    };
+    const NOW = new Date("2026-10-06T16:00:00Z");
+    check("échec de la v1 il y a 6 h : de nouveau éligible (stratégie v2)", ineligibility(prospect, NOW) === null, ineligibility(prospect, NOW));
+    check(
+      "… mais pas un échec de la même version",
+      /90 jours/.test(ineligibility({ ...prospect, key_figures: { ...prospect.key_figures, nominative: { checked_at: "2026-10-06T10:00:00Z", version: NOMINATIVE_VERSION } } }, NOW) ?? ""),
+    );
+
+    const fake = new FakeDb({ prospects: [{ ...prospect }], messages: [], prospect_events: [] } as Record<string, Record<string, unknown>[]>);
+    const nothing = hunter({ people: [], pattern: null, finder: null });
+    const result = await upgradeToNominative(
+      fake as unknown as Db,
+      prospect,
+      { ...nothing.deps, sitePeople: async () => [{ firstName: "Marc", lastName: "Lefebvre", role: "Directeur commercial", url: "x" }] },
+      { now: NOW },
+    );
+    const figures = fake.rows("prospects")[0].key_figures as Record<string, { text?: string; version?: number }>;
+    check(
+      "rien de vérifié : générique gardée, « À l'attention de M. Marc Lefebvre » (rôle du sujet)",
+      result.status === "kept" && figures.addressee_hint?.text === "À l'attention de M. Marc Lefebvre" && fake.rows("prospects")[0].email === "contact@parcome.fr",
+      figures.addressee_hint,
+    );
+    check("… trace datée avec la version", figures.nominative?.version === NOMINATIVE_VERSION);
+  }
+
+  console.log("\n7. À qualité égale, le nominatif d'abord (Nouveaux et quota)");
+  {
+    const item = (key: string, kind: "nominatif" | "generique", quality: number, score: number): RawTodayItem =>
+      ({ key, kind: "nouveau", prospectId: key, status: "valide", messageId: `m-${key}`, tags: [], score, quality, contact: { email: `${key}@x.fr`, kind, name: null, phone: null }, exclusion: null }) as unknown as RawTodayItem;
+    const raw = [item("gen-ready", "generique", 9.5, 5), item("nom-ready", "nominatif", 9.2, 3), item("nom-weak", "nominatif", 7, 5)];
+    const order = groupToday(raw).flatMap((group) => group.items.map((entry) => entry.key));
+    check("prêts (≥ 9) : nominatif avant générique, même à score plus bas", order.indexOf("nom-ready") < order.indexOf("gen-ready"), order);
+    check("un nominatif non prêt ne passe pas devant un mail prêt", order.indexOf("gen-ready") < order.indexOf("nom-weak"), order);
+    const plan = planSchedule({
+      items: [item("gen-ready", "generique", 9.5, 5), item("nom-ready", "nominatif", 9.2, 3)] as never,
+      remaining: 1,
+      now: new Date("2026-10-07T07:30:00Z"),
+      random: () => 0,
+    });
+    check("quota d'une place : c'est la fiche nominative qui part", plan.planned[0]?.key === "nom-ready" && plan.postponed[0]?.key === "gen-ready", plan);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);
