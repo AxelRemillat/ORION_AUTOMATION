@@ -60,6 +60,7 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
     budget: opportunity.budget,
     need: analysis.need,
     demo: analysis.demo,
+    kind: analysis.kind,
   });
   if ("error" in proposal) return { ok: false, error: proposal.error };
   await db

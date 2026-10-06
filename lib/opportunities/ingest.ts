@@ -138,6 +138,7 @@ async function proposeRow(deps: IngestDeps, id: string, body: IngestBody, analys
     budget: body.budget_text,
     need: analysis.need,
     demo: analysis.demo,
+    kind: analysis.kind,
     maxRewrites: 1,
   });
   if ("error" in proposal) return;
