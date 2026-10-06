@@ -10,6 +10,7 @@ import { allowedFamilies, assembleFamily, demoTextOf, familyFor, subjectArmFor, 
 import { buildWriterPrompt, parseParts } from "./writer";
 import { avecAllowed, mailReadiness } from "./readiness";
 import type { SubjectArm } from "./experiment";
+import type { KeyFact } from "./facts-gate";
 
 /**
  * GÉNÉRATION QUALITÉ — objectif « envoyable sans retouche » (≥ 9/10).
@@ -51,6 +52,8 @@ export interface QualityInput {
   sector?: string | null;
   /** Poste de la personne réellement contactée : l'angle s'y adapte. */
   recipientRole?: string | null;
+  /** `key_figures.facts` triés (lib/emails/quality/facts-gate.ts) ; absent = fiche d'avant. */
+  keyFacts?: readonly KeyFact[] | null;
 }
 
 export interface QualityAttempt {
@@ -104,14 +107,19 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   // Le juge voit les MÊMES faits que le rédacteur : faits du brief + faits
   // propres (site, profil). Sinon il tient pour « supposé » ce qui est lu sur
   // le site (AGCEI, itération 2 : « bobines et transformateurs » notés 6/10).
-  const factText = [...new Set([...facts, ...own])].map((fact) => `- ${fact.label} : ${fact.value}`).join("\n");
+  const factText = [
+    ...[...new Set([...facts, ...own])].map((fact) => `- ${fact.label} : ${fact.value}`),
+    ...(input.keyFacts ?? []).map((fact) => `- Fait vérifié (${fact.distinctiveness}/3) : ${fact.text}`),
+  ].join("\n");
+  // Faits vérifiés (key_figures.facts, Cowork #31) : le juge de grille vérifie que le fait cité en vient.
+  const verifiedFacts = (input.keyFacts ?? []).map((fact) => fact.text);
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
 
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole }),
+      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole, keyFacts: input.keyFacts }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -150,7 +158,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     const verdict = rules.ok
       ? combineJudges(
           ...(await Promise.all([
-            judgeMail(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, family }, `qualite:juge:${attempt}`),
+            judgeMail(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, family, verifiedFacts }, `qualite:juge:${attempt}`),
             judgeMailSenior(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, contactRole: input.recipientRole }, `qualite:juge-senior:${attempt}`),
           ])),
         )

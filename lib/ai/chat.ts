@@ -96,6 +96,13 @@ export async function withParamFallback<T>(
   }
 }
 
+/**
+ * Graine fixe des JUGES (Cowork #31) : gpt-6 refuse `temperature: 0`, la
+ * graine et un prompt figé sont ce qui reste pour qu'un même mail reçoive la
+ * même note d'un passage à l'autre.
+ */
+export const JUDGE_SEED = 31;
+
 export async function chatJson(request: ChatJsonRequest): Promise<string> {
   const model = request.model ?? modelFor(request.role);
   const started = Date.now();
@@ -108,6 +115,7 @@ export async function chatJson(request: ChatJsonRequest): Promise<string> {
         temperature: request.temperature,
         reasoningEffort: reasoningEffortFor(request.role),
         maxOutputTokens: request.maxOutputTokens,
+        seed: request.role === "judge" ? JUDGE_SEED : undefined,
       }),
     (params) =>
       request.client.chat.completions.create({

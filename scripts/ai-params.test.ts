@@ -93,6 +93,13 @@ async function main(): Promise<void> {
     check("temperature → capacité retirée", capabilityToDrop("temperature")?.supportsTemperature === false);
     check("max_tokens → on bascule de nom", capabilityToDrop("max_tokens")?.maxOutputParam === "max_completion_tokens");
     check("paramètre inconnu → rien à retirer", capabilityToDrop("machin") === null);
+    check("seed refusé → graine retirée", capabilityToDrop("seed")?.rejectsSeed === true);
+    resetLearnedCapabilities();
+    check("graine du juge envoyée à gpt-6", buildParams({ model: "gpt-6-luna", temperature: 0, seed: 31 }).seed === 31);
+    check("pas de graine demandée → aucune graine", !("seed" in buildParams({ model: "gpt-6-luna", temperature: 0 })));
+    rememberUnsupported("gpt-6-luna", { rejectsSeed: true });
+    check("graine refusée une fois → plus envoyée", !("seed" in buildParams({ model: "gpt-6-luna", seed: 31 })));
+    resetLearnedCapabilities();
 
     // Un modèle classique qui refuserait la température doit s'en souvenir.
     check("avant apprentissage", buildParams({ model: "gpt-4o-mini", temperature: 0.5 }).temperature === 0.5);

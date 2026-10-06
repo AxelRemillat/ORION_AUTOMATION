@@ -1,3 +1,4 @@
+import { FACTS_MIN_DISTINCTIVENESS, type KeyFact } from "./facts-gate";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import type { StrategyBrief } from "@/lib/emails/strategist";
 import { FORBIDDEN_WORDS, LIMITS } from "./rules";
@@ -43,6 +44,22 @@ export interface WriterInput {
   sector?: string | null;
   /** Poste de la personne réellement contactée (contacts nominatifs, 06/10) : l'angle s'y adapte. */
   recipientRole?: string | null;
+  /** `key_figures.facts` (agent1), triés du plus distinctif au moins distinctif : l'accroche s'ancre dans le meilleur (Cowork #31). */
+  keyFacts?: readonly KeyFact[] | null;
+}
+
+/**
+ * Faits vérifiés de la fiche (Cowork #31) : le problème naît du MEILLEUR fait
+ * et de son process, comme PLIMETAL (« cotes manquantes dans vos demandes de
+ * découpe laser »). Vide quand la fiche n'a pas de faits (fiches d'avant).
+ */
+export function keyFactsBlock(facts: readonly KeyFact[] | null | undefined): string {
+  const usable = (facts ?? []).filter((fact) => fact.distinctiveness >= FACTS_MIN_DISTINCTIVENESS);
+  if (!usable.length) return "";
+  const lines = usable.slice(0, 5).map((fact, index) => `${index + 1}. [${fact.distinctiveness}/3] ${fact.text}${fact.process_hint ? ` — process lié : ${fact.process_hint}` : ""}`);
+  return `FAITS VÉRIFIÉS DE LA FICHE (du plus distinctif au moins distinctif) — OBLIGATOIRE :
+${lines.join("\n")}
+Ancre le problème dans le fait n° 1 (ou un autre de cette liste) et dans SON process : le problème naît de ce process précis (PLIMETAL : « cotes manquantes dans vos demandes de découpe laser »). Ce que tu dis de l'entreprise vient de cette liste, jamais d'ailleurs.`;
 }
 
 const factLines = (facts: DerivedFact[]) =>
@@ -77,7 +94,7 @@ AUTRES ÉLÉMENTS (contexte seulement, jamais l'accroche) :
 ${other || "- (rien de plus)"}
 - Tâche qui leur coûte : ${brief.pain.task}
 - Ce qu'on automatiserait : ${brief.pain.automationIdea}
-${input.recipientRole ? `- Destinataire : ${input.recipientRole} — parle de SA fonction (DAF : factures, relances ; commercial : devis, commandes ; service client : demandes reçues)\n` : ""}
+${input.recipientRole ? `- Destinataire : ${input.recipientRole} — parle de SA fonction (DAF : factures, relances ; commercial : devis, commandes ; service client : demandes reçues)\n` : ""}${keyFactsBlock(input.keyFacts) ? `\n${keyFactsBlock(input.keyFacts)}\n` : ""}
 1. ACCROCHE — ${LIMITS.hookSentences} phrases au plus, ${LIMITS.sentenceWords} mots au plus CHACUNE.
    Phrase 1 : un FAIT PROPRE ci-dessus (nombre de sites ou de fournils, gamme précise, type de clients, zone, produit phare),
    posé comme CONTEXTE de la tâche : « Avec un catalogue qui mêle X et Y, chaque commande… », « Avec quatre fournils et des clients en restauration, … ».
@@ -120,6 +137,7 @@ function knownBlock(input: WriterInput): string {
     `- Tâche typique de ce métier : ${input.brief.pain.task}`,
     `- Ce qu'on automatiserait : ${input.brief.pain.automationIdea}`,
     input.recipientRole ? `- Destinataire : ${input.recipientRole} — parle de SA fonction` : "",
+    keyFactsBlock(input.keyFacts),
   ]
     .filter(Boolean)
     .join("\n");

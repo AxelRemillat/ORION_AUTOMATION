@@ -4,6 +4,11 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { factsGate, isFactsInsufficient, keyFactsOf } from "../lib/emails/quality/facts-gate";
+import { keyFactsBlock } from "../lib/emails/quality/writer";
+import { INVENTED_FACT_MAX, INVENTED_FACT_REASON, judgeMailSenior, medianVerdict, SENIOR_SAMPLES, verifiedFactsCheck } from "../lib/emails/quality/judge";
+import { addresseeHintOf } from "../lib/emails/quality/greeting";
+import { acquireAvecLock, AVEC_LOCK_NAME, closeAvec, type LockDb } from "../lib/emails/quality/avec-lock";
 import { FakeDb } from "./fake-supabase";
 import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { offTargetReason } from "../lib/funnel/off-target";
@@ -505,6 +510,104 @@ async function main() {
       check(`validé ${mail.company} (${countWords(body)} mots) : règles OK (hors longueur)`, failuresButLength.length === 0, failuresButLength.join(" | "));
     }
     check("jeu de référence : 11 positifs, 6 négatifs de fond", VALIDATED_POSITIVES.length === 11 && FOND_NEGATIVES.length === 6);
+  }
+
+  console.log("\nQuota « Avec » atomique : deux jobs en parallèle (Cowork #31)");
+  {
+    // Faux Postgres : les deux fonctions de la migration 20261006191506, mêmes règles.
+    const locks = new Map<string, { holder: string; until: number }>();
+    let clock = 0;
+    const lockDb = (broken = false): LockDb => ({
+      rpc: async (name, args) => {
+        if (broken) return { data: null, error: { message: "function try_generation_lock does not exist" } };
+        const key = `${args.p_user}:${args.p_name}`;
+        const row = locks.get(key);
+        if (name === "try_generation_lock") {
+          if (row && row.until > clock && row.holder !== args.p_holder) return { data: false, error: null };
+          locks.set(key, { holder: String(args.p_holder), until: clock + Number(args.p_seconds) });
+          return { data: true, error: null };
+        }
+        if (row && row.holder === args.p_holder) row.until = clock;
+        return { data: null, error: null };
+      },
+    });
+    // Un job de rédaction réduit à ce qui compte : verrou → comptage → rédaction (lente) → enregistrement → relâche.
+    const drafts: { avec: boolean }[] = [];
+    const job = async (id: string, db: LockDb, useLock = true) => {
+      const lock = useLock ? await acquireAvecLock(db, "u1", id) : ({ held: true, release: async () => undefined } as const);
+      try {
+        const counted = { total: drafts.length, avec: drafts.filter((draft) => draft.avec).length };
+        const day = lock.held ? counted : closeAvec(counted);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        drafts.push({ avec: avecAllowed(day) });
+      } finally {
+        if (lock.held) await lock.release();
+      }
+    };
+    await Promise.all([job("job-a", lockDb(), false), job("job-b", lockDb(), false)]);
+    check("sans verrou, la course existe : 2 « Avec » sur 2 (le quota en permet 1)", drafts.filter((draft) => draft.avec).length === 2);
+    drafts.length = 0;
+    await Promise.all([job("job-a", lockDb()), job("job-b", lockDb())]);
+    check("avec le verrou : 2 jobs en parallèle → 1 seul « Avec » sur 2", drafts.length === 2 && drafts.filter((draft) => draft.avec).length === 1, JSON.stringify(drafts));
+    await job("job-c", lockDb());
+    check("verrou relâché après l'enregistrement : le job suivant le reprend", locks.get(`u1:${AVEC_LOCK_NAME}`)?.holder === "job-c");
+    locks.set(`u1:${AVEC_LOCK_NAME}`, { holder: "job-mort", until: clock + 300 });
+    clock += 301;
+    drafts.length = 0;
+    await job("job-d", lockDb());
+    check("verrou d'un job mort : expiré, repris", locks.get(`u1:${AVEC_LOCK_NAME}`)?.holder === "job-d");
+    drafts.length = 0;
+    await job("job-e", lockDb(true));
+    check("fonction absente (migration non appliquée) : rédaction sans « Avec », jamais bloquée", drafts.length === 1 && !drafts[0].avec);
+    check("sans verrou : « Avec » fermé sur la journée et dans chaque famille", [0, 1, 2, 5, 9].every((total) => !avecAllowed(closeAvec({ total, avec: 0 })) && !avecAllowed(closeAvec({ total, avec: 0, byFamily: { F1: { total, avec: 0 } } }).byFamily.F1)));
+  }
+
+  console.log("\nPorte « faits », fait d'ancrage et salutation (Cowork #31)");
+  {
+    const fact = (text: string, distinctiveness: number, process_hint: string | null = null) => ({ text, source_url: "https://exemple.fr", page_kind: "produits", distinctiveness, process_hint });
+    check("fiche d'avant (pas de champ facts) : comportement d'avant, rien de bloqué", factsGate({}).ok && (factsGate({}) as { facts: unknown }).facts === null);
+    const weak = factsGate({ facts: [fact("Entreprise de métallerie", 1), fact("Basée à Lyon", 0)] });
+    check("aucun fait ≥ 2 : « Faits insuffisants », pas de rédaction", !weak.ok && isFactsInsufficient((weak as { reason: string }).reason));
+    check("tableau facts vide : « Faits insuffisants »", !factsGate({ facts: [] }).ok);
+    const strong = factsGate({ facts: [fact("Basée à Lyon", 0), fact("Découpe laser sur plan client", 3, "demandes de découpe avec cotes"), fact("Pliage de tôles", 2)] });
+    check("un fait ≥ 2 : on rédige, faits triés du plus distinctif au moins distinctif", strong.ok && (strong as { facts: { distinctiveness: number }[] }).facts.map((item) => item.distinctiveness).join(",") === "3,2,0");
+    check("entrée mal formée ignorée (sans texte ou sans distinctivité)", keyFactsOf({ facts: [{ text: "", distinctiveness: 3 }, { text: "x" }, fact("ok", 2)] })?.length === 1);
+    check("raison « Faits insuffisants » = blocage (pas d'ancienne note affichée)", isBlockedReason((weak as { reason: string }).reason));
+    const tags = tagsOf({ email: "contact@x.fr", emailDoubtful: false, oppositionUnverified: false, website: "x.fr", hasBusinessProfile: true, hasDraft: false, draftPending: false, qualityReview: true, factsInsufficient: true });
+    check("étiquette « Faits insuffisants », jamais « Brouillon manquant » (la préparation ne relance pas)", tags.includes("Faits insuffisants") && !tags.includes("Brouillon manquant") && !tags.includes("À revoir"), tags.join(","));
+    check("« Faits insuffisants » : hors « Nouveaux »", !isComplete(tags, true));
+
+    // Rédacteur : faits triés, ancrage dans le meilleur et son process.
+    const block = keyFactsBlock(strong.ok ? strong.facts : null);
+    check("rédacteur : le meilleur fait en n° 1 avec son process, les faits < 2 absents", /1\. \[3\/3\] Découpe laser sur plan client — process lié : demandes de découpe avec cotes/.test(block) && !block.includes("Basée à Lyon"), block);
+    check("rédacteur : sans faits, aucun bloc (fiches d'avant)", keyFactsBlock(null) === "" && keyFactsBlock([fact("x", 1)]) === "");
+
+    // Juge de grille : le fait cité doit venir des faits vérifiés.
+    const grid = JSON.stringify({ criteria: { fait: 2, consequence: 2, proposition: 3, clarte: 2, naturel: 1 }, reasons: [], fix: null });
+    check("juge : fait cité dans la liste → note inchangée", parseVerdict(JSON.stringify({ ...JSON.parse(grid), fait_dans_la_liste: true }))?.score === 10);
+    const invented = parseVerdict(JSON.stringify({ ...JSON.parse(grid), fait_cite: "four à pain", fait_dans_la_liste: false }));
+    check(`juge : fait cité HORS des faits vérifiés → ${INVENTED_FACT_MAX} au plus, raison en tête`, invented?.score === INVENTED_FACT_MAX && invented.reasons[0] === INVENTED_FACT_REASON, JSON.stringify(invented));
+    const at = (score: number) => ({ score, criteria: {}, reasons: [], fix: null });
+    check("relecteur senior : médiane de 3 lectures (8 / 9 / 9 → 9 ; 9 / 7 / 8 → 8)", medianVerdict([at(8), at(9), at(9)])?.score === 9 && medianVerdict([at(9), at(7), at(8)])?.score === 8);
+    check("relecteur senior : lecture illisible écartée, deux restantes → la plus basse ; aucune → null", medianVerdict([at(9), null, at(8)])?.score === 8 && medianVerdict([null, null]) === null);
+    {
+      const seen: string[] = [];
+      const ask: AskFn = async (_role, system, _user, _temperature, operation) => {
+        seen.push(`${operation}|${system.length}`);
+        return JSON.stringify({ score: [9, 7, 9][seen.length - 1], reasons: [], fix: null });
+      };
+      const verdict = await judgeMailSenior(ask, { subject: "s", body: "b", company: "c", facts: "f" });
+      check("relecteur senior : 3 appels au MÊME prompt figé, note médiane retenue", seen.length === SENIOR_SAMPLES && new Set(seen.map((line) => line.split("|")[1])).size === 1 && verdict?.score === 9, seen.join(","));
+    }
+    check("juge : la vérification n'est posée que si la fiche a des faits (prompt système figé)", verifiedFactsCheck([]) === "" && verifiedFactsCheck(["Découpe laser"]).includes("fait_dans_la_liste"));
+
+    // Salutation : adresse générique + addressee_hint (agent1).
+    const hint = (name: string, civility: "Monsieur" | "Madame" | null) => ({ addressee_hint: { name, role: "dirigeant", civility, text: "", source: "site" } });
+    check("générique + addressee_hint → « Bonjour Madame Durand, »", buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf(hint("Claude Durand", "Madame")) }) === "Bonjour Madame Durand,");
+    check("générique + addressee_hint sans civilité connue → civilité du prénom", buildQualityGreeting({ email: "contact@plimetal.fr", addresseeHint: addresseeHintOf(hint("Pierre Durand", null)) }) === "Bonjour Monsieur Durand,");
+    check("générique, addressee_hint calculé mais vide → « Bonjour, »", buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({ addressee_hint: null }) }) === "Bonjour,");
+    check("adresse nominative : son titulaire, jamais l'addressee_hint", buildQualityGreeting({ email: "jean.martin@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf(hint("Claude Durand", "Madame")) }) === "Bonjour Monsieur Martin,");
+    check("fiche d'avant (pas de champ) : comportement d'avant (dirigeant)", addresseeHintOf({}) === undefined && buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({}) }) === "Bonjour Monsieur Martin,");
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

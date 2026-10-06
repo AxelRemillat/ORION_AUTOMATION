@@ -35,6 +35,20 @@ export interface GreetingInput {
    * jamais le dirigeant, à qui on n'écrit pas (06/10/2026).
    */
   contactIsRecipient?: boolean;
+  /**
+   * `key_figures.addressee_hint` (agent1, #93) : la personne à viser quand
+   * l'adresse reste GÉNÉRIQUE. `undefined` = fiche d'avant (jamais calculé) :
+   * comportement d'avant ; `null` = calculé, personne à viser → « Bonjour, ».
+   */
+  addresseeHint?: { name: string; civility: Civility | null } | null;
+}
+
+/** Lit `key_figures.addressee_hint` ; `undefined` si le champ n'a jamais été posé. */
+export function addresseeHintOf(figures: Record<string, unknown> | null | undefined): GreetingInput["addresseeHint"] {
+  if (!figures || !("addressee_hint" in figures)) return undefined;
+  const hint = figures.addressee_hint as { name?: unknown; civility?: unknown } | null;
+  if (!hint || typeof hint.name !== "string" || !hint.name.trim()) return null;
+  return { name: hint.name.trim(), civility: hint.civility === "Monsieur" || hint.civility === "Madame" ? hint.civility : null };
 }
 
 /** La personne à saluer, avec son prénom quand on le connaît. */
@@ -58,6 +72,8 @@ export function greetingPerson(input: GreetingInput): Person | null {
       .find((person) => person && key(person.last) === key(owner.last));
     return known ?? owner;
   }
+  // Adresse GÉNÉRIQUE (Cowork #31) : la personne visée par agent1, sinon personne.
+  if (input.addresseeHint !== undefined) return input.addresseeHint ? usagePerson(input.addresseeHint.name) : null;
   return usagePerson(input.leaderPerson ?? input.contactName);
 }
 
@@ -72,7 +88,9 @@ export function civilityOf(first: string, cache: CivilityCache = {}): Civility |
 export function buildQualityGreeting(input: GreetingInput, cache: CivilityCache = {}): string {
   const person = greetingPerson(input);
   if (!person) return "Bonjour,";
-  const civility = civilityOf(person.first, cache);
+  // La civilité donnée par agent1 pour la personne visée prime (adresse générique).
+  const hinted = input.addresseeHint && usagePerson(input.addresseeHint.name)?.last === person.last ? input.addresseeHint.civility : null;
+  const civility = hinted ?? civilityOf(person.first, cache);
   if (!civility) return "Bonjour,";
   // Nom coupé ou douteux (« Danancher- ») : la civilité seule, jamais un nom tronqué.
   return isCompleteName(person.last) ? `Bonjour ${civility} ${person.last},` : `Bonjour ${civility},`;

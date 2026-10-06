@@ -39,6 +39,8 @@ const { buildFacts } = require("@/lib/emails/derived-facts") as typeof import("@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { runStrategist } = require("@/lib/emails/strategist") as typeof import("@/lib/emails/strategist");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const factsGate = require("@/lib/emails/quality/facts-gate") as typeof import("@/lib/emails/quality/facts-gate");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const greeting = require("@/lib/emails/quality/greeting") as typeof import("@/lib/emails/quality/greeting");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const quality = require("@/lib/emails/quality/generate") as typeof import("@/lib/emails/quality/generate");
@@ -114,9 +116,9 @@ export interface PreparedMail {
 export async function prepareMail(
   prospect: Prospect,
   userId: string,
-  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean; dayOpenings?: { total: number; avec: number }; family?: MailFamily } = {},
+  options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean; dayOpenings?: { total: number; avec: number }; family?: MailFamily; ask?: AskFn } = {},
 ): Promise<PreparedMail> {
-  const ask = liveAsk(prospect.id);
+  const ask = options.ask ?? liveAsk(prospect.id);
   // Comme le job : site inconnu → recherche GRATUITE (domaines du nom, validés
   // par les mentions légales). Écrit seulement si `persist` (régénération).
   let foundSite: string | null = null;
@@ -170,6 +172,8 @@ export async function prepareMail(
     leaderPerson: factsResult.leaderPerson,
     contactName: text(figures.contact_name),
     addressee: incomingLeader(figures)?.fullName ?? null,
+    contactIsRecipient: Boolean(prospect.contact_name && prospect.email),
+    addresseeHint: greeting.addresseeHintOf(figures),
   };
   const unknown = greeting.unknownFirstName(input, civilities);
   if (unknown) civilities[greeting.cacheKey(unknown)] = await greeting.askCivility(ask, unknown, greeting.greetingPerson(input)?.last ?? "");
@@ -194,6 +198,7 @@ export async function prepareMail(
     dayOpenings: options.dayOpenings,
     website: prospect.website,
     family: options.family,
+    keyFacts: factsGate.keyFactsOf(figures),
   });
   return { outcome, civilities, greeting: salutation, brief, profileNote, foundSite };
 }
