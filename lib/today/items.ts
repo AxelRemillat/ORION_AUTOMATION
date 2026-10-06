@@ -50,6 +50,10 @@ function contactOf(prospect: Prospect | null, card: FunnelCard | null): TodayCon
   const email = prospect?.email ?? card?.email ?? null;
   const kind = !email ? "aucun" : prospect?.email_type === "generique" || card?.contact === "generique" ? "generique" : "nominatif";
   const figures = prospect?.key_figures ?? {};
+  // La personne À QUI on écrit (contact nominatif) ; à défaut, le dirigeant.
+  if (prospect?.contact_name && email === prospect.email) {
+    return { email, kind, name: prospect.contact_name, role: prospect.contact_role ?? null, phone: card?.phone ?? null };
+  }
   const name = typeof figures.leader_person === "string" ? figures.leader_person : null;
   return { email, kind, name, phone: card?.phone ?? null };
 }
@@ -70,7 +74,7 @@ function factsOf(prospect: Prospect | null, card: FunnelCard | null, contact: To
   if (card?.revenue) facts.push({ label: "Chiffre d'affaires", value: card.revenue.replace(/^CA /, "") });
   const city = prospect?.city ?? card?.city;
   if (city) facts.push({ label: "Ville", value: city });
-  if (contact.name) facts.push({ label: "Dirigeant", value: contact.name });
+  if (contact.name) facts.push(contact.role ? { label: "Contact", value: `${contact.name} — ${contact.role}` } : { label: "Dirigeant", value: contact.name });
   return facts.slice(0, 4);
 }
 

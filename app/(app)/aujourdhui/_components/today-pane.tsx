@@ -68,7 +68,11 @@ export function TodayPane({
               <Badge key={tag} tone="warning">{tag}</Badge>
             ))}
             {item.contact.kind === "nominatif" && <Badge tone="success">✓ email nominatif</Badge>}
-            {item.contact.kind === "generique" && <Badge tone="neutral">email générique</Badge>}
+            {item.contact.kind === "generique" && (
+              <Badge tone="warning" title="Adresse générique (contact@, info@…) : ORION cherche la personne à qui écrire ; elle passe après les nominatives.">
+                adresse générique
+              </Badge>
+            )}
             <Badge tone="info">{TYPE_CHIP[item.messageType]}</Badge>
             {item.score != null && <Badge tone="accent">score {item.score}/5</Badge>}
           </div>

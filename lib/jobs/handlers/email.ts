@@ -396,12 +396,15 @@ async function contactStep(ctx: StepContext): Promise<StepOutcome> {
   let candidates: DecisionMakerContact[] = [];
   const figures = prospect.key_figures ?? {};
   const text = (value: unknown) => (typeof value === "string" && value ? value : null);
-  if (params.mode === "full" && params.storedContact && prospect.email) {
+  // Contact NOMINATIF déjà choisi pour la fiche (Hunter, selon le sujet) : c'est
+  // à lui qu'on écrit — le job ne va pas en chercher un autre (06/10/2026).
+  const chosen = Boolean(prospect.email && prospect.contact_name && prospect.email_type === "nominatif");
+  if (params.mode === "full" && prospect.email && (params.storedContact || chosen)) {
     contact = {
       email: prospect.email,
-      full_name: text(figures.contact_name) ?? text(figures.leader_person),
-      position: text(figures.contact_position),
-      confidence: typeof figures.contact_confidence === "number" ? figures.contact_confidence : null,
+      full_name: text(prospect.contact_name) ?? text(figures.contact_name) ?? text(figures.leader_person),
+      position: text(prospect.contact_role) ?? text(figures.contact_position),
+      confidence: prospect.contact_confidence ?? (typeof figures.contact_confidence === "number" ? figures.contact_confidence : null),
     };
   } else if (params.mode === "full") {
     const outcome = await findContact(prospect).catch(() => ({ contact: null, warning: undefined, candidates: [] }));
@@ -673,6 +676,8 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
     leaderPerson,
     contactName: contact?.full_name ?? (typeof figures.contact_name === "string" ? figures.contact_name : null),
     addressee: incomingLeader(figures)?.fullName ?? null,
+    // La personne contactée est connue (contact nominatif) : la salutation est la sienne.
+    contactIsRecipient: Boolean(prospect.contact_name && (contact?.email ?? prospect.email) === prospect.email),
   };
   const unknown = unknownFirstName(greetingInput, civilities);
   if (unknown) {
@@ -707,8 +712,8 @@ async function draftStep(ctx: StepContext): Promise<StepOutcome> {
       companyName: brief.companyName || singleCompanyName(prospect.company_name),
       activity: profile?.offer ?? prospect.sector ?? null,
       sector: prospect.sector ?? null,
-      // Rôle du contact réellement écrit (ajouté par la complétion), sinon le poste trouvé.
-      contactRole: (typeof figures.contact_role === "string" && figures.contact_role) || (typeof figures.contact_position === "string" && figures.contact_position) || contact?.position || null,
+      // Poste de la personne réellement contactée (contacts nominatifs), sinon le poste trouvé par la recherche.
+      recipientRole: prospect.contact_role ?? ((typeof figures.contact_role === "string" && figures.contact_role) || (typeof figures.contact_position === "string" && figures.contact_position) || contact?.position || null),
       prospectText: [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" "),
       greeting: buildQualityGreeting(greetingInput, civilities),
       signature: signatureFor(loaded.offer),

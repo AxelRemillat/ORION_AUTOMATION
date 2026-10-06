@@ -288,6 +288,14 @@ export type Prospect = {
   contact_found_by?: string | null;
   contact_search?: Record<string, unknown> | null;
   contact_checked_at?: string | null;
+  /**
+   * Personne réellement contactée (migration 20261006145446) : « Prénom Nom »,
+   * poste, et d'où vient l'adresse (« hunter:domain-search »…). NULL = adresse
+   * générique ou d'avant.
+   */
+  contact_name?: string | null;
+  contact_role?: string | null;
+  contact_source?: string | null;
   sector: string | null;
   size_range: string | null;
   city: string | null;
@@ -375,6 +383,12 @@ export type Message = {
   quality_reason?: string | null;
   /** Retouché par Axel : plus jamais régénéré automatiquement. */
   edited_by_hand?: boolean;
+  /**
+   * Brouillon à régénérer (migration 20261006145446) : le contact a changé
+   * après la rédaction (adresse nominative trouvée). NULL = rien à refaire.
+   */
+  regenerate_reason?: string | null;
+  regenerate_requested_at?: string | null;
 }
 
 export type MessageOrigin = "eval" | "script";

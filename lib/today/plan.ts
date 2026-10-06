@@ -1,5 +1,6 @@
 import { MAX_GAP_MIN, MIN_GAP_MIN } from "@/lib/mail-preflight/schedule";
 import { parisToUtc, utcToParis } from "@/lib/outbox/paris-time";
+import { nominativeFirst } from "./group";
 import type { TodayItem } from "./types";
 
 /**
@@ -8,7 +9,8 @@ import type { TodayItem } from "./types";
  *
  * Règles :
  *   - seuls les éléments VALIDÉS partent — jamais un brouillon non relu ;
- *   - ordre : réponses, puis relances, puis intros (dans l'ordre de la liste) ;
+ *   - ordre : réponses, puis relances, puis intros — à qualité égale, les
+ *     adresses NOMINATIVES d'abord (elles remplissent le quota en premier) ;
  *   - fenêtre 9 h – 17 h (Paris), jours ouvrés ; 2 à 7 min entre deux envois ;
  *   - plafond de montée en charge du jour : au-delà, l'élément reste validé et
  *     revient demain en tête de file. Rien n'est perdu, rien ne part en trop.
@@ -72,7 +74,7 @@ export function planSchedule(input: {
   const validated = input.items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item.status === "valide" && Boolean(item.messageId))
-    .sort((a, b) => RANK[a.item.kind] - RANK[b.item.kind] || a.index - b.index)
+    .sort((a, b) => RANK[a.item.kind] - RANK[b.item.kind] || (a.item.kind === "nouveau" ? nominativeFirst(a.item, b.item) : 0) || a.index - b.index)
     .map(({ item }) => item);
 
   const planned: PlannedSend[] = [];

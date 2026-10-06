@@ -6,6 +6,7 @@ import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Input } from "
 import type { Prospect } from "@/types";
 import { useContactFinder, type ContactFields } from "./use-contact-finder";
 import { SearchReport } from "./search-report";
+import { contactLine } from "@/lib/contact-finder/nominative";
 
 /** Libellé lisible du chemin qui a produit l'adresse. */
 function foundByLabel(value: string | null | undefined): string {
@@ -25,6 +26,10 @@ export function ContactCard({ prospect }: { prospect: Pick<Prospect, "id" | "com
   const { fields, running, step, error, find } = useContactFinder(prospect);
   const [site, setSite] = useState(prospect.website ?? "");
   const nominal = fields.email_type === "nominatif";
+  // « Contact : Prénom Nom — Poste (Hunter, confiance 94 %) » : la personne à qui on écrit.
+  const person = fields.email
+    ? contactLine({ name: fields.contact_name ?? null, role: fields.contact_role ?? null, source: fields.contact_source ?? null, confidence: fields.contact_confidence ?? null })
+    : null;
 
   return (
     <Card>
@@ -43,11 +48,12 @@ export function ContactCard({ prospect }: { prospect: Pick<Prospect, "id" | "com
             <a href={`mailto:${fields.email}`} className="font-data text-[13px] text-text hover:text-primary-ink">
               {fields.email}
             </a>
-            {fields.email_type && <Badge tone={nominal ? "success" : "neutral"}>{nominal ? "nominatif" : "générique"}</Badge>}
+            {fields.email_type && <Badge tone={nominal ? "success" : "warning"}>{nominal ? "nominatif" : "adresse générique"}</Badge>}
           </div>
         ) : (
           <p className="text-[13px] text-muted">Aucune adresse : la programmation d&apos;un envoi reste impossible.</p>
         )}
+        {person && <p className="text-[13px] text-text">Contact : {person}</p>}
 
         {fields.email && (
           <p className="text-[12px] text-muted">

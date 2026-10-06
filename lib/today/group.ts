@@ -30,6 +30,20 @@ export interface RawTodayItem extends TodayItem {
 
 const byDate = (a?: string | null, b?: string | null) => (a ?? "").localeCompare(b ?? "");
 
+/** Mail prêt : noté ≥ 9 par le juge qualité. */
+export const READY_QUALITY = 9;
+
+/**
+ * À QUALITÉ ÉGALE, LE NOMINATIF D'ABORD (06/10/2026) : parmi les mails prêts
+ * (≥ 9) — et de même parmi les autres —, une adresse nominative passe avant
+ * une générique. Sert à « Nouveaux » et au remplissage du quota d'envoi.
+ */
+export function nominativeFirst(a: Pick<TodayItem, "quality" | "contact">, b: Pick<TodayItem, "quality" | "contact">): number {
+  const ready = (item: Pick<TodayItem, "quality">) => ((item.quality ?? 0) >= READY_QUALITY ? 0 : 1);
+  const generic = (item: Pick<TodayItem, "contact">) => (item.contact.kind === "nominatif" ? 0 : 1);
+  return ready(a) - ready(b) || generic(a) - generic(b);
+}
+
 /** Le groupe d'un élément de prospection dépend de sa complétude. */
 export function kindOf(item: RawTodayItem): TodayKind {
   if (item.kind === "reponse" || item.kind === "relance") return item.kind;
@@ -39,7 +53,7 @@ export function kindOf(item: RawTodayItem): TodayKind {
 const COMPARE: Record<TodayKind, (a: RawTodayItem, b: RawTodayItem) => number> = {
   reponse: (a, b) => byDate(a.receivedAt, b.receivedAt),
   relance: (a, b) => byDate(a.dueAt, b.dueAt),
-  nouveau: (a, b) => (b.score ?? -1) - (a.score ?? -1) || (b.weight ?? 0) - (a.weight ?? 0),
+  nouveau: (a, b) => nominativeFirst(a, b) || (b.score ?? -1) - (a.score ?? -1) || (b.weight ?? 0) - (a.weight ?? 0),
   a_completer: (a, b) => (b.score ?? -1) - (a.score ?? -1) || (b.weight ?? 0) - (a.weight ?? 0),
 };
 

@@ -29,11 +29,23 @@ export interface GreetingInput {
   contactName?: string | null;
   /** Dirigeant entrant que le mail interpelle (arrivée récente). */
   addressee?: string | null;
+  /**
+   * `contactName` EST le titulaire de `email` (contact nominatif choisi pour la
+   * fiche) : à défaut de lire le nom dans l'adresse, c'est lui qu'on salue —
+   * jamais le dirigeant, à qui on n'écrit pas (06/10/2026).
+   */
+  contactIsRecipient?: boolean;
 }
 
 /** La personne à saluer, avec son prénom quand on le connaît. */
 export function greetingPerson(input: GreetingInput): Person | null {
   if (input.addressee) return usagePerson(input.addressee);
+  // Contact nominatif choisi pour la fiche : son nom COMPLET, plutôt que ce que
+  // l'adresse laisse deviner (« jmartin@ » ne donne pas le prénom).
+  if (input.contactIsRecipient && input.contactName) {
+    const recipient = usagePerson(input.contactName);
+    if (recipient) return recipient;
+  }
   // `aktid@aktid.fr` : la partie locale reprend le domaine, c'est une boîte de service.
   const [local = "", domain = ""] = (input.email ?? "").toLowerCase().split("@");
   const serviceBox = Boolean(local) && key(domain.split(".")[0] ?? "").replace(/[^a-z0-9]/g, "") === local.replace(/[^a-z0-9]/g, "");
