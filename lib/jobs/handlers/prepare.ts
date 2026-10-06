@@ -7,6 +7,7 @@ import { liveDigDeps } from "@/lib/funnel/live";
 import { verifyQueueOppositions } from "@/lib/today/opposition";
 import { verifyFollowUpOppositions } from "@/lib/outbox/opposition-backfill";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
+import { ensureFacts } from "@/lib/enrichment/facts-server";
 import { draftFollowUp } from "@/lib/outbox/follow-up";
 import { draftReply } from "@/lib/outbox/reply-generate";
 import { runCompletionStage } from "@/lib/today/complete";
@@ -31,6 +32,7 @@ export const PREPARE_KIND = "prepare";
  *   → entonnoir (moisson → filtre ×8 → tri → creusage ×8)
  *   → complétion des fiches « à compléter » (une tentative par run, 3 au plus)
  *   → profil métier des fiches dont le site existe mais n'a pas été lu
+ *   → faits distinctifs sourcés (key_figures.facts, lib/enrichment/facts.ts)
  *   → brouillons de réponse aux mails reçus
  *   → relances J+4 / J+7 dues, dans le fil de l'envoi précédent
  *   → brouillons d'intro (jobs `email_generate`, contact de la fiche réutilisé)
@@ -46,6 +48,9 @@ const COMPLETE_PER_STEP = 6;
 const OPPOSITIONS_PER_RUN = 40;
 /** Profils métier lus par run : un appel LLM léger chacun. */
 const PROFILES_PER_RUN = 12;
+/** Faits distinctifs : trois étapes de 240 s, un appel LLM léger par fiche. */
+const FACTS_STEPS = 3;
+const FACTS_PER_STEP = 10;
 
 const progress = (step: string, pct: number) => ({ step, pct, counts: { scanned: 0, signals: 0, sheets: 0 } });
 const deadline = () => Date.now() + STEP_BUDGET_MS;
@@ -132,6 +137,30 @@ async function profilesStep(ctx: StepContext): Promise<StepOutcome> {
   return { progress: progress(`Profil métier : ${read} lu(s)${failed ? `, ${failed} illisible(s)` : ""}`, 96) };
 }
 
+/**
+ * FAITS DISTINCTIFS SOURCÉS (Cowork #34) des fiches de la file qui ont un site
+ * et pas encore de faits : le brouillon qui suit s'appuie dessus. Les fiches
+ * contactées n'y sont pas (elles ne sont plus en intro).
+ */
+async function factsStep(ctx: StepContext): Promise<StepOutcome> {
+  const end = deadline();
+  const items = flatten((await loadToday(ctx.db, ctx.userId)).groups).filter(
+    (item) => item.messageType === "intro" && item.prospectId && item.website && item.status === "todo",
+  );
+  let read = 0;
+  let found = 0;
+  for (const item of items) {
+    if (read >= FACTS_PER_STEP || Date.now() > end) break;
+    const { data } = await ctx.db.from("prospects").select("id, company_name, website, key_figures").eq("id", item.prospectId!).maybeSingle();
+    const prospect = data as { id: string; company_name: string; website: string | null; key_figures: Record<string, unknown> | null } | null;
+    if (!prospect || Array.isArray(prospect.key_figures?.facts)) continue;
+    const run = await ensureFacts(ctx.db, prospect).catch(() => null);
+    read += 1;
+    if (run?.facts.length) found += 1;
+  }
+  return { progress: progress(`Faits distinctifs : ${found} fiche(s) sur ${read} lue(s)`, 97) };
+}
+
 async function repliesStep(ctx: StepContext): Promise<StepOutcome> {
   const end = deadline();
   const { data } = await ctx.db
@@ -173,6 +202,9 @@ async function relancesStep(ctx: StepContext): Promise<StepOutcome> {
 export { needsIntroDraft };
 
 async function draftsStep(ctx: StepContext): Promise<StepOutcome> {
+  // Préparation « sans brouillons » (lot de mesure, Cowork #34) : on s'arrête
+  // avant la génération des mails.
+  if (ctx.job.params?.skipDrafts === true) return { progress: { ...EMPTY_PROGRESS, step: "Brouillons non lancés (préparation sans brouillons)", pct: 99 } };
   const prefs = await prefsOf(ctx);
   const items = flatten((await loadToday(ctx.db, ctx.userId)).groups);
   const ready = items.filter((item) => item.kind === "nouveau" && item.status === "todo").length;
@@ -293,6 +325,7 @@ export const prepareHandler: JobHandler = {
     ...Array.from({ length: WIDEN_DIG_STEPS }, (_, i) => whenWidened(openAiGuarded(digStep(i, WIDEN_DIG_STEPS)))),
     openAiGuarded(completeStep),
     openAiGuarded(profilesStep),
+    ...Array.from({ length: FACTS_STEPS }, () => openAiGuarded(factsStep)),
     openAiGuarded(repliesStep),
     openAiGuarded(relancesStep),
     openAiGuarded(draftsStep),
