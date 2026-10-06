@@ -41,6 +41,8 @@ export interface WriterInput {
   family?: MailFamily;
   /** Secteur (libellé), pour F2 et F4 quand le profil est mince. */
   sector?: string | null;
+  /** Poste de la personne réellement contactée (contacts nominatifs, 06/10) : l'angle s'y adapte. */
+  recipientRole?: string | null;
 }
 
 const factLines = (facts: DerivedFact[]) =>
@@ -75,7 +77,7 @@ AUTRES ÉLÉMENTS (contexte seulement, jamais l'accroche) :
 ${other || "- (rien de plus)"}
 - Tâche qui leur coûte : ${brief.pain.task}
 - Ce qu'on automatiserait : ${brief.pain.automationIdea}
-
+${input.recipientRole ? `- Destinataire : ${input.recipientRole} — parle de SA fonction (DAF : factures, relances ; commercial : devis, commandes ; service client : demandes reçues)\n` : ""}
 1. ACCROCHE — ${LIMITS.hookSentences} phrases au plus, ${LIMITS.sentenceWords} mots au plus CHACUNE.
    Phrase 1 : un FAIT PROPRE ci-dessus (nombre de sites ou de fournils, gamme précise, type de clients, zone, produit phare),
    posé comme CONTEXTE de la tâche : « Avec un catalogue qui mêle X et Y, chaque commande… », « Avec quatre fournils et des clients en restauration, … ».
@@ -114,6 +116,7 @@ function knownBlock(input: WriterInput): string {
     other,
     `- Tâche typique de ce métier : ${input.brief.pain.task}`,
     `- Ce qu'on automatiserait : ${input.brief.pain.automationIdea}`,
+    input.recipientRole ? `- Destinataire : ${input.recipientRole} — parle de SA fonction` : "",
   ]
     .filter(Boolean)
     .join("\n");

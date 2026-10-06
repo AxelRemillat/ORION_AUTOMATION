@@ -59,3 +59,34 @@ Les 5 conclusions précédentes sont gardées dans `contact_search.history`.
 - `npm run test:contact-report` : compte rendu sur GLOBAL 2F (pas de site) et
   BRIOL (site trouvé), nom en double.
 - `npm run contact:live -- <siren> [--save]` : test réel, **payant**, en local.
+
+## Contact nominatif selon le sujet du mail (`nominative.ts`, `upgrade.ts`)
+
+Une adresse GÉNÉRIQUE (contact@, info@…) n'est qu'un dernier recours. Dès
+qu'elle est trouvée (creusage, complétion — `lib/funnel/live.ts`), ORION
+cherche la personne dont la fonction correspond au **sujet du brouillon**
+(`brief.pain.task`, sinon `pain_point`) :
+
+| Sujet | Rôles visés, dans l'ordre |
+| --- | --- |
+| factures, relances de paiement, comptabilité | DAF, responsable comptable/administratif, dirigeant |
+| tri des e-mails, SAV, service client | service client, ADV, office manager, dirigeant |
+| devis, prix, commandes, ADV | directeur commercial, ADV, dirigeant |
+| comptes rendus, documents, fichier clients | dirigeant, responsable administratif |
+| < 20 salariés | le dirigeant d'abord, quel que soit le sujet |
+
+Hunter : Domain Search filtré (type personnel, départements utiles), meilleur
+poste à confiance ≥ 80 → sinon Email Finder sur le dirigeant (nom d'usage) →
+Email Verifier : `valid`, ou `accept_all` à confiance ≥ 90. Rien de sûr : la
+générique reste. Garde-fou Hunter inchangé (cache 90 jours, `HUNTER_DAILY_BUDGET`,
+80 par défaut). Une fiche n'est pas recherchée deux fois en 90 jours.
+
+Écrit `contact_name`, `contact_role`, `contact_source` (affichés « Contact :
+Prénom Nom — Poste (Hunter, confiance 94 %) ») ; la salutation et l'angle du
+mail suivent la personne contactée. Jamais pour une fiche opposée, à
+l'opposition non vérifiée, « ne plus contacter », déjà contactée, ni quand un
+brouillon est validé, programmé ou retouché à la main. Les brouillons libres
+sont marqués « à régénérer » (`messages.regenerate_reason`).
+
+Rattrapage du stock : `npm run contacts:nominatifs` (simulation, 0 crédit),
+puis `-- --apply [--limit N] [--max-credits N]` (réel, **payant**).

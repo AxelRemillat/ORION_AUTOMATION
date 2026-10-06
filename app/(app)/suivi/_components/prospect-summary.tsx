@@ -98,7 +98,14 @@ export function ProspectSummary({
                 : "—"
             }
           />
-          <Row label="Contact" value={prospect.email ?? "—"} />
+          <Row
+            label="Contact"
+            value={
+              prospect.email
+                ? [prospect.email, [prospect.contact_name, prospect.contact_role].filter(Boolean).join(" — ")].filter(Boolean).join(" · ")
+                : "—"
+            }
+          />
           <Row
             label="Site"
             value={

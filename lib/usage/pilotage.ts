@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parisToUtc } from "@/lib/outbox/paris-time";
+import { hunterDailyBudget, parisMidnight } from "@/lib/hunter/gate";
 import { readAll } from "@/lib/supabase/read-all";
 import { buildReadiness, READY_SCORE, type Readiness } from "./readiness";
 import { openAiBudgetState, openAiMonthlyCap, type OpenAiBudgetState } from "./budgets";
@@ -83,6 +84,7 @@ export async function loadPilotage(db: unknown, now = new Date()): Promise<Pilot
       pappersExact,
       openaiBudget: openAiMonthlyBudget(),
       now,
+      hunterToday: { used: Math.round(sum(usage, "hunter", parisMidnight(now))), budget: hunterDailyBudget() },
     }),
   };
 }

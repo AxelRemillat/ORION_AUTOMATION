@@ -49,6 +49,8 @@ export interface QualityInput {
   family?: MailFamily;
   /** Secteur, pour F2 et F4 quand le profil est mince. */
   sector?: string | null;
+  /** Poste de la personne réellement contactée : l'angle s'y adapte. */
+  recipientRole?: string | null;
 }
 
 export interface QualityAttempt {
@@ -109,7 +111,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings), subjectArm: arm, feedback, family }),
+      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, recipientRole: input.recipientRole, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings), subjectArm: arm, feedback, family }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,

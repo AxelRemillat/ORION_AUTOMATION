@@ -16,10 +16,13 @@ export type ContactFields = Pick<
   | "contact_found_by"
   | "contact_checked_at"
   | "contact_search"
+  | "contact_name"
+  | "contact_role"
+  | "contact_source"
 >;
 
 const COLUMNS =
-  "website, email, email_type, email_source_url, contact_confidence, contact_found_by, contact_checked_at, contact_search";
+  "website, email, email_type, email_source_url, contact_confidence, contact_found_by, contact_checked_at, contact_search, contact_name, contact_role, contact_source";
 
 /**
  * Lance le module contact en tâche de fond (job `reanalyze`, scope contact)
