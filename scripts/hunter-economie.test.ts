@@ -11,6 +11,7 @@
  * Données inventées, aucun réseau. Exécution : `npm run test:hunter`.
  */
 import {
+  withHunterRunCap,
   DEFAULT_HUNTER_DAILY_BUDGET,
   HUNTER_CACHE_TTL_MS,
   gatedHunterCall,
@@ -134,6 +135,14 @@ async function main() {
     const status = await hunterStatus(fakeStore(4), NOON);
     check("état du jour pour le bandeau", status.usedToday === 4 && status.budget === 10 && status.remaining === 6 && status.blocked === null, JSON.stringify(status));
     resetHunterGate();
+
+    // Plafond d'un lot (Cowork #34) : 40 crédits pour la préparation de mesure.
+    const lotStore = fakeStore(4);
+    const inLot = await withHunterRunCap(3, new Date("2026-10-01T08:00:00Z"), () => hunterStatus(lotStore, NOON));
+    check("plafond du lot atteint (4/3) : bloqué, même avec du budget du jour", Boolean(inLot.blocked?.includes("plafond du lot")) && inLot.remaining === 0, JSON.stringify(inLot));
+    const roomy = await withHunterRunCap(40, new Date("2026-10-01T08:00:00Z"), () => hunterStatus(lotStore, NOON));
+    check("sous le plafond du lot : autorisé, reste = min(jour, lot)", roomy.blocked === null && roomy.remaining === 6, JSON.stringify(roomy));
+    check("hors lot : le plafond ne s'applique pas", (await hunterStatus(lotStore, NOON)).blocked === null);
   }
 
   console.log("\n2. Feu vert Hunter d'une fiche");

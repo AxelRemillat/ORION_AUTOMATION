@@ -24,7 +24,21 @@
  * sans réseau ni base.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export const HUNTER_CACHE_TTL_MS = 90 * 86_400_000;
+
+/**
+ * PLAFOND D'UN LOT (Cowork #34) : un job peut borner SES crédits Hunter (ex. 40
+ * pour une préparation de mesure), en plus du budget du jour. Porté par le
+ * contexte asynchrone de l'étape : seuls les appels faits sous ce contexte sont
+ * concernés. Compté sur `api_usage` depuis le début du lot.
+ */
+export const hunterRunCap = new AsyncLocalStorage<{ cap: number; since: Date }>();
+
+export function withHunterRunCap<T>(cap: number | null | undefined, since: Date, run: () => Promise<T>): Promise<T> {
+  return typeof cap === "number" && cap >= 0 ? hunterRunCap.run({ cap, since }, run) : run();
+}
 /**
  * 80 par jour (06/10/2026, contacts nominatifs) : le Starter donne 2 000 crédits
  * par mois et seuls 9 étaient utilisés — la recherche du BON destinataire (Domain
@@ -102,13 +116,18 @@ export interface HunterStatus {
 export async function hunterStatus(store: HunterGateStore, now: Date = new Date()): Promise<HunterStatus> {
   const budget = hunterDailyBudget();
   const usedToday = await store.usedSince(parisMidnight(now)).catch(() => 0);
-  const remaining = Math.max(0, budget - usedToday);
+  let remaining = Math.max(0, budget - usedToday);
+  const lot = hunterRunCap.getStore();
+  const usedInLot = lot ? await store.usedSince(lot.since).catch(() => 0) : 0;
+  if (lot) remaining = Math.min(remaining, Math.max(0, lot.cap - usedInLot));
   const blocked =
     now.getTime() < exhaustedUntil
       ? `${HUNTER_EPUISE} : crédits du compte épuisés`
-      : remaining <= 0
+      : Math.max(0, budget - usedToday) <= 0
         ? `${HUNTER_EPUISE} : budget du jour atteint (${usedToday}/${budget})`
-        : null;
+        : lot && usedInLot >= lot.cap
+          ? `${HUNTER_EPUISE} : plafond du lot atteint (${usedInLot}/${lot.cap})`
+          : null;
   return { usedToday, budget, remaining, blocked };
 }
 

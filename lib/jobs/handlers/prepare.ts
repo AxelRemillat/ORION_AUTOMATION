@@ -17,6 +17,7 @@ import { flatten } from "@/lib/today/group";
 import { needsIntroDraft } from "@/lib/today/tags";
 import type { InboundMessage, Prospect } from "@/types";
 import { createJob } from "../store";
+import { withHunterRunCap } from "@/lib/hunter/gate";
 import { EMPTY_PROGRESS } from "../types";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, SITE_STEPS, siteStep, STEP_BUDGET_MS, TRIAGE_STEPS, triageStep } from "./funnel";
@@ -304,8 +305,16 @@ export function openAiGuarded(step: Step, budget: () => Promise<OpenAiBudgetStat
   };
 }
 
-export const prepareHandler: JobHandler = {
-  steps: [
+/**
+ * Plafond Hunter d'un lot (`params.hunterCap`, ex. 40) : chaque étape tourne
+ * sous ce plafond, compté depuis la création du job (lib/hunter/gate.ts).
+ */
+const capped = (step: Step): Step => (ctx) => {
+  const cap = typeof ctx.job.params?.hunterCap === "number" ? (ctx.job.params.hunterCap as number) : null;
+  return withHunterRunCap(cap, new Date(ctx.job.created_at ?? Date.now()), () => step(ctx));
+};
+
+const STEPS: Step[] = [
     prepareRun,
     oppositionStep,
     followUpOppositionStep,
@@ -330,6 +339,9 @@ export const prepareHandler: JobHandler = {
     openAiGuarded(relancesStep),
     openAiGuarded(draftsStep),
     summaryStep,
-  ],
+];
+
+export const prepareHandler: JobHandler = {
+  steps: STEPS.map(capped),
   onFailed: closeRunOnFailure,
 };
