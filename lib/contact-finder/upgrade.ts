@@ -2,8 +2,7 @@ import { recordProspectEvent } from "@/lib/history/record";
 import type { Db } from "@/lib/trash/scope";
 import { domainOfEmail, toDomain } from "./domains";
 import { classifyEmail } from "./extract";
-import { usageName } from "./names";
-import { civilityFor } from "@/lib/emails/salutation";
+import { civilityFor, usagePerson } from "@/lib/emails/salutation";
 import { findNominativeContact, targetRoles, type NominativeContact, type NominativeDeps, type RoleKey } from "./nominative";
 import type { SitePerson } from "./site-people";
 
@@ -62,9 +61,11 @@ export const NOMINATIVE_RETRY_MS = 90 * 86_400_000;
  * de nouveau éligible : v2 (06/10/2026) ajoute les noms du site et le schéma
  * d'adresse du domaine — les échecs de la v1 méritent un nouvel essai. v3 : le
  * registre donne TOUS les prénoms (« Daniel Claude Christian Marie Frelet ») ;
- * Email Finder et le schéma ne reçoivent plus que le premier.
+ * Email Finder et le schéma ne reçoivent plus que le premier. v4 : en casse
+ * mixte (« Daniel Claude Christian Marie Frelet »), le NOM est le dernier mot —
+ * `usagePerson` (salutation.ts), pas `usageName` qui y voyait quatre mots de nom.
  */
-export const NOMINATIVE_VERSION = 3;
+export const NOMINATIVE_VERSION = 4;
 
 /** Dépendances : Hunter, et la lecture (gratuite) des pages équipe/contact du site. */
 export type UpgradeDeps = NominativeDeps & { sitePeople?(domain: string): Promise<SitePerson[]> };
@@ -188,7 +189,9 @@ export async function upgradeToNominative(
   if (!domain) return skip("aucun domaine");
 
   const figures = prospect.key_figures ?? {};
-  const leader = usageName(typeof figures.leader_person === "string" ? figures.leader_person : null);
+  // Nom d'usage du dirigeant (née / épouse, NOM en capitales, sinon le dernier mot).
+  const usage = usagePerson(typeof figures.leader_person === "string" ? figures.leader_person : null);
+  const leader = usage?.first && usage.last ? { firstName: usage.first, lastName: usage.last } : null;
   const { data: dnc } = await db.from("prospects").select("email").eq("user_id", prospect.user_id).eq("do_not_contact", true);
   const blocked = ((dnc ?? []) as { email: string | null }[]).map((row) => row.email).filter((email): email is string => Boolean(email));
 
