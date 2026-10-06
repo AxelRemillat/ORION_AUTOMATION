@@ -1,3 +1,5 @@
+import type { SitePerson } from "./site-people";
+
 /**
  * CONTACT NOMINATIF, choisi selon le SUJET du mail — 06/10/2026.
  *
@@ -78,7 +80,7 @@ const ROLES: Record<RoleKey, RoleTarget> = {
   dirigeant: {
     key: "dirigeant",
     label: "dirigeant",
-    pattern: /\b(ceo|pdg|p\.d\.g|dg|g[ée]rante?|pr[ée]sidente?|fondat(eur|rice)|founder|co-?founder|owner|directeur g[ée]n[ée]ral|directrice g[ée]n[ée]rale|managing director|general manager|dirigeant)\b/i,
+    pattern: /\b(ceo|pdg|p\.d\.g|dg|g[ée]rante?|pr[ée]sidente?|fondat(eur|rice)|founder|co-?founder|owner|directeur g[ée]n[ée]ral|directrice g[ée]n[ée]rale|managing director|general manager|dirigeante?|directeur de la publication|directrice de la publication|responsable de la publication)\b/i,
     departments: ["executive", "management"],
   },
 };
@@ -125,8 +127,14 @@ export interface HunterPerson {
 
 export type VerifierStatus = "valid" | "accept_all" | "invalid" | "unknown" | "disposable" | "webmail";
 
+export interface DomainSearchResult {
+  people: HunterPerson[];
+  /** Schéma d'adresse du domaine selon Hunter (« {first}.{last} »), s'il est connu. */
+  pattern: string | null;
+}
+
 export interface NominativeDeps {
-  domainSearch(domain: string, filters: { departments: string[] }): Promise<HunterPerson[] | null>;
+  domainSearch(domain: string, filters: { departments: string[] }): Promise<DomainSearchResult | null>;
   emailFinder(domain: string, firstName: string, lastName: string): Promise<{ email: string; score: number | null; position: string | null } | null>;
   verify(email: string): Promise<{ status: VerifierStatus; score: number | null } | null>;
 }
@@ -139,6 +147,8 @@ export interface NominativeInput {
   leader: { firstName: string; lastName: string } | null;
   /** Adresses à ne jamais retenir (liste « ne plus contacter »). */
   blocked?: string[];
+  /** Noms + fonctions lus sur le site (site-people.ts) : candidats avant Hunter. */
+  sitePeople?: SitePerson[];
 }
 
 export interface NominativeContact {
@@ -147,7 +157,7 @@ export interface NominativeContact {
   /** Poste Hunter, sinon le libellé du rôle visé. */
   role: string;
   roleKey: RoleKey;
-  /** « hunter:domain-search » ou « hunter:email-finder ». */
+  /** « hunter:domain-search », « hunter:email-finder » ou « hunter:pattern » (schéma du domaine). */
   source: string;
   /** Confiance retenue (Hunter / vérification), 0–100. */
   confidence: number;
@@ -164,6 +174,28 @@ export interface NominativeOutcome {
 
 const MIN_SEARCH_CONFIDENCE = 80;
 const MIN_ACCEPT_ALL_CONFIDENCE = 90;
+
+/** Partie d'adresse : minuscules, sans accent, sans espace ni apostrophe (« Le Gall » → « legall »). */
+const slug = (text: string) =>
+  text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/['’\s.]/g, "").replace(/[^a-z-]/g, "");
+
+/**
+ * Adresse construite avec le SCHÉMA du domaine (Hunter : « {first}.{last} »,
+ * « {f}{last} »…). Une adresse ainsi devinée n'est JAMAIS utilisée sans Email
+ * Verifier. `null` si le schéma est inconnu ou le résultat douteux.
+ */
+export function emailFromPattern(pattern: string | null | undefined, firstName: string, lastName: string, domain: string): string | null {
+  if (!pattern || !/\{(first|last|f|l)\}/.test(pattern)) return null;
+  const first = slug(firstName);
+  const last = slug(lastName);
+  if (!first || !last) return null;
+  const local = pattern
+    .replace(/\{first\}/g, first)
+    .replace(/\{last\}/g, last)
+    .replace(/\{f\}/g, first[0])
+    .replace(/\{l\}/g, last[0]);
+  return /^[a-z0-9][a-z0-9._-]*$/.test(local) ? `${local}@${domain.toLowerCase()}` : null;
+}
 
 const fold = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z]/g, "");
 
@@ -185,10 +217,12 @@ export async function findNominativeContact(input: NominativeInput, deps: Nomina
 
   // a) Domain Search : candidats avec poste, classés par rôle visé puis confiance.
   outcome.calls.domainSearch += 1;
-  const people = ((await deps.domainSearch(input.domain, { departments })) ?? []).filter(
+  const search = await deps.domainSearch(input.domain, { departments });
+  const pattern = search?.pattern ?? null;
+  const people = (search?.people ?? []).filter(
     (person) => person.type !== "generic" && person.email.includes("@") && !blocked.has(person.email.toLowerCase()),
   );
-  outcome.steps.push(`domain-search ${input.domain} [${departments.join(",")}] : ${people.length} personne(s)`);
+  outcome.steps.push(`domain-search ${input.domain} [${departments.join(",")}] : ${people.length} personne(s)${pattern ? `, schéma ${pattern}` : ""}`);
   type Pick = { person: HunterPerson; target: RoleTarget; rank: number };
   const picks: Pick[] = [];
   targets.forEach((target, rank) => {
@@ -228,26 +262,52 @@ export async function findNominativeContact(input: NominativeInput, deps: Nomina
     if (found) return outcome;
   }
 
-  // b) Personne de sûr dans la recherche : Email Finder sur le dirigeant, s'il
-  //    fait partie des rôles visés et que son adresse n'a pas déjà échoué.
-  const leaderWanted = targets.some((target) => target.key === "dirigeant");
-  const leaderTried = best ? isLeader(best.person, input.leader) : false;
-  if (input.leader && leaderWanted && !leaderTried) {
-    outcome.calls.finder += 1;
-    const found = await deps.emailFinder(input.domain, input.leader.firstName, input.leader.lastName);
-    outcome.steps.push(`email-finder ${input.leader.firstName} ${input.leader.lastName} @${input.domain} : ${found?.email ?? "rien"}`);
-    if (found?.email && !blocked.has(found.email.toLowerCase())) {
-      const ok = await tryVerify({
-        email: found.email.toLowerCase(),
-        name: `${input.leader.firstName} ${input.leader.lastName}`,
-        role: found.position?.trim() || ROLES.dirigeant.label,
-        roleKey: "dirigeant",
-        source: "hunter:email-finder",
-        confidence: found.score ?? 0,
-      });
-      if (ok) return outcome;
+  // b) NOMS CONNUS, dans l'ordre des rôles visés : les personnes nommées sur le
+  //    site (équipe, contact, mentions légales) puis le dirigeant du registre.
+  //    Adresse : celle que Hunter connaît déjà pour ce nom, sinon le SCHÉMA du
+  //    domaine, sinon l'Email Finder — toujours suivie de l'Email Verifier.
+  type Named = { firstName: string; lastName: string; role: string; roleKey: RoleKey; origin: string };
+  const named: Named[] = [];
+  const sameName = (a: { firstName: string; lastName: string }, b: { firstName: string; lastName: string }) =>
+    fold(a.lastName) === fold(b.lastName) && fold(a.firstName).slice(0, 3) === fold(b.firstName).slice(0, 3);
+  for (const target of targets) {
+    for (const site of input.sitePeople ?? []) {
+      if (target.pattern.test(site.role) && !named.some((item) => sameName(item, site))) {
+        named.push({ firstName: site.firstName, lastName: site.lastName, role: site.role, roleKey: target.key, origin: "site" });
+      }
+    }
+    if (target.key === "dirigeant" && input.leader && !named.some((item) => sameName(item, input.leader!))) {
+      named.push({ ...input.leader, role: ROLES.dirigeant.label, roleKey: "dirigeant", origin: "registre" });
     }
   }
+  const alreadyTried = (item: Named) =>
+    best ? sameName(item, { firstName: best.person.firstName ?? "", lastName: best.person.lastName ?? "" }) || isLeader(best.person, item) : false;
+
+  let finderLeft = 2;
+  for (const item of named.filter((candidate) => !alreadyTried(candidate)).slice(0, 2)) {
+    const known = people.find((hit) => hit.firstName && hit.lastName && sameName(item, { firstName: hit.firstName, lastName: hit.lastName }));
+    let email = known?.email.toLowerCase() ?? null;
+    let source = known ? "hunter:domain-search" : "hunter:pattern";
+    let confidence = known?.confidence ?? 0;
+    let role = known?.position?.trim() || item.role;
+    if (!email) email = emailFromPattern(pattern, item.firstName, item.lastName, input.domain);
+    if (!email && finderLeft > 0) {
+      finderLeft -= 1;
+      outcome.calls.finder += 1;
+      const found = await deps.emailFinder(input.domain, item.firstName, item.lastName);
+      outcome.steps.push(`email-finder ${item.firstName} ${item.lastName} (${item.origin}) @${input.domain} : ${found?.email ?? "rien"}`);
+      email = found?.email?.toLowerCase() ?? null;
+      source = "hunter:email-finder";
+      confidence = found?.score ?? 0;
+      role = found?.position?.trim() || role;
+    } else if (email) {
+      outcome.steps.push(`${item.firstName} ${item.lastName} (${item.origin}, ${item.role}) → ${email} (${source})`);
+    }
+    if (!email || blocked.has(email)) continue;
+    const ok = await tryVerify({ email, name: `${item.firstName} ${item.lastName}`, role, roleKey: item.roleKey, source, confidence });
+    if (ok) return outcome;
+  }
+
   // d) Rien de sûr : l'appelant garde l'adresse générique.
   outcome.steps.push("aucune adresse nominative sûre : l'adresse générique reste");
   return outcome;

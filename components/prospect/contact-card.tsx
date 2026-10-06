@@ -48,7 +48,7 @@ export function ContactCard({ prospect }: { prospect: Pick<Prospect, "id" | "com
             <a href={`mailto:${fields.email}`} className="font-data text-[13px] text-text hover:text-primary-ink">
               {fields.email}
             </a>
-            {fields.email_type && <Badge tone={nominal ? "success" : "neutral"}>{nominal ? "nominatif" : "générique"}</Badge>}
+            {fields.email_type && <Badge tone={nominal ? "success" : "warning"}>{nominal ? "nominatif" : "adresse générique"}</Badge>}
           </div>
         ) : (
           <p className="text-[13px] text-muted">Aucune adresse : la programmation d&apos;un envoi reste impossible.</p>

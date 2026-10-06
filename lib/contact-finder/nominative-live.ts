@@ -3,8 +3,9 @@ import { recordUnitUsage } from "@/lib/usage/record";
 import { hunterStatus } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
 import type { Db } from "@/lib/trash/scope";
-import { hunter } from "./clients";
-import { upgradeToNominative, type UpgradeProspect, type UpgradeResult } from "./upgrade";
+import { fetchHtml, hunter } from "./clients";
+import { extractPeople, teamPages, type SitePerson } from "./site-people";
+import { upgradeToNominative, type UpgradeDeps, type UpgradeProspect, type UpgradeResult } from "./upgrade";
 import type { HunterPerson, NominativeDeps, VerifierStatus } from "./nominative";
 
 /**
@@ -25,16 +26,19 @@ interface DomainSearchEmail {
   seniority?: string | null;
 }
 
-export function liveNominativeDeps(prospectId: string | null): NominativeDeps {
+export function liveNominativeDeps(prospectId: string | null): UpgradeDeps {
   return {
+    sitePeople: readSitePeople,
     async domainSearch(domain, filters) {
       const params: Record<string, string> = { domain, type: "personal", limit: "10" };
       if (filters.departments.length) params.department = filters.departments.join(",");
-      const { data, billed } = await hunter<{ emails?: DomainSearchEmail[] }>("domain-search", params);
+      const { data, billed } = await hunter<{ emails?: DomainSearchEmail[]; pattern?: string | null }>("domain-search", params);
       const emails = (data?.emails ?? []).filter((email) => email.value);
       if (billed) await recordUnitUsage({ service: "hunter", operation: `nominatif:domain-search:${emails.length ? "trouve" : "vide"}`, units: 1, prospectId });
-      return data
-        ? emails.map<HunterPerson>((email) => ({
+      if (!data) return null;
+      return {
+        pattern: data.pattern ?? null,
+        people: emails.map<HunterPerson>((email) => ({
             email: (email.value as string).toLowerCase(),
             type: email.type ?? null,
             firstName: email.first_name ?? null,
@@ -42,9 +46,9 @@ export function liveNominativeDeps(prospectId: string | null): NominativeDeps {
             position: email.position ?? null,
             confidence: email.confidence ?? null,
             department: email.department ?? null,
-            seniority: email.seniority ?? null,
-          }))
-        : null;
+          seniority: email.seniority ?? null,
+        })),
+      };
     },
     async emailFinder(domain, firstName, lastName) {
       // Client existant : il trace déjà son appel dans api_usage.
@@ -73,4 +77,22 @@ export async function upgradeProspectLive(
   const { data } = await db.from("prospects").select("*").eq("id", prospectId).maybeSingle();
   if (!data) return { status: "skipped", reason: "fiche introuvable", contact: null, targets: [], calls: { domainSearch: 0, finder: 0, verifier: 0 }, flagged: 0 };
   return upgradeToNominative(db, data as unknown as UpgradeProspect, liveNominativeDeps(prospectId), options);
+}
+
+/**
+ * Noms + fonctions sur le site : accueil, puis 4 pages au plus (équipe, à
+ * propos, contact, mentions légales). Simples lectures HTTP, aucun crédit.
+ */
+export async function readSitePeople(domain: string): Promise<SitePerson[]> {
+  const home = (await fetchHtml(`https://${domain}`)) ?? (await fetchHtml(`https://www.${domain}`));
+  if (!home) return [];
+  const people = extractPeople(home.html, home.url);
+  for (const url of teamPages(home.html, home.url)) {
+    const page = await fetchHtml(url);
+    if (!page) continue;
+    for (const person of extractPeople(page.html, page.url)) {
+      if (!people.some((item) => item.firstName === person.firstName && item.lastName === person.lastName)) people.push(person);
+    }
+  }
+  return people.slice(0, 12);
 }

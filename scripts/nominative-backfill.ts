@@ -19,7 +19,8 @@ import { db, ownerId } from "./quality-live";
 import { readAll } from "@/lib/supabase/read-all";
 import { upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
 import { topicOf } from "@/lib/contact-finder/nominative";
-import { ineligibility, isFreeDraft, isGenericAddress, nominativeShare, type UpgradeProspect } from "@/lib/contact-finder/upgrade";
+import { addresseeHint, ineligibility, isFreeDraft, isGenericAddress, nominativeShare, type UpgradeProspect } from "@/lib/contact-finder/upgrade";
+import { usageName } from "@/lib/contact-finder/names";
 import type { Db } from "@/lib/trash/scope";
 
 const arg = (name: string, fallback: number) => {
@@ -78,6 +79,7 @@ async function main() {
   }
 
   const examples: { company: string; role: string; topic: string; pain: string }[] = [];
+  const misses: string[] = [];
   let upgraded = 0;
   let flagged = 0;
   for (const prospect of candidates.slice(0, LIMIT)) {
@@ -86,22 +88,43 @@ async function main() {
       break;
     }
     const result = await upgradeProspectLive(db as unknown as Db, prospect.id);
-    console.log(`${prospect.company_name} | ${result.status} | ${result.contact ? `${result.contact.name ?? "?"} — ${result.contact.role} <${result.contact.email}> (${result.contact.verifier}, ${result.contact.confidence})` : result.reason}`);
+    const detail = result.contact
+      ? `${result.contact.name ?? "?"} — ${result.contact.role} <${result.contact.email}> (${result.contact.source}, ${result.contact.verifier}, ${result.contact.confidence})`
+      : `${result.reason}${result.hint ? ` · ${result.hint.text}` : ""}`;
+    console.log(`${prospect.company_name} | ${result.status} | ${detail} | crédits ${result.calls.domainSearch + result.calls.finder + result.calls.verifier}`);
+    if (result.status === "kept") misses.push(`${prospect.company_name} <${prospect.email}>${result.hint ? ` → ${result.hint.text}` : ""}`);
     if (result.status === "skipped" && result.reason.startsWith("Hunter épuisé")) break;
     if (result.status === "upgraded" && result.contact) {
       upgraded += 1;
       flagged += result.flagged;
       const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? "—";
-      examples.push({ company: prospect.company_name, role: result.contact.role, topic: topicOf(pain), pain });
+      examples.push({ company: prospect.company_name, role: `${result.contact.name ?? "?"} — ${result.contact.role}`, topic: topicOf(pain), pain });
     }
   }
 
-  const after = nominativeShare((await loadStock(userId)).stock);
+  // Générique restante (brouillon verrouillé, etc.), hors opposées et « ne plus
+  // contacter » : « À l'attention de <dirigeant> » pour le générateur, sans crédit.
+  const { stock: remaining } = await loadStock(userId);
+  let hinted = 0;
+  for (const prospect of remaining.filter(isGenericAddress)) {
+    const figures = prospect.key_figures ?? {};
+    if (prospect.do_not_contact || figures.refuses_prospecting === true || figures.addressee_hint) continue;
+    const leader = usageName(typeof figures.leader_person === "string" ? figures.leader_person : null);
+    const hint = leader ? addresseeHint({ firstName: leader.firstName, lastName: leader.lastName, role: "dirigeant", source: "registre" }) : null;
+    if (!hint) continue;
+    await db.from("prospects").update({ key_figures: { ...figures, addressee_hint: hint } } as never).eq("id", prospect.id);
+    hinted += 1;
+  }
+
+  const after = nominativeShare(remaining);
   console.log("\n=== RAPPORT ===");
   console.log(`Nominatif sur le stock : avant ${pct(before)} → après ${pct(after)}`);
   console.log(`Fiches passées en nominatif : ${upgraded} ; brouillons marqués « à régénérer » : ${flagged}`);
   console.log(`Crédits Hunter consommés par ce run : ${await hunterCreditsSince(started)}`);
-  console.log("Exemples (entreprise · rôle choisi · sujet du mail) :");
+  console.log(`« À l'attention de… » posé sur ${hinted} fiche(s) restée(s) générique(s) (sans crédit)`);
+  console.log(`Sans résultat Hunter (${misses.length}) :`);
+  for (const miss of misses) console.log(`  · ${miss}`);
+  console.log("Exemples (entreprise · contact retenu · sujet du mail) :");
   for (const example of examples.slice(0, 5)) console.log(`  · ${example.company} · ${example.role} · ${example.pain} [${example.topic}]`);
 }
 

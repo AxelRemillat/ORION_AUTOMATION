@@ -3,7 +3,9 @@ import type { Db } from "@/lib/trash/scope";
 import { domainOfEmail, toDomain } from "./domains";
 import { classifyEmail } from "./extract";
 import { usageName } from "./names";
-import { findNominativeContact, type NominativeContact, type NominativeDeps, type RoleKey } from "./nominative";
+import { civilityFor } from "@/lib/emails/salutation";
+import { findNominativeContact, targetRoles, type NominativeContact, type NominativeDeps, type RoleKey } from "./nominative";
+import type { SitePerson } from "./site-people";
 
 /**
  * Passage d'une adresse GÉNÉRIQUE à une adresse NOMINATIVE (Hunter), pour une
@@ -49,10 +51,58 @@ export interface UpgradeResult {
   calls: { domainSearch: number; finder: number; verifier: number };
   /** Brouillons marqués « à régénérer ». */
   flagged: number;
+  /** Adresse restée générique : la personne à viser (« À l'attention de… »). */
+  hint?: AddresseeHint | null;
 }
 
 /** Une nouvelle recherche n'est pas relancée avant 90 jours (le cache Hunter dure autant). */
 export const NOMINATIVE_RETRY_MS = 90 * 86_400_000;
+/**
+ * Version de la stratégie. Une fiche cherchée avec une version ANTÉRIEURE est
+ * de nouveau éligible : v2 (06/10/2026) ajoute les noms du site et le schéma
+ * d'adresse du domaine — les échecs de la v1 méritent un nouvel essai.
+ */
+export const NOMINATIVE_VERSION = 2;
+
+/** Dépendances : Hunter, et la lecture (gratuite) des pages équipe/contact du site. */
+export type UpgradeDeps = NominativeDeps & { sitePeople?(domain: string): Promise<SitePerson[]> };
+
+/**
+ * « À l'attention de M. Pierre Durand » : quand l'adresse reste GÉNÉRIQUE, le
+ * mail peut viser la bonne personne. Champ `key_figures.addressee_hint`, lu par
+ * le générateur de mails (agent 2) ; le code contact ne touche pas au mail.
+ */
+export interface AddresseeHint {
+  name: string;
+  role: string | null;
+  civility: "Monsieur" | "Madame" | null;
+  /** Phrase prête : « À l'attention de M. Pierre Durand ». */
+  text: string;
+  source: "site" | "registre";
+}
+
+export function addresseeHint(person: { firstName: string; lastName: string; role?: string | null; source: "site" | "registre" } | null): AddresseeHint | null {
+  if (!person?.firstName || !person.lastName) return null;
+  const civility = civilityFor(person.firstName.split(/[-\s]/)[0] ?? "");
+  const name = `${person.firstName} ${person.lastName}`.replace(/\s+/g, " ").trim();
+  const prefix = civility === "Monsieur" ? "M. " : civility === "Madame" ? "Mme " : "";
+  return { name, role: person.role ?? null, civility, text: `À l'attention de ${prefix}${name}`, source: person.source };
+}
+
+/** La personne à viser, à défaut d'adresse nominative : le meilleur rôle du site, sinon le dirigeant. */
+export function bestAddressee(
+  pain: string | null,
+  headcount: number | null,
+  sitePeople: readonly SitePerson[],
+  leader: { firstName: string; lastName: string } | null,
+): AddresseeHint | null {
+  for (const target of targetRoles(pain, headcount)) {
+    const site = sitePeople.find((item) => target.pattern.test(item.role));
+    if (site) return addresseeHint({ ...site, source: "site" });
+    if (target.key === "dirigeant" && leader) return addresseeHint({ ...leader, role: "dirigeant", source: "registre" });
+  }
+  return leader ? addresseeHint({ ...leader, role: "dirigeant", source: "registre" }) : null;
+}
 
 const NO_CALLS = () => ({ domainSearch: 0, finder: 0, verifier: 0 });
 const skip = (reason: string): UpgradeResult => ({ status: "skipped", reason, contact: null, targets: [], calls: NO_CALLS(), flagged: 0 });
@@ -77,8 +127,9 @@ export function ineligibility(prospect: UpgradeProspect, now = new Date()): stri
   if (!isGenericAddress(prospect)) return "adresse déjà nominative";
   // Adresse saisie à la main : ni trouvée par ORION, ni classée par lui.
   if (!prospect.contact_found_by && !prospect.email_type) return "adresse saisie à la main";
-  const last = (figures.nominative as { checked_at?: string } | undefined)?.checked_at;
-  if (last && now.getTime() - Date.parse(last) < NOMINATIVE_RETRY_MS) return "déjà cherché il y a moins de 90 jours";
+  const previous = figures.nominative as { checked_at?: string; version?: number } | undefined;
+  const sameStrategy = (previous?.version ?? 1) >= NOMINATIVE_VERSION;
+  if (previous?.checked_at && sameStrategy && now.getTime() - Date.parse(previous.checked_at) < NOMINATIVE_RETRY_MS) return "déjà cherché il y a moins de 90 jours";
   return null;
 }
 
@@ -108,7 +159,7 @@ export function isFreeDraft(row: DraftRow): boolean {
 export async function upgradeToNominative(
   db: Db,
   prospect: UpgradeProspect,
-  deps: NominativeDeps,
+  deps: UpgradeDeps,
   options: { now?: Date; dryRun?: boolean } = {},
 ): Promise<UpgradeResult> {
   const now = options.now ?? new Date();
@@ -133,23 +184,30 @@ export async function upgradeToNominative(
   const { data: dnc } = await db.from("prospects").select("email").eq("user_id", prospect.user_id).eq("do_not_contact", true);
   const blocked = ((dnc ?? []) as { email: string | null }[]).map((row) => row.email).filter((email): email is string => Boolean(email));
 
-  const outcome = await findNominativeContact(
-    {
-      domain,
-      pain: prospect.brief?.pain?.task ?? prospect.pain_point ?? null,
-      headcount: typeof figures.headcount === "number" ? figures.headcount : null,
-      leader: leader ? { firstName: leader.firstName, lastName: leader.lastName } : null,
-      blocked,
-    },
-    deps,
-  );
+  const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? null;
+  const headcount = typeof figures.headcount === "number" ? figures.headcount : null;
+  const leaderName = leader ? { firstName: leader.firstName, lastName: leader.lastName } : null;
+  // Noms + fonctions lus sur le site (gratuit) : des candidats de plus avant Hunter.
+  const sitePeople = deps.sitePeople ? await deps.sitePeople(domain).catch(() => []) : [];
+  const outcome = await findNominativeContact({ domain, pain, headcount, leader: leaderName, blocked, sitePeople }, deps);
   const base = { contact: outcome.contact, targets: outcome.targets, calls: outcome.calls };
   if (options.dryRun) return { ...base, status: outcome.contact ? "upgraded" : "kept", reason: "simulation", flagged: 0 };
 
-  const trace = { checked_at: now.toISOString(), domain, from: prospect.email, targets: outcome.targets, steps: outcome.steps, found: outcome.contact?.email ?? null };
+  const trace = {
+    checked_at: now.toISOString(),
+    version: NOMINATIVE_VERSION,
+    domain,
+    from: prospect.email,
+    targets: outcome.targets,
+    site_people: sitePeople.map((item) => `${item.firstName} ${item.lastName} — ${item.role}`).slice(0, 8),
+    steps: outcome.steps,
+    found: outcome.contact?.email ?? null,
+  };
   if (!outcome.contact) {
-    await db.from("prospects").update({ key_figures: { ...figures, nominative: trace } } as never).eq("id", prospect.id);
-    return { ...base, status: "kept", reason: "aucune adresse nominative sûre", flagged: 0 };
+    // L'adresse reste générique : le mail peut viser la bonne personne.
+    const hint = bestAddressee(pain, headcount, sitePeople, leaderName);
+    await db.from("prospects").update({ key_figures: { ...figures, nominative: trace, ...(hint ? { addressee_hint: hint } : {}) } } as never).eq("id", prospect.id);
+    return { ...base, status: "kept", reason: "aucune adresse nominative sûre", flagged: 0, hint };
   }
 
   const contact = outcome.contact;
@@ -163,7 +221,8 @@ export async function upgradeToNominative(
       contact_source: contact.source,
       contact_confidence: contact.confidence,
       contact_found_by: `${contact.source}+verifier:${contact.verifier}`,
-      key_figures: { ...figures, nominative: trace, email_doubtful: false },
+      // Adresse nominative : plus besoin de « À l'attention de ».
+      key_figures: { ...figures, nominative: trace, email_doubtful: false, addressee_hint: null },
     } as never)
     .eq("id", prospect.id)
     .eq("user_id", prospect.user_id);
