@@ -121,6 +121,7 @@ export type PortfolioTitle = (typeof PORTFOLIO_TITLES)[number];
 /** Besoin de prospection : trouver des clients, leur écrire, mails commerciaux. */
 export const PROSPECTION_NEED = /(prospect|recherche de clients?|trouver (des |de nouveaux )?clients|g[ée]n[ée]ration de leads?|\bleads?\b|mails? commerciaux|e-?mails? de prospection|emailing|d[ée]marchage|lead gen)/i;
 
+const DOCUMENT_NEED = /(excel|xlsx|tarif|fichiers? de prix|colonnes?|import(er)? dans|pdf|bons? de commande|documents? fournisseurs?)/i;
 const EMAIL_NEED = /e-?mails?|courriels?|gmail|outlook|bo[iî]te (de r[ée]ception|mail)|\bmails?\b/i;
 
 /**
@@ -140,7 +141,8 @@ export function portfolioTitle(demo: DemoLink["key"], context = "", kind: Projec
     case "factures":
       return "Extraction automatique de factures";
     case "fichier":
-      return EMAIL_NEED.test(context) ? "Tri automatique des e-mails entrants" : null;
+      // Fichiers de prix, tableaux, documents à lire et importer : Axel cite l'extraction de factures (P2, 06/10).
+      return EMAIL_NEED.test(context) ? "Tri automatique des e-mails entrants" : DOCUMENT_NEED.test(context) ? "Extraction automatique de factures" : null;
     default:
       return "Tri automatique des e-mails entrants";
   }
@@ -303,7 +305,9 @@ export function checkProposal(
   const written = [parts.reading, ...parts.steps, parts.framing, parts.references ?? "", parts.question].join("\n");
   const words = countWords(core);
   const limits = wordsFor(context.platform);
-  if (words < limits.min || words > limits.max) {
+  // Codeur, Malt, ComeUp : la vraie limite est celle du message privé (1 000 caractères, contrôlée plus bas) ;
+  // la proposition Sage réellement envoyée par Axel fait ~155 mots.
+  if (words < limits.min || (words > limits.max && !isNoContactPlatform(platform))) {
     failures.push(`${words} mots : la proposition fait ${limits.min} à ${limits.max} mots (signature non comprise).`);
   }
   if (isNoContactPlatform(platform) && text.length > PRIVATE_MESSAGE_MAX_CHARS) {

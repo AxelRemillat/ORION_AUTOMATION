@@ -125,7 +125,15 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     ...(input.keyFacts ?? []).map((fact) => `- Fait vérifié (${fact.distinctiveness}/3) : ${fact.text}`),
   ].join("\n");
   // Faits soumis au critère C1 : key_figures.facts quand la fiche en a (Cowork #31), sinon ce que l'on sait d'elle.
-  const checklistFacts = input.keyFacts?.length ? input.keyFacts.map((fact) => `- ${fact.text}${fact.process_hint ? ` (process : ${fact.process_hint})` : ""}`).join("\n") : factText;
+  // Le juge voit EXACTEMENT ce que voit le rédacteur (mesure #32 : C1 refusait « épandeurs pour granulés »,
+  // lu dans le profil, faute de le trouver dans les 5 extraits) : faits vérifiés + ce que l'on sait d'elle.
+  // (`factText` porte déjà les faits vérifiés de key_figures.facts.)
+  const checklistFacts = [
+    factText,
+    input.activity ? `- Activité (leur site) : ${input.activity}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
 

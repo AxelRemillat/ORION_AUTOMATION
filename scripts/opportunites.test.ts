@@ -507,6 +507,11 @@ async function main() {
     check("modèle indisponible (quota) → relecture indisponible, pas de verdict inventé", (await judgeProposalChecklist(down, { title: sage.title, text: sage.text, ...ctx(sage) })) === null);
     const failed = proposalVerdictOf([...proposalCodeChecks(sage.text, ctx(sage)), ...(proposalMajority([checklistKeys(8) as never]) ?? [])]);
     check("réécriture ciblée : seuls les critères à NON, avec leur citation", proposalChecklistFeedback(failed) === "- P1 NON — Lecture précise du besoin (ses outils, ses documents, son résultat attendu) : « reformulation générique »", proposalChecklistFeedback(failed));
+    check("fichiers de prix Excel à importer → démo « Extraction automatique de factures » (choix d'Axel, P2)", portfolioTitle("fichier", "fichiers de prix fournisseurs Excel à importer dans Sage") === "Extraction automatique de factures" && portfolioTitle("fichier", "Nettoyer un export CSV") === null);
+    const sageParts = { ...PROPOSAL_POSITIVES[1], reading: `${PROPOSAL_POSITIVES[1].reading} Vous gardez la main sur chaque envoi.` };
+    const sageText = assembleProposal(sageParts, { language: "fr", demo: "emails", platform: "codeur", context: sageParts.ad });
+    const sageRules = checkProposal(sageParts, sageText.core, { language: "fr", budget: sageParts.budget, platform: "codeur", requested: requestedItems(sageParts.ad), ad: sageParts.ad }, sageText.text);
+    check("Codeur : plus de 150 mots mais < 1 000 caractères → pas refusée pour les mots", !sageRules.failures.some((line) => /mots : la proposition/.test(line)), sageRules.failures.join(" | "));
     check("prompt du modèle figé (aucune donnée variable)", buildProposalChecklistPrompt() === buildProposalChecklistPrompt() && buildProposalChecklistPrompt().includes(AXEL_SENT[2].text));
   }
 

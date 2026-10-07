@@ -103,7 +103,7 @@ export function deterministicChecks(core: string, context: { family: MailFamily;
 export const C5_NEGATIVES = [
   "« les informations manquantes sont signalées » (DELIMBE) : passif, on ne sait pas qui signale ni à qui.",
   "« quand la ville manque » (FIRSTPELLETS) : tournure lourde et peu naturelle.",
-  "« la démo trie une demande type » (PARCOME) : vague, aucun résultat utile.",
+  "« la démo trie une demande » (PARCOME) : « trier » n'est pas un résultat utile pour le client.",
   "« prépare les informations à valider » (TRANSLOCAUTO) : vague, quel résultat concret ?",
   "« pièces administratives » chez un fabricant de pièces mécaniques : mot à double sens dans leur métier.",
   "« prépare son classement dans la catégorie commandes » : résultat sans valeur pour le client.",
@@ -131,7 +131,10 @@ C3 — (pas en F4) La proposition dit ce que JE fais, à la 1re personne et à l
    OUI : « J'automatise la préparation des devis : je reprends les références et quantités demandées, signale les manques et prépare le chiffrage pour votre validation. »
    NON : « Les demandes sont triées puis une réponse est préparée. » (passif) ; « J'optimise vos processus. » (vague).
 C4 — (F4 seulement) Une phrase dit le RÉSULTAT concret que la démo produit pour le client (une facture, un devis, une réponse, une confirmation de délai, une commande fournisseur), puis le transpose honnêtement à leur activité.
-   NON : « la démo trie une demande type » ; « elle prépare les informations à valider ».
+   OUI : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels. »
+   OUI : « Elle lit une demande de transport type et prépare un brouillon de devis à valider ; le même principe s'appliquerait à vos demandes de transport. » (un devis, une facture, une réponse au client = résultat concret)
+   NON : « elle trie une demande » ; « elle prépare les informations à valider » (aucun document ni réponse pour le client).
+   Le mot « type » (ou « générique ») est OBLIGATOIRE en F4 : il dit honnêtement que la démo n'a pas été faite sur leurs données. Ne le juge jamais vague.
 C5 — Aucune formulation passive, vague, lourde ou à double sens dans leur métier. Refus réels :
 ${C5_NEGATIVES.map((line) => `   - ${line}`).join("\n")}
 
