@@ -23,7 +23,8 @@ export const STATUS_LABELS: Record<OpportunityStatus, string> = {
   a_repondre: "À répondre",
   envoyee: "Envoyée",
   reponse: "Réponse",
-  entretien: "Entretien",
+  // Valeur historique « entretien » : affichée « Conversation » (échanges suivis, plateformes #1).
+  entretien: "Conversation",
   gagnee: "Gagnée",
   perdue: "Perdue",
   ignoree: "Ignorée",
@@ -75,6 +76,14 @@ export interface Opportunity {
   proposal_on_excerpt?: boolean;
   suggested_amount_eur?: number | null;
   suggested_delay_days?: number | null;
+  /** Devise du montant suggéré (Upwork : USD) et enchère horaire. */
+  suggested_currency?: "EUR" | "USD" | null;
+  suggested_hourly?: boolean;
+  /** Client (nom affiché par la plateforme), jalons datés du suivi. */
+  client_name?: string | null;
+  conversation_at?: string | null;
+  won_at?: string | null;
+  last_event_at?: string | null;
 }
 
 export const isPlatform = (value: unknown): value is Platform => typeof value === "string" && (PLATFORMS as readonly string[]).includes(value);
