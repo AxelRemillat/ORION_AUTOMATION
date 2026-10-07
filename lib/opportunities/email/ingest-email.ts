@@ -101,11 +101,11 @@ export async function findOpportunity(db: Db, userId: string, platform: Platform
 /** Identifiant stable quand l'e-mail n'en donne pas : empreinte du message_id. */
 const fallbackId = (messageId: string) => `email:${createHash("sha256").update(messageId).digest("hex").slice(0, 24)}`;
 
-function alertFor(platform: Platform, kind: EmailKind, parsed: ParsedEmail, url: string, extra: string | null): Notification {
-  const what = kind === "invitation" ? "Invitation" : kind === "commande" ? "Nouvelle commande" : "Nouvelle demande";
+function alertFor(platform: Platform, kind: EmailKind, parsed: ParsedEmail, url: string, extra: string | null, knownTitle?: string): Notification {
+  const what = kind === "invitation" ? "Invitation" : kind === "commande" ? "Nouvelle commande" : kind === "gagnee" ? "Projet attribué" : kind === "message" ? "Message client" : "Nouvelle demande";
   const details = [parsed.clientName ? `Client : ${parsed.clientName}.` : null, parsed.budget ? `Budget : ${parsed.budget}.` : null, extra].filter(Boolean).join(" ");
   return {
-    title: `${what} ${PLATFORM_LABELS[platform]} : ${parsed.title ?? "sans titre"}`,
+    title: `${what} ${PLATFORM_LABELS[platform]} : ${knownTitle ?? parsed.title ?? "sans titre"}`,
     body: details || "Ouvrez la fiche dans ORION pour répondre.",
     priority: "high",
     tags: ["briefcase"],
@@ -142,10 +142,20 @@ export type EmailDecision =
   | { action: "rattache"; kind: EmailKind; opportunityId: string; status: OpportunityStatus; statusChanged: boolean; alert: boolean }
   | { action: "cree"; kind: EmailKind; status: OpportunityStatus | null; alert: boolean };
 
+/** Codeur : alerte pour un message du client ou un projet attribué. */
+export const CODEUR_ALERT_KINDS: readonly EmailKind[] = ["message", "gagnee"];
+
 export function decideEmail(parsed: ParsedEmail, existing: Pick<OpportunityRow, "id" | "status"> | null): EmailDecision {
   const platform = parsed.platform;
-  if (!platform || platform === "codeur" || platform === "autre") return { action: "a_trier", kind: parsed.kind, reason: platform ? `${platform} : pas d'ingestion par e-mail` : "expéditeur inconnu" };
+  if (!platform || platform === "autre") return { action: "a_trier", kind: parsed.kind, reason: "expéditeur inconnu" };
   if (parsed.kind === "autre") return { action: "a_trier", kind: "autre", reason: "type d'e-mail non reconnu" };
+  // Codeur (plateformes #6) : SUIVI d'un projet déjà connu par le flux RSS, jamais de création.
+  // Alerte pour un message client ou une attribution ; refus et clôture passent en « Perdue » sans alerte.
+  if (platform === "codeur") {
+    if (!existing) return { action: "a_trier", kind: parsed.kind, reason: parsed.externalId ? `Codeur : projet ${parsed.externalId} inconnu d'ORION` : "Codeur : aucun identifiant de projet dans l'e-mail" };
+    const next = statusAfterEvent(existing.status, parsed.kind);
+    return { action: "rattache", kind: parsed.kind, opportunityId: existing.id, status: next ?? existing.status, statusChanged: Boolean(next), alert: CODEUR_ALERT_KINDS.includes(parsed.kind) };
+  }
   if (parsed.kind === "recommandation") return { action: "recommandations", kind: "recommandation", jobs: parsed.jobs.length };
   const tracking = parsed.kind === "message" || parsed.kind === "offre" || parsed.kind === "gagnee" || parsed.kind === "perdue";
   if (existing && (tracking || parsed.kind === "invitation" || parsed.kind === "demande")) {
@@ -204,7 +214,7 @@ export async function planPlatformEmail(deps: Pick<EmailIngestDeps, "db" | "user
   if (seen) {
     return { ok: true, dry_run: true, message_id: email.message_id, duplicate: true, platform: parsed.platform, kind: parsed.kind, action: "doublon", reason: "message_id déjà reçu : rien ne serait refait", opportunity_status: null, would_alert: false, target: await targetOf(seen.opportunity_id), parsed: summary };
   }
-  const usable = parsed.platform && parsed.platform !== "codeur" && parsed.platform !== "autre";
+  const usable = parsed.platform && parsed.platform !== "autre";
   const existing = usable ? await findOpportunity(deps.db, deps.userId, parsed.platform as Platform, parsed) : null;
   const decision = decideEmail(parsed, existing);
   return {
@@ -267,7 +277,7 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   };
 
   const platform = parsed.platform;
-  const usable = platform && platform !== "codeur" && platform !== "autre";
+  const usable = platform && platform !== "autre";
   const existing = usable && parsed.kind !== "recommandation" && parsed.kind !== "autre" ? await findOpportunity(db, deps.userId, platform as Platform, parsed) : null;
   const decision = decideEmail(parsed, existing);
 
@@ -307,7 +317,7 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
     if (parsed.clientName && !existing.client_name) patch.client_name = parsed.clientName;
     await db.from("opportunities").update(patch).eq("id", existing.id);
     const url = orionUrl(deps.baseUrl, existing.id);
-    const alerted = decision.alert ? await sendAlert(deps, alertFor(platform, parsed.kind, parsed, url, null)) : false;
+    const alerted = decision.alert ? await sendAlert(deps, alertFor(platform, parsed.kind, parsed, url, null, existing.title)) : false;
     await finish({ status: "rattache", opportunity_id: existing.id, alerted });
     return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "rattache", opportunity_ids: [existing.id], alerted, orion_url: url, opportunity_status: decision.status };
   }

@@ -160,7 +160,9 @@ interface KindRule {
  * Sujets reconnus (sur le sujet sans accents, en minuscules). L'ordre compte :
  * le premier qui correspond l'emporte (une offre n'est pas un message).
  */
-export const SUBJECT_RULES: Record<"upwork" | "malt" | "comeup", readonly KindRule[]> = {
+type ParsedPlatform = "upwork" | "malt" | "comeup" | "codeur";
+
+export const SUBJECT_RULES: Record<ParsedPlatform, readonly KindRule[]> = {
   upwork: [
     { kind: "gagnee", subject: /(contract (has )?(started|begun)|offer (was |has been )?accepted|you('ve| have) been hired|hired you|your contract with)/ },
     { kind: "perdue", subject: /(proposal (was |has been )?declined|declined your proposal|job (posting )?(has been |was )?(closed|cancelled|canceled|removed)|no longer (available|accepting)|(position|job) (has been )?filled|hired (someone|another freelancer))/ },
@@ -182,20 +184,27 @@ export const SUBJECT_RULES: Record<"upwork" | "malt" | "comeup", readonly KindRu
     { kind: "demande", subject: /(demande personnalisee|offre personnalisee|nouvelle demande|demande de devis|souhaite (vous commander|commander)|demande (de|d')?(service|prestation))/ },
     { kind: "message", subject: /(nouveau message|vous a envoye un message|a repondu|message de)/ },
   ],
+  // Codeur (plateformes #6) : SUIVI seulement — les annonces arrivent par le flux RSS.
+  codeur: [
+    { kind: "gagnee", subject: /((projet|mission) .{0,120}?(vous )?a ete attribue|vous a ete attribue|vous avez ete (selectionne|retenu|choisi)|votre (offre|proposition) a ete (acceptee|retenue)|attribution du projet)/ },
+    { kind: "perdue", subject: /((offre|proposition) (n'a pas ete retenue|a ete refusee|refusee|declinee)|n'a pas retenu votre|projet .{0,120}?(a ete )?(ferme|clos|cloture|annule|attribue a un autre)|(fermeture|cloture) du projet|projet (ferme|clos|cloture|annule))/ },
+    { kind: "message", subject: /(nouveau message|vous a (envoye|ecrit) un message|message prive|a repondu a votre offre|message de)/ },
+  ],
 };
 
 /** Au défaut du sujet, quelques indices du corps (même ordre de priorité). */
-const BODY_HINTS: Record<"upwork" | "malt" | "comeup", readonly KindRule[]> = {
+const BODY_HINTS: Record<ParsedPlatform, readonly KindRule[]> = {
   upwork: [
     { kind: "invitation", subject: /(invited you to (interview|apply|submit)|has invited you)/ },
     { kind: "offre", subject: /(sent you an offer|accept the offer)/ },
   ],
   malt: [{ kind: "demande", subject: /(souhaite vous confier|vous propose un projet|demande de projet)/ }],
   comeup: [{ kind: "commande", subject: /(a passe (une )?commande|nouvelle commande)/ }],
+  codeur: [{ kind: "message", subject: /(vous a envoye un message|a repondu a votre offre)/ }],
 };
 
 export function kindOf(platform: Platform | null, subject: string, body: string): EmailKind {
-  if (platform !== "upwork" && platform !== "malt" && platform !== "comeup") return "autre";
+  if (platform !== "upwork" && platform !== "malt" && platform !== "comeup" && platform !== "codeur") return "autre";
   const subjectPlain = plain(subject);
   const bySubject = SUBJECT_RULES[platform].find((rule) => rule.subject.test(subjectPlain));
   if (bySubject) return bySubject.kind;
@@ -239,6 +248,12 @@ function platformLink(platform: Platform, links: string[]): { url: string | null
     const link = links.find((candidate) => /(comeup|5euros)\.com\/[^\s]*(order|commande|messages|conversation|demande)/i.test(candidate)) ?? null;
     const id = link?.match(/(?:orders?|commandes?|conversations?|demandes?)\/(\d{3,}|[a-z0-9-]{6,})/i)?.[1] ?? null;
     return { url: link?.split("?")[0] ?? null, externalId: id ? `comeup:${id.toLowerCase()}` : null };
+  }
+  if (platform === "codeur") {
+    // L'identifiant du projet dans le lien est l'external_id du flux RSS (« /projects/490123-titre »).
+    const link = links.find((candidate) => /codeur\.com\/projects\/\d+/i.test(candidate)) ?? null;
+    const id = link?.match(/codeur\.com\/projects\/(\d+)/i)?.[1] ?? null;
+    return { url: id && link ? link.split("?")[0].split("#")[0] : null, externalId: id };
   }
   return { url: null, externalId: null };
 }

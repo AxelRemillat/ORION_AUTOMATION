@@ -224,3 +224,72 @@ export const EMAIL_FIXTURES: EmailFixture[] = [
     expect: { platform: null, kind: "autre" },
   },
 ];
+
+/**
+ * Codeur (plateformes #6) — e-mails de SUIVI d'un projet connu par le flux RSS.
+ * Fictifs : projet 490123, client « Société Martin », montants inventés.
+ */
+const FOOTER_CODEUR = "\n\nVous recevez cet e-mail car vous avez répondu à ce projet sur Codeur.com.\nGérer mes notifications : https://www.codeur.com/users/notifications\nCodeur.com SAS";
+
+export const CODEUR_EMAIL_FIXTURES: EmailFixture[] = [
+  {
+    name: "Codeur — message du client",
+    email: {
+      message_id: "<codeur-msg-0001@codeur.com>",
+      from: "Codeur.com <notifications@codeur.com>",
+      subject: "Nouveau message de Société Martin sur le projet « Automatiser le tri de nos e-mails de commande »",
+      text: "Bonjour Axel,\n\nSociété Martin vous a envoyé un message concernant le projet « Automatiser le tri de nos e-mails de commande » :\n« Bonjour, votre approche nous intéresse. Pouvez-vous démarrer lundi ? »\n\nRépondre : https://www.codeur.com/projects/490123-automatiser-le-tri-de-nos-e-mails-de-commande/messages?utm_source=email" + FOOTER_CODEUR,
+      html: "",
+      received_at: "2026-10-07T09:00:00Z",
+    },
+    expect: { platform: "codeur", kind: "message", externalId: "490123", client: "Société Martin" },
+  },
+  {
+    name: "Codeur — projet attribué",
+    email: {
+      message_id: "<codeur-win-0002@codeur.com>",
+      from: "Codeur.com <notifications@codeur.com>",
+      subject: "Le projet « Automatiser le tri de nos e-mails de commande » vous a été attribué",
+      text: "Félicitations !\n\nSociété Martin vous a attribué le projet « Automatiser le tri de nos e-mails de commande ».\n\nVoir le projet : https://www.codeur.com/projects/490123-automatiser-le-tri-de-nos-e-mails-de-commande" + FOOTER_CODEUR,
+      html: "",
+      received_at: "2026-10-08T10:00:00Z",
+    },
+    expect: { platform: "codeur", kind: "gagnee", externalId: "490123" },
+  },
+  {
+    name: "Codeur — offre non retenue",
+    email: {
+      message_id: "<codeur-lost-0003@codeur.com>",
+      from: "Codeur.com <notifications@codeur.com>",
+      subject: "Votre offre n'a pas été retenue pour le projet « Chatbot pour notre site immobilier »",
+      text: "Bonjour,\n\nLe client a choisi un autre prestataire pour le projet « Chatbot pour notre site immobilier ».\n\nVoir le projet : https://www.codeur.com/projects/490456-chatbot-pour-notre-site-immobilier" + FOOTER_CODEUR,
+      html: "",
+      received_at: "2026-10-07T11:00:00Z",
+    },
+    expect: { platform: "codeur", kind: "perdue", externalId: "490456" },
+  },
+  {
+    name: "Codeur — projet clos",
+    email: {
+      message_id: "<codeur-closed-0004@codeur.com>",
+      from: "Codeur.com <notifications@codeur.com>",
+      subject: "Le projet « Extraction de factures PDF vers Excel » a été fermé",
+      text: "Bonjour,\n\nLe projet « Extraction de factures PDF vers Excel » a été fermé par son auteur.\n\nhttps://www.codeur.com/projects/490789-extraction-de-factures-pdf-vers-excel" + FOOTER_CODEUR,
+      html: "",
+      received_at: "2026-10-07T12:00:00Z",
+    },
+    expect: { platform: "codeur", kind: "perdue", externalId: "490789" },
+  },
+  {
+    name: "Codeur — message sur un projet inconnu d'ORION",
+    email: {
+      message_id: "<codeur-msg-0005@codeur.com>",
+      from: "Codeur.com <notifications@codeur.com>",
+      subject: "Nouveau message de Paul D. sur le projet « Site vitrine pour boulangerie »",
+      text: "Paul D. vous a envoyé un message.\n\nRépondre : https://www.codeur.com/projects/400001-site-vitrine-pour-boulangerie/messages" + FOOTER_CODEUR,
+      html: "",
+      received_at: "2026-10-07T13:00:00Z",
+    },
+    expect: { platform: "codeur", kind: "message", externalId: "400001" },
+  },
+];

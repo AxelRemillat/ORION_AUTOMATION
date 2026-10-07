@@ -73,7 +73,11 @@ export async function completeOne(
   // Site protégé contre les robots : on ne contourne pas la protection ; une
   // personne, elle, peut l'ouvrir — la fiche reste « À compléter ».
   const unreadable = resolved && "unreadable" in resolved ? resolved.unreadable : null;
-  let contact = await input.deps.findContact(row.prospect_id!).catch(() => null);
+  // RÈGLE « SITE D'ABORD » (Cowork #38) : sans domaine (site résolu, ou adresse
+  // déjà connue), aucune recherche payante — ni Pappers ni Hunter.
+  const known = (row.contact as { website?: string | null; email?: string | null } | null) ?? {};
+  const hasDomain = Boolean(site || unreadable || known.website || known.email || !input.deps.resolveSite);
+  let contact = hasDomain ? await input.deps.findContact(row.prospect_id!).catch(() => null) : null;
   // 2. Une adresse sur un domaine sans MX ne recevra jamais le mail.
   const domain = contact?.email?.split("@")[1];
   if (contact?.email && domain && input.deps.hasMx && (await input.deps.hasMx(domain)) === false) {

@@ -155,6 +155,8 @@ export const F4_TRANSPOSE = /(m[êe]me principe|appliqu(er|erais|erait|erions) (
  * sont triées, puis une commande… est préparée » — on ne sait pas qui fait quoi).
  */
 export const F2_FIRST_PERSON = /^\s*(je |j['’])/i;
+/** Ouverture par la démo (gabarit F4 refusé par Cowork #34) : « Elle lit… », « Dans la démo… », « Une démo… ». */
+export const DEMO_OPENING = /^\s*(elle\s|dans\s+(la|cette|une)\s+d[ée]mo|(une|la|cette)\s+d[ée]mo)/i;
 export const PASSIVE_VOICE = /\b(est|sont|serait|seraient|sera|seront|soit|soient)\s+(automatiquement\s+|ensuite\s+|alors\s+|directement\s+)?[a-zàâçéèêëîïôûùüÿœ]+(é|ée|és|ées)\b/i;
 
 /**
@@ -180,14 +182,16 @@ export function unsourcedTerms(text: string, known: string): string[] {
  * reste de la phrase ne sont pas des faits sur eux.
  */
 export function activityClause(family: MailFamily, hook: string): string {
-  if (family === "F4") return hook.split(/s['’]appliquerait\s+(?:à|aux|au)\s+/i)[1] ?? "";
+  if (family === "F4") return hook.split(/s['’]appliquerai(?:t|ent)\s+(?:à|aux|au)\s+/i)[1] ?? "";
   return (sentencesOf(hook)[0] ?? "").split(",")[0] ?? "";
 }
 
 function familyFailures(family: MailFamily, parts: MailParts, context: RuleContext): string[] {
   const failures: string[] = [];
   if (family === "F4") {
-    if (!F4_TYPE_CASE.test(parts.hook) || !F4_TRANSPOSE.test(parts.hook)) {
+    // Cowork #34 : la démo vient APRÈS le fait et le problème — jamais en ouverture.
+    if (DEMO_OPENING.test(parts.hook)) failures.push("F4 : n'ouvre jamais par la démo (« Elle lit… », « Dans la démo… ») : un fait propre à l'entreprise, puis le problème qui en découle ; la démo vient ensuite, en preuve.");
+    if (!F4_TYPE_CASE.test(parts.proposal) || !F4_TRANSPOSE.test(parts.proposal)) {
       failures.push("F4 — démo honnête : la démo est générique. Décris un cas TYPE (« Elle lit une commande type et prépare la facture à valider ») puis « le même principe s'appliquerait à vos … ». Ne laisse jamais croire qu'elle a été faite sur leur métier.");
     }
   }
@@ -197,12 +201,14 @@ function familyFailures(family: MailFamily, parts: MailParts, context: RuleConte
   if (family !== "F4" && !F2_FIRST_PERSON.test(parts.proposal)) {
     failures.push("La proposition commence à la première personne (« J'automatise… », « Je mets en place… », « Je construis… »).");
   }
+  // Passif après « J'automatise ce tri : » : permis par le code (mails validés par Axel) ; la voix active est
+  // imposée au RÉDACTEUR et jugée par C5 (Cowork #34, PLIMETAL). En F2, la phrase entière au passif est refusée.
   if (family === "F2") {
     const passive = parts.proposal.replace(/^[^:]*:/, "").match(PASSIVE_VOICE);
     if (passive && !/:/.test(parts.proposal)) failures.push(`Voix passive (« ${passive[0]} ») — dis qui fait quoi, à la première personne et à la voix active.`);
   }
   if ((family === "F2" || family === "F4") && context.knownText !== undefined) {
-    const unsourced = unsourcedTerms(activityClause(family, parts.hook), `${context.knownText} ${context.prospectText} ${context.facts.map((fact) => fact.value).join(" ")}`);
+    const unsourced = unsourcedTerms(activityClause(family, family === "F4" ? parts.proposal : parts.hook), `${context.knownText} ${context.prospectText} ${context.facts.map((fact) => fact.value).join(" ")}`);
     if (unsourced.length >= 2) failures.push(`Faits non sourcés (${unsourced.slice(0, 3).join(", ")}) : ne décris leur activité qu'avec ce que l'on sait d'eux (site, registre).`);
   }
   return failures;
@@ -211,8 +217,7 @@ function familyFailures(family: MailFamily, parts: MailParts, context: RuleConte
 export function checkMail(parts: MailParts, body: string, context: RuleContext): RuleResult {
   const failures: string[] = [];
   const family = context.family ?? "F1";
-  // F4 : la ligne « qui je suis » est posée par le code, seule la description de la démo est écrite par le modèle.
-  const written = family === "F4" ? parts.hook : `${parts.hook}\n${parts.proposal}`;
+  const written = `${parts.hook}\n${parts.proposal}`;
 
   // --- Salutation : posée par le code, on vérifie qu'elle n'est pas doublée.
   if (!body.startsWith(context.greeting)) failures.push(`Salutation : le mail doit commencer par « ${context.greeting} ».`);
@@ -227,13 +232,13 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   } else if (hook.length > LIMITS.hookSentences) failures.push(`Accroche en ${hook.length} phrases : deux au plus (le fait, puis sa conséquence).`);
   for (const sentence of [...hook, ...sentencesOf(parts.proposal)]) {
     const words = countWords(sentence);
-    // F4 : la formule « … type … ; le même principe s'appliquerait à … » tient en une phrase plus longue.
-    const sentenceMax = family === "F4" ? 32 : LIMITS.sentenceWords;
+    // F4 : la formule de la démo (« … type … ; le même principe s'appliquerait à … ») tient en une phrase plus longue.
+    const sentenceMax = family === "F4" && sentence === parts.proposal.trim() ? 32 : LIMITS.sentenceWords;
     if (sentence !== parts.proposal.trim() && words > sentenceMax) {
       failures.push(`Phrase de ${words} mots (« ${sentence.slice(0, 60)}… ») : ${sentenceMax} au plus, coupe-la.`);
     }
     // F4 : la formule attendue (« … ; le même principe s'appliquerait à … ») porte un point-virgule.
-    if (family !== "F4" && /;/.test(sentence)) failures.push(`Point-virgule (« ${sentence.slice(0, 50)}… ») : fais deux phrases courtes ou supprimes-en une.`);
+    if (!(family === "F4" && sentence === parts.proposal.trim()) && /;/.test(sentence)) failures.push(`Point-virgule (« ${sentence.slice(0, 50)}… ») : fais deux phrases courtes ou supprimes-en une.`);
   }
 
   // --- Règles Cowork : décrire n'est pas accrocher, « prend du temps » n'est pas une conséquence.
@@ -273,7 +278,7 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   const proposal = family === "F4" ? [parts.proposal] : sentencesOf(parts.proposal);
   if (proposal.length !== 1) failures.push(`Proposition en ${proposal.length} phrases : une seule.`);
   const proposalWords = countWords(parts.proposal);
-  if (proposalWords > LIMITS.proposalWords) failures.push(`Proposition de ${proposalWords} mots : ${LIMITS.proposalWords} au plus.`);
+  if (family !== "F4" && proposalWords > LIMITS.proposalWords) failures.push(`Proposition de ${proposalWords} mots : ${LIMITS.proposalWords} au plus.`);
   // « Concrètement, … » (F2) n'est pas une étape.
   const steps = family === "F4" ? 0 : (parts.proposal.replace(/^\s*concr[èe]tement\s*,/i, "").match(/,|\bpuis\b|\bensuite\b|\bet enfin\b/gi) ?? []).length;
   if (steps >= 3) failures.push("Proposition : c'est une liste d'étapes techniques. Dis le bénéfice (temps gagné, erreurs ou retards évités).");
@@ -306,6 +311,9 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
 
   // --- Nombres : seulement ceux des faits (15 minutes vient de la demande).
   const known = knownNumbers(context.facts);
+  // Cowork #34 (ICP LOGISTIQUE, « 4 000 commandes par heure ») : un nombre lu sur le site ou dans
+  // key_figures.facts n'est pas inventé. Le lien entre ce nombre et le problème, c'est au juge de le dire.
+  for (const value of numbersIn(`${context.prospectText ?? ""} ${context.knownText ?? ""}`)) known.add(value);
   for (const value of context.offerNumbers ?? []) known.add(value);
   const invented = numbersIn(written).filter((value) => !known.has(value) && !known.has(Math.round(value)));
   if (invented.length) failures.push(`Nombre absent des faits : ${[...new Set(invented)].join(", ")}.`);

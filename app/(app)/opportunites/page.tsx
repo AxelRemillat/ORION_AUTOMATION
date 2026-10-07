@@ -14,7 +14,7 @@ export const metadata = { title: "Opportunités · ORION" };
  * Analyse et proposition par l'IA, suivi. Aucun envoi, aucune candidature,
  * aucune connexion aux plateformes, aucun scraping.
  */
-export default async function OpportunitesPage({ searchParams }: { searchParams?: { id?: string } }) {
+export default async function OpportunitesPage({ searchParams }: { searchParams?: { id?: string; filtre?: string } }) {
   await requireUser();
   const db = createClient() as unknown as { from: (table: string) => any };
   const [{ data }, emails] = await Promise.all([
@@ -35,7 +35,12 @@ export default async function OpportunitesPage({ searchParams }: { searchParams?
         title="Opportunités"
         description="Codeur, Upwork, Malt, ComeUp : analyse d'adéquation et proposition prête à copier. Rien n'est envoyé automatiquement."
       />
-      <OpportunitiesClient initial={opportunities} emails={emails as OpportunityEmail[]} focusId={searchParams?.id ?? null} />
+      <OpportunitiesClient
+        initial={opportunities}
+        emails={emails as OpportunityEmail[]}
+        focusId={searchParams?.id ?? null}
+        initialFilter={searchParams?.filtre === "relances" || searchParams?.filtre === "a_trier" ? searchParams.filtre : null}
+      />
     </>
   );
 }

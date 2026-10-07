@@ -151,7 +151,9 @@ const REVIEWER_GRID = `CE QUI SERA EXIGÉ PAR LE RELECTEUR (consultant B2B senio
 - Le fait le plus DISTINCTIF que l'on sait d'eux (leurs produits, leur clientèle, un service précis), jamais une catégorie générique (« vos demandes de devis », « votre bureau d'étude »).
 - Un problème concret, crédible, lié à CE fait (une demande qui attend, une référence manquante, un devis qui part tard) — dit en une phrase simple.
 - Ce que je fais, à la 1re personne, et le RÉSULTAT visible pour eux ou leur client (ce qui arrive, ce qui est signalé, ce que le client reçoit) — jamais « prépare un dossier / une fiche / son classement ».
-- Aucun mot à double sens dans leur métier, aucune tournure lourde, phrases courtes.`;
+- Aucun mot à double sens dans leur métier, aucune tournure lourde, phrases courtes.
+- Toujours la VOIX ACTIVE : « je signale », « je prépare » — jamais « sont signalées », « est préparé ».
+- Jamais deux fois le même groupe nominal (« lunettes de soleil » une seule fois) : reprends-le par « ces commandes », « ces produits ».`;
 
 const COMMON_RULES = (input: WriterInput) => `${REVIEWER_GRID}
 
@@ -175,20 +177,20 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
         // F5 « partenaire » (agent3) : même ordre que F1, contenu différent.
         : family === "F5"
           ? `${input.greeting}\n\n<FAIT SUR L'AGENCE + PROBLÈME DE SES CLIENTS — c'est toi>\n\n<PROPOSITION EN MARQUE BLANCHE — c'est toi>\n\n${proof}\n\n${input.cta}`
-          : `${input.greeting}\n\n${proof}\n\n<CE QUE FAIT LA DÉMO — c'est toi>\n\n${F4_WHO}\n\n${input.cta}`;
+          : `${input.greeting}\n\n<FAIT + PROBLÈME — c'est toi>\n\n${proof}\n\n<CE QUE MONTRE LA DÉMO — c'est toi>\n\n${input.cta}`;
   const parts =
     family === "F2"
       ? `1. "hook" = BESOIN PROBABLE lié à leur activité, UNE ou DEUX phrases de 20 mots au plus : nomme leur activité précisément (« Pour une entreprise qui fabrique des emballages sur mesure, … ») et la tâche qui revient souvent, avec ce qu'elle produit (client qui attend, devis qui part tard, double saisie).
 2. "proposal" = UNE phrase de 22 mots au plus, À LA PREMIÈRE PERSONNE et à la VOIX ACTIVE, qui commence par « Je mets en place », « J'automatise » ou « Je construis » : ce que je ferais chez eux, concrètement (« Je mets en place le tri de vos demandes de pièces et je prépare la commande fournisseur, que vous validez. »). Jamais de passif (« sont triées », « est préparée »). Elle décrit ce que montre la démo « ${input.demo.label} ».
    Phrases simples et naturelles : pas de tournure lourde (« revient souvent, avec une intervention qui attend »).`
       : family === "F3"
-        ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier (« Qui s'occupe de confirmer les délais de vos commandes de pièces sur mesure ? »). Directe, polie, jamais intrusive.
-2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise » : ce qui se fait tout seul pour cette tâche. Elle décrit ce que montre la démo « ${input.demo.label} ».`
+        ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier, et qui NOMME UN OBJET CONCRET PROPRE À L'ENTREPRISE (un produit, un type de commande, un document précis : « Qui confirme les délais de vos commandes d'épandeurs ? »). Jamais un objet vague (« vos documents clients », « vos demandes »). Directe, polie, jamais intrusive.
+2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise », À LA VOIX ACTIVE : je fais, je signale, je prépare (« J'automatise la lecture des plans et je signale les cotes manquantes au bureau d'étude. ») — JAMAIS « sont signalées », « est préparé ». Elle décrit ce que montre la démo « ${input.demo.label} ». Ne répète pas le nom de l'objet de la question : reprends-le par « ces commandes », « ces plans ».`
         : family === "F5"
           ? `1. "hook" = LE FAIT PUIS LE PROBLÈME, deux phrases, 40 mots au plus. Phrase 1 : un fait PRÉCIS lu sur leur site (client nommé, réalisation, offre) — jamais un compliment. Phrase 2 : ce que ce type de client leur demande ensuite et qu'une petite équipe ne peut pas produire (automatisations, agents IA, intégrations), ou la capacité qui les oblige à refuser. C'est une situation TYPE du métier d'agence, jamais un défaut affirmé chez eux.
 2. "proposal" = UNE phrase de 25 mots au plus, À LA PREMIÈRE PERSONNE : je réalise en MARQUE BLANCHE, ils vendent, gardent la relation et facturent (« Je les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom. »). Jamais proposer de travailler en direct avec leurs clients. Elle décrit ce que montre la démo « ${input.demo.label} ».`
-        : `1. "hook" = CE QUE FAIT LA DÉMO, HONNÊTEMENT : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus, sur ce modèle : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent, d'après ce que l'on sait d'eux>, <ce que ça leur change : qui part plus vite, plus de ressaisie…>. » (exemple : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels, facturées dès la livraison. »). La démo est « ${input.demo.label} ». <le résultat> est UN DOCUMENT ou UNE RÉPONSE que le client reçoit : un accusé de réception, une confirmation de commande ou de délai, un brouillon de devis, une facture, une réponse au client — JAMAIS « le tri », « le classement », « les informations à valider » (critère C4 de la relecture, mesure #32 : « Elle trie des demandes types » refusé à chaque fois).
-2. "proposal" = chaîne vide "" (la ligne « qui je suis » est posée par le code).`;
+        : `1. "hook" = FAIT + PROBLÈME, comme un mail classique : DEUX phrases de 20 mots au plus. Phrase 1 : un FAIT PROPRE à l'entreprise tiré de ce que l'on sait d'elle (produit, gamme, clientèle, service précis). Phrase 2 : le problème concret qui en découle (une demande qui attend, une référence manquante, un devis qui part tard). JAMAIS d'ouverture par la démo (« Elle lit… », « Dans la démo… », « Une démo… » : interdits, Cowork #34).
+2. "proposal" = CE QUE MONTRE LA DÉMO, HONNÊTEMENT, en preuve : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent>. » <le résultat> est UN DOCUMENT ou UNE RÉPONSE que le client reçoit (accusé de réception, confirmation de commande ou de délai, brouillon de devis, facture, réponse au client) — JAMAIS « le tri », « le classement », « les informations à valider ». La démo est « ${input.demo.label} ».`;
   return `Tu écris, à la place d'Axel Remillat (indépendant, automatisation et IA pour PME), des morceaux d'un mail de prospection à froid pour ${input.companyName}. Le reste est déjà écrit par le code.
 
 LE MAIL FINAL AURA EXACTEMENT CETTE FORME :
@@ -216,7 +218,6 @@ export function parseParts(raw: string, family: MailFamily = "F1"): MailParts | 
   if (!parsed || typeof parsed !== "object") return null;
   const value = parsed as Record<string, unknown>;
   const text = (field: string) => (typeof value[field] === "string" ? (value[field] as string).trim() : "");
-  // F4 : la ligne « qui je suis » est posée par le code, le modèle n'écrit pas de proposition.
-  const parts = { subject: text("subject"), hook: text("hook"), proposal: family === "F4" ? F4_WHO : text("proposal") };
+  const parts = { subject: text("subject"), hook: text("hook"), proposal: text("proposal") };
   return parts.hook && parts.proposal ? parts : null;
 }

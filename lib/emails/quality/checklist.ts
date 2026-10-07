@@ -1,8 +1,8 @@
 import { isOpenAIQuotaError } from "@/lib/ai/quota";
 import type { AskFn } from "@/lib/ai/chat";
 import { ALLOWED_DEMO_URLS, DEMO_HOST } from "./demo-links";
-import { bareDemoUrl, FAMILY_LIMITS, FAMILY_PARAM, type MailFamily } from "./families";
-import { FORBIDDEN_WORDS, wordHit } from "./rules";
+import { bareDemoUrl, F2_INTRO, F4_WHO, FAMILY_LIMITS, FAMILY_PARAM, type MailFamily } from "./families";
+import { DEMO_OPENING, FORBIDDEN_WORDS, wordHit } from "./rules";
 import { countWords } from "./template";
 
 /**
@@ -28,7 +28,7 @@ const keepQuota = (error: unknown): string => {
   return "";
 };
 
-export type CriterionId = "D1" | "D2" | "D3" | "D4" | "D5" | "C1" | "C2" | "C3" | "C4" | "C5";
+export type CriterionId = "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "D7" | "C1" | "C2" | "C3" | "C4" | "C5";
 
 export interface CriterionResult {
   id: CriterionId;
@@ -53,6 +53,8 @@ export const CRITERIA: Record<CriterionId, { label: string; kind: "code" | "llm"
   D3: { label: "Salutation correcte", kind: "code", penalty: 1 },
   D4: { label: "Un seul appel à l'action (une seule question finale)", kind: "code", penalty: 1 },
   D5: { label: "Aucun mot interdit", kind: "code", penalty: 1 },
+  D6: { label: "Aucun groupe nominal répété", kind: "code", penalty: 1 },
+  D7: { label: "Pas d'ouverture par la démo (fait et problème d'abord)", kind: "code", penalty: 2 },
   C1: { label: "Le fait cité est spécifique et figure dans les faits de la fiche", kind: "llm", penalty: 3 },
   C2: { label: "Le problème découle de ce fait et concerne le rôle du destinataire", kind: "llm", penalty: 2 },
   C3: { label: "Proposition concrète, à la 1re personne, à la voix active", kind: "llm", penalty: 2 },
@@ -60,7 +62,31 @@ export const CRITERIA: Record<CriterionId, { label: string; kind: "code" | "llm"
   C5: { label: "Aucune formulation passive, vague ou à double sens", kind: "llm", penalty: 1 },
 };
 
-export const CHECKLIST_SAMPLES = 3;
+/**
+ * Lectures (Cowork #34) : C1 et C5, les critères qui basculaient d'un passage
+ * à l'autre, sont tranchés sur CHECKLIST_SAMPLES lectures ; les autres sur les
+ * BASE_SAMPLES premières. Un seul appel par lecture (JSON de tous les critères).
+ */
+export const CHECKLIST_SAMPLES = 5;
+export const BASE_SAMPLES = 3;
+const WIDE: ReadonlySet<CriterionId> = new Set(["C1", "C5"]);
+
+/** Mots de liaison, et mots trop génériques pour qu'une répétition gêne (« références manquantes » ×2 passe). */
+const STOP = new Set(["le", "la", "les", "l", "un", "une", "des", "de", "du", "d", "au", "aux", "à", "a", "et", "ou", "en", "dans", "sur", "pour", "par", "avec", "vos", "votre", "nos", "notre", "leur", "leurs", "ce", "ces", "cette", "qui", "que", "quoi", "je", "j", "vous", "il", "elle", "est", "sont", "se", "s", "ne", "pas", "plus", "chaque", "avant", "après"]);
+const GENERIC = new Set(["référence", "références", "manquante", "manquantes", "manquant", "manquants", "commande", "commandes", "demande", "demandes", "devis", "information", "informations", "client", "clients", "délai", "délais", "e-mail", "e-mails", "mail", "mails", "réponse", "confirmation", "confirmations", "validation", "reçues", "reçus", "reçue"]);
+
+/** D6 : le même groupe nominal (2 mots pleins consécutifs, dont un non générique) revient. */
+export function repeatedNounGroups(text: string): string[] {
+  const words = text.toLowerCase().replace(/[’']/g, " ").split(/[^\p{L}\p{N}-]+/u).filter((word) => word && !STOP.has(word));
+  const seen = new Map<string, number>();
+  for (let index = 0; index + 1 < words.length; index += 1) {
+    const pair = [words[index], words[index + 1]];
+    if (pair.every((word) => GENERIC.has(word))) continue;
+    const key = pair.join(" ");
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  return [...seen].filter(([, count]) => count > 1).map(([key]) => key);
+}
 
 /** Salutation que le code pose : « Bonjour, » ou « Bonjour Monsieur/Madame <Nom>, ». */
 const GREETING_SHAPE = /^Bonjour( (Monsieur|Madame)( [\p{Lu}][\p{L}' -]*)?)?,$/u;
@@ -93,6 +119,10 @@ export function deterministicChecks(core: string, context: { family: MailFamily;
 
   const written = blocks.slice(1).join("\n");
   const forbidden = FORBIDDEN_WORDS.filter((word) => wordHit(written, word));
+  // Texte écrit par le rédacteur : sans la salutation, la ligne de démo, les phrases fixes et la demande.
+  const own = blocks.slice(1, -1).filter((block) => !block.includes(DEMO_HOST) && block !== F2_INTRO && block !== F4_WHO);
+  const repeated = repeatedNounGroups(own.join(" "));
+  const opening = own[0] ?? "";
 
   return [
     result("D1", words >= min && words <= max, `${words} mots (${min} à ${max})`),
@@ -100,6 +130,8 @@ export function deterministicChecks(core: string, context: { family: MailFamily;
     result("D3", greetingOk, first || "aucune salutation"),
     result("D4", ctaOk, `${questions} question(s) ; fin : « ${last.slice(-80)} »`),
     result("D5", forbidden.length === 0, forbidden.length ? forbidden.join(", ") : "aucun"),
+    result("D6", repeated.length === 0, repeated.length ? repeated.join(", ") : "aucune"),
+    result("D7", !DEMO_OPENING.test(opening) && !(blocks[1] ?? "").includes(DEMO_HOST), opening.slice(0, 90) || "—"),
   ];
 }
 
@@ -116,10 +148,10 @@ export const C5_NEGATIVES = [
   "« prépare son classement dans la catégorie commandes » : résultat sans valeur pour le client.",
 ] as const;
 
-const SEMANTIC: Exclude<CriterionId, "D1" | "D2" | "D3" | "D4" | "D5">[] = ["C1", "C2", "C3", "C4", "C5"];
+const SEMANTIC: Exclude<CriterionId, "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "D7">[] = ["C1", "C2", "C3", "C4", "C5"];
 
 export function semanticCriteria(family: MailFamily): typeof SEMANTIC {
-  // F4 n'a pas de phrase « J'automatise… » (la démo parle, puis « Je suis Axel… ») : C4 y remplace C3.
+  // F4 n'a pas de phrase « J'automatise… » (la démo parle en preuve) : C4 y remplace C3. C1 et C2 s'y appliquent comme ailleurs.
   return family === "F4" ? SEMANTIC.filter((id) => id !== "C3") : SEMANTIC.filter((id) => id !== "C4");
 }
 
@@ -128,10 +160,12 @@ export function buildChecklistPrompt(): string {
   return `Tu vérifies un mail de prospection à froid écrit par Axel Remillat (indépendant, automatisation et IA pour PME). Tu ne donnes PAS de note : tu réponds OUI (true) ou NON (false) à chaque critère, avec une CITATION EXACTE du mail qui prouve ta réponse (pour un NON : le passage fautif ; s'il manque quelque chose, le passage le plus proche).
 La forme (longueur, lien, salutation, demande finale, mots interdits) est vérifiée par un programme : ne la juge pas.
 
-C1 — Ce que le mail affirme de l'entreprise (produit, clientèle, service, process) est SPÉCIFIQUE à elle et figure dans « Faits de la fiche » (même reformulé). NON si c'est une catégorie générique (« vos demandes de devis », « votre secteur ») ou un fait absent de la liste.
+C1 — Le mail s'appuie sur un fait SPÉCIFIQUE à l'entreprise (produit, gamme, clientèle, service, process), présent dans « Faits de la fiche » OU dans « Texte du site ». Compare sur le SENS, jamais à la lettre : un fait reformulé, abrégé ou combiné à partir de ces textes = OUI (« capteurs de front d'onde et miroirs déformables » lu sur le site = OUI). NON si c'est une catégorie générique (« vos demandes de devis », « vos documents clients », « votre secteur ») ou un fait qu'aucun des deux textes ne porte.
+   En F4 aussi : le mail doit ouvrir sur un fait propre à l'entreprise ; la démo n'est PAS un fait sur elle.
+   En F3 : la question doit NOMMER un objet concret propre à l'entreprise (un produit, un type de commande, un document précis) — « documents clients », « vos demandes » = NON.
    OUI : « Votre liste de produits en ligne permet aux crèches de demander un devis personnalisé. » (fait : devis personnalisé à partir d'une liste de produits).
    NON : « Dans le négoce, les commandes arrivent par mail. » (générique).
-C2 — Le problème DÉCOULE de ce fait (même tâche, même objet) et concerne le rôle du destinataire quand on le connaît (DAF : factures, relances ; commercial : devis, commandes ; service client : demandes reçues). Une situation TYPE du métier dite simplement suffit (« une quantité manquante retarde son envoi ») : elle n'a pas à être prouvée.
+C2 — (toutes familles, F4 comprise) Un problème est ÉNONCÉ et il DÉCOULE de ce fait (même tâche, même objet) et concerne le rôle du destinataire quand on le connaît (DAF : factures, relances ; commercial : devis, commandes ; service client : demandes reçues). Une situation TYPE du métier dite simplement suffit (« une quantité manquante retarde son envoi ») : elle n'a pas à être prouvée.
    OUI : « Qui repère les cotes manquantes dans les plans de découpe laser avant le devis ? » (fait : analyse des plans et devis sous 48 h).
    NON : un problème sans lien avec le fait cité, ou affirmé comme un défaut constaté chez eux (« vous perdez des commandes »).
    Cas du mail à une AGENCE (famille F5, segment Agences) : le problème est celui de SES CLIENTS, ou sa capacité à produire — « ces clients demandent ensuite des automatisations qu'une équipe de six personnes ne peut pas livrer » est un OUI. Ne le refuse pas au motif qu'il ne décrit pas un défaut de l'agence elle-même.
@@ -145,6 +179,7 @@ C4 — (F4 seulement) Une phrase dit le RÉSULTAT concret que la démo produit p
    Le mot « type » (ou « générique ») est OBLIGATOIRE en F4 : il dit honnêtement que la démo n'a pas été faite sur leurs données. Ne le juge jamais vague.
 C5 — Aucune formulation passive, vague, lourde ou à double sens dans leur métier. Refus réels :
 ${C5_NEGATIVES.map((line) => `   - ${line}`).join("\n")}
+   À l'inverse, un acte concret à la voix active est CLAIR, même court : « je signale les références manquantes et prépare une confirmation à valider », « je prépare un devis à vérifier » = OUI (Cowork #34, FIRSTPELLETS prêt).
 
 Réponds UNIQUEMENT en JSON : {"C1":{"ok":true|false,"citation":"…"},"C2":{…},"C3":{…},"C4":{…},"C5":{…}} — C3 sauf en F4, C4 seulement en F4.`;
 }
@@ -167,13 +202,18 @@ export function parseChecklistSample(raw: string): Sample | null {
   return Object.keys(sample).length ? sample : null;
 }
 
-/** Majorité par critère sur les lectures lisibles ; égalité → NON (prudence). `null` si aucune lecture. */
+/**
+ * Majorité par critère sur les lectures lisibles ; égalité → NON (prudence).
+ * C1 et C5 votent sur toutes les lectures, les autres sur les BASE_SAMPLES premières.
+ * `null` si aucune lecture.
+ */
 export function majority(samples: readonly (Sample | null)[], ids: readonly CriterionId[]): CriterionResult[] | null {
   const read = samples.filter((sample): sample is Sample => Boolean(sample));
   if (!read.length) return null;
   const results: CriterionResult[] = [];
   for (const id of ids) {
-    const votes = read.map((sample) => sample[id]).filter((vote): vote is { ok: boolean; citation: string } => Boolean(vote));
+    const pool = WIDE.has(id) ? read : read.slice(0, BASE_SAMPLES);
+    const votes = pool.map((sample) => sample[id]).filter((vote): vote is { ok: boolean; citation: string } => Boolean(vote));
     if (!votes.length) return null;
     const yes = votes.filter((vote) => vote.ok).length;
     const ok = yes > votes.length - yes;
@@ -201,6 +241,8 @@ export interface ChecklistInput {
   /** Faits de la fiche : key_figures.facts s'ils existent, sinon ce que l'on sait d'elle. */
   facts: string;
   recipientRole?: string | null;
+  /** Texte du site déjà extrait (profil métier, signaux) : C1 y cherche le fait, sur le sens. */
+  siteText?: string | null;
 }
 
 /**
@@ -211,7 +253,7 @@ export interface ChecklistInput {
 export async function judgeChecklist(ask: AskFn, input: ChecklistInput, operation = "qualite:checklist", samples = CHECKLIST_SAMPLES): Promise<ChecklistVerdict | null> {
   const code = deterministicChecks(input.core, { family: input.family, greeting: input.greeting });
   if (code.some((item) => !item.ok)) return verdictOf(code);
-  const user = `Famille : ${input.family}\nEntreprise : ${input.company}\nDestinataire : ${input.recipientRole?.trim() || "rôle inconnu"}\nFaits de la fiche :\n${input.facts || "- (aucun)"}\n\nMAIL\nObjet : ${input.subject}\n\n${input.core}`;
+  const user = `Famille : ${input.family}\nEntreprise : ${input.company}\nDestinataire : ${input.recipientRole?.trim() || "rôle inconnu"}\nFaits de la fiche :\n${input.facts || "- (aucun)"}\nTexte du site (extrait) :\n${(input.siteText ?? "").slice(0, 3000) || "(aucun)"}\n\nMAIL\nObjet : ${input.subject}\n\n${input.core}`;
   const raws = await Promise.all(
     Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
   );
