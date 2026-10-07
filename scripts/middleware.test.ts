@@ -24,6 +24,7 @@ console.log("\n1. Routes machine : exemptées de la redirection");
 {
   check("/api/inbound est une route machine", isMachinePath("/api/inbound"));
   check("/api/opportunities/ingest (veille Codeur) est une route machine", isMachinePath("/api/opportunities/ingest"));
+  check("/api/opportunities/ingest-email (e-mails des plateformes) est une route machine", isMachinePath("/api/opportunities/ingest-email"));
   check("/api/opportunites (saisie, session) n'est PAS une route machine", !isMachinePath("/api/opportunites"));
   check("/api/cron/purge-trash aussi", isMachinePath("/api/cron/purge-trash"));
   check("/api/cron seul aussi", isMachinePath("/api/cron"));

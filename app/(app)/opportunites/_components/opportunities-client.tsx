@@ -1,13 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bell, Briefcase, Copy, ExternalLink, Plus, RefreshCw, Send } from "lucide-react";
+import { Bell, Briefcase, Check, ClipboardPaste, Copy, ExternalLink, Inbox, Mail, RefreshCw, Send } from "lucide-react";
 import { Badge, Button, Card, CardContent, EmptyState, Input, Label, Modal, Select, Textarea, useToast } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { OPPORTUNITY_STATUSES, PLATFORMS, PLATFORM_LABELS, STATUS_LABELS, type Opportunity, type OpportunityStatus, type Platform } from "@/lib/opportunities/types";
 import { ageLabel, BUCKET_LABELS, bucketOf, staleLabel, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
+import { EMAIL_KIND_LABELS } from "@/lib/opportunities/email/parse";
+import { emailsOf, emailsToSort, suggestedPrice, type OpportunityEmail } from "@/lib/opportunities/email/view";
 
-const EMPTY_FORM = { platform: "codeur" as Platform, url: "", title: "", body: "", budget: "", deadline: "" };
+// « Coller une annonce » : Upwork d'abord (plus de flux RSS, l'annonce se copie à la main).
+const EMPTY_FORM = { platform: "upwork" as Platform, url: "", title: "", body: "", budget: "", deadline: "" };
+
+const BUDGET_PLACEHOLDER: Record<Platform, string> = {
+  upwork: "ex. $500 fixed, ou $25–40/hr",
+  codeur: "ex. 500 à 1 000 €",
+  malt: "ex. 1 500 €, ou TJM 350 €",
+  comeup: "ex. 120 €",
+  autre: "ex. 500 €",
+};
 
 const scoreTone = (score: number | null) => (score == null ? "neutral" : score >= 8 ? "success" : score >= 5 ? "warning" : "danger");
 
@@ -19,9 +30,12 @@ const FILTERS: Filter[] = ["alertes", "a_voir", "ignorees", "toutes"];
  * envoi : on ouvre l'annonce, on copie la proposition, on marque « envoyée ».
  * La fiche ouverte par la notification (`?id=`) passe en premier sur mobile.
  */
-export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity[]; focusId?: string | null }) {
+export function OpportunitiesClient({ initial, emails: initialEmails = [], focusId }: { initial: Opportunity[]; emails?: OpportunityEmail[]; focusId?: string | null }) {
   const toast = useToast();
   const [items, setItems] = useState(initial);
+  const [emails, setEmails] = useState(initialEmails);
+  const [platformFilter, setPlatformFilter] = useState<Platform | "toutes">("toutes");
+  const toSort = useMemo(() => emailsToSort(emails), [emails]);
   const focused = focusId && initial.some((item) => item.id === focusId) ? focusId : null;
   const [selectedId, setSelectedId] = useState<string | null>(focused ?? initial[0]?.id ?? null);
   const [filter, setFilter] = useState<Filter>(focused ? "toutes" : "alertes");
@@ -36,7 +50,20 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
     for (const item of items) result[bucketOf(item)] += 1;
     return result;
   }, [items]);
-  const shown = useMemo(() => (filter === "toutes" ? items : items.filter((item) => bucketOf(item) === filter)), [items, filter]);
+  const shown = useMemo(
+    () => items.filter((item) => (filter === "toutes" || bucketOf(item) === filter) && (platformFilter === "toutes" || item.platform === platformFilter)),
+    [items, filter, platformFilter],
+  );
+  // Plateformes présentes : le filtre ne propose que celles qui ont des fiches.
+  const platformsPresent = useMemo(() => PLATFORMS.filter((platform) => items.some((item) => item.platform === platform)), [items]);
+  const selectedEmails = useMemo(() => (selectedId ? emailsOf(emails, selectedId) : []), [emails, selectedId]);
+
+  /** E-mail « à trier » classé à la main (rien n'est supprimé). */
+  async function markSorted(id: string) {
+    const response = await fetch(`/api/opportunites/emails/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "trie" }) });
+    if (!response.ok) return toast.error("Non enregistré.");
+    setEmails((current) => current.map((email) => (email.id === id ? { ...email, status: "trie" } : email)));
+  }
 
   /** Relecture complète (analyse et proposition sont écrites côté serveur), sur l'opportunité concernée. */
   function reload(focus?: string) {
@@ -136,7 +163,7 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
     <>
       <div className="mb-4 flex justify-end">
         <Button onClick={() => setAdding(true)}>
-          <Plus className="h-4 w-4" aria-hidden /> Ajouter
+          <ClipboardPaste className="h-4 w-4" aria-hidden /> Coller une annonce
         </Button>
       </div>
 
@@ -175,6 +202,53 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
         </section>
       )}
 
+      {toSort.length > 0 && (
+        <details className="mb-6 rounded-xl border border-line bg-surface p-3">
+          <summary className="flex cursor-pointer items-center gap-2 text-[14px] font-medium text-text">
+            <Inbox className="h-4 w-4 text-muted" aria-hidden /> E-mails à trier <span className="font-data text-muted">{toSort.length}</span>
+            <span className="text-[12px] font-normal text-faint">non reconnus par l&apos;ingestion, sans alerte</span>
+          </summary>
+          <ul className="mt-2 divide-y divide-line-soft">
+            {toSort.map((email) => (
+              <li key={email.id} className="flex flex-wrap items-start justify-between gap-2 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] text-text">{email.subject || "(sans sujet)"}</p>
+                  <p className="truncate text-[12px] text-muted">
+                    {email.platform ? PLATFORM_LABELS[email.platform] : email.from_address ?? "expéditeur inconnu"}
+                    {email.received_at ? ` · ${ageLabel(email.received_at)}` : ""}
+                    {email.kind !== "autre" ? ` · ${EMAIL_KIND_LABELS[email.kind]}` : ""}
+                  </p>
+                  {email.excerpt && <p className="mt-0.5 line-clamp-2 text-[12px] text-faint">{email.excerpt}</p>}
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => markSorted(email.id)}>
+                  <Check className="h-3.5 w-3.5" aria-hidden /> Classé
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {platformsPresent.length > 1 && (
+        <div className="mb-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filtrer par plateforme">
+          {(["toutes", ...platformsPresent] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={platformFilter === key}
+              onClick={() => setPlatformFilter(key)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-[12px]",
+                platformFilter === key ? "border-primary/30 bg-primary/10 text-primary-ink" : "border-line text-muted hover:bg-surface-2",
+              )}
+            >
+              {key === "toutes" ? "Toutes plateformes" : PLATFORM_LABELS[key]}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Filtrer les opportunités">
         {FILTERS.map((key) => (
           <button
@@ -197,8 +271,8 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
         <EmptyState
           icon={<Briefcase className="h-6 w-6" aria-hidden />}
           title="Aucune opportunité"
-          description="La veille Codeur les ajoute toute seule ; vous pouvez aussi coller une annonce Codeur, Upwork, ComeUp ou Malt."
-          action={<Button onClick={() => setAdding(true)}>Ajouter une annonce</Button>}
+          description="La veille Codeur et les e-mails Upwork, Malt et ComeUp les ajoutent tout seuls ; vous pouvez aussi coller une annonce (Upwork d'abord)."
+          action={<Button onClick={() => setAdding(true)}>Coller une annonce</Button>}
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
@@ -242,8 +316,10 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                 <div>
                   <p className="text-[12px] text-faint">
                     {PLATFORM_LABELS[selected.platform]}
+                    {selected.client_name ? ` · ${selected.client_name}` : ""}
                     {selected.published_at ? ` · ${ageLabel(selected.published_at)}` : ""}
                     {selected.budget ? ` · ${selected.budget}` : ""}
+                    {selected.source === "email" ? " · reçue par e-mail" : ""}
                   </p>
                   <h2 className="font-display text-lg text-text">{selected.title}</h2>
                   {staleLabel(selected.published_at) && <p className="mt-1 text-[12px] text-warn-ink">{staleLabel(selected.published_at)}</p>}
@@ -318,10 +394,13 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                         if (event.target.value.trim() !== selected.proposal?.trim()) void patch(selected.id, { proposal: event.target.value }, "Proposition enregistrée.");
                       }}
                     />
-                    <p className="mt-1 font-data text-[11px] text-faint">{(selected.proposal ?? "").length} caractères</p>
+                    <p className={cn("mt-1 font-data text-[11px]", selected.platform === "upwork" && (selected.proposal ?? "").length > 1200 ? "text-lost-ink" : "text-faint")}>
+                      {(selected.proposal ?? "").length} caractères{selected.platform === "upwork" ? " / 1 200 (Upwork : la 1re phrase s'affiche en aperçu)" : ""}
+                    </p>
                     {(selected.suggested_amount_eur != null || selected.suggested_delay_days != null) && (
                       <p className="mt-1.5 text-[13px] text-text">
-                        À saisir sur la plateforme : <span className="font-data">{selected.suggested_amount_eur != null ? `${selected.suggested_amount_eur} €` : "—"}</span> ·{" "}
+                        À saisir sur {PLATFORM_LABELS[selected.platform]} :{" "}
+                        <span className="font-data">{suggestedPrice(selected.suggested_amount_eur, selected.suggested_currency ?? (selected.platform === "upwork" ? "USD" : "EUR"), selected.suggested_hourly)}</span> ·{" "}
                         <span className="font-data">{selected.suggested_delay_days != null ? `${selected.suggested_delay_days} jours` : "—"}</span>
                       </p>
                     )}
@@ -397,6 +476,24 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                     }}
                   />
                 </div>
+                {selectedEmails.length > 0 && (
+                  <div>
+                    <Label>Suivi par e-mail</Label>
+                    <ul className="mt-1 space-y-1">
+                      {selectedEmails.map((email) => (
+                        <li key={email.id} className="flex items-start gap-2 text-[12px]">
+                          <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-faint" aria-hidden />
+                          <span className="min-w-0 flex-1">
+                            <span className="text-text">{EMAIL_KIND_LABELS[email.kind]}</span>
+                            <span className="text-muted"> · {email.subject || "(sans sujet)"}</span>
+                            {email.received_at && <span className="font-data text-faint"> · {ageLabel(email.received_at)}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <details className="text-[12px] text-muted">
                   <summary className="cursor-pointer">Texte de l&apos;annonce{selected.description_truncated ? " (extrait du flux)" : ""}</summary>
                   <p className="mt-2 whitespace-pre-wrap">{selected.body}</p>
@@ -411,8 +508,8 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
       <Modal
         open={adding}
         onClose={() => setAdding(false)}
-        title="Ajouter une opportunité"
-        description="Collez l'annonce : l'analyse et la proposition prennent une trentaine de secondes."
+        title="Coller une annonce"
+        description="Texte, lien et budget de l'annonce, pour toute plateforme : l'analyse et la proposition prennent une trentaine de secondes. Rien n'est envoyé."
         size="lg"
         footer={
           <>
@@ -441,8 +538,8 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
             <Input id="new-url" value={form.url} placeholder="https://…" onChange={(event) => setForm({ ...form, url: event.target.value })} />
           </div>
           <div className="sm:col-span-2">
-            <Label htmlFor="new-title">Titre</Label>
-            <Input id="new-title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+            <Label htmlFor="new-title">Titre (facultatif)</Label>
+            <Input id="new-title" value={form.title} placeholder="sinon, la première ligne de l'annonce" onChange={(event) => setForm({ ...form, title: event.target.value })} />
           </div>
           <div className="sm:col-span-2">
             <Label htmlFor="new-body">Texte de l&apos;annonce</Label>
@@ -450,7 +547,7 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
           </div>
           <div>
             <Label htmlFor="new-budget">Budget</Label>
-            <Input id="new-budget" value={form.budget} placeholder="ex. 500 à 1 000 €" onChange={(event) => setForm({ ...form, budget: event.target.value })} />
+            <Input id="new-budget" value={form.budget} placeholder={BUDGET_PLACEHOLDER[form.platform]} onChange={(event) => setForm({ ...form, budget: event.target.value })} />
           </div>
           <div>
             <Label htmlFor="new-deadline">Date limite</Label>

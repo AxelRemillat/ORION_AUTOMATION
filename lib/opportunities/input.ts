@@ -16,14 +16,22 @@ export interface NewOpportunity {
 
 const text = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null);
 
+/** Première ligne non vide de l'annonce, coupée proprement à 120 caractères. */
+export function titleFromBody(body: string): string {
+  const line = body.split("\n").map((candidate) => candidate.trim()).find(Boolean) ?? body.trim();
+  if (line.length <= 120) return line;
+  const cut = line.slice(0, 120);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 60))}…`;
+}
+
 export function parseNewOpportunity(raw: Record<string, unknown> | null): { ok: true; value: NewOpportunity } | { ok: false; error: string } {
   if (!raw) return { ok: false, error: "Formulaire vide." };
   const platform = isPlatform(raw.platform) ? raw.platform : null;
   if (!platform) return { ok: false, error: "Choisissez une plateforme." };
-  const title = text(raw.title, 300);
   const body = text(raw.body, 20_000);
-  if (!title) return { ok: false, error: "Le titre de l'annonce est obligatoire." };
   if (!body || body.length < 40) return { ok: false, error: "Collez le texte de l'annonce (au moins quelques lignes)." };
+  // « Coller une annonce » : sans titre saisi, la première ligne de l'annonce en tient lieu.
+  const title = text(raw.title, 300) ?? titleFromBody(body);
   const url = text(raw.url, 1000);
   if (url && !/^https?:\/\//i.test(url)) return { ok: false, error: "L'URL doit commencer par http:// ou https://." };
   const deadline = text(raw.deadline, 10);
@@ -38,7 +46,7 @@ export function parseNewOpportunity(raw: Record<string, unknown> | null): { ok: 
  */
 export function buildOpportunityPatch(
   raw: Record<string, unknown> | null,
-  current: { status: OpportunityStatus; sent_at: string | null; replied_at: string | null },
+  current: { status: OpportunityStatus; sent_at: string | null; replied_at: string | null; conversation_at?: string | null; won_at?: string | null },
   now = new Date(),
 ): { ok: true; patch: Record<string, unknown> } | { ok: false; error: string } {
   if (!raw) return { ok: false, error: "Rien à enregistrer." };
@@ -48,6 +56,9 @@ export function buildOpportunityPatch(
     patch.status = raw.status;
     if (raw.status !== "a_repondre" && raw.status !== "ignoree" && !current.sent_at) patch.sent_at = now.toISOString();
     if (REPLIED_STATUSES.includes(raw.status) && !current.replied_at) patch.replied_at = now.toISOString();
+    // Jalons du Cockpit (7 / 30 jours) : datés au premier passage, jamais effacés.
+    if ((raw.status === "entretien" || raw.status === "gagnee") && !current.conversation_at) patch.conversation_at = now.toISOString();
+    if (raw.status === "gagnee" && !current.won_at) patch.won_at = now.toISOString();
   }
   if ("notes" in raw) patch.notes = text(raw.notes, 5000);
   // Alerte vue (annonce ouverte ou proposition copiée).

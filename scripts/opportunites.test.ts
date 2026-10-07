@@ -138,7 +138,13 @@ async function main() {
     check("montant suggéré au-delà du plafond refusé", price("Prix : 900 €. Délai : 15 jours.", { amountEur: 6000 }).some((line) => /positionnement/.test(line)));
     check("coûts mensuels « 100 à 250 €/mois » refusés", price("Prix : 900 €. Délai : 15 jours. Maintenance : 100 à 250 €/mois.").some((line) => /irréalistes/.test(line)));
     check("coûts mensuels réalistes (15 €, 10 à 30 €, 90 €/mois) acceptés, sans fausse fourchette", !price("Prix : 900 €. Coûts mensuels : hébergement 15 €, API IA 10 à 30 € selon le volume, maintenance en option 90 €/mois. Délai : 15 jours.").some((line) => /irréalistes|Fourchette/.test(line)));
-    check("toujours « Bonjour, » en tête (FR), « Hello, » (EN)", assembleProposal(base, { language: "fr", demo: "emails", platform: "codeur" }).text.startsWith("Bonjour,") && assembleProposal(PROPOSAL_POSITIVES[4], { language: "en", demo: "sav", platform: "upwork" }).text.startsWith("Hello,"));
+    // Upwork (plateformes #1) : la 1re phrase est l'aperçu — l'accroche ouvre, sans « Hello, ».
+    check(
+      "« Bonjour, » en tête (FR), « Hello, » (EN hors Upwork), accroche directe sur Upwork",
+      assembleProposal(base, { language: "fr", demo: "emails", platform: "codeur" }).text.startsWith("Bonjour,") &&
+        assembleProposal(PROPOSAL_POSITIVES[4], { language: "en", demo: "sav", platform: "autre" }).text.startsWith("Hello,") &&
+        assembleProposal(PROPOSAL_POSITIVES[4], { language: "en", demo: "sav", platform: "upwork" }).text.startsWith(PROPOSAL_POSITIVES[4].reading.slice(0, 20)),
+    );
   }
 
   console.log("\n4c. Éléments demandés par l'annonce (Sage 100, cas réel)");

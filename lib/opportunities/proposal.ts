@@ -5,6 +5,7 @@ import { opportunityDemoUrl } from "./analyze";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "./calibration";
 import { judgeProposalChecklist, proposalChecklistFeedback, proposalChecklistReason, type ProposalChecklist } from "./proposal-checklist";
 import type { Language, Platform } from "./types";
+import { PLATFORM_RULES, UPWORK_FIXED_CAP_USD, UPWORK_HOURLY_USD, UPWORK_HOURLY_CAP_USD, UPWORK_MAX_CHARS, UPWORK_SHORTEN_ABOVE, UPWORK_SHORTEN_TARGET, UPWORK_WORDS, upworkFailures, upworkPricingGuide, usdAmounts } from "./platforms";
 import {
   DELAY_CAP_DAYS,
   developmentAmounts,
@@ -49,7 +50,15 @@ export const SHORTEN_ABOVE_CHARS = 980;
 export const SHORTEN_TARGET_CHARS = 900;
 export const SHORTEN_PASSES = 2;
 export const SHORT_PROPOSAL_WORDS = { min: 80, max: 150 } as const;
-const wordsFor = (platform: Platform | undefined) => (platform && ["codeur", "malt", "comeup"].includes(platform) ? SHORT_PROPOSAL_WORDS : PROPOSAL_WORDS);
+const wordsFor = (platform: Platform | undefined) =>
+  platform === "upwork" ? UPWORK_WORDS : platform && ["codeur", "malt", "comeup"].includes(platform) ? SHORT_PROPOSAL_WORDS : PROPOSAL_WORDS;
+/** Upwork : l'aperçu montre la 1re phrase — pas de salutation, l'accroche ouvre la proposition. */
+const opensWithHook = (platform: Platform | undefined) => Boolean(platform && PLATFORM_RULES[platform].hookFirst);
+/** Seuil et cible du raccourcissement, par plateforme (`null` : pas de limite). */
+function shortenLimits(platform: Platform): { above: number; target: number; max: number } | null {
+  if (platform === "upwork") return { above: UPWORK_SHORTEN_ABOVE, target: UPWORK_SHORTEN_TARGET, max: UPWORK_MAX_CHARS };
+  return isNoContactPlatform(platform) ? { above: SHORTEN_ABOVE_CHARS, target: SHORTEN_TARGET_CHARS, max: PRIVATE_MESSAGE_MAX_CHARS } : null;
+}
 
 export interface ProposalParts {
   /** Reformulation précise du besoin (montre qu'on a lu). */
@@ -62,8 +71,10 @@ export interface ProposalParts {
   question: string;
   /** Réponse « références » quand l'annonce en demande : honnête (pas encore de projet X, puis portfolio et ORION). */
   references?: string;
-  /** Montant et délai à saisir dans le formulaire de la plateforme (Codeur les demande). */
+  /** Montant et délai à saisir dans le formulaire de la plateforme (Codeur les demande). Upwork : en dollars. */
   amountEur?: number | null;
+  /** Upwork : enchère au taux horaire plutôt qu'au forfait. */
+  hourly?: boolean;
   delayDays?: number | null;
 }
 
@@ -89,9 +100,12 @@ export interface ProposalOutcome {
   needsReview: boolean;
   reason: string | null;
   attempts: number;
-  /** Montant (€) et délai (jours) suggérés pour le formulaire de la plateforme. */
+  /** Montant (€ ; $ sur Upwork) et délai (jours) suggérés pour le formulaire de la plateforme. */
   amountEur: number | null;
   delayDays: number | null;
+  /** Devise du montant suggéré, et enchère horaire (Upwork). */
+  currency: "EUR" | "USD";
+  hourly: boolean;
 }
 
 const DEMO_LINE: Record<Language, string> = {
@@ -190,7 +204,7 @@ export function assembleProposal(
     : stepTexts.map((step, index) => `${index + 1}. ${step}`).join("\n");
   const demo = demoLine(frame.platform, frame.language, frame.demo, frame.context ?? parts.reading, frame.kind);
   // Ordre des demandes usuelles : approche (étapes), prix · coûts mensuels · délai, références, démo, question.
-  const core = [GREETINGS[frame.language], clean(parts.reading), steps, clean(parts.framing), parts.references ? clean(parts.references) : null, demo, clean(parts.question)]
+  const core = [opensWithHook(frame.platform) ? null : GREETINGS[frame.language], clean(parts.reading), steps, clean(parts.framing), parts.references ? clean(parts.references) : null, demo, clean(parts.question)]
     .filter((block): block is string => Boolean(block))
     .join("\n\n");
   return { core, text: `${core}\n\n${proposalSignature(frame.platform, frame.language)}` };
@@ -256,7 +270,17 @@ export function checkProposal(
   const kind = context.kind ?? "automatisation";
   const requested = context.requested ?? [];
   failures.push(...contactFailures(text, platform));
-  if (!text.startsWith(GREETINGS[context.language])) failures.push(`La proposition commence par « ${GREETINGS[context.language]} ».`);
+  const upwork = platform === "upwork";
+  if (upwork) {
+    failures.push(...upworkFailures(text, parts.framing));
+    const usd = [...usdAmounts(parts.framing), ...(parts.amountEur != null ? [{ value: parts.amountEur, hourly: parts.hourly === true }] : [])];
+    const fixedTop = Math.max(0, ...usd.filter((item) => !item.hourly).map((item) => item.value));
+    const hourlyTop = Math.max(0, ...usd.filter((item) => item.hourly).map((item) => item.value));
+    if (fixedTop > UPWORK_FIXED_CAP_USD[kind]) failures.push(`$${fixedTop} is above Axel's positioning (${kind === "fullstack" ? "web app: $4,400 at most" : "complex automation: $3,300 at most"}).`);
+    if (hourlyTop > UPWORK_HOURLY_CAP_USD) failures.push(`$${hourlyTop}/hr is above Axel's positioning (about $40/hr, $60/hr at most).`);
+    const quotedUsd = usdAmounts(parts.framing).map((item) => item.value);
+    if (parts.amountEur != null && quotedUsd.length && !quotedUsd.includes(parts.amountEur)) failures.push(`The price in the text (${quotedUsd.map((value) => `$${value}`).join(", ")}) differs from the bid to enter ($${parts.amountEur}): quote exactly $${parts.amountEur}.`);
+  } else if (!text.startsWith(GREETINGS[context.language])) failures.push(`La proposition commence par « ${GREETINGS[context.language]} ».`);
 
   // Prix : UN montant, dans le positionnement d'Axel (profil récent, premiers avis).
   const range = priceRange(parts.framing);
@@ -288,7 +312,7 @@ export function checkProposal(
       item === "approche"
         ? parts.steps.length >= 3
         : item === "prix"
-          ? developmentAmounts(parts.framing).length > 0
+          ? developmentAmounts(parts.framing).length > 0 || (upwork && usdAmounts(parts.framing).length > 0)
           : item === "couts_mensuels"
             ? monthly.length > 0 || /(\/\s?mois|par mois|mensuel|per month|monthly)/i.test(parts.framing)
             : item === "delai"
@@ -325,7 +349,7 @@ export function checkProposal(
   if (flattery) failures.push(`Flatterie (« ${flattery[0]} ») : va droit au besoin.`);
   const jargon = written.match(PROPOSAL_JARGON);
   if (jargon) failures.push(`Jargon (« ${jargon[0]} ») : dis-le avec des mots simples.`);
-  if (!context.budget?.trim() && !requested.includes("prix") && MONEY.test(parts.framing)) {
+  if (!upwork && !context.budget?.trim() && !requested.includes("prix") && MONEY.test(parts.framing)) {
     failures.push("Budget absent de l'annonce : pas de prix, pose une question de cadrage (volume, délai, outils).");
   }
   if (/https?:\/\/|www\.|axelremillat/i.test(written)) failures.push("Aucune URL dans le texte : le lien de démo est posé par le code.");
@@ -341,13 +365,14 @@ export function buildProposalPrompt(input: Omit<ProposalInput, "ask" | "signatur
   const budget = input.budget?.trim();
   const kind = input.kind ?? "automatisation";
   const requested = requestedItems(input.body);
+  const upwork = input.platform === "upwork";
   return `Tu rédiges, à la place d'Axel Remillat (indépendant en IA et automatisation de tâches pour les PME), la réponse à une annonce publiée sur ${input.platform}.
 Langue de la réponse : ${fr ? "FRANÇAIS, vouvoiement" : "ENGLISH, plain and direct"}.
 
-LA RÉPONSE FINALE AURA EXACTEMENT CETTE FORME (le code ajoute la salutation, la ligne de démo et la signature) :
-${GREETINGS[input.language]}
+LA RÉPONSE FINALE AURA EXACTEMENT CETTE FORME (le code ajoute ${upwork ? "" : "la salutation, "}la ligne de démo et la signature) :
+${upwork ? "<HOOK + READING — 2 phrases ; la 1re est l'APERÇU Upwork>" : `${GREETINGS[input.language]}
 
-<READING — ${isNoContactPlatform(input.platform) ? "1 phrase" : "2 phrases"}>
+<READING — ${isNoContactPlatform(input.platform) ? "1 phrase" : "2 phrases"}>`}
 
 ${isNoContactPlatform(input.platform) ? `${APPROACH_LABEL[input.language]} <STEP 1> <STEP 2> <STEP 3>   (un seul paragraphe de trois PHRASES COMPLÈTES avec un sujet, comme Axel : « un agent surveille le dossier… Il interroge Sage en lecture seule… Vous validez les prix dans un écran de contrôle… » — la 1re commence par une minuscule, jamais d'infinitif seul comme « recenser… »)` : "1. <STEP 1>\n2. <STEP 2>\n3. <STEP 3>"}
 
@@ -358,11 +383,12 @@ ${requested.includes("references") ? "\n<REFERENCES — 1 ou 2 phrases>\n" : ""}
 <QUESTION — 1 phrase>
 
 À ÉCRIRE :
-- "reading" : la reformulation PRÉCISE du besoin, avec les éléments concrets de l'annonce (outil, volume, type de documents, résultat attendu). Montre qu'on a lu. Jamais « j'ai bien lu votre annonce ».
+${upwork ? `- UPWORK — LA 1re PHRASE EST L'APERÇU : le client ne voit qu'elle dans sa liste de 50 propositions. Elle ouvre "reading", fait 160 caractères au plus et nomme SON problème ou SON résultat concret, avec ses outils ou ses volumes (« Your 40 PDF manuals can answer support questions on their own, with a human handover when the bot is unsure. »). JAMAIS de salutation (« Hello », « Hi »), JAMAIS « I am… », « I'm a… », « My name… », « I have read… ».
+` : ""}- "reading" : la reformulation PRÉCISE du besoin, avec les éléments concrets de l'annonce (outil, volume, type de documents, résultat attendu). Montre qu'on a lu. Jamais « j'ai bien lu votre annonce ».
 - "steps" : TROIS étapes concrètes et courtes (12 à 22 mots chacune) : ce qui sera fait, dans l'ordre, avec leurs outils.
-- "framing" : ${isNoContactPlatform(input.platform) && input.language === "fr" ? "forme « Prix : <montant> € (<ce qui est inclus>). Délai : <N> jours. »" + (requested.includes("couts_mensuels") ? " puis « Mensuel : hébergement ~15 €, API IA ~10-30 € selon le volume, maintenance en option 90 €. » (montants à adapter) ;" : " ;") + " " : ""}${budget ? `un prix UNIQUE (jamais de fourchette) et un délai, cohérents avec le budget annoncé (${budget}) et le positionnement ci-dessous.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
+- "framing" : ${upwork ? `UN prix en DOLLARS — un montant fixe (« Fixed price: $900. ») OU un taux horaire si l'annonce est à l'heure (« Rate: $${UPWORK_HOURLY_USD}/hr. ») — et UN délai en jours (« Delivery: 10 days. »), TOUJOURS, même sans budget affiché (l'enchère Upwork l'exige). Jamais de fourchette. ` : ""}${isNoContactPlatform(input.platform) && input.language === "fr" ? "forme « Prix : <montant> € (<ce qui est inclus>). Délai : <N> jours. »" + (requested.includes("couts_mensuels") ? " puis « Mensuel : hébergement ~15 €, API IA ~10-30 € selon le volume, maintenance en option 90 €. » (montants à adapter) ;" : " ;") + " " : ""}${upwork ? (budget ? `Cohérent avec le budget affiché (${budget}).` : "Budget non affiché : un prix de lancement crédible.") : budget ? `un prix UNIQUE (jamais de fourchette) et un délai, cohérents avec le budget annoncé (${budget}) et le positionnement ci-dessous.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
 - "question" : UNE question pour qualifier le besoin (ce qui conditionne la solution), qui finit par « ? ».
-- PRIX ET DÉLAI — ${pricingGuide(kind)} Le prix et le délai écrits dans "framing" sont EXACTEMENT "amount_eur" et "delay_days" (même montant, même nombre de jours).${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
+- PRIX ET DÉLAI — ${upwork ? upworkPricingGuide(kind) : pricingGuide(kind)} Le prix et le délai écrits dans "framing" sont EXACTEMENT "amount_eur" et "delay_days" (même montant, même nombre de jours).${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
 ${requested.length ? `- L'ANNONCE DEMANDE EXPLICITEMENT, DANS CET ORDRE : ${requested.map((item) => REQUESTED_LABELS[item]).join(", ")}. Réponds à CHACUN, dans cet ordre (l'approche = les trois étapes ; prix${requested.includes("couts_mensuels") ? ", coûts mensuels" : ""} et délai dans "framing"${requested.includes("references") ? ` ; les références dans "references"` : ""}).${requested.includes("prix") ? " Le prix est demandé : donne-le même sans budget annoncé." : ""}` : ""}
 ${requested.includes("couts_mensuels") ? `- ${MONTHLY_GUIDE}` : ""}
 ${requested.includes("references") ? `- "references" : HONNÊTETÉ OBLIGATOIRE. Si tu n'as pas de projet sur l'outil cité, dis-le (« Pas encore de projet Sage 100 à vous montrer »), puis cite la démo du portfolio et ORION, l'application d'automatisation mail + IA que j'utilise au quotidien. Jamais de client ni de projet inventé.` : ""}
@@ -375,12 +401,14 @@ CE QUE LE CLIENT EXIGE (il reçoit 80 offres et choisit en 30 secondes) — coch
 - Une question de cadrage qui fait avancer SON devis (volume, outil, format), jamais générique.
 
 INTERDITS : expérience, clients ou références inventés (« j'ai déjà aidé… », « mes clients »), chiffres de résultats non prouvés (« -50 % de temps »), flatterie (« super projet »), jargon (workflow, pipeline, leverage, seamless…), toute URL, toute adresse e-mail, tout téléphone, tout lien de prise de rendez-vous, toute signature.${isNoContactPlatform(input.platform) ? " Sur cette plateforme, aucun moyen de contact hors plateforme : ni site, ni lien, ni coordonnée." : ""}
-${isNoContactPlatform(input.platform)
+${upwork
+  ? `La réponse complète fait ${UPWORK_WORDS.min} à ${UPWORK_WORDS.max} mots et MOINS DE ${UPWORK_MAX_CHARS} CARACTÈRES signature et ligne de démo comprises — budget : "reading" 30 à 45 mots (accroche comprise), chaque étape 12 à 18 mots, "framing" 12 à 20 mots, "question" 10 à 16 mots.`
+  : isNoContactPlatform(input.platform)
   ? requested.length >= 3
     ? `La réponse complète fait MOINS DE 1 000 CARACTÈRES signature comprise (limite du message privé) et ${SHORT_PROPOSAL_WORDS.min} à ${SHORT_PROPOSAL_WORDS.max} mots. L'annonce demande beaucoup : sois très concis — "reading" 150 caractères au plus, chaque étape 90 au plus, "framing" 180 au plus${requested.includes("references") ? `, "references" 150 au plus` : ""}, "question" 80 au plus.`
     : `La réponse complète fait ${SHORT_PROPOSAL_WORDS.min} à ${SHORT_PROPOSAL_WORDS.max} mots et MOINS DE 1 000 CARACTÈRES signature comprise (limite du message privé) — budget : "reading" 25 à 35 mots, chaque étape 10 à 15 mots, "framing" 12 à 20 mots, "question" 10 à 15 mots.`
   : `La réponse complète (sans la signature) fait ${PROPOSAL_WORDS.min} à ${PROPOSAL_WORDS.max} mots — budget : "reading" 40 à 55 mots, chaque étape 14 à 20 mots, "framing" 20 à 30 mots, "question" 12 à 20 mots.`}
-- "amount_eur" et "delay_days" : le montant (nombre, en euros) et le délai (nombre de jours) à saisir dans le formulaire de la plateforme${input.platform === "codeur" ? " — repères Codeur : 300–600 € tâche simple, 600–1 200 € workflow complet, 45 €/h" : ""}${budget ? `, dans le budget annoncé (${budget})` : ", même sans budget annoncé (montant indicatif de lancement)"}.
+- "amount_eur" et "delay_days" : le montant (nombre, en ${upwork ? 'DOLLARS US malgré le nom de la clé ; "hourly": true si c\'est un taux horaire' : "euros"}) et le délai (nombre de jours) à saisir dans le formulaire de la plateforme${input.platform === "codeur" ? " — repères Codeur : 300–600 € tâche simple, 600–1 200 € workflow complet, 45 €/h" : ""}${budget ? `, dans le budget annoncé (${budget})` : ", même sans budget annoncé (montant indicatif de lancement)"}.
 
 ${isNoContactPlatform(input.platform) && input.language === "fr"
   ? `PROPOSITIONS RÉELLEMENT ENVOYÉES PAR AXEL (autres annonces) — imite leur structure, leur ton, leurs références honnêtes et leur prix unique ; n'en reprends aucune phrase. Ici, la ligne « démo proche dans mon portfolio » est posée par le code : ne l'écris pas.
@@ -393,7 +421,7 @@ ${PROPOSAL_POSITIVES.filter((item) => item.language === input.language)
   .map((item) => item.text)
   .join("\n\n")}`}${feedback ? `\n\nRÉÉCRITURE — la version précédente avait ces défauts, corrige-les tous :\n${feedback}` : ""}
 
-Réponds UNIQUEMENT en JSON : {"reading":"…","steps":["…","…","…"],"framing":"…",${requested.includes("references") ? '"references":"…",' : ""}"question":"…","amount_eur":0,"delay_days":0}`;
+Réponds UNIQUEMENT en JSON : {"reading":"…","steps":["…","…","…"],"framing":"…",${requested.includes("references") ? '"references":"…",' : ""}"question":"…","amount_eur":0,"delay_days":0${upwork ? ',"hourly":false' : ""}}`;
 }
 
 export function parseProposalParts(raw: string): ProposalParts | null {
@@ -409,7 +437,7 @@ export function parseProposalParts(raw: string): ProposalParts | null {
     const amount = Number(value[key]);
     return Number.isFinite(amount) && amount > 0 ? Math.round(amount) : null;
   };
-  const parts = { reading: text("reading"), steps, framing: text("framing"), question: text("question"), references: text("references") || undefined, amountEur: number("amount_eur"), delayDays: number("delay_days") };
+  const parts = { reading: text("reading"), steps, framing: text("framing"), question: text("question"), references: text("references") || undefined, amountEur: number("amount_eur"), delayDays: number("delay_days"), ...(value.hourly === true ? { hourly: true } : {}) };
   return parts.reading && steps.length && parts.question ? parts : null;
 }
 
@@ -571,14 +599,14 @@ interface Attempt {
  * délai, mêmes réponses aux demandes ; seuls les mots en trop partent. Hors
  * des essais du double juge.
  */
-export function buildShortenPrompt(parts: ProposalParts, length: number): string {
-  return `Tu raccourcis la réponse d'Axel Remillat à une annonce freelance. Elle fait ${length} caractères une fois assemblée (salutation, ligne de démo et signature comprises) : la limite du message privé est ${PRIVATE_MESSAGE_MAX_CHARS}. Vise ${SHORTEN_TARGET_CHARS} caractères au plus, soit environ ${Math.max(40, length - SHORTEN_TARGET_CHARS)} caractères à retirer.
-GARDE, sans les changer : le prix (${parts.amountEur ?? "celui du texte"} €), le délai (${parts.delayDays ?? "celui du texte"} jours), les coûts mensuels s'ils y sont, la réponse honnête sur les références, les trois étapes (une phrase chacune) et la question finale.
+export function buildShortenPrompt(parts: ProposalParts, length: number, limits = { target: SHORTEN_TARGET_CHARS, max: PRIVATE_MESSAGE_MAX_CHARS }): string {
+  return `Tu raccourcis la réponse d'Axel Remillat à une annonce freelance. Elle fait ${length} caractères une fois assemblée (salutation, ligne de démo et signature comprises) : la limite de la plateforme est ${limits.max}. Vise ${limits.target} caractères au plus, soit environ ${Math.max(40, length - limits.target)} caractères à retirer. Garde la langue du texte.
+GARDE, sans les changer : la 1re phrase si c'est une accroche, le prix (${parts.amountEur ?? "celui du texte"}), le délai (${parts.delayDays ?? "celui du texte"} jours), les coûts mensuels s'ils y sont, la réponse honnête sur les références, les trois étapes (une phrase chacune) et la question finale.
 COUPE : les répétitions de l'annonce, les adjectifs, les détails techniques secondaires, les parenthèses non indispensables. N'ajoute rien.
-Réponds UNIQUEMENT en JSON, mêmes clés : {"reading":"…","steps":["…","…","…"],"framing":"…",${parts.references ? '"references":"…",' : ""}"question":"…","amount_eur":${parts.amountEur ?? 0},"delay_days":${parts.delayDays ?? 0}}`;
+Réponds UNIQUEMENT en JSON, mêmes clés : {"reading":"…","steps":["…","…","…"],"framing":"…",${parts.references ? '"references":"…",' : ""}"question":"…","amount_eur":${parts.amountEur ?? 0},"delay_days":${parts.delayDays ?? 0}${parts.hourly ? ',"hourly":true' : ""}}`;
 }
 
-/** Raccourcit tant que le texte dépasse SHORTEN_ABOVE_CHARS (plateformes à message privé limité). */
+/** Raccourcit tant que le texte dépasse le seuil de la plateforme (message privé Codeur, Malt, ComeUp ; 1 200 caractères sur Upwork). */
 async function shortenIfLong(
   input: ProposalInput,
   parts: ProposalParts,
@@ -586,14 +614,16 @@ async function shortenIfLong(
 ): Promise<ProposalParts> {
   let best = parts;
   let length = assemble(parts).text.length;
-  for (let pass = 0; pass < SHORTEN_PASSES && length > SHORTEN_ABOVE_CHARS; pass += 1) {
+  const limits = shortenLimits(input.platform);
+  if (!limits) return parts;
+  for (let pass = 0; pass < SHORTEN_PASSES && length > limits.above; pass += 1) {
     const raw = await input
-      .ask("writer", buildShortenPrompt(best, length), JSON.stringify({ reading: best.reading, steps: best.steps, framing: best.framing, references: best.references, question: best.question }), 0.3, "opportunites:raccourci")
+      .ask("writer", buildShortenPrompt(best, length, limits), JSON.stringify({ reading: best.reading, steps: best.steps, framing: best.framing, references: best.references, question: best.question }), 0.3, "opportunites:raccourci")
       .catch(() => "");
     const shorter = parseProposalParts(raw);
     if (!shorter) continue;
     // Le montant et le délai à saisir ne bougent pas pendant un raccourcissement.
-    const next = { ...shorter, amountEur: best.amountEur, delayDays: best.delayDays };
+    const next = { ...shorter, amountEur: best.amountEur, delayDays: best.delayDays, ...(best.hourly ? { hourly: true } : {}) };
     const nextLength = assemble(next).text.length;
     if (nextLength < length) {
       best = next;
@@ -622,7 +652,7 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
       continue;
     }
     const assemble = (draft: ProposalParts) => assembleProposal(draft, { language: input.language, demo: input.demo, platform: input.platform, context: `${input.need} ${input.body}`, kind: input.kind });
-    const parts = isNoContactPlatform(input.platform) ? await shortenIfLong(input, written, assemble) : written;
+    const parts = shortenLimits(input.platform) ? await shortenIfLong(input, written, assemble) : written;
     const { core, text } = assemble(parts);
     const rules = checkProposal(parts, core, { language: input.language, budget: input.budget, platform: input.platform, kind: input.kind, requested: requestedItems(input.body), ad: input.body }, text);
     // Check-list (Cowork #32) : la grille d'Axel en 8 critères OUI/NON, seulement si les règles passent.
@@ -661,5 +691,7 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
     attempts: attempts.length,
     amountEur: best.parts.amountEur ?? null,
     delayDays: best.parts.delayDays ?? null,
+    currency: PLATFORM_RULES[input.platform].currency,
+    hourly: best.parts.hourly === true,
   };
 }

@@ -12,6 +12,9 @@ import Link from "next/link";
 import { OpenAiQuotaBanner } from "@/components/layout/openai-quota-banner";
 import { GMAIL_AUTH_MESSAGE, isGmailAuthError } from "@/lib/outbox/send-errors";
 import { readPrefs } from "@/lib/funnel/settings";
+import { PlatformsCard } from "./_components/platforms/platforms-card";
+import { platformActivity } from "@/lib/opportunities/stats";
+import type { Opportunity } from "@/lib/opportunities/types";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -41,13 +44,16 @@ export default async function CockpitPage({
   const supabase = createClient();
 
   // Corbeille exclue partout : boîte de réception, courbes.
-  const [{ prospects, messages, deals, inbound }, pilotage, prefs] = await Promise.all([
+  const [{ prospects, messages, deals, inbound }, pilotage, prefs, opportunities] = await Promise.all([
     loadPortfolio(supabase, ["messages", "deals", "inbound"]),
     // Pilotage : agrégats serveur, soldes fournisseurs en cache 1 h. Une panne
     // ici ne doit jamais empêcher le Cockpit de s'afficher.
     loadPilotage(supabase).catch(() => null),
     readPrefs(supabase, user.id).catch(() => null),
+    // Plateformes freelance (Opportunités) : jalons des 30 derniers jours. Une panne n'empêche rien.
+    loadPlatformRows(supabase).catch(() => [] as PlatformRow[]),
   ]);
+  const now = new Date();
   // Aperçu de la boîte mail : les plus récents ; « Tout voir » → /cockpit/mails.
   const mailbox = buildMailbox({ prospects, messages, inbound });
   const recentSent = mailbox.sent.slice(0, 10);
@@ -114,6 +120,8 @@ export default async function CockpitPage({
         initialSeries={parseSeriesParam(searchParams.kpi)}
       />
 
+      <PlatformsCard week={platformActivity(opportunities, 7, now)} month={platformActivity(opportunities, 30, now)} />
+
       {pilotage && (
         <section id="pilotage" className="scroll-mt-24">
           <PilotageCard
@@ -127,4 +135,19 @@ export default async function CockpitPage({
       )}
     </div>
   );
+}
+
+type PlatformRow = Pick<Opportunity, "platform" | "status" | "sent_at" | "replied_at" | "updated_at" | "conversation_at" | "won_at">;
+
+/** Opportunités touchées ces 30 derniers jours (jalons datés), pour la carte « Plateformes freelance ». */
+async function loadPlatformRows(supabase: ReturnType<typeof createClient>): Promise<PlatformRow[]> {
+  const since = new Date(Date.now() - 31 * 86_400_000).toISOString();
+  const db = supabase as unknown as { from: (table: string) => any };
+  const { data, error } = await db
+    .from("opportunities")
+    .select("platform, status, sent_at, replied_at, updated_at, conversation_at, won_at")
+    .gte("updated_at", since)
+    .limit(2000);
+  if (error) throw error;
+  return (data ?? []) as PlatformRow[];
 }
