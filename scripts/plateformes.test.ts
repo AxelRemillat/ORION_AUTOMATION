@@ -20,7 +20,8 @@ import { STATUS_LABELS } from "../lib/opportunities/types";
 import type { AskFn } from "../lib/ai/chat";
 import type { Notification } from "../lib/notify/ntfy";
 import { FakeDb } from "./fake-supabase";
-import { EMAIL_FIXTURES } from "./fixtures/opportunity-emails";
+import { CODEUR_EMAIL_FIXTURES, EMAIL_FIXTURES } from "./fixtures/opportunity-emails";
+import { buildFollowUpPrompt, dueFollowUps, fallbackFollowUp, followUpDue, followUpFailures, generateFollowUp } from "../lib/opportunities/follow-up";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -337,6 +338,73 @@ async function main() {
     check("Codeur : 2 envoyées sur 30 j (l'ancienne exclue), 50 %", sources[0].sent === 2 && sources[0].replyRate === 0.5, JSON.stringify(sources[0]));
     check("Upwork : rien envoyé → taux « — » (null)", sources[1].sent === 0 && sources[1].replyRate === null);
     check("Malt et ComeUp réunis : 2 envoyées, 50 %", sources[2].sent === 2 && sources[2].replyRate === 0.5);
+  }
+
+  console.log("\n13. E-mails Codeur : suivi des projets connus par le flux RSS");
+  {
+    for (const fixture of CODEUR_EMAIL_FIXTURES) {
+      const parsed = parsePlatformEmail(fixture.email);
+      const expect = fixture.expect;
+      const diffs = [
+        parsed.platform !== expect.platform && `platform=${parsed.platform}`,
+        parsed.kind !== expect.kind && `kind=${parsed.kind}`,
+        expect.externalId !== undefined && parsed.externalId !== expect.externalId && `externalId=${parsed.externalId}`,
+        expect.client !== undefined && parsed.clientName !== expect.client && `client=${parsed.clientName}`,
+      ].filter(Boolean);
+      check(`${fixture.name} → ${expect.kind}`, diffs.length === 0, diffs.join(", "));
+    }
+    const rssRow = (id: string, external: string, title: string) => ({ id, user_id: "u1", platform: "codeur", source: "rss", external_id: external, title, status: "envoyee", sent_at: "2026-10-03T10:00:00Z", replied_at: null, conversation_at: null, won_at: null, client_name: null, url: `https://www.codeur.com/projects/${external}-x`, created_at: "2026-10-03T09:00:00Z" });
+    const db = new FakeDb({
+      opportunities: [rssRow("c1", "490123", "Automatiser le tri de nos e-mails de commande"), rssRow("c2", "490456", "Chatbot pour notre site immobilier"), { ...rssRow("c3", "490789", "Extraction de factures PDF vers Excel"), status: "gagnee" }],
+      opportunity_emails: [],
+    });
+    const alerts: Notification[] = [];
+    let llm = 0;
+    const deps = { db: db as never, userId: "u1", ask: (async () => ((llm += 1), "")) as AskFn, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-08T12:00:00Z"), notify: async (notification: Notification) => (alerts.push(notification), true) };
+    const byName = (prefix: string) => CODEUR_EMAIL_FIXTURES.find((fixture) => fixture.name.startsWith(prefix))!.email;
+    const row = (id: string) => db.rows("opportunities").find((item) => item.id === id) as Record<string, unknown>;
+
+    const dry = await planPlatformEmail(deps, byName("Codeur — message du client"));
+    check("dry_run Codeur : rattacherait au projet 490123, « Réponse », alerte prévue", dry.action === "rattache" && dry.target?.id === "c1" && dry.opportunity_status === "reponse" && dry.would_alert, JSON.stringify(dry));
+    const message = await ingestPlatformEmail(deps, byName("Codeur — message du client"));
+    check("message client → rattaché par l'identifiant de projet, « Réponse », alerte « Message client »", message.status === "rattache" && message.opportunity_ids[0] === "c1" && row("c1").status === "reponse" && typeof row("c1").replied_at === "string" && message.alerted && /^Message client Codeur : Automatiser le tri/.test(alerts[0]?.title ?? ""), JSON.stringify({ message, alert: alerts[0] }));
+    const won = await ingestPlatformEmail(deps, byName("Codeur — projet attribué"));
+    check("projet attribué → « Gagnée » (won_at), alerte « Projet attribué »", won.status === "rattache" && row("c1").status === "gagnee" && typeof row("c1").won_at === "string" && won.alerted && /^Projet attribué Codeur/.test(alerts[1]?.title ?? ""), JSON.stringify(won));
+    const lost = await ingestPlatformEmail(deps, byName("Codeur — offre non retenue"));
+    check("offre non retenue → « Perdue », sans alerte", lost.status === "rattache" && row("c2").status === "perdue" && !lost.alerted);
+    const closed = await ingestPlatformEmail(deps, byName("Codeur — projet clos"));
+    check("projet clos sur une mission gagnée → reste « Gagnée », sans alerte", closed.status === "rattache" && row("c3").status === "gagnee" && !closed.alerted);
+    const unknown = await ingestPlatformEmail(deps, byName("Codeur — message sur un projet inconnu"));
+    check("projet inconnu d'ORION → « à trier », aucune fiche créée, sans alerte", unknown.status === "a_trier" && db.rows("opportunities").length === 3 && !unknown.alerted);
+    check("Codeur : jamais d'appel au modèle, 2 alertes au total", llm === 0 && alerts.length === 2);
+  }
+
+  console.log("\n14. Relances suggérées : 3 j (Codeur, Malt, ComeUp), 5 j (Upwork)");
+  {
+    const now = new Date("2026-10-10T12:00:00Z");
+    const sent = (platform: string, sentAt: string, extra: Record<string, unknown> = {}) => ({ platform, status: "envoyee", sent_at: sentAt, replied_at: null, followed_up_at: null, ...extra }) as never;
+    check("Codeur envoyée il y a 3 j → relance due", followUpDue(sent("codeur", "2026-10-07T10:00:00Z"), now));
+    check("Codeur envoyée il y a 2 j → pas encore", !followUpDue(sent("codeur", "2026-10-08T13:00:00Z"), now));
+    check("Malt 3 j, ComeUp 3 j → dues", followUpDue(sent("malt", "2026-10-07T10:00:00Z"), now) && followUpDue(sent("comeup", "2026-10-07T10:00:00Z"), now));
+    check("Upwork 4 j → pas encore ; 5 j → due", !followUpDue(sent("upwork", "2026-10-06T10:00:00Z"), now) && followUpDue(sent("upwork", "2026-10-05T10:00:00Z"), now));
+    check("réponse reçue, déjà relancée ou statut avancé → plus due", !followUpDue(sent("codeur", "2026-10-01T10:00:00Z", { replied_at: "2026-10-02T10:00:00Z" }), now) && !followUpDue(sent("codeur", "2026-10-01T10:00:00Z", { followed_up_at: "2026-10-05T10:00:00Z" }), now) && !followUpDue(sent("codeur", "2026-10-01T10:00:00Z", { status: "reponse" }), now));
+    check("compte des relances dues (Cockpit)", dueFollowUps([sent("codeur", "2026-10-01T10:00:00Z"), sent("upwork", "2026-10-09T10:00:00Z"), sent("malt", "2026-10-02T10:00:00Z")], now).length === 2);
+    const marked = buildOpportunityPatch({ followed_up: true }, { status: "envoyee", sent_at: "x", replied_at: null }, now);
+    check("« Marquer relancée » pose followed_up_at, sans toucher au statut", marked.ok && marked.patch.followed_up_at === now.toISOString() && !("status" in marked.patch));
+
+    check("règles : 400 caractères au plus", followUpFailures("x".repeat(400), "upwork").some((line) => /400 caractères/.test(line)) && followUpFailures("x".repeat(399), "upwork").length === 0);
+    check("Codeur, Malt, ComeUp : aucune URL ; Upwork : lien toléré, jamais d'e-mail", followUpFailures("Voir axelremillat.com", "codeur").length > 0 && followUpFailures("See axelremillat.com", "upwork").length === 0 && followUpFailures("mail me: axel@exemple.fr", "upwork").length > 0);
+    const opp = { platform: "codeur" as const, title: "Automatiser le tri de nos e-mails de commande", need: "Trier 80 e-mails par jour", proposal: "Bonjour, …", language: "fr" as const };
+    const good: AskFn = async () => JSON.stringify({ text: "Bonjour, avez-vous pu regarder ma proposition pour le tri de vos 80 e-mails de commande quotidiens ? Je peux démarrer dès lundi.\n\nAxel Remillat" });
+    const llmText = await generateFollowUp(good, opp);
+    check("texte rédigé par le modèle gardé s'il passe les règles", llmText.source === "llm" && llmText.text.length < 400);
+    let calls = 0;
+    const bad: AskFn = async () => ((calls += 1), JSON.stringify({ text: "Bonjour, voir www.axelremillat.com ou appelez le 07 49 72 71 92." }));
+    const fallback = await generateFollowUp(bad, opp);
+    check("coordonnées refusées deux fois → texte de repli sûr (FR, < 400, sans URL)", fallback.source === "fallback" && calls === 2 && fallback.text.length < 400 && followUpFailures(fallback.text, "codeur").length === 0 && fallback.text.startsWith("Bonjour"), fallback.text);
+    const upworkFallback = fallbackFollowUp({ platform: "upwork", title: "x".repeat(200) }, "en");
+    check("repli Upwork en anglais, titre coupé, < 400 caractères", upworkFallback.startsWith("Hi,") && upworkFallback.length < 400 && followUpFailures(upworkFallback, "upwork").length === 0, String(upworkFallback.length));
+    check("consigne : aucune URL demandée sur Codeur", /TOUTE URL/.test(buildFollowUpPrompt("codeur", "fr")) && !/TOUTE URL/.test(buildFollowUpPrompt("upwork", "en")));
   }
 
   console.log(failures === 0 ? "\nTous les tests plateformes passent.\n" : `\n${failures} test(s) en echec.\n`);

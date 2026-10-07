@@ -9,6 +9,8 @@ import { ageLabel, BUCKET_LABELS, bucketOf, staleLabel, unseenAlerts, type Bucke
 import { EMAIL_KIND_LABELS } from "@/lib/opportunities/email/parse";
 import { emailsOf, emailsToSort, suggestedPrice, type OpportunityEmail } from "@/lib/opportunities/email/view";
 import { TriagePanel } from "./triage-panel";
+import { FollowUpBox } from "./follow-up-box";
+import { followUpDue } from "@/lib/opportunities/follow-up-due";
 
 // « Coller une annonce » : Upwork d'abord (plus de flux RSS, l'annonce se copie à la main).
 const EMPTY_FORM = { platform: "upwork" as Platform, url: "", title: "", body: "", budget: "", deadline: "" };
@@ -24,7 +26,8 @@ const BUDGET_PLACEHOLDER: Record<Platform, string> = {
 const scoreTone = (score: number | null) => (score == null ? "neutral" : score >= 8 ? "success" : score >= 5 ? "warning" : "danger");
 
 // « À trier » (plateformes #3) : les e-mails de plateforme non reconnus, avec leurs trois actions.
-type Filter = Bucket | "toutes" | "a_trier";
+// « Relances » (plateformes #6) : propositions envoyées sans réponse, à relancer.
+type Filter = Bucket | "toutes" | "a_trier" | "relances";
 const FILTERS: (Bucket | "toutes")[] = ["alertes", "a_voir", "ignorees", "toutes"];
 
 /**
@@ -32,7 +35,17 @@ const FILTERS: (Bucket | "toutes")[] = ["alertes", "a_voir", "ignorees", "toutes
  * envoi : on ouvre l'annonce, on copie la proposition, on marque « envoyée ».
  * La fiche ouverte par la notification (`?id=`) passe en premier sur mobile.
  */
-export function OpportunitiesClient({ initial, emails: initialEmails = [], focusId }: { initial: Opportunity[]; emails?: OpportunityEmail[]; focusId?: string | null }) {
+export function OpportunitiesClient({
+  initial,
+  emails: initialEmails = [],
+  focusId,
+  initialFilter,
+}: {
+  initial: Opportunity[];
+  emails?: OpportunityEmail[];
+  focusId?: string | null;
+  initialFilter?: "relances" | "a_trier" | null;
+}) {
   const toast = useToast();
   const [items, setItems] = useState(initial);
   const [emails, setEmails] = useState(initialEmails);
@@ -40,7 +53,7 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
   const toSort = useMemo(() => emailsToSort(emails), [emails]);
   const focused = focusId && initial.some((item) => item.id === focusId) ? focusId : null;
   const [selectedId, setSelectedId] = useState<string | null>(focused ?? initial[0]?.id ?? null);
-  const [filter, setFilter] = useState<Filter>(focused ? "toutes" : "alertes");
+  const [filter, setFilter] = useState<Filter>(initialFilter ?? (focused ? "toutes" : "alertes"));
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [fullText, setFullText] = useState("");
@@ -53,11 +66,16 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
     return result;
   }, [items]);
   const shown = useMemo(
-    () => items.filter((item) => (filter === "toutes" || bucketOf(item) === filter) && (platformFilter === "toutes" || item.platform === platformFilter)),
+    () =>
+      items.filter(
+        (item) =>
+          (filter === "toutes" || (filter === "relances" ? followUpDue(item) : bucketOf(item) === filter)) && (platformFilter === "toutes" || item.platform === platformFilter),
+      ),
     [items, filter, platformFilter],
   );
   // Plateformes présentes : le filtre ne propose que celles qui ont des fiches.
   const platformsPresent = useMemo(() => PLATFORMS.filter((platform) => items.some((item) => item.platform === platform)), [items]);
+  const dueCount = useMemo(() => items.filter((item) => followUpDue(item)).length, [items]);
   const selectedEmails = useMemo(() => (selectedId ? emailsOf(emails, selectedId) : []), [emails, selectedId]);
 
   /** E-mail « à trier » ignoré ou rattaché (rien n'est supprimé). */
@@ -250,6 +268,18 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
         >
           <Inbox className="h-3.5 w-3.5" aria-hidden /> À trier <span className="font-data">{toSort.length}</span>
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={filter === "relances"}
+          onClick={() => setFilter("relances")}
+          className={cn(
+            "rounded-full border px-3 py-1 text-[12px]",
+            filter === "relances" ? "border-primary/30 bg-primary/10 text-primary-ink" : "border-line text-muted hover:bg-surface-2",
+          )}
+        >
+          Relances dues <span className="font-data">{dueCount}</span>
+        </button>
       </div>
 
       {filter === "a_trier" ? (
@@ -266,7 +296,7 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
           <Card>
             <CardContent className="p-0">
               {shown.length === 0 ? (
-                <p className="p-4 text-[13px] text-faint">Rien dans « {BUCKET_LABELS[filter]} ».</p>
+                <p className="p-4 text-[13px] text-faint">{filter === "relances" ? "Aucune relance due : toutes les propositions envoyées ont une réponse ou sont récentes." : `Rien dans « ${BUCKET_LABELS[filter]} ».`}</p>
               ) : (
                 <ul className="divide-y divide-line-soft">
                   {shown.map((item) => (
@@ -406,6 +436,10 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
                       </Button>
                     </div>
                   </div>
+                )}
+
+                {followUpDue(selected) && (
+                  <FollowUpBox item={selected} onPatched={(patch) => setItems((current) => current.map((item) => (item.id === selected.id ? { ...item, ...patch } : item)))} />
                 )}
 
                 {selected.description_truncated && (

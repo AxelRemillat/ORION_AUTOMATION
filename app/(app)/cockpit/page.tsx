@@ -14,6 +14,7 @@ import { GMAIL_AUTH_MESSAGE, isGmailAuthError } from "@/lib/outbox/send-errors";
 import { readPrefs } from "@/lib/funnel/settings";
 import { PlatformsCard } from "./_components/platforms/platforms-card";
 import { freelanceSources, platformActivity } from "@/lib/opportunities/stats";
+import { dueFollowUps } from "@/lib/opportunities/follow-up-due";
 import type { Opportunity } from "@/lib/opportunities/types";
 
 export const metadata = { title: "Cockpit — ORION" };
@@ -44,7 +45,7 @@ export default async function CockpitPage({
   const supabase = createClient();
 
   // Corbeille exclue partout : boîte de réception, courbes.
-  const [{ prospects, messages, deals, inbound }, pilotage, prefs, opportunities] = await Promise.all([
+  const [{ prospects, messages, deals, inbound }, pilotage, prefs, opportunities, sentRows] = await Promise.all([
     loadPortfolio(supabase, ["messages", "deals", "inbound"]),
     // Pilotage : agrégats serveur, soldes fournisseurs en cache 1 h. Une panne
     // ici ne doit jamais empêcher le Cockpit de s'afficher.
@@ -52,6 +53,8 @@ export default async function CockpitPage({
     readPrefs(supabase, user.id).catch(() => null),
     // Plateformes freelance (Opportunités) : jalons des 30 derniers jours. Une panne n'empêche rien.
     loadPlatformRows(supabase).catch(() => [] as PlatformRow[]),
+    // Relances dues : toutes les propositions « Envoyées », quelle que soit leur date.
+    loadSentRows(supabase).catch(() => [] as SentRow[]),
   ]);
   const now = new Date();
   // Aperçu de la boîte mail : les plus récents ; « Tout voir » → /cockpit/mails.
@@ -79,6 +82,7 @@ export default async function CockpitPage({
         subtitle={subtitle}
         date={date.charAt(0).toUpperCase() + date.slice(1)}
         sources={freelanceSources(opportunities, now)}
+        followUpsDue={dueFollowUps(sentRows, now).length}
       />
 
       <OpenAiQuotaBanner />
@@ -151,4 +155,14 @@ async function loadPlatformRows(supabase: ReturnType<typeof createClient>): Prom
     .limit(2000);
   if (error) throw error;
   return (data ?? []) as PlatformRow[];
+}
+
+type SentRow = Pick<Opportunity, "platform" | "status" | "sent_at" | "replied_at" | "followed_up_at">;
+
+/** Propositions « Envoyées » (relances dues, plateformes #6). */
+async function loadSentRows(supabase: ReturnType<typeof createClient>): Promise<SentRow[]> {
+  const db = supabase as unknown as { from: (table: string) => any };
+  const { data, error } = await db.from("opportunities").select("platform, status, sent_at, replied_at, followed_up_at").eq("status", "envoyee").limit(2000);
+  if (error) throw error;
+  return (data ?? []) as SentRow[];
 }
