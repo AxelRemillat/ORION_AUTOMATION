@@ -1,92 +1,64 @@
 /**
- * CALIBRAGE DU DOUBLE JUGE des mails (grille de la famille + relecteur senior).
+ * ÉTALONNAGE DE LA CHECK-LIST sur le jeu D (Cowork #34) : les 15 mails notés à
+ * la main par Cowork (lib/emails/quality/cowork-d-set.ts). PAYANT (~0,10 €).
  *
- *   npm run calibrate:judge            un passage (PAYANT, ~0,03 €)
- *   npm run calibrate:judge -- --runs 2   deux passages, pour la stabilité
+ *   npm run calibrate:judge
  *
- * Attendu : chaque POSITIF (mails validés par Axel, réécritures F2/F4, ANTARES
- * réécrit par Cowork) ≥ 9 aux DEUX juges ; chaque NÉGATIF (contre-exemples de
- * fond, originaux F2/F4, mails du 06/10 notés 6 à 8 par Cowork) < 9 au double
- * juge. Sort en erreur sinon. Aucune écriture en base, aucun envoi.
+ * Pour chaque mail : la check-list réelle (code + modèle, mêmes faits et même
+ * texte du site qu'en production), puis l'accord avec le verdict humain
+ * (« prêt » = 9 ou plus). Cible : au moins 13 accords sur 15. Rien n'est écrit.
  */
-import { liveAsk } from "./quality-live";
-import { combineJudges, judgeMail, judgeMailSenior, PASS_SCORE } from "@/lib/emails/quality/judge";
-import { COWORK_GRADED, FAMILY_REFERENCES, FOND_NEGATIVES, VALIDATED_POSITIVES } from "@/lib/emails/quality/calibration-set";
-import { CALIBRATION } from "@/lib/emails/quality/references";
-import { CTA_VARIANTS } from "@/lib/emails/quality/template";
-import { DEMO_LINKS, demoForProposal } from "@/lib/emails/quality/demo-links";
-import { assembleFamily, F4_WHO, type MailFamily } from "@/lib/emails/quality/families";
+import { db, liveAsk, ownerId, spentSince } from "./quality-live";
+import { COWORK_D_SET } from "@/lib/emails/quality/cowork-d-set";
+import { judgeChecklist } from "@/lib/emails/quality/checklist";
+import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
+import { buildFacts } from "@/lib/emails/derived-facts";
+import { storedProfile } from "@/lib/emails/business-profile";
+import type { Prospect } from "@/types";
 
-const runsIndex = process.argv.indexOf("--runs");
-const runs = runsIndex >= 0 ? Math.max(1, Number(process.argv[runsIndex + 1]) || 1) : 1;
-
-interface Case {
-  label: string;
-  family: MailFamily;
-  company: string;
-  subject: string;
-  greeting: string;
-  hook: string;
-  proposal: string;
-  demo: keyof typeof DEMO_LINKS;
-  facts: string;
-  expected: "positif" | "négatif";
-}
-
-const siteFacts = (company: string) => `- Activité (leur site) : faits cités dans le mail, lus sur le site de ${company}`;
-
-function cases(): Case[] {
-  const list: Case[] = [];
-  for (const mail of VALIDATED_POSITIVES) {
-    list.push({ label: "validé Axel", family: "F1", company: mail.company, subject: mail.subject, greeting: "Bonjour Madame Martin,", hook: mail.hook, proposal: mail.proposal, demo: demoForProposal(mail.proposal).key, facts: siteFacts(mail.company), expected: "positif" });
-  }
-  for (const mail of [...FOND_NEGATIVES, ...CALIBRATION.filter((item) => item.score < 9).map((item) => ({ ...item, subject: "Vos demandes" }))]) {
-    list.push({ label: "négatif de fond", family: "F1", company: mail.company, subject: mail.subject, greeting: "Bonjour Madame Martin,", hook: mail.hook, proposal: mail.proposal, demo: demoForProposal(mail.proposal).key, facts: siteFacts(mail.company), expected: "négatif" });
-  }
-  for (const item of FAMILY_REFERENCES) {
-    list.push({ label: `${item.family} ${item.why}`, family: item.family, company: item.company, subject: item.subject, greeting: "Bonjour Madame Martin,", hook: item.hook, proposal: item.family === "F4" ? F4_WHO : item.proposal, demo: item.family === "F4" ? "factures" : "emails", facts: item.facts, expected: item.expected });
-  }
-  for (const mail of COWORK_GRADED) {
-    list.push({
-      label: `Cowork 06/10 : ${mail.coworkScore}`,
-      family: mail.family,
-      company: mail.company,
-      subject: mail.subject,
-      greeting: mail.greeting,
-      hook: mail.hook,
-      proposal: mail.family === "F4" ? F4_WHO : mail.proposal,
-      demo: mail.demo,
-      facts: siteFacts(mail.company),
-      expected: mail.coworkScore >= PASS_SCORE ? "positif" : "négatif",
-    });
-  }
-  return list;
-}
+const TARGET = 13;
 
 async function main() {
-  let failures = 0;
-  const all = cases();
-  for (let run = 1; run <= runs; run += 1) {
-    console.log(`\nPassage ${run}/${runs} — ${all.length} mails`);
-    for (const item of all) {
-      const body = assembleFamily(item.family, { subject: item.subject, hook: item.hook, proposal: item.proposal }, { greeting: item.greeting, demo: DEMO_LINKS[item.demo], cta: CTA_VARIANTS[0] });
-      const [grid, senior] = await Promise.all([
-        judgeMail(liveAsk(null), { subject: item.subject, body, company: item.company, facts: item.facts, family: item.family }, `qualite:calibrage:${run}`),
-        judgeMailSenior(liveAsk(null), { subject: item.subject, body, company: item.company, facts: item.facts }, `qualite:calibrage-senior:${run}`),
-      ]);
-      // Mails validés le 05/10, avant la grille « 9–10 réels » du 06/10 : leur gabarit F1
-      // (« J'automatise ce type de tâche pour des PME : … sont triés ») est au passif, ce que
-      // la nouvelle grille exclut. Ils ne contrôlent plus que le juge de grille.
-      const historical = item.label === "validé Axel";
-      const combined = historical ? grid : combineJudges(grid, senior);
-      const value = combined?.score ?? null;
-      const ok = value !== null && (item.expected === "positif" ? value >= PASS_SCORE : value < PASS_SCORE);
-      if (!ok) failures += 1;
-      console.log(`  ${ok ? "ok  " : "ÉCART"} ${item.expected.padEnd(7)} ${item.company.slice(0, 28).padEnd(28)} grille ${grid?.score ?? "?"} · senior ${senior?.score ?? "?"} — ${item.label}`);
-    }
+  const userId = await ownerId();
+  const started = new Date().toISOString();
+  const loose = db as never as { from: (table: string) => any };
+  let agree = 0;
+  const rows: string[] = [];
+  for (const mail of COWORK_D_SET) {
+    const name = mail.company.replace(/\s*\(.*$/, "").slice(0, 30);
+    const { data } = await loose.from("prospects").select("*").eq("user_id", userId).ilike("company_name", `%${name}%`).is("deleted_at", null).limit(1);
+    const prospect = (data ?? [])[0] as Prospect | undefined;
+    const figures = (prospect?.key_figures ?? {}) as Record<string, unknown>;
+    const keyFacts = keyFactsOf(figures) ?? [];
+    const derived = prospect ? buildFacts(prospect, null).facts : [];
+    const profile = prospect ? storedProfile(prospect.business_profile) : null;
+    const facts = [
+      ...keyFacts.map((fact) => `- Fait vérifié (${fact.distinctiveness}/3) : ${fact.text}`),
+      ...derived.map((fact) => `- ${fact.label} : ${fact.value}`),
+      profile?.offer ? `- Activité (leur site) : ${profile.offer}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const siteText = prospect ? [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" ") : "";
+    const verdict = await judgeChecklist(
+      liveAsk(prospect?.id ?? null),
+      { subject: mail.subject, core: mail.core, family: mail.family, greeting: mail.core.split("\n\n")[0] ?? "", company: prospect?.company_name ?? mail.company, facts, recipientRole: prospect?.contact_role ?? null, siteText },
+      "qualite:etalonnage",
+    );
+    const ready = Boolean(verdict?.ready);
+    const ok = verdict !== null && ready === mail.coworkReady;
+    if (ok) agree += 1;
+    const failed = verdict?.items.filter((item) => !item.ok).map((item) => `${item.id} « ${item.citation.slice(0, 70)} »`).join(" ; ") ?? "relecture indisponible";
+    rows.push(`| ${mail.company} | ${mail.family} | ${mail.coworkReady ? "prêt" : `non (${mail.coworkScore})`} | ${ready ? "prêt" : "non"} | ${ok ? "accord" : "**ÉCART**"} | ${failed || "—"} |`);
   }
-  console.log(failures ? `\n${failures} écart(s) de calibrage.` : "\nCalibrage conforme : positifs ≥ 9 aux deux juges, négatifs < 9.");
-  process.exit(failures ? 1 : 0);
+  console.log("| Mail | Famille | Cowork | Check-list | Accord | Critères à NON |");
+  console.log("| --- | --- | --- | --- | --- | --- |");
+  console.log(rows.join("\n"));
+  console.log(`\nAccords avec Cowork : ${agree}/${COWORK_D_SET.length} (cible ${TARGET}) · coût ${(await spentSince(userId, started)).toFixed(3)} €`);
+  if (agree < TARGET) process.exitCode = 1;
 }
 
-void main();
+void main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
