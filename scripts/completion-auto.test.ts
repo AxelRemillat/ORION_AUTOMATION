@@ -68,6 +68,17 @@ async function main() {
     check("budget du jour atteint : refusé", (await linkupGate(store(30), "acme lyon site officiel")).status === "blocked");
     check("sous le budget : appel permis", (await linkupGate(store(3), "acme lyon site officiel")).status === "call");
 
+    // Règle « site d'abord » (Cowork #38) : la complétion ne paie rien sans domaine.
+    {
+      let contactCalls = 0;
+      const fake = new FakeDb({ signal_candidates: [{ id: "c-nosite", user_id: "u1", prospect_id: "p-nosite", contact: {}, publication: "a_completer" }] });
+      await completeOne(fake as never, fake.rows("signal_candidates")[0] as never, {
+        runId: "r1",
+        deps: { resolveSite: async () => null, findContact: async () => { contactCalls += 1; return { confidence: 0, found_by: "aucun" }; } },
+      });
+      check("complétion sans site résolu : aucune recherche de contact (ni Pappers ni Hunter)", contactCalls === 0);
+    }
+
     // Plafond par job et part réservée par segment (Cowork #37), sans relever le budget du jour.
     check("LINKUP_RESERVE « agences:10, x:5 » lu", JSON.stringify(linkupReserves({ LINKUP_RESERVE: "agences:10, x:5" })) === '{"agences":10,"x":5}');
     check("budget accessible : autres segments retirés", budgetFor(30, null, { agences: 10 }) === 20 && budgetFor(30, "agences", { agences: 10 }) === 30);
