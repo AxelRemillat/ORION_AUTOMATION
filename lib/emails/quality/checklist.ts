@@ -1,3 +1,4 @@
+import { isOpenAIQuotaError } from "@/lib/ai/quota";
 import type { AskFn } from "@/lib/ai/chat";
 import { ALLOWED_DEMO_URLS, DEMO_HOST } from "./demo-links";
 import { bareDemoUrl, FAMILY_LIMITS, FAMILY_PARAM, type MailFamily } from "./families";
@@ -20,6 +21,12 @@ import { countWords } from "./template";
  * Le juge de grille et le relecteur senior d'avant ne notent plus : leurs
  * refus réels servent d'exemples aux critères (C5 surtout).
  */
+
+/** Crédit OpenAI épuisé : on le fait SUIVRE (le job s'arrête proprement) ; toute autre panne = lecture illisible. */
+const keepQuota = (error: unknown): string => {
+  if (isOpenAIQuotaError(error)) throw error;
+  return "";
+};
 
 export type CriterionId = "D1" | "D2" | "D3" | "D4" | "D5" | "C1" | "C2" | "C3" | "C4" | "C5";
 
@@ -205,7 +212,7 @@ export async function judgeChecklist(ask: AskFn, input: ChecklistInput, operatio
   if (code.some((item) => !item.ok)) return verdictOf(code);
   const user = `Famille : ${input.family}\nEntreprise : ${input.company}\nDestinataire : ${input.recipientRole?.trim() || "rôle inconnu"}\nFaits de la fiche :\n${input.facts || "- (aucun)"}\n\nMAIL\nObjet : ${input.subject}\n\n${input.core}`;
   const raws = await Promise.all(
-    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(() => "")),
+    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
   );
   const semantic = majority(raws.map(parseChecklistSample), semanticCriteria(input.family));
   if (!semantic) return null;

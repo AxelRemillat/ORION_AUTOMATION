@@ -1,3 +1,4 @@
+import { isOpenAIQuotaError } from "@/lib/ai/quota";
 import type { AskFn } from "@/lib/ai/chat";
 import { AXEL_SENT } from "./calibration";
 import { CODEUR_LAUNCH_MAX_EUR, contactFailures, FLATTERY, INVENTED_CLAIMS, isNoContactPlatform, PRIVATE_MESSAGE_MAX_CHARS, PROPOSAL_JARGON } from "./proposal";
@@ -17,6 +18,12 @@ import type { Platform } from "./types";
  * « Prête » = les 8 à OUI. Les 3 propositions réellement envoyées par Axel
  * (P1 Sage, P2 fichiers de prix, P3 tri de pièces) passent à 100 %.
  */
+
+/** Crédit OpenAI épuisé : on le fait SUIVRE (le job s'arrête proprement) ; toute autre panne = lecture illisible. */
+const keepQuota = (error: unknown): string => {
+  if (isOpenAIQuotaError(error)) throw error;
+  return "";
+};
 
 export type ProposalCriterionId = "P1" | "P2" | "P3" | "P4" | "P5" | "P6" | "P7" | "P8";
 
@@ -188,7 +195,7 @@ export async function judgeProposalChecklist(
   if (code.some((item) => !item.ok)) return proposalVerdictOf(code);
   const user = `ANNONCE « ${input.title} » (budget : ${input.budget ?? "non indiqué"})\n${input.ad.slice(0, 5000)}\n\nRÉPONSE REÇUE\n${input.text}`;
   const raws = await Promise.all(
-    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildProposalChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(() => "")),
+    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildProposalChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
   );
   const semantic = proposalMajority(raws.map(parseProposalChecklist));
   if (!semantic) return null;

@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { isOpenAIQuotaError, OpenAIQuotaError } from "../lib/ai/quota";
 import { buildChecklistPrompt, C5_NEGATIVES, checklistFeedback, deterministicChecks, judgeChecklist, majority, parseChecklistSample, semanticCriteria, verdictOf } from "../lib/emails/quality/checklist";
 import { CHECKLIST_SAMPLES } from "../lib/emails/quality/checklist";
 import { factsGate, isFactsInsufficient, keyFactsOf } from "../lib/emails/quality/facts-gate";
@@ -690,7 +691,12 @@ async function main() {
     const down: AskFn = async () => {
       throw new Error("429 quota");
     };
-    check("modèle indisponible (quota) → relecture indisponible", (await judgeChecklist(down, { subject: "x", core: f1(), family: "F1", greeting, company: "B", facts: "" })) === null);
+    check("panne du modèle (réseau) → relecture indisponible", (await judgeChecklist(down, { subject: "x", core: f1(), family: "F1", greeting, company: "B", facts: "" })) === null);
+    const noCredit: AskFn = async () => {
+      throw new OpenAIQuotaError("Crédit OpenAI épuisé");
+    };
+    const raised = await judgeChecklist(noCredit, { subject: "x", core: f1(), family: "F1", greeting, company: "B", facts: "" }).then(() => null, (error: unknown) => error);
+    check("crédit épuisé (OpenAIQuotaError, agent1 #100) : l'erreur remonte, jamais « relecture indisponible »", isOpenAIQuotaError(raised));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
