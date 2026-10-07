@@ -31,6 +31,14 @@ export function siteOf(row: SignalCandidateRow): string | null {
   return baseOf(row)?.website ?? siteFreeOf(row)?.website ?? null;
 }
 
+/**
+ * « SANS SITE » (Cowork #38) : l'étape « sites » a cherché et n'a rien trouvé.
+ * La fiche ne passe pas au creusage (aucun crédit Pappers ni Hunter), sort du
+ * quota du jour, et porte ce motif — elle n'arrive jamais en « à compléter ».
+ */
+export const NO_SITE_REASON = "Sans site : aucun site trouvé à l'étape « sites »";
+export const isNoSite = (motif: string | null | undefined) => Boolean(motif?.startsWith("Sans site"));
+
 export function siteState(row: SignalCandidateRow): SiteState {
   if (siteOf(row)) return "trouvé";
   return siteFreeOf(row)?.checked_at ? "aucun" : "à chercher";

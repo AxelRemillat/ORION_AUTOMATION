@@ -20,7 +20,7 @@ import {
 } from "./store";
 import { askTriageBatch, settleAll, TRIAGE_BATCH, type TriageAsk, type TriageRaw } from "./triage";
 import type { Identity, Triage } from "./types";
-import { bySite, siteOf } from "./site-priority";
+import { bySite, siteOf, siteState, NO_SITE_REASON } from "./site-priority";
 
 /**
  * Boucles des étages 2 à 4, sur les lignes d'un run. Dépendances injectées :
@@ -288,12 +288,19 @@ export async function runDigStage(db: Db, userId: string, runId: string, options
     resumed.push(row);
   }
 
-  // Site trouvé d'abord (étape gratuite `runSiteStage`) : une fiche sans site
-  // ne pourra pas recevoir de mail, elle passe derrière. Même plafond.
-  const pending = bySite([
+  // RÈGLE « SITE D'ABORD » (Cowork #38) : AUCUN crédit Pappers ni Hunter tant
+  // que l'étape « sites » n'a pas trouvé de domaine.
+  //   - site trouvé          → creusage (dans le plafond) ;
+  //   - cherché, rien trouvé → « Sans site » : hors creusage, hors quota du jour ;
+  //   - pas encore cherché   → attend le passage de l'étape « sites » (rien n'est dépensé).
+  const ordered = bySite([
     ...digOrder(current.map((row) => ({ row, triage: row.triage as unknown as Triage, weight: row.weight ?? 0 }))),
     ...digOrder(resumed.map((row) => ({ row, triage: row.triage as unknown as Triage, weight: row.weight ?? 0 }))),
-  ]).slice(0, Math.max(0, Math.min(budget, options.perStep)));
+  ]);
+  for (const { row } of ordered.filter(({ row }) => siteState(row) === "aucun")) {
+    await updateCandidate(db, row.id, { statut: "rejeté", motif_rejet: NO_SITE_REASON, ...(row.run_id !== runId ? { run_id: runId } : {}) });
+  }
+  const pending = ordered.filter(({ row }) => siteState(row) === "trouvé").slice(0, Math.max(0, Math.min(budget, options.perStep)));
 
   for (const { row, triage: verdict, weight } of pending) {
     // Une fiche reprise d'un run précédent rejoint ce run : elle y est comptée.

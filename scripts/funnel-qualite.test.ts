@@ -16,6 +16,7 @@ import { DEFAULT_EXCLUDED_SECTORS, filterSignal } from "../lib/funnel/filter";
 import { applyTypeQuota, MAX_SHARE_PER_TYPE, signalFamily } from "../lib/funnel/quota";
 import { DEFAULT_PREFS } from "../lib/funnel/settings";
 import { GOVERNANCE_ONLY, MAX_LOOKUPS, runDigStage, runFilterStage } from "../lib/funnel/stages";
+import { NO_SITE_REASON } from "../lib/funnel/site-priority";
 import { NOT_EXAMINED, yieldBySource } from "../lib/funnel/store";
 import { capGenericPains, GENERIC_PAIN_MAX_SCORE, onePerCompany, settle, userPrompt, type TriageInput, type TriageOutcome } from "../lib/funnel/triage";
 import type { HarvestedSignal, Identity, Triage } from "../lib/funnel/types";
@@ -253,7 +254,9 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
   console.log("\n7. Creusage : issue explicite, reprise au run suivant");
   {
     const now = "2026-09-30T10:00:00Z";
-    const base = { company_name: "X", siren: "123456789", naf_code: "46.69B", figures: {} };
+    // Site trouvé à l'étape « sites » : seul cas creusé (règle « site d'abord », Cowork #38).
+    const base = { company_name: "X", siren: "123456789", naf_code: "46.69B", figures: {}, website: "https://x.fr" };
+    const noSiteBase = { company_name: "X", siren: "123456789", naf_code: "46.69B", figures: {} };
     const retained = (id: string, run: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
       id, user_id: "u1", run_id: run, source: "bodacc", statut: "retenu", motif_rejet: null, date_signal: "2026-09-25", texte_brut: "Nomination",
       url_source: null, siren: "123456789", company_name: id, hash: id, score: 4, weight: 0.5, badges: [],
@@ -269,11 +272,19 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
         retained("ANCIEN_OK", "run1"),
         retained("ANCIEN_B2C", "run1", { identity: { ...identity({ name: "ANCIEN_B2C", naf: "56.30Z" }), base } }),
         retained("ERREUR_PASSEE", "run1", { motif_rejet: "creusage à reprendre : délai dépassé" }),
+        // Cherché à l'étape « sites », rien trouvé → « Sans site ».
+        retained("SANS_SITE", "run2", { identity: { ...identity({ name: "SANS_SITE" }), base: noSiteBase }, contact: { site_free: { website: null, checked_at: now } } }),
+        // Pas encore passé à l'étape « sites » → attend, rien n'est dépensé.
+        retained("A_CHERCHER", "run2", { identity: { ...identity({ name: "A_CHERCHER" }), base: noSiteBase } }),
       ],
       prospects: [],
     });
+    const enriched: string[] = [];
     const deps: DigDeps = {
-      enrich: async (c) => ({ ...c.base, key_figures: c.id === "OPPOSE" ? { refuses_prospecting: true, pappers_read: true } : { pappers_read: true }, signals: [], warnings: [] }),
+      enrich: async (c) => {
+        enriched.push(c.id);
+        return { ...c.base, key_figures: c.id === "OPPOSE" ? { refuses_prospecting: true, pappers_read: true } : { pappers_read: true }, signals: [], warnings: [] };
+      },
       createProspect: async (_company, c) => ({ id: `p-${c.id}` }),
       findContact: async () => ({ email: "contact@x.fr", email_type: "generique", confidence: 60, found_by: "site" }),
       brief: async () => undefined,
@@ -285,6 +296,9 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
     check("retenu d'un run précédent : repris et creusé dans ce run", byId.get("ANCIEN_OK")?.statut === "creusé" && byId.get("ANCIEN_OK")?.run_id === "run2");
     check("retenu d'un run précédent devenu hors cible : re-filtré", byId.get("ANCIEN_B2C")?.statut === "rejeté" && /^re-filtré/.test(byId.get("ANCIEN_B2C")?.motif_rejet ?? ""), byId.get("ANCIEN_B2C")?.motif_rejet ?? "");
     check("erreur passagère d'un run précédent : reprise", byId.get("ERREUR_PASSEE")?.statut === "creusé");
+    check("règle 1 — sans site trouvé : « Sans site », hors creusage (jamais « à compléter »)", byId.get("SANS_SITE")?.statut === "rejeté" && byId.get("SANS_SITE")?.motif_rejet === NO_SITE_REASON && !byId.get("SANS_SITE")?.publication, JSON.stringify(byId.get("SANS_SITE")?.motif_rejet));
+    check("règle 2 — aucun crédit Pappers/Hunter sans domaine (ni pour « Sans site », ni avant l'étape « sites »)", !enriched.includes("SANS_SITE") && !enriched.includes("A_CHERCHER"), enriched.join(","));
+    check("… pas encore cherché : reste retenu, repris après l'étape « sites »", byId.get("A_CHERCHER")?.statut === "retenu" && !byId.get("A_CHERCHER")?.motif_rejet);
   }
 
   console.log("\n8. Cible PME 10-249 salariés, groupes, action sociale, gouvernance");
