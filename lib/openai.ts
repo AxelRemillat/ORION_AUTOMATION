@@ -9,6 +9,8 @@ import {
   readOpenAiError,
   rememberUnsupported,
 } from "@/lib/ai/params";
+import { guardOpenAi } from "@/lib/ai/quota";
+import { watchOpenAiQuota } from "@/lib/ai/quota-watch";
 
 /**
  * Modèle historique, surchargeable via OPENAI_MODEL. Les appels passent
@@ -39,6 +41,8 @@ export const OPENAI_MAX_RETRIES = 1;
  * Instancié à la demande pour ne pas exiger la clé au build.
  */
 export function getOpenAI(): OpenAI {
+  // Garde-fou du crédit : état partagé + notification (lib/ai/quota-watch.ts).
+  watchOpenAiQuota();
   if (!client) {
     client = new OpenAI({
       apiKey: requireEnv("OPENAI_API_KEY"),
@@ -87,7 +91,7 @@ export async function completeText(params: {
 
   let response;
   try {
-    response = await send();
+    response = await guardOpenAi(send);
   } catch (error) {
     // Meme filet qu'ailleurs : on retire la capacite refusee et on rejoue une fois.
     const info = readOpenAiError(error);
@@ -100,13 +104,15 @@ export async function completeText(params: {
       temperature: params.temperature ?? 0.7,
       reasoningEffort: reasoningEffortFor(role),
     });
-    response = await getOpenAI().chat.completions.create({
-      ...(retry as { model: string }),
-      messages: [
-        { role: "system", content: params.system },
-        { role: "user", content: params.user },
-      ],
-    });
+    response = await guardOpenAi(() =>
+      getOpenAI().chat.completions.create({
+        ...(retry as { model: string }),
+        messages: [
+          { role: "system", content: params.system },
+          { role: "user", content: params.user },
+        ],
+      }),
+    );
   }
   if (response.usage) {
     await recordOpenAiUsage({

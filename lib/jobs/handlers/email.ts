@@ -1,3 +1,4 @@
+import { OpenAIQuotaError, QUOTA_MESSAGE, quotaHitSince } from "@/lib/ai/quota";
 import { singleCompanyName } from "@/lib/company-name";
 import { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
@@ -746,6 +747,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
   const familyOf = await todayFamilies(ctx.db, todayRows.map((row) => row.id));
   const counted = openingsOf(todayRows, familyOf);
   const dayOpenings = lock.held ? counted : closeAvec(counted);
+  const quotaStart = Date.now();
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -768,6 +770,8 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       keyFacts: keyFactsOf(figures as Record<string, unknown>),
     }),
   );
+  // Crédit OpenAI épuisé pendant la rédaction : ni « À revoir » ni brouillon.
+  if (quotaHitSince(quotaStart)) throw new OpenAIQuotaError(QUOTA_MESSAGE);
   if ("error" in draft) throw new JobError(draft.error, true, 502);
   if ("blocked" in draft) {
     // Pas de mail sans fait propre ni pain sûr : la raison est gardée sur la

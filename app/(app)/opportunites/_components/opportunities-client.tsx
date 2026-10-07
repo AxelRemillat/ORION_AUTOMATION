@@ -222,7 +222,7 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                             {item.published_at ? ` · ${ageLabel(item.published_at)}` : ""}
                             {item.budget ? ` · ${item.budget}` : ""}
                             {item.filter_reason ? ` · filtre : ${item.filter_reason}` : ""}
-                            {item.analysis_state === "pending" ? " · analyse en cours" : item.analysis_state === "a_analyser" ? " · à analyser" : ""}
+                            {item.analysis_state === "pending" ? " · analyse en cours" : item.analysis_state === "a_analyser" ? " · à analyser" : item.analysis_state === "non_analysee" ? " · non analysée" : ""}
                           </p>
                         </div>
                         {item.fit_score != null && <Badge tone={scoreTone(item.fit_score)}>{item.fit_score}/10</Badge>}
@@ -266,7 +266,7 @@ export function OpportunitiesClient({ initial, focusId }: { initial: Opportunity
                   </p>
                 ) : selected.fit_score == null ? (
                   <div className="flex items-center gap-2 text-[13px] text-muted">
-                    {selected.analysis_state === "pending" ? "Analyse en cours." : selected.analysis_state === "a_analyser" ? "Plafond d'analyses du jour atteint." : "Analyse absente."}
+                    {selected.analysis_state === "pending" ? "Analyse en cours." : selected.analysis_state === "a_analyser" ? "Plafond d'analyses du jour atteint." : selected.analysis_state === "non_analysee" ? "Non analysée : crédit OpenAI épuisé." : "Analyse absente."}
                     <Button size="sm" variant="outline" loading={busy === `regen:${selected.id}`} onClick={() => regenerate(selected.id)}>
                       <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Analyser
                     </Button>

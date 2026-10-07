@@ -1,3 +1,4 @@
+import { isOpenAIQuotaError, OpenAIQuotaError, QUOTA_MESSAGE, quotaHitSince } from "@/lib/ai/quota";
 import { autoReplyKind } from "@/lib/inbound/auto-reply";
 import { verifyOpposition } from "@/lib/enrichment/opposition";
 import { openAiBudget, pappersAllowance } from "@/lib/usage/budgets-server";
@@ -119,12 +120,16 @@ async function profilesStep(ctx: StepContext): Promise<StepOutcome> {
   );
   let read = 0;
   let failed = 0;
+  const started = Date.now();
   for (const item of items.slice(0, PROFILES_PER_RUN)) {
     if (Date.now() > end) break;
+    // Crédit épuisé : on s'arrête, sans marquer de profil « illisible ».
+    if (quotaHitSince(started)) throw new OpenAIQuotaError(QUOTA_MESSAGE);
     const { data } = await ctx.db.from("prospects").select("*").eq("id", item.prospectId!).maybeSingle();
     if (!data) continue;
     const run = await ensureBusinessProfile(ctx.db, data as Prospect, profileAsk(item.prospectId!)).catch(() => null);
     if (run?.profile) read += 1;
+    else if (quotaHitSince(started)) throw new OpenAIQuotaError(QUOTA_MESSAGE);
     else {
       failed += 1;
       const figures = ((data as Prospect).key_figures ?? {}) as Record<string, unknown>;
@@ -299,7 +304,17 @@ type Step = (ctx: StepContext) => Promise<StepOutcome>;
 export function openAiGuarded(step: Step, budget: () => Promise<OpenAiBudgetState> = () => openAiBudget()): Step {
   return async (ctx) => {
     const state = await budget().catch(() => null);
-    if (state?.level !== "plafond") return step(ctx);
+    if (state?.level !== "plafond") {
+      try {
+        return await step(ctx);
+      } catch (error) {
+        // CRÉDIT OPENAI ÉPUISÉ (Cowork #35) : arrêt propre, run clos, rien
+        // n'est marqué écarté ni « à revoir » — la reprise se fera à la recharge.
+        if (!isOpenAIQuotaError(error)) throw error;
+        const closed = await finishStep(ctx).catch(() => ({}) as StepOutcome);
+        return { ...closed, done: true, progress: progress(QUOTA_MESSAGE, 100) };
+      }
+    }
     const closed = await finishStep(ctx).catch(() => ({}) as StepOutcome);
     return { ...closed, done: true, progress: progress(state.message ?? "Plafond OpenAI atteint : préparation arrêtée.", 100) };
   };
