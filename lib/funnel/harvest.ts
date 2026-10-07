@@ -81,6 +81,8 @@ export function fromOfficial(signal: OfficialSignal): HarvestedSignal {
 export interface HarvestCriteria {
   departements: readonly string[];
   days?: number;
+  /** Fenêtre France Travail en jours (défaut FUNNEL_FT_DAYS = 30 ; le job de stock passe 60). */
+  ftDays?: number;
   today?: Date;
   env?: EnvLike;
 }
@@ -99,6 +101,12 @@ export interface Harvest {
  * invocation (300 s) avec BODACC derrière. Au-delà, on garde ce qui est lu.
  */
 export const FT_READ_BUDGET_MS = 170_000;
+
+/** Fenêtre France Travail retenue : réglable par run (1 à 90 jours), 30 par défaut. */
+export function ftWindowDays(value: unknown): number {
+  const days = Math.floor(Number(value));
+  return Number.isFinite(days) && days >= 1 ? Math.min(90, days) : FUNNEL_FT_DAYS;
+}
 
 /** Moisson sur plusieurs départements, dédoublonnée par empreinte. */
 export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
@@ -123,7 +131,7 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
         departement,
         tranches: [],
         limit: 0,
-        days: national ? FUNNEL_FT_DAYS : days,
+        days: national ? ftWindowDays(criteria.ftDays) : days,
         today: criteria.today,
         env: criteria.env,
         only,
