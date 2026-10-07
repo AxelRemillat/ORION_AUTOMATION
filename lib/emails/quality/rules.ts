@@ -136,7 +136,7 @@ export interface RuleResult {
   failures: string[];
 }
 
-function wordHit(text: string, word: string): boolean {
+export function wordHit(text: string, word: string): boolean {
   const pattern = new RegExp(`(^|[^\\p{L}])${normalize(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "u");
   return pattern.test(normalize(text));
 }

@@ -4,6 +4,8 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { buildChecklistPrompt, C5_NEGATIVES, checklistFeedback, deterministicChecks, judgeChecklist, majority, parseChecklistSample, semanticCriteria, verdictOf } from "../lib/emails/quality/checklist";
+import { CHECKLIST_SAMPLES } from "../lib/emails/quality/checklist";
 import { factsGate, isFactsInsufficient, keyFactsOf } from "../lib/emails/quality/facts-gate";
 import { keyFactsBlock } from "../lib/emails/quality/writer";
 import { INVENTED_FACT_MAX, INVENTED_FACT_REASON, judgeMailSenior, medianVerdict, SENIOR_SAMPLES, verifiedFactsCheck } from "../lib/emails/quality/judge";
@@ -172,17 +174,33 @@ async function main() {
   const base = { brief, facts: [OWN_FACT], prospectId: "p-belledonne", companyName: "Le Pain de Belledonne", activity: "Boulangerie bio", prospectText: "boulangerie bio", greeting: GREETING, signature: "Axel Remillat\nAutomatisation & IA pour PME · axelremillat.com/pme", family: "F1" as const };
   const scripted = (writer: string[], judge: string[]): { ask: AskFn; calls: string[] } => {
     const calls: string[] = [];
-    // Double juge : le relecteur senior (second appel du tour) rend la même note que la grille.
-    let last = "";
-    const ask: AskFn = async (role, system) => {
-      if (role === "judge" && /consultant B2B senior/.test(system)) {
-        const verdict = parseVerdict(last);
-        return JSON.stringify({ score: verdict?.score ?? 0, reasons: verdict?.reasons ?? [], fix: verdict?.fix ?? null });
+    // Check-list (Cowork #32) : la note scénarisée devient des critères à NON dont les pénalités font 10 − note ;
+    // les CHECKLIST_SAMPLES lectures d'un même essai rendent la même chose (un seul « judge » compté).
+    let current = "";
+    let reads = 0;
+    const asChecklist = (raw: string) => {
+      const score = parseVerdict(raw)?.score ?? 0;
+      const failing = new Set<string>();
+      let missing = 10 - score;
+      for (const [id, penalty] of [["C1", 3], ["C2", 2], ["C3", 2], ["C5", 1]] as const) {
+        if (missing >= penalty) {
+          failing.add(id);
+          missing -= penalty;
+        }
       }
-      calls.push(role);
-      if (role === "writer") return writer.shift() ?? "";
-      last = judge.shift() ?? "";
-      return last;
+      return JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C4", "C5"].map((id) => [id, { ok: !failing.has(id), citation: failing.has(id) ? "accroche générique" : "ok" }])));
+    };
+    const ask: AskFn = async (role) => {
+      if (role === "writer") {
+        calls.push(role);
+        return writer.shift() ?? "";
+      }
+      if (reads % CHECKLIST_SAMPLES === 0) {
+        calls.push(role);
+        current = asChecklist(judge.shift() ?? "");
+      }
+      reads += 1;
+      return current;
     };
     return { ask, calls };
   };
@@ -197,12 +215,12 @@ async function main() {
     const { ask, calls } = scripted([good, good, good], [verdictJson(7), verdictJson(8), verdictJson(7)]);
     const outcome = await generateQualityDraft({ ...base, ask });
     check("toujours < 9 : 3 essais (2 réécritures), puis « À revoir »", isDraft(outcome) && outcome.needsReview && outcome.attempts === 3, JSON.stringify(calls));
-    check("la raison est donnée", isDraft(outcome) && /Note 8\/10/.test(outcome.reviewReason ?? ""), isDraft(outcome) ? String(outcome.reviewReason) : "");
+    check("la raison est donnée", isDraft(outcome) && /critère\(s\) à NON — C2/.test(outcome.reviewReason ?? ""), isDraft(outcome) ? String(outcome.reviewReason) : "");
     check("le meilleur essai est gardé (8/10)", isDraft(outcome) && outcome.score === 8);
   }
   {
     const bad = JSON.stringify(parts({ hook: "Vous recrutez un préparateur. Les commandes s'accumulent." }));
-    const { ask, calls } = scripted([bad, good], [verdictJson(9)]);
+    const { ask, calls } = scripted([bad, good], [verdictJson(10)]);
     const outcome = await generateQualityDraft({ ...base, ask });
     check("règle cassée → réécrit sans payer le juge", calls.join(",") === "writer,writer,judge" && isDraft(outcome) && !outcome.needsReview, calls.join(","));
   }
@@ -486,6 +504,22 @@ async function main() {
       routed.push(isDraft(outcome) ? outcome.family : "blocked" in outcome ? "bloqué" : "erreur");
     }
     check("pain incertain + activité → F2 ou F4, jamais F1/F3", routed.every((family) => family === "F2" || family === "F4"), routed.join(","));
+    {
+      // Cowork #32 : F2 au-delà de 80 mots → raccourcissement dédié AVANT le jugement, hors des essais.
+      const longF2 = JSON.stringify({ ...f2Parts, hook: `${f2Parts.hook} ${"Le client rappelle ensuite pour savoir où en est sa commande du matin. ".repeat(3)}` });
+      const operations: string[] = [];
+      const ask: AskFn = async (role, _system, _user, _temperature, operation) => {
+        operations.push(operation.replace(/:lecture-\d+$/, ""));
+        if (role === "writer") return operation === "qualite:raccourci" ? f2Good : longF2;
+        return JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C5"].map((id) => [id, { ok: true, citation: "ok" }])));
+      };
+      const outcome = await generateQualityDraft({ ...base, family: "F2", brief: doubtful, ask });
+      check(
+        "F2 trop long : raccourci avant la check-list, sans compter d'essai",
+        isDraft(outcome) && outcome.attempts === 1 && !outcome.needsReview && operations.slice(0, 3).join(",") === "qualite:redaction,qualite:raccourci,qualite:checklist:0",
+        JSON.stringify({ ops: operations, r: isDraft(outcome) ? outcome.reviewReason : outcome }),
+      );
+    }
     const { ask: none, calls: noCalls } = scripted([], []);
     const noActivity = await generateQualityDraft({ ...base, family: undefined, brief: doubtful, activity: null, ask: none });
     check("pain incertain sans activité → bloqué, aucun appel", "blocked" in noActivity && noCalls.length === 0);
@@ -608,6 +642,55 @@ async function main() {
     check("générique, addressee_hint calculé mais vide → « Bonjour, »", buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({ addressee_hint: null }) }) === "Bonjour,");
     check("adresse nominative : son titulaire, jamais l'addressee_hint", buildQualityGreeting({ email: "jean.martin@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf(hint("Claude Durand", "Madame")) }) === "Bonjour Monsieur Martin,");
     check("fiche d'avant (pas de champ) : comportement d'avant (dirigeant)", addresseeHintOf({}) === undefined && buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({}) }) === "Bonjour Monsieur Martin,");
+  }
+
+  console.log("\nCheck-list des mails (Cowork #32)");
+  {
+    const greeting = "Bonjour Monsieur Martin,";
+    const f1 = (over: Partial<{ hook: string; proposal: string; link: string; cta: string; greet: string }> = {}) =>
+      [
+        over.greet ?? greeting,
+        over.hook ?? "Vos quatre fournils livrent les restaurants chaque matin. Une commande arrivée tard part sans pain.",
+        over.proposal ?? "J'automatise la prise de commande : chaque demande des restaurants arrive dans votre planning de fournée, et les oublis sont signalés.",
+        `Exemple testable en une minute : ${over.link ?? "axelremillat.com/automatisations?demo=email&v=1"}`,
+        over.cta ?? "Auriez-vous 15 minutes la semaine prochaine pour en parler ?",
+      ].join("\n\n");
+    const codeOf = (core: string, family: "F1" | "F3" = "F1", expected = greeting) => deterministicChecks(core, { family, greeting: expected });
+    const failing = (core: string, family: "F1" | "F3" = "F1", expected = greeting) => codeOf(core, family, expected).filter((item) => !item.ok).map((item) => item.id).join(",");
+    check("mail correct : D1 à D5 à OUI", failing(f1()) === "", JSON.stringify(codeOf(f1())));
+    check("D1 : trop long pour F1 (75 mots)", failing(f1({ proposal: `J'automatise la prise de commande ${"et la suite ".repeat(30)}.` })).includes("D1"));
+    check("D2 : lien d'une autre famille (v=3 en F1)", failing(f1({ link: "axelremillat.com/automatisations?demo=email&v=3" })) === "D2");
+    check("D2 : page générique sans démo précise", failing(f1({ link: "axelremillat.com/automatisations?v=1" })) === "D2");
+    check("D3 : salutation différente de celle calculée (addressee_hint, nominatif)", failing(f1({ greet: "Bonjour Monsieur Durand," })) === "D3");
+    check("D3 : « Bonjour, » accepté quand c'est la salutation calculée", failing(f1({ greet: "Bonjour," }), "F1", "Bonjour,") === "");
+    check("D4 : deux questions → NON", failing(f1({ hook: "Vos quatre fournils livrent-ils les restaurants chaque matin ? Une commande arrivée tard part sans pain." })) === "D4");
+    check("D4 : le « ? » de l'URL de démo ne compte pas", codeOf(f1()).find((item) => item.id === "D4")?.ok === true);
+    check("D4 : F3 garde sa question d'ouverture + la demande finale", failing(["Bonjour,", "Qui vérifie les cotes des plans avant le devis ?", "J'automatise la lecture des plans : les cotes manquantes vous sont signalées.", "Exemple testable en une minute : axelremillat.com/automatisations?demo=email&v=3", "Auriez-vous 15 minutes la semaine prochaine pour en parler ?"].join("\n\n"), "F3", "Bonjour,") === "");
+    check("D5 : mot interdit (« workflow »)", failing(f1({ proposal: "J'automatise ce workflow : chaque demande des restaurants arrive dans votre planning de fournée, et les oublis sont signalés." })) === "D5");
+
+    const sample = (ok: Partial<Record<string, boolean>>) => JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C4", "C5"].map((id) => [id, { ok: ok[id] ?? true, citation: ok[id] === false ? `citation ${id}` : "ok" }])));
+    const votes = majority([sample({ C2: false }), sample({ C2: false }), sample({})].map(parseChecklistSample), semanticCriteria("F1"));
+    check("majorité par critère : C2 NON 2 fois sur 3 → NON, citation gardée", votes?.find((item) => item.id === "C2")?.ok === false && votes.find((item) => item.id === "C2")?.citation === "citation C2" && votes.find((item) => item.id === "C1")?.ok === true);
+    check("majorité : égalité (1 lecture illisible) → NON par prudence", majority([sample({ C3: false }), sample({}), null].map((raw) => (raw ? parseChecklistSample(raw) : null)), semanticCriteria("F1"))?.find((item) => item.id === "C3")?.ok === false);
+    check("C4 seulement en F4, où il remplace C3", !semanticCriteria("F1").includes("C4") && semanticCriteria("F4").includes("C4") && !semanticCriteria("F4").includes("C3"));
+    let reads = 0;
+    const readsAsk: AskFn = async () => {
+      reads += 1;
+      return sample({});
+    };
+    const ready = await judgeChecklist(readsAsk, { subject: "Vos commandes", core: f1(), family: "F1", greeting, company: "Belledonne", facts: "- quatre fournils" });
+    check(`tous à OUI → prêt, 10/10, ${CHECKLIST_SAMPLES} lectures`, ready?.ready === true && ready.score === 10 && reads === CHECKLIST_SAMPLES && ready.items.length === 9);
+    reads = 0;
+    const refused = await judgeChecklist(readsAsk, { subject: "x", core: f1({ greet: "Bonjour," }), family: "F1", greeting, company: "Belledonne", facts: "" });
+    check("contrôle du code à NON → aucun appel au modèle", reads === 0 && refused?.ready === false && refused.items.length === 5);
+    const failed = verdictOf([...codeOf(f1()), ...(majority([parseChecklistSample(sample({ C1: false, C5: false }))], semanticCriteria("F1")) ?? [])]);
+    check("note = 10 − pénalités (C1 3, C5 1) → 6, pas prêt", failed.score === 6 && !failed.ready);
+    check("réécriture ciblée : seuls les critères à NON, avec leur citation", checklistFeedback(failed) === "- C1 NON — Le fait cité est spécifique et figure dans les faits de la fiche : « citation C1 »\n- C5 NON — Aucune formulation passive, vague ou à double sens : « citation C5 »", checklistFeedback(failed));
+    check("C5 : 6 refus réels en exemples négatifs", C5_NEGATIVES.length === 6 && C5_NEGATIVES.every((line) => buildChecklistPrompt().includes(line)));
+    const down: AskFn = async () => {
+      throw new Error("429 quota");
+    };
+    check("modèle indisponible (quota) → relecture indisponible", (await judgeChecklist(down, { subject: "x", core: f1(), family: "F1", greeting, company: "B", facts: "" })) === null);
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

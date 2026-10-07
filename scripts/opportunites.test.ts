@@ -2,6 +2,8 @@
  * Opportunités (Codeur, Upwork…) : saisie, analyse, proposition, suivi, stats.
  * Fixtures uniquement, aucun appel réel.
  */
+import { buildProposalChecklistPrompt, judgeProposalChecklist, proposalChecklistFeedback, proposalCodeChecks, proposalMajority, proposalVerdictOf } from "../lib/opportunities/proposal-checklist";
+import { PROPOSAL_CHECKLIST_SAMPLES } from "../lib/opportunities/proposal-checklist";
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
 import { assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
@@ -15,6 +17,22 @@ import { freshScore, ingestOpportunity, parseIngestBody, statusAfterAnalysis, ve
 import { prefilterReason } from "../lib/opportunities/prefilter";
 import { requestedItems } from "../lib/opportunities/requests";
 import { ageLabel, bucketOf, staleLabel, unseenAlerts } from "../lib/opportunities/view";
+
+/**
+ * Check-list des propositions (Cowork #32) : réponse du modèle scénarisée à
+ * partir d'une note — les critères LLM à NON font 10 − note (P1 2, P3 2, P4 1, P6 1).
+ */
+function checklistKeys(score: number): Record<string, { ok: boolean; citation: string }> {
+  const failing = new Set<string>();
+  let missing = Math.max(0, 10 - score);
+  for (const [id, penalty] of [["P1", 2], ["P3", 2], ["P4", 1], ["P6", 1]] as const) {
+    if (missing >= penalty) {
+      failing.add(id);
+      missing -= penalty;
+    }
+  }
+  return Object.fromEntries(["P1", "P3", "P4", "P6"].map((id) => [id, { ok: !failing.has(id), citation: failing.has(id) ? "reformulation générique" : "ok" }]));
+}
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -170,17 +188,24 @@ async function main() {
   {
     const good = PROPOSAL_POSITIVES[2];
     const goodJson = JSON.stringify({ reading: good.reading, steps: good.steps, framing: good.framing, question: good.question });
-    const verdict = (score: number) => JSON.stringify({ score, criteria: { lecture: Math.min(3, score - 7 + 0), approche: 3, cadrage: 2, ton: 2 }, reasons: score >= 9 ? [] : ["reformulation générique"], fix: score >= 9 ? null : "Reprends les éléments de l'annonce." });
+    // Note 9 ou 10 → les 8 critères à OUI ; en dessous, des critères à NON pour 10 − note.
+    const verdict = (score: number) => JSON.stringify({ score, criteria: { lecture: Math.min(3, score - 7 + 0), approche: 3, cadrage: 2, ton: 2 }, reasons: score >= 9 ? [] : ["reformulation générique"], fix: score >= 9 ? null : "Reprends les éléments de l'annonce.", ...checklistKeys(score >= 9 ? 10 : score) });
     const scripted = (writer: string[], judge: string[]) => {
       const calls: string[] = [];
-      // Double juge : le client (second appel du tour) reçoit la même note que le relecteur.
-      let last = "";
-      const ask: AskFn = async (role, system) => {
-        if (role === "judge" && /Tu es le CLIENT/.test(system)) return last;
-        calls.push(role);
-        if (role === "writer") return writer.shift() ?? "";
-        last = judge.shift() ?? "";
-        return last;
+      // Les PROPOSAL_CHECKLIST_SAMPLES lectures d'un même essai rendent la même chose (un seul « judge » compté).
+      let current = "";
+      let reads = 0;
+      const ask: AskFn = async (role) => {
+        if (role === "writer") {
+          calls.push(role);
+          return writer.shift() ?? "";
+        }
+        if (reads % PROPOSAL_CHECKLIST_SAMPLES === 0) {
+          calls.push(role);
+          current = judge.shift() ?? "";
+        }
+        reads += 1;
+        return current;
       };
       return { ask, calls };
     };
@@ -199,24 +224,21 @@ async function main() {
     {
       const { ask } = scripted([goodJson, goodJson, goodJson], [verdict(7), verdict(8), verdict(7)]);
       const outcome = await generateProposal({ ...base, ask });
-      check("toujours < 9 : 3 essais, meilleur gardé (8), « À revoir » avec la raison", "text" in outcome && outcome.needsReview && outcome.attempts === 3 && outcome.score === 8 && /Note 8\/10/.test(outcome.reason ?? ""), JSON.stringify("text" in outcome ? { s: outcome.score, r: outcome.reason } : outcome));
+      check("toujours < 9 : 3 essais, meilleur gardé (8), « À revoir » avec la raison", "text" in outcome && outcome.needsReview && outcome.attempts === 3 && outcome.score === 8 && /critère\(s\) à NON — P1/.test(outcome.reason ?? ""), JSON.stringify("text" in outcome ? { s: outcome.score, r: outcome.reason } : outcome));
     }
     {
       // Cowork #31 : au-delà de 980 caractères, réécriture de raccourcissement dédiée, HORS des essais du juge.
       const padded = JSON.stringify({ reading: `${good.reading} ${"Détail de l'annonce repris en entier. ".repeat(14)}`, steps: good.steps, framing: good.framing, question: good.question });
       const operations: string[] = [];
-      let last = "";
-      const ask: AskFn = async (role, system, _user, _temperature, operation) => {
+      const ask: AskFn = async (role, _system, _user, _temperature, operation) => {
         operations.push(operation.replace(/:\d+$/, ""));
-        if (role === "judge" && /Tu es le CLIENT/.test(system)) return last;
         if (role === "writer") return operation === "opportunites:raccourci" ? goodJson : padded;
-        last = verdict(9);
-        return last;
+        return verdict(10);
       };
       const outcome = await generateProposal({ ...base, ask });
       check(
         "trop longue → raccourcie avant le juge, sans compter d'essai",
-        "text" in outcome && !outcome.needsReview && outcome.attempts === 1 && outcome.text.length <= SHORTEN_ABOVE_CHARS && operations.join(",") === "opportunites:redaction,opportunites:raccourci,opportunites:juge,opportunites:juge-client",
+        "text" in outcome && !outcome.needsReview && outcome.attempts === 1 && outcome.text.length <= SHORTEN_ABOVE_CHARS && operations.join(",") === "opportunites:redaction,opportunites:raccourci,opportunites:checklist,opportunites:checklist:0:lecture-2,opportunites:checklist:0:lecture-3",
         JSON.stringify({ ops: operations, len: "text" in outcome ? outcome.text.length : 0 }),
       );
     }
@@ -310,7 +332,7 @@ async function main() {
       amount_eur: 900,
       delay_days: 21,
     });
-    const verdictJson = JSON.stringify({ score: 10, criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
+    const verdictJson = JSON.stringify({ score: 10, criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null, ...checklistKeys(10) });
     const calls: string[] = [];
     const ask: AskFn = async (role, _system, user, _temperature, operation) => {
       calls.push(operation);
@@ -441,12 +463,51 @@ async function main() {
     const ouiDb = new FakeDb({ opportunities: [] });
     const ouiAsk: AskFn = async (_role, system) =>
       /Tu es le CLIENT/.test(system)
-        ? JSON.stringify({ score: 9, reasons: [], fix: null })
+        ? JSON.stringify({ score: 9, reasons: [], fix: null, ...checklistKeys(10) })
         : /analyses une annonce/.test(system)
           ? JSON.stringify({ score: 9, reasons: ["Intranet métier à refondre", "Agents IA factures et assureurs", "Budget adapté"], need: "Refondre l'intranet et ajouter des agents IA.", demo: "factures", language: "fr", kind: "fullstack" })
           : JSON.stringify({ score: 10, criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
     const oui = await ingestOpportunity({ db: ouiDb as never, userId: "u1", ask: ouiAsk, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-06T13:35:00Z") }, (parseIngestBody(OUIGLASS) as { ok: true; value: IngestBody }).value);
     check("OuiGlass → alerte (texte exact du flux, catégories « refonte de site » comprises)", oui.verdict === "alerte" && !oui.filtered, JSON.stringify(oui));
+  }
+
+  console.log("\n9. Check-list des propositions (Cowork #32)");
+  {
+    const ctx = (item: (typeof AXEL_SENT)[number]) => ({ platform: "codeur" as const, ad: item.ad, budget: item.budget, amountEur: item.amountEur, delayDays: item.delayDays });
+    for (const item of AXEL_SENT) {
+      const code = proposalCodeChecks(item.text, ctx(item));
+      check(`envoyée par Axel « ${item.title.slice(0, 40)} » : critères du code à 100 %`, code.length === 4 && code.every((criterion) => criterion.ok), JSON.stringify(code.filter((criterion) => !criterion.ok)));
+    }
+    const allYes: AskFn = async () => JSON.stringify(checklistKeys(10));
+    const verdicts = await Promise.all(AXEL_SENT.map((item) => judgeProposalChecklist(allYes, { title: item.title, text: item.text, ...ctx(item) })));
+    check("P1, P2, P3 : les 8 critères à OUI → prêtes, 10/10", verdicts.every((verdict) => verdict?.ready && verdict.score === 10 && verdict.items.length === 8), JSON.stringify(verdicts.map((verdict) => verdict?.score)));
+    const sage = AXEL_SENT[0];
+    const wrongPrice = proposalCodeChecks(sage.text, { ...ctx(sage), amountEur: 2600 });
+    check("prix du texte ≠ champ → P5 NON, en code", wrongPrice.find((criterion) => criterion.id === "P5")?.ok === false);
+    const wrongDelay = proposalCodeChecks(sage.text, { ...ctx(sage), delayDays: 20 });
+    check("délai du texte ≠ champ → P5 NON", wrongDelay.find((criterion) => criterion.id === "P5")?.ok === false);
+    const long = sage.text.replace("Combien de demandes", `${"Détail. ".repeat(10)}Combien de demandes`);
+    check("plus de 1 000 caractères sur Codeur → P7 NON", proposalCodeChecks(long, ctx(sage)).find((criterion) => criterion.id === "P7")?.ok === false);
+    const withUrl = sage.text.replace("(ORION)", "(orion.axelremillat.com)");
+    check("coordonnée ou URL → P8 NON", proposalCodeChecks(withUrl, ctx(sage)).find((criterion) => criterion.id === "P8")?.ok === false);
+    const noMonthly = sage.text.replace(/Mensuel : [^\n]*\n/, "");
+    check("coûts mensuels demandés mais absents → P2 NON", proposalCodeChecks(noMonthly, ctx(sage)).find((criterion) => criterion.id === "P2")?.ok === false);
+    let judgeCalls = 0;
+    const counting: AskFn = async () => {
+      judgeCalls += 1;
+      return JSON.stringify(checklistKeys(10));
+    };
+    const refused = await judgeProposalChecklist(counting, { title: sage.title, text: long, ...ctx(sage) });
+    check("un critère du code à NON → pas d'appel au modèle", judgeCalls === 0 && refused?.ready === false);
+    const split = proposalMajority([checklistKeys(10), checklistKeys(8), checklistKeys(8)].map((value) => value as never));
+    check("majorité par critère : 2 NON sur 3 → NON (P1)", split?.find((criterion) => criterion.id === "P1")?.ok === false && split.find((criterion) => criterion.id === "P3")?.ok === true);
+    const down: AskFn = async () => {
+      throw new Error("429 quota");
+    };
+    check("modèle indisponible (quota) → relecture indisponible, pas de verdict inventé", (await judgeProposalChecklist(down, { title: sage.title, text: sage.text, ...ctx(sage) })) === null);
+    const failed = proposalVerdictOf([...proposalCodeChecks(sage.text, ctx(sage)), ...(proposalMajority([checklistKeys(8) as never]) ?? [])]);
+    check("réécriture ciblée : seuls les critères à NON, avec leur citation", proposalChecklistFeedback(failed) === "- P1 NON — Lecture précise du besoin (ses outils, ses documents, son résultat attendu) : « reformulation générique »", proposalChecklistFeedback(failed));
+    check("prompt du modèle figé (aucune donnée variable)", buildProposalChecklistPrompt() === buildProposalChecklistPrompt() && buildProposalChecklistPrompt().includes(AXEL_SENT[2].text));
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);
