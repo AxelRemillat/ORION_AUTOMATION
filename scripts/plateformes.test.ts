@@ -4,7 +4,8 @@
  * suivi, dédoublonnage, alertes), Cockpit 7 / 30 jours. Fixtures uniquement,
  * aucun appel réel.
  */
-import { assembleProposal, buildClientJudgePrompt, checkProposal, generateProposal } from "../lib/opportunities/proposal";
+import { assembleProposal, checkProposal, generateProposal } from "../lib/opportunities/proposal";
+import { buildProposalChecklistPrompt, judgeProposalChecklist, proposalCodeChecks } from "../lib/opportunities/proposal-checklist";
 import { PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { firstSentence, upworkFailures, usdAmounts, usdRange, PLATFORM_RULES } from "../lib/opportunities/platforms";
 import { UPWORK_CHECKLIST } from "../lib/opportunities/checklist-en";
@@ -80,28 +81,43 @@ async function main() {
     check("sans budget affiché, un prix reste exigé (pas la règle « Budget absent » du FR)", !price("Fixed price: $900. Delivery: 14 days.", { budget: null }).some((line) => /Budget absent/.test(line)));
   }
 
-  console.log("\n3. Check-list anglaise (8 points) et juge client Upwork");
+  console.log("\n3. Check-list anglaise (8 points) dans le moteur d'agent2 (#32)");
   {
-    check("8 points, ids uniques", UPWORK_CHECKLIST.items.length === 8 && new Set(UPWORK_CHECKLIST.items.map((item) => item.id)).size === 8);
-    const prompt = buildClientJudgePrompt("upwork");
-    check("juge client Upwork : en anglais, aperçu de la 1re phrase, 1 200 caractères, dollars", /You are the CLIENT/.test(prompt) && /FIRST sentence/.test(prompt) && /1,200 characters/.test(prompt) && /US dollars/.test(prompt) && UPWORK_CHECKLIST.items.every((item) => prompt.includes(item.rule)));
-    check("juge client Codeur inchangé (français)", /Tu es le CLIENT/.test(buildClientJudgePrompt("codeur")));
+    check("8 points, un par critère P1 à P8", UPWORK_CHECKLIST.items.map((item) => item.id).join(",") === "P1,P2,P3,P4,P5,P6,P7,P8");
+    const prompt = buildProposalChecklistPrompt("upwork");
+    check("consigne du modèle Upwork : anglais, aperçu de la 1re phrase, même JSON P1/P3/P4/P6", /You are the CLIENT/.test(prompt) && /FIRST sentence/.test(prompt) && /"P1":\{"ok":true\|false/.test(prompt) && !/Tu es le CLIENT/.test(prompt));
+    check("consigne Codeur inchangée (français)", /Tu es le CLIENT/.test(buildProposalChecklistPrompt("codeur")));
+    const item = upworkPositives[0];
+    const { text } = assembleProposal(item, { language: "en", demo: item.demo, platform: "upwork" });
+    const ctx = { platform: "upwork" as const, ad: item.ad, budget: item.budget, amountEur: null, delayDays: null };
+    const code = proposalCodeChecks(text, ctx);
+    check("positif Upwork : P2, P5, P7, P8 à OUI (dollars, accroche, sans « Hello, »)", code.every((criterion) => criterion.ok), code.filter((criterion) => !criterion.ok).map((criterion) => `${criterion.id} ${criterion.citation}`).join(" | "));
+    const hello = proposalCodeChecks(`Hello,\n\n${text}`, ctx).find((criterion) => criterion.id === "P7");
+    check("« Hello, » en tête : P7 à NON (aperçu gâché)", hello?.ok === false && /weak opening/.test(hello.citation), hello?.citation);
+    const euros = proposalCodeChecks(text.replace("$1,500", "1 500 €"), ctx).find((criterion) => criterion.id === "P5");
+    check("prix en euros sur Upwork : P5 à NON", euros?.ok === false, euros?.citation);
+    const long = proposalCodeChecks(`${text.split("\n\n")[0]}\n\n${"More detail. ".repeat(110)}\n\n${text}`, ctx).find((criterion) => criterion.id === "P7");
+    check("plus de 1 200 caractères : P7 à NON", long?.ok === false, long?.citation);
+    // Essai réel du 07/10 : « 150 monthly leads » lu comme un délai de 4 500 jours.
+    const monthly = proposalCodeChecks(text.replace(item.reading, `Your 150 monthly support questions can be answered from your 40 PDF manuals. ${item.reading}`), { ...ctx, delayDays: 21 }).find((criterion) => criterion.id === "P5");
+    check("« 150 monthly » n'est pas un délai (P5 OK)", monthly?.ok === true, monthly?.citation);
+    const verdicts = await judgeProposalChecklist(async () => JSON.stringify({ P1: { ok: true, citation: "a" }, P3: { ok: true, citation: "b" }, P4: { ok: true, citation: "c" }, P6: { ok: true, citation: "d" } }), { title: item.title, text, ...ctx });
+    check("check-list complète : 8/8, prête", verdicts?.ready === true && verdicts.items.length === 8, JSON.stringify(verdicts?.items.filter((criterion) => !criterion.ok)));
   }
 
-  console.log("\n4. Boucle Upwork : JSON horaire, devise rendue, juge client anglais");
+  console.log("\n4. Boucle Upwork : JSON horaire, devise rendue, consigne anglaise");
   {
     const item = upworkPositives[0];
     const systems: string[] = [];
     const ask: AskFn = async (role, system) => {
       systems.push(system);
       if (role === "writer") return JSON.stringify({ reading: item.reading, steps: item.steps, framing: "Rate: $40/hr, about 30 hours. Delivery: 21 days.", question: item.question, amount_eur: 40, delay_days: 21, hourly: true });
-      if (/You are the CLIENT/.test(system)) return JSON.stringify({ score: 9, reasons: [], fix: null });
-      return JSON.stringify({ criteria: { lecture: 3, approche: 3, cadrage: 2, ton: 2 }, reasons: [], fix: null });
+      return JSON.stringify({ P1: { ok: true, citation: "a" }, P3: { ok: true, citation: "b" }, P4: { ok: true, citation: "c" }, P6: { ok: true, citation: "d" } });
     };
     const outcome = await generateProposal({ ask, platform: "upwork", language: "en", title: item.title, body: item.ad, budget: item.budget, need: "Support chatbot", demo: item.demo });
     check("proposition Upwork prête, enchère horaire $40/hr", "text" in outcome && !outcome.needsReview && outcome.currency === "USD" && outcome.hourly && outcome.amountEur === 40, JSON.stringify(outcome));
     check("le rédacteur reçoit la consigne d'accroche et de prix en dollars", systems.some((system) => /LA 1re PHRASE EST L'APERÇU/.test(system) && /DOLLARS/.test(system)));
-    check("le juge client reçoit la check-list anglaise", systems.some((system) => /You are the CLIENT who posted this job on Upwork/.test(system)));
+    check("la lecture du modèle reçoit la check-list anglaise", systems.some((system) => /You are the CLIENT who posted this job on Upwork/.test(system)));
     check("montant affiché : $40/hr, $550, 450 €", suggestedPrice(40, "USD", true) === "$40/hr" && suggestedPrice(550, "USD", false) === "$550" && suggestedPrice(450, "EUR", false) === "450 €");
   }
 

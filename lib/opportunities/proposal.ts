@@ -6,7 +6,6 @@ import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "./calibration
 import { judgeProposalChecklist, proposalChecklistFeedback, proposalChecklistReason, type ProposalChecklist } from "./proposal-checklist";
 import type { Language, Platform } from "./types";
 import { PLATFORM_RULES, UPWORK_FIXED_CAP_USD, UPWORK_HOURLY_USD, UPWORK_HOURLY_CAP_USD, UPWORK_MAX_CHARS, UPWORK_SHORTEN_ABOVE, UPWORK_SHORTEN_TARGET, UPWORK_WORDS, upworkFailures, upworkPricingGuide, usdAmounts } from "./platforms";
-import { renderChecklist, UPWORK_CHECKLIST } from "./checklist-en";
 import {
   DELAY_CAP_DAYS,
   developmentAmounts,
@@ -501,19 +500,7 @@ export function parseProposalVerdict(raw: string): ProposalVerdict | null {
  * et doit choisir en 30 secondes. Grille d'Axel : une proposition n'est
  * « prête » que si elle coche TOUT. Les deux juges doivent donner 9 ou plus.
  */
-export function buildClientJudgePrompt(platform?: Platform): string {
-  if (platform === "upwork") {
-    // Check-list anglaise (8 points) : configuration, prête pour le moteur d'agent2 (#32).
-    return `You are the CLIENT who posted this job on Upwork. You receive 50 proposals and only see the FIRST sentence of each in your list; you decide in 30 seconds which ones to open.
-Score this proposal out of 10. It gets 9 or more ONLY if it ticks EVERYTHING:
-${renderChecklist(UPWORK_CHECKLIST)}
-
-EXAMPLES THAT TICK EVERYTHING (9 or more, other jobs):
-${PROPOSAL_POSITIVES.filter((item) => item.platform === "upwork")
-  .map((item) => `--- ${item.title} ---\n${item.text}`)
-  .join("\n\n")}
-Reply ONLY in JSON: {"score":0-10,"reasons":["what would make you skip to the next proposal…"],"fix":"precise rewrite instruction, or null if 9 or more"}`;
-  }
+export function buildClientJudgePrompt(): string {
   return `Tu es le CLIENT qui a publié cette annonce. Tu reçois 80 offres et tu choisis en 30 secondes celles que tu lis vraiment.
 Tu notes cette réponse sur 10. Elle ne vaut 9 ou plus QUE si elle coche TOUT :
 1. « Bonjour, » puis la preuve qu'il a lu TON besoin réel (tes outils, tes documents, ton résultat attendu), dans une reformulation ou directement dans l'approche — pas une paraphrase vague.
@@ -553,7 +540,7 @@ export async function judgeProposalClient(
 ): Promise<ProposalVerdict | null> {
   const raw = await ask(
     "judge",
-    buildClientJudgePrompt(input.platform),
+    buildClientJudgePrompt(),
     `PLATEFORME : ${input.platform ?? "non précisée"}
 TON ANNONCE — ${input.title} (budget : ${input.budget || "non indiqué"})
 ${input.body.slice(0, 4000)}

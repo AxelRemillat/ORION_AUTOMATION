@@ -117,3 +117,17 @@ export function upworkFailures(text: string, framing: string): string[] {
   if (!DELAY_EN.test(framing)) failures.push("Upwork: no timeline — give ONE delivery time (e.g. « 10 days »).");
   return failures;
 }
+
+/**
+ * Délai le plus long cité en anglais, en jours (« 10 days », « 2-3 weeks »,
+ * « 1 month »). Frontière de mot stricte : « 150 monthly leads » n'est pas un
+ * délai (le parseur commun le lisait comme 4 500 jours — essai réel du 07/10).
+ */
+export function delayDaysEn(text: string): number | null {
+  const values = [...text.matchAll(/\b(\d+)(?:\s?(?:-|–|to)\s?(\d+))?\s?(?:business |working )?(days?|weeks?|months?)\b/gi)].map((match) => {
+    const value = Number(match[2] ?? match[1]);
+    const unit = match[3].toLowerCase();
+    return unit.startsWith("week") ? value * 7 : unit.startsWith("month") ? value * 30 : value;
+  });
+  return values.length ? Math.max(...values) : null;
+}
