@@ -11,6 +11,7 @@
 import { aggregate, perProspect, remainingProspects } from "../app/(app)/reglages/couts/_lib/aggregate";
 import type { ApiService, ApiUsage } from "../types";
 import type { ServiceBalance } from "../lib/usage/balances";
+import { usageSource } from "../lib/usage/record";
 import {
   clampAnalysisLimit,
   DEFAULT_ANALYSIS_LIMIT,
@@ -129,6 +130,14 @@ console.log("\n5. Plafond d'analyse : aucune saisie ne doit faire exploser la fa
   check("decimal tronque", clampAnalysisLimit(4.9) === 4);
   check("absent -> defaut", clampAnalysisLimit(undefined) === DEFAULT_ANALYSIS_LIMIT);
   check("texte -> defaut", clampAnalysisLimit("beaucoup") === DEFAULT_ANALYSIS_LIMIT);
+}
+
+console.log("\n6. Source de la consommation (USAGE_SOURCE, Cowork #38)");
+{
+  check("absente -> prod", usageSource({}) === "prod");
+  check("agent1 garde tel quel", usageSource({ USAGE_SOURCE: "agent1" }) === "agent1");
+  check("casse et espaces normalises", usageSource({ USAGE_SOURCE: "  Agent3 " }) === "agent3");
+  check("caracteres exotiques retires, vide -> prod", usageSource({ USAGE_SOURCE: "a;b c" }) === "abc" && usageSource({ USAGE_SOURCE: "  " }) === "prod");
 }
 
 console.log(

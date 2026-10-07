@@ -179,6 +179,10 @@ const verdictOf = (key: keyof typeof CASES) => {
     const retained = rows().filter((row) => row.statut === "retenu").map((row) => row.company_name).sort();
     check("retenus : score ≥ 4 et sujet = l'entreprise", retained.join(",") === "CHAMPEIL,HUMAN SIGHT,LOGIFLUX", retained.join(","));
 
+    // Étape « sites » passée : les retenus ont un site (règle « site d'abord », Cowork #38).
+    for (const row of rows().filter((item) => item.statut === "retenu")) {
+      (row as { contact: unknown }).contact = { site_free: { website: `https://${(row.company_name ?? "x").toLowerCase().replace(/\W+/g, "")}.fr`, checked_at: "2026-09-27T08:00:00Z" } };
+    }
     const created: string[] = [];
     const deps: DigDeps = {
       enrich: async (candidate) => ({ ...candidate.base, key_figures: { pappers_read: true }, signals: [], warnings: [] }),
@@ -209,7 +213,7 @@ const verdictOf = (key: keyof typeof CASES) => {
     const shown = rows().filter((row) => row.publication === "pret");
     check("objectif ≥ 60 % des fiches affichées = signal daté + email", shown.length > 0 && shown.every((row) => row.date_signal && (row.contact as { email?: string }).email));
 
-    const limited = new FakeDb({ signal_candidates: rows().map((row) => ({ ...row, statut: row.statut === "creusé" ? "retenu" : row.statut, publication: null, prospect_id: null })) });
+    const limited = new FakeDb({ signal_candidates: rows().map((row) => ({ ...row, statut: row.statut === "creusé" ? "retenu" : row.statut, publication: null, prospect_id: null, contact: { site_free: { website: "https://site.fr", checked_at: "2026-09-27T08:00:00Z" } } })) });
     const capped = await runDigStage(limited as never, "u1", "run1", { deps, limit: 1, perStep: 4 });
     check("plafond N respecté", capped.dug === 1);
   }

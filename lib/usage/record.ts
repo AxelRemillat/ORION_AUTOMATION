@@ -29,11 +29,20 @@ interface UsageEntry {
   prospectId?: string | null;
 }
 
+/**
+ * QUI consomme (Cowork #38) : `USAGE_SOURCE` (agent1…agent4, prod, cron),
+ * « prod » par défaut. Une valeur inattendue est gardée telle quelle, bornée.
+ */
+export function usageSource(env: Record<string, string | undefined> = process.env): string {
+  const raw = env.USAGE_SOURCE?.trim().toLowerCase();
+  return raw ? raw.replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "prod" : "prod";
+}
+
 async function insert(entry: UsageEntry): Promise<void> {
   const scriptUserId = process.env.ORION_SCRIPT_USER_ID;
   try {
     const supabase = scriptUserId ? createAdminClient() : createClient();
-    await supabase.from("api_usage").insert({
+    const row = {
       service: entry.service,
       operation: entry.operation,
       units: Number(entry.units.toFixed(4)),
@@ -41,7 +50,10 @@ async function insert(entry: UsageEntry): Promise<void> {
       cost: Number(entry.cost.toFixed(6)),
       prospect_id: entry.prospectId ?? null,
       ...(scriptUserId ? { user_id: scriptUserId } : {}),
-    });
+    };
+    const { error } = await supabase.from("api_usage").insert({ ...row, source: usageSource() } as never);
+    // Base pas encore migrée (colonne `source` absente) : la ligne est gardée sans source.
+    if (error && /source/i.test(error.message)) await supabase.from("api_usage").insert(row);
   } catch {
     // Hors contexte de requete (script, tache de fond) ou base indisponible :
     // on ne journalise pas, et surtout on ne propage pas.
