@@ -84,6 +84,9 @@ export interface Opportunity {
   conversation_at?: string | null;
   won_at?: string | null;
   last_event_at?: string | null;
+  /** Relance suggérée (plateformes #6) : texte proposé, et date de « Marquer relancée ». */
+  follow_up_text?: string | null;
+  followed_up_at?: string | null;
 }
 
 export const isPlatform = (value: unknown): value is Platform => typeof value === "string" && (PLATFORMS as readonly string[]).includes(value);

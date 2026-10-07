@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { HeroScene } from "./hero-scene/hero-scene";
 import type { FreelanceSource } from "@/lib/opportunities/stats";
 
@@ -12,12 +13,15 @@ export function CockpitHeader({
   subtitle,
   date,
   sources,
+  followUpsDue = 0,
 }: {
   title: string;
   subtitle: string;
   date: string;
   /** Prospection freelance (Codeur, Upwork, Malt/ComeUp) : envoyées et taux de réponse sur 30 jours. */
   sources?: FreelanceSource[];
+  /** Propositions envoyées sans réponse à relancer (3 j Codeur/Malt/ComeUp, 5 j Upwork). */
+  followUpsDue?: number;
 }) {
   return (
     <header
@@ -67,6 +71,16 @@ export function CockpitHeader({
               </li>
             ))}
             <li className="px-1 py-1 text-[11px] text-faint">30 j</li>
+            {followUpsDue > 0 && (
+              <li>
+                <Link
+                  href="/opportunites?filtre=relances"
+                  className="inline-flex rounded-full border border-warn/45 bg-warn/15 px-2.5 py-1 text-[12px] text-warn-ink underline-offset-2 hover:underline"
+                >
+                  <span className="font-data">{followUpsDue}</span>&nbsp;relance{followUpsDue > 1 ? "s" : ""} due{followUpsDue > 1 ? "s" : ""}
+                </Link>
+              </li>
+            )}
           </ul>
         )}
       </div>

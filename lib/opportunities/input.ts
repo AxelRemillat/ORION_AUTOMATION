@@ -63,6 +63,8 @@ export function buildOpportunityPatch(
   if ("notes" in raw) patch.notes = text(raw.notes, 5000);
   // Alerte vue (annonce ouverte ou proposition copiée).
   if (raw.seen === true) patch.seen_at = now.toISOString();
+  // « Marquer relancée » : la relance n'est plus due (rien n'est envoyé par ORION).
+  if (raw.followed_up === true) patch.followed_up_at = now.toISOString();
   // Annonce COMPLÈTE collée par Axel (le flux RSS n'en donne qu'un extrait) : la régénération repart de là.
   if ("body" in raw) {
     const body = text(raw.body, 20_000);
