@@ -20,7 +20,8 @@ import { STATUS_LABELS } from "../lib/opportunities/types";
 import type { AskFn } from "../lib/ai/chat";
 import type { Notification } from "../lib/notify/ntfy";
 import { FakeDb } from "./fake-supabase";
-import { CODEUR_EMAIL_FIXTURES, EMAIL_FIXTURES } from "./fixtures/opportunity-emails";
+import { CODEUR_EMAIL_FIXTURES, CODEUR_PROJECT_FIXTURES, EMAIL_FIXTURES } from "./fixtures/opportunity-emails";
+import { ingestOpportunity } from "../lib/opportunities/ingest";
 import { buildFollowUpPrompt, dueFollowUps, fallbackFollowUp, followUpDue, followUpFailures, generateFollowUp } from "../lib/opportunities/follow-up";
 
 let failures = 0;
@@ -405,6 +406,54 @@ async function main() {
     const upworkFallback = fallbackFollowUp({ platform: "upwork", title: "x".repeat(200) }, "en");
     check("repli Upwork en anglais, titre coupé, < 400 caractères", upworkFallback.startsWith("Hi,") && upworkFallback.length < 400 && followUpFailures(upworkFallback, "upwork").length === 0, String(upworkFallback.length));
     check("consigne : aucune URL demandée sur Codeur", /TOUTE URL/.test(buildFollowUpPrompt("codeur", "fr")) && !/TOUTE URL/.test(buildFollowUpPrompt("upwork", "en")));
+  }
+
+  console.log("\n15. Codeur « Nouveau projet » : filet de sécurité du flux RSS");
+  {
+    const [known, relevant, offTarget] = CODEUR_PROJECT_FIXTURES;
+    for (const fixture of CODEUR_PROJECT_FIXTURES) {
+      const parsed = parsePlatformEmail(fixture.email);
+      check(`${fixture.name} : reconnu « nouveau_projet », identifiant ${fixture.externalId}`, parsed.platform === "codeur" && parsed.kind === "nouveau_projet" && parsed.externalId === fixture.externalId && parsed.title === fixture.email.subject.replace("Nouveau projet : ", ""), JSON.stringify({ kind: parsed.kind, id: parsed.externalId, title: parsed.title }));
+    }
+    check("expéditeur notification@compte.codeur.com → Codeur", platformOfSender("Codeur.com <notification@compte.codeur.com>") === "codeur");
+    // Le flux RSS a déjà livré 490913 (même ligne que /api/opportunities/ingest l'aurait écrite).
+    const rss = { id: "rss-490913", user_id: "u1", platform: "codeur", source: "rss", external_id: "490913", title: "Recherche développeur", status: "a_repondre", fit_score: 7, created_at: "2026-10-07T17:30:00Z", sent_at: null, replied_at: null, conversation_at: null, won_at: null, client_name: null, url: "https://www.codeur.com/projects/490913-recherche-developpeur" };
+    const db = new FakeDb({ opportunities: [rss], opportunity_emails: [] });
+    const alerts: Notification[] = [];
+    const llm: string[] = [];
+    const ask: AskFn = async (role, system, _user, _t, operation) => {
+      llm.push(String(operation));
+      if (/Tu analyses une annonce/.test(system)) return JSON.stringify({ score: 9, reasons: ["factures PDF", "Pennylane", "volume clair"], need: "Extraire les factures", demo: "factures", language: "fr", kind: "automatisation" });
+      return "";
+    };
+    const deps = { db: db as never, userId: "u1", ask, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-07T18:00:00Z"), notify: async (notification: Notification) => (alerts.push(notification), true) };
+
+    const before = JSON.stringify(db.tables);
+    const dryKnown = await planPlatformEmail(deps, known.email);
+    const dryNew = await planPlatformEmail(deps, relevant.email);
+    check("dry_run : connu → « doublon » (fiche du flux RSS en cible)", dryKnown.action === "doublon" && dryKnown.target?.id === "rss-490913" && !dryKnown.would_alert, JSON.stringify(dryKnown));
+    check("dry_run : inconnu → « cree », rien d'écrit, aucun appel", dryNew.action === "cree" && dryNew.kind === "nouveau_projet" && JSON.stringify(db.tables) === before && llm.length === 0, JSON.stringify(dryNew));
+
+    const duplicate = await ingestPlatformEmail(deps, known.email);
+    check("connu : « doublon », RIEN d'écrit (pas même l'e-mail), aucune alerte, aucun appel", duplicate.status === "doublon" && duplicate.duplicate === true && duplicate.opportunity_ids[0] === "rss-490913" && JSON.stringify(db.tables) === before && alerts.length === 0 && llm.length === 0, JSON.stringify(duplicate));
+
+    // Référence : le même e-mail passé par /api/opportunities/ingest (même pipeline) sur une base vide.
+    const reference = new FakeDb({ opportunities: [] });
+    const viaRss = await ingestOpportunity({ ...deps, db: reference as never, notify: undefined }, { platform: "codeur", external_id: "491020", url: "https://www.codeur.com/projects/491020-automatiser-la-saisie-de-nos-factures-fournisseurs", title: "Automatiser la saisie de nos factures fournisseurs", description: parsePlatformEmail(relevant.email).body, description_truncated: true, budget_text: "1 000 € à 2 000 €", categories: [], published_at: relevant.email.received_at });
+    const created = await ingestPlatformEmail(deps, relevant.email);
+    const row = db.rows("opportunities").find((item) => item.id === created.opportunity_ids[0]) as Record<string, unknown>;
+    check("inconnu pertinent : fiche créée par le chemin de /ingest (même verdict et score)", created.status === "cree" && created.verdict === viaRss.verdict && created.score === viaRss.score && created.verdict === "alerte" && row.external_id === "491020" && row.platform === "codeur" && row.description_truncated === true, JSON.stringify({ created, viaRss: { verdict: viaRss.verdict, score: viaRss.score } }));
+    check("… titre et extrait de l'e-mail comme annonce, lien du projet gardé", row.title === "Automatiser la saisie de nos factures fournisseurs" && /150 factures PDF/.test(String(row.body)) && row.url === "https://www.codeur.com/projects/491020-automatiser-la-saisie-de-nos-factures-fournisseurs");
+    check("… alerte au même seuil que la veille (score 9 ≥ 8)", created.alerted && alerts.length === 1 && /^Nouvelle offre Codeur \(9\/10\) : Automatiser la saisie/.test(alerts[0].title), JSON.stringify(alerts[0]));
+
+    const llmBefore = llm.length;
+    const filtered = await ingestPlatformEmail(deps, offTarget.email);
+    const filteredRow = db.rows("opportunities").find((item) => item.id === filtered.opportunity_ids[0]) as Record<string, unknown>;
+    check("inconnu hors cible (WordPress) : même pré-filtre → « Ignorée », sans appel, sans alerte", filtered.status === "cree" && filtered.verdict === "ignore" && filteredRow.status === "ignoree" && typeof filteredRow.filter_reason === "string" && llm.length === llmBefore && alerts.length === 1, JSON.stringify({ filtered, reason: filteredRow?.filter_reason }));
+    const replay = await ingestPlatformEmail(deps, relevant.email);
+    check("e-mail rejoué : doublon par message_id, rien refait", replay.duplicate === true && db.rows("opportunities").length === 3 && alerts.length === 1);
+    const noId = parsePlatformEmail({ ...relevant.email, message_id: "<x>", text: "Nouveau projet sans lien." });
+    check("« Nouveau projet » sans identifiant → à trier", decideEmail(noId, null).action === "a_trier");
   }
 
   console.log(failures === 0 ? "\nTous les tests plateformes passent.\n" : `\n${failures} test(s) en echec.\n`);

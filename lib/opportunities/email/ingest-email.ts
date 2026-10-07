@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Notification } from "@/lib/notify/ntfy";
-import { ingestOpportunity, type IngestBody, type IngestDeps } from "../ingest";
+import { ingestOpportunity, type IngestBody, type IngestDeps, type IngestResponse, type Verdict } from "../ingest";
 import { PLATFORM_LABELS, type OpportunityStatus, type Platform } from "../types";
 
 export { milestones, statusAfterEvent };
@@ -30,7 +30,7 @@ export interface EmailIngestDeps extends Omit<IngestDeps, "notify"> {
   notify?: (notification: Notification) => Promise<unknown>;
 }
 
-export type EmailIngestStatus = "cree" | "rattache" | "a_trier";
+export type EmailIngestStatus = "cree" | "rattache" | "a_trier" | "doublon";
 
 export interface EmailIngestResponse {
   ok: true;
@@ -44,6 +44,9 @@ export interface EmailIngestResponse {
   duplicate?: true;
   /** Statut de l'opportunité après un événement de suivi. */
   opportunity_status?: OpportunityStatus;
+  /** Codeur « Nouveau projet » : verdict et score de l'analyse (mêmes valeurs que /ingest). */
+  verdict?: Verdict;
+  score?: number | null;
 }
 
 const orionUrl = (baseUrl: string, id: string) => `${baseUrl.replace(/\/$/, "")}/opportunites?id=${encodeURIComponent(id)}`;
@@ -140,18 +143,27 @@ export type EmailDecision =
   | { action: "a_trier"; kind: EmailKind; reason: string }
   | { action: "recommandations"; kind: "recommandation"; jobs: number }
   | { action: "rattache"; kind: EmailKind; opportunityId: string; status: OpportunityStatus; statusChanged: boolean; alert: boolean }
-  | { action: "cree"; kind: EmailKind; status: OpportunityStatus | null; alert: boolean };
+  | { action: "cree"; kind: EmailKind; status: OpportunityStatus | null; alert: boolean }
+  /** Codeur « Nouveau projet » déjà connu par le flux RSS : rien d'écrit, aucune alerte. */
+  | { action: "doublon"; kind: "nouveau_projet"; opportunityId: string };
 
 /** Codeur : alerte pour un message du client ou un projet attribué. */
 export const CODEUR_ALERT_KINDS: readonly EmailKind[] = ["message", "gagnee"];
 
-export function decideEmail(parsed: ParsedEmail, existing: Pick<OpportunityRow, "id" | "status"> | null): EmailDecision {
+export function decideEmail(parsed: ParsedEmail, existing: (Pick<OpportunityRow, "id" | "status"> & Partial<Pick<OpportunityRow, "external_id">>) | null): EmailDecision {
   const platform = parsed.platform;
   if (!platform || platform === "autre") return { action: "a_trier", kind: parsed.kind, reason: "expéditeur inconnu" };
   if (parsed.kind === "autre") return { action: "a_trier", kind: "autre", reason: "type d'e-mail non reconnu" };
   // Codeur (plateformes #6) : SUIVI d'un projet déjà connu par le flux RSS, jamais de création.
   // Alerte pour un message client ou une attribution ; refus et clôture passent en « Perdue » sans alerte.
   if (platform === "codeur") {
+    // « Nouveau projet » (plateformes #7) : filet de sécurité du flux RSS. Projet déjà connu (même
+    // identifiant, jamais le titre) → doublon ; inconnu → créé par le chemin de /ingest (analyse et seuil d'alerte).
+    if (parsed.kind === "nouveau_projet") {
+      if (!parsed.externalId) return { action: "a_trier", kind: "nouveau_projet", reason: "Codeur : aucun identifiant de projet dans l'e-mail" };
+      if (existing && existing.external_id === parsed.externalId) return { action: "doublon", kind: "nouveau_projet", opportunityId: existing.id };
+      return { action: "cree", kind: "nouveau_projet", status: null, alert: false };
+    }
     if (!existing) return { action: "a_trier", kind: parsed.kind, reason: parsed.externalId ? `Codeur : projet ${parsed.externalId} inconnu d'ORION` : "Codeur : aucun identifiant de projet dans l'e-mail" };
     const next = statusAfterEvent(existing.status, parsed.kind);
     return { action: "rattache", kind: parsed.kind, opportunityId: existing.id, status: next ?? existing.status, statusChanged: Boolean(next), alert: CODEUR_ALERT_KINDS.includes(parsed.kind) };
@@ -181,7 +193,7 @@ export interface EmailDryRunResponse {
   platform: Platform | null;
   kind: EmailKind;
   /** cree · rattache · a_trier · recommandations · doublon */
-  action: EmailDecision["action"] | "doublon";
+  action: EmailDecision["action"];
   reason: string | null;
   /** Statut que prendrait la fiche (`null` : celui de l'analyse). */
   opportunity_status: OpportunityStatus | null;
@@ -225,10 +237,17 @@ export async function planPlatformEmail(deps: Pick<EmailIngestDeps, "db" | "user
     platform: parsed.platform,
     kind: decision.kind,
     action: decision.action,
-    reason: decision.action === "a_trier" ? decision.reason : null,
+    reason:
+      decision.action === "a_trier"
+        ? decision.reason
+        : decision.action === "doublon"
+          ? "projet déjà connu par le flux RSS : rien ne serait écrit"
+          : decision.kind === "nouveau_projet"
+            ? "nouveau projet inconnu : même chemin que /ingest (filtre, analyse) ; alerte si le score atteint 8"
+            : null,
     opportunity_status: decision.action === "rattache" || decision.action === "cree" ? decision.status : null,
     would_alert: decision.action === "rattache" || decision.action === "cree" ? decision.alert : false,
-    target: decision.action === "rattache" && existing ? { id: existing.id, title: existing.title, status: existing.status, orion_url: orionUrl(deps.baseUrl, existing.id) } : null,
+    target: (decision.action === "rattache" || decision.action === "doublon") && existing ? { id: existing.id, title: existing.title, status: existing.status, orion_url: orionUrl(deps.baseUrl, existing.id) } : null,
     parsed: summary,
   };
 }
@@ -255,6 +274,16 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   }
 
   const parsed = parsePlatformEmail(email);
+  const platform = parsed.platform;
+  const usable = platform && platform !== "autre";
+  const existing = usable && parsed.kind !== "recommandation" && parsed.kind !== "autre" ? await findOpportunity(db, deps.userId, platform as Platform, parsed) : null;
+  const decision = decideEmail(parsed, existing);
+
+  // Codeur « Nouveau projet » déjà connu par le flux RSS : RIEN d'écrit (pas même l'e-mail), aucune alerte.
+  if (decision.action === "doublon") {
+    return { ok: true, message_id: email.message_id, platform, kind: decision.kind, status: "doublon", opportunity_ids: [decision.opportunityId], alerted: false, orion_url: orionUrl(deps.baseUrl, decision.opportunityId), duplicate: true };
+  }
+
   const base = {
     user_id: deps.userId,
     message_id: email.message_id,
@@ -275,11 +304,6 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   const finish = async (patch: Record<string, unknown>) => {
     await db.from("opportunity_emails").update(patch).eq("id", emailId);
   };
-
-  const platform = parsed.platform;
-  const usable = platform && platform !== "autre";
-  const existing = usable && parsed.kind !== "recommandation" && parsed.kind !== "autre" ? await findOpportunity(db, deps.userId, platform as Platform, parsed) : null;
-  const decision = decideEmail(parsed, existing);
 
   // 2. Non reconnu (expéditeur inconnu, Codeur, type inconnu, clôture sans fiche) : à trier, sans alerte.
   if (decision.action === "a_trier" || !platform) {
@@ -322,6 +346,17 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
     return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "rattache", opportunity_ids: [existing.id], alerted, orion_url: url, opportunity_status: decision.status };
   }
 
+  // 5a. Codeur « Nouveau projet » inconnu : EXACTEMENT le chemin de /api/opportunities/ingest
+  //     (pré-filtre, plafond, analyse, proposition, alerte de quota) ; titre et extrait de l'e-mail
+  //     comme annonce. Alerte au même seuil que la veille RSS : verdict « alerte » (score ≥ 8).
+  if (decision.action === "cree" && decision.kind === "nouveau_projet") {
+    const result = await ingestOpportunity({ ...deps }, codeurProjectBody(parsed, email.received_at));
+    const url = orionUrl(deps.baseUrl, result.id);
+    const alerted = result.verdict === "alerte" && !result.duplicate ? await sendAlert(deps, projectAlert(parsed, result, url)) : false;
+    await finish({ status: result.duplicate ? "rattache" : "cree", opportunity_id: result.id, alerted });
+    return { ok: true, message_id: email.message_id, platform, kind: "nouveau_projet", status: result.duplicate ? "rattache" : "cree", opportunity_ids: [result.id], alerted, orion_url: url, verdict: result.verdict, score: result.score };
+  }
+
   // 5. Nouvelle opportunité.
   const { kind, status } = decision as Extract<EmailDecision, { action: "cree" }>;
   const result = await ingestOpportunity(ingestDeps, asIngestBody(platform, parsed, email.message_id, email.received_at));
@@ -335,6 +370,32 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   const alerted = ALERT_KINDS.includes(kind) ? await sendAlert(deps, alertFor(platform, kind, parsed, url, scoreNote)) : false;
   await finish({ status: "cree", kind, opportunity_id: result.id, alerted });
   return { ok: true, message_id: email.message_id, platform, kind, status: "cree", opportunity_ids: [result.id], alerted, orion_url: url, ...(status ? { opportunity_status: status } : {}) };
+}
+
+/** Codeur « Nouveau projet » : l'annonce telle que l'e-mail la donne (titre, extrait), comme un item du flux. */
+function codeurProjectBody(parsed: ParsedEmail, receivedAt: string | null): IngestBody {
+  return {
+    platform: "codeur",
+    external_id: parsed.externalId as string,
+    url: parsed.url,
+    title: (parsed.title ?? "Nouveau projet Codeur").slice(0, 300),
+    description: parsed.body.slice(0, 20_000),
+    description_truncated: true,
+    budget_text: parsed.budget,
+    categories: [],
+    published_at: receivedAt,
+    source: "email",
+  };
+}
+
+function projectAlert(parsed: ParsedEmail, result: IngestResponse, url: string): Notification {
+  return {
+    title: `Nouvelle offre Codeur (${result.score ?? "?"}/10) : ${result.title}`,
+    body: [result.reasons.slice(0, 3).join(" · "), parsed.budget ? `Budget : ${parsed.budget}.` : null, "Reçue par e-mail (absente du flux RSS)."].filter(Boolean).join(" "),
+    priority: "high",
+    tags: ["briefcase"],
+    click: url,
+  };
 }
 
 async function sendAlert(deps: EmailIngestDeps, notification: Notification): Promise<boolean> {

@@ -18,7 +18,7 @@ async function main() {
   const jobId = value("--job");
   const query = db.from("jobs").select("id, state, created_at").eq("type", "search_signals").order("created_at", { ascending: false }).limit(1);
   const { data: jobs } = jobId ? await db.from("jobs").select("id, state, created_at").eq("id", jobId).limit(1) : await query;
-  const job = (jobs ?? [])[0] as { id: string; state: { runId?: string } | null; created_at: string } | undefined;
+  const job = (jobs ?? [])[0] as { id: string; state: { runId?: string; warnings?: { source?: string; message?: string }[]; harvest?: { collected: number; inserted: number; reopened: number; ft?: { read: number; head?: number; below?: number } } } | null; created_at: string } | undefined;
   const runId = job?.state?.runId;
   if (!runId) throw new Error("run introuvable");
   const rows = await readAll<{ source: string; statut: string; motif_rejet: string | null }>(() =>
@@ -32,6 +32,11 @@ async function main() {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   for (const [key, count] of [...counts].sort((a, b) => b[1] - a[1])) console.log(`  ${String(count).padStart(5)}  ${key}`);
+  const harvested = job!.state?.harvest;
+  if (harvested) console.log(`Moisson : ${harvested.collected} signaux, ${harvested.inserted} nouveaux, ${harvested.collected - harvested.inserted} déjà vus, ${harvested.reopened} repris · France Travail ${harvested.ft?.read ?? 0} lues (tête ${harvested.ft?.head ?? "—"}, sous le curseur ${harvested.ft?.below ?? "—"})`);
+  const warnings = job!.state?.warnings ?? [];
+  if (warnings.length) console.log(`Avertissements de la moisson (${warnings.length}) :`);
+  for (const warning of warnings.slice(0, 12)) console.log(`  · ${warning.source ?? "?"} : ${(warning.message ?? "").slice(0, 160)}`);
 }
 
 main().catch((error) => {

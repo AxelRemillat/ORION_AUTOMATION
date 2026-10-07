@@ -134,7 +134,17 @@ export interface FtHarvestStats {
   staffing: number;
   /** Offres lues par code ROME. */
   byCode: Record<string, number>;
+  /** Curseur (Cowork #40) : offres lues en tête (nouvelles depuis le run d'avant) et sous le curseur. */
+  head?: number;
+  below?: number;
 }
+
+/**
+ * Curseur de lecture France Travail, PAR CODE ROME, persistant entre les runs :
+ * date de création de l'offre la plus RÉCENTE et de la plus ANCIENNE déjà lues
+ * (lecture contiguë entre les deux). `exhausted` : le bas de la fenêtre est atteint.
+ */
+export type FtCursorState = Record<string, { newest: string | null; oldest: string | null; exhausted?: boolean }>;
 
 export function emptyFtStats(): FtHarvestStats {
   return { read: 0, anonymous: 0, staffing: 0, byCode: {} };
@@ -166,6 +176,10 @@ export interface PaginatedJobQuery {
   stats?: FtHarvestStats;
   /** Injecté par les tests ; sinon l'API réelle, avec cache d'un jour. */
   fetchPage?: FtPageFetcher;
+  /** Curseur du run précédent (absent : premier run, toute la fenêtre). */
+  cursor?: FtCursorState | null;
+  /** Reçoit le curseur mis à jour, à enregistrer pour le run suivant. */
+  onCursor?: (cursor: FtCursorState) => void;
 }
 
 /**
@@ -195,13 +209,31 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
   let budget = query.maxOffers;
   let failures = 0;
   let pages = 0;
+  const previous = query.cursor ?? {};
 
-  // État de lecture de chaque code : on peut y revenir à la passe suivante.
-  const cursors = query.romeCodes.map((code) => ({ code, max: window.max, start: 0, oldest: null as string | null, done: false }));
+  /*
+   * CURSEUR ENTRE LES RUNS (Cowork #40). Sans lui, chaque run relisait les
+   * 8 000 offres les plus RÉCENTES — les mêmes qu'au run d'avant, toutes déjà
+   * vues (07/10 : 0 signal nouveau). Par code ROME, deux segments, dans l'ordre :
+   *   1. la TÊTE : offres publiées depuis la plus récente déjà lue ;
+   *   2. SOUS LE CURSEUR : de la plus ancienne déjà lue vers le bas de la fenêtre.
+   * Chaque segment se lit en tranches de dates (borne haute glissée sur la plus
+   * ancienne offre lue) : une requête ne pagine pas au-delà de FT_RANGE_LIMIT.
+   * Sans curseur (premier run) : un seul segment, toute la fenêtre.
+   */
+  type Segment = { kind: "tete" | "dessous" | "fenetre"; min: string; max: string; start: number; oldest: string | null; done: boolean; read: number };
+  const segmentsOf = (code: string): Segment[] => {
+    const state = previous[code];
+    const make = (kind: Segment["kind"], min: string, max: string): Segment => ({ kind, min, max, start: 0, oldest: null, done: min >= max, read: 0 });
+    if (!state?.newest || !state.oldest) return [make("fenetre", window.min, window.max)];
+    const head = make("tete", state.newest > window.min ? state.newest : window.min, window.max);
+    const below = make("dessous", window.min, state.oldest > window.min ? state.oldest : window.min);
+    return [head, below];
+  };
+  const cursors = query.romeCodes.map((code) => ({ code, segments: segmentsOf(code), newest: null as string | null, done: false }));
 
-  // Passe après passe : chaque code non épuisé lit sa part du budget restant.
-  // Un code saturé à la première passe (assistant administratif) récupère à la
-  // suivante ce que les petits codes n'ont pas consommé.
+  // Passe après passe : chaque code non épuisé lit sa part du budget restant ;
+  // un code saturé récupère à la passe suivante ce que les petits n'ont pas lu.
   passes: while (budget > 0) {
     const open = cursors.filter((cursor) => !cursor.done);
     if (!open.length) break;
@@ -211,21 +243,26 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
       const quota = Math.max(1, Math.floor(budget / (open.length - index)));
       let readForCode = 0;
 
-      while (readForCode < quota && !cursor.done) {
-        if (query.deadline && Date.now() > query.deadline) break passes;
-        if (cursor.start >= FT_RANGE_LIMIT) {
-          // Fenêtre épuisée : on repart de la plus ancienne offre lue.
-          const next = cursor.oldest ? isoSecond(new Date(cursor.oldest)) : null;
-          if (!next || next === cursor.max || next <= window.min) {
-            cursor.done = true;
-            break;
-          }
-          cursor.max = next;
-          cursor.start = 0;
+      while (readForCode < quota) {
+        const segment = cursor.segments.find((item) => !item.done);
+        if (!segment) {
+          cursor.done = true;
+          break;
         }
-        const start = cursor.start;
+        if (query.deadline && Date.now() > query.deadline) break passes;
+        if (segment.start >= FT_RANGE_LIMIT) {
+          // Tranche épuisée : la suivante a pour borne haute la plus ancienne offre lue.
+          const next = segment.oldest ? isoSecond(new Date(segment.oldest)) : null;
+          if (!next || next >= segment.max || next <= segment.min) {
+            segment.done = true;
+            continue;
+          }
+          segment.max = next;
+          segment.start = 0;
+        }
+        const start = segment.start;
         const end = Math.min(start + FT_PAGE_SIZE, start + quota - readForCode, FT_RANGE_LIMIT) - 1;
-        const page = await fetchPage({ code: cursor.code, min: window.min, max: cursor.max, start, end, slid: cursor.max !== window.max });
+        const page = await fetchPage({ code: cursor.code, min: segment.min, max: segment.max, start, end, slid: segment.kind !== "fenetre" || segment.max !== window.max });
         pages += 1;
         if (!page) {
           failures += 1;
@@ -234,9 +271,11 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
         }
         const rows = page.resultats ?? [];
         readForCode += rows.length;
+        segment.read += rows.length;
         for (const row of rows) {
           const created = row.dateCreation?.trim();
-          if (created && (!cursor.oldest || created < cursor.oldest)) cursor.oldest = created;
+          if (created && (!segment.oldest || created < segment.oldest)) segment.oldest = created;
+          if (created && (!cursor.newest || created > cursor.newest)) cursor.newest = created;
           const signal = toJobSignal(row);
           if (!signal) {
             if (!row.entreprise?.nom?.trim()) stats.anonymous += 1;
@@ -252,8 +291,8 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
             signals.push(signal);
           }
         }
-        if (rows.length < end - start + 1) cursor.done = true;
-        cursor.start = end + 1;
+        if (rows.length < end - start + 1) segment.done = true;
+        segment.start = end + 1;
       }
       stats.read += readForCode;
       stats.byCode[cursor.code] = (stats.byCode[cursor.code] ?? 0) + readForCode;
@@ -263,6 +302,25 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
     }
     if (!readThisPass) break;
   }
+
+  // Nouveau curseur, par code. La tête n'avance QUE si elle a été lue en entier
+  // (sinon un trou resterait entre l'ancienne tête et ce qui a été lu) ; le bas
+  // descend à la plus ancienne offre lue, la lecture étant contiguë depuis lui.
+  const next: FtCursorState = { ...previous };
+  for (const cursor of cursors) {
+    const state = previous[cursor.code];
+    const head = cursor.segments.find((item) => item.kind === "tete" || item.kind === "fenetre")!;
+    const below = cursor.segments.find((item) => item.kind === "dessous" || item.kind === "fenetre")!;
+    // Premier run (« fenetre ») : lecture contiguë depuis « maintenant », la plus récente vaut tête.
+    const newest = (head.kind === "fenetre" || head.done) && cursor.newest ? cursor.newest : state?.newest ?? null;
+    const oldest = below.oldest && (!state?.oldest || below.oldest < state.oldest) ? below.oldest : state?.oldest ?? below.oldest;
+    if (!newest && !oldest) continue;
+    // Bas de fenêtre atteint : le segment « dessous » s'est terminé (moins d'offres que demandé, ou plus rien sous la fenêtre).
+    next[cursor.code] = { newest, oldest: oldest ?? null, exhausted: below.done };
+    stats.head = (stats.head ?? 0) + (head.kind === "tete" ? head.read : 0);
+    stats.below = (stats.below ?? 0) + (below.kind === "dessous" ? below.read : 0);
+  }
+  query.onCursor?.(next);
 
   if (!signals.length && failures && failures === pages) {
     return { ok: false, error: "France Travail — offres illisibles" };
