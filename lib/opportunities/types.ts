@@ -66,7 +66,7 @@ export interface Opportunity {
   published_at?: string | null;
   /** Le flux ne donne qu'un extrait de l'annonce (~300 caractères). */
   description_truncated?: boolean;
-  /** ok · pending (en cours) · a_analyser (plafond du jour) · filtre (écartée sans LLM). */
+  /** ok · pending (en cours) · a_analyser (plafond du jour) · non_analysee (crédit OpenAI épuisé) · filtre (écartée sans LLM). */
   analysis_state?: string | null;
   filter_reason?: string | null;
   /** Alerte vue (ouverte ou copiée). */

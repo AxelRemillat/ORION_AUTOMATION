@@ -1,3 +1,4 @@
+import { isOpenAIQuotaError, QUOTA_MESSAGE } from "@/lib/ai/quota";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
 import { claimJob, commitStep, getJobRow, readStatus, writeProgress } from "./store";
@@ -70,6 +71,8 @@ export function failureDecision(
   attempts: number,
   error: unknown,
 ): { verdict: "retry" | "failed"; message: string; httpStatus: number; details?: Record<string, unknown> } {
+  // Crédit OpenAI épuisé : rien à réessayer, ce n'est pas un échec de contenu.
+  if (isOpenAIQuotaError(error)) return { verdict: "failed", message: QUOTA_MESSAGE, httpStatus: 402, details: { openai_quota: true } };
   const message = error instanceof Error ? error.message : String(error ?? "erreur inconnue");
   const job = error instanceof JobError ? error : null;
   const httpStatus = job?.httpStatus ?? 500;

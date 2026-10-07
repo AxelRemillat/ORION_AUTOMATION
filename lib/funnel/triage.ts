@@ -1,3 +1,4 @@
+import { isOpenAIQuotaError } from "@/lib/ai/quota";
 import { z } from "zod";
 import { effectifLabel } from "@/lib/enrichment/naf";
 import { ageInMonths } from "./filter";
@@ -201,6 +202,9 @@ async function askBatch(ask: TriageAsk, batch: readonly TriageInput[]) {
       // qu'on sache si le modèle avait répondu, mal répondu, ou pas répondu.
       console.warn(`[entonnoir] tri : réponse non conforme — ${parsed.error.issues[0]?.message ?? "?"}`);
     } catch (error) {
+      // Crédit épuisé : on remonte l'erreur — le lot reste NON trié (rien n'est
+      // enregistré), et il sera repris à la recharge au lieu de finir « rejeté ».
+      if (isOpenAIQuotaError(error)) throw error;
       console.warn(`[entonnoir] tri : ${error instanceof Error ? error.message : String(error)}`);
     }
   }

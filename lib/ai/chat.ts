@@ -9,6 +9,7 @@ import {
   unsupportedParamMessage,
   type ChatParams,
 } from "./params";
+import { guardOpenAi } from "./quota";
 
 /**
  * Un appel JSON à OpenAI pour un rôle donné.
@@ -66,6 +67,10 @@ export interface ChatJsonRequest {
  * Partage par tous les appels OpenAI du projet : `chatJson`, l'extraction et
  * la generation de reponses. Le `build` est rappele APRES la mise a jour des
  * capacites, pour que le second essai parte avec le bon corps.
+ *
+ * C'est aussi LE point de garde du credit (lib/ai/quota.ts) : quota ou
+ * facturation → `OpenAIQuotaError` (jamais reessayee) ; limite de debit →
+ * nouvel essai apres attente.
  */
 export async function withParamFallback<T>(
   model: string,
@@ -74,7 +79,7 @@ export async function withParamFallback<T>(
   onWarn: (message: string) => void = (message) => console.warn(message),
 ): Promise<T> {
   try {
-    return await send(build());
+    return await guardOpenAi(() => send(build()));
   } catch (error) {
     const info = readOpenAiError(error);
     if (!isUnsupportedParamError(info)) throw error;
@@ -88,7 +93,7 @@ export async function withParamFallback<T>(
         "capacité retirée, appel rejoué sans elle.",
     );
     try {
-      return await send(build());
+      return await guardOpenAi(() => send(build()));
     } catch (retryError) {
       const retryInfo = readOpenAiError(retryError);
       throw new AiCallError(unsupportedParamMessage(model, retryInfo), model, retryInfo.param, retryError);
