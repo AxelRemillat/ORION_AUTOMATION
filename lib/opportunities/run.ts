@@ -77,6 +77,8 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
       proposal_on_excerpt: opportunity.description_truncated === true,
       suggested_amount_eur: proposal.amountEur,
       suggested_delay_days: proposal.delayDays,
+      suggested_currency: proposal.currency,
+      suggested_hourly: proposal.hourly,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

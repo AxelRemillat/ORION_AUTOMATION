@@ -144,7 +144,10 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
       "Standardise phone numbers and fill in missing countries from postal codes where possible.",
       "Deliver a HubSpot-ready CSV and a short report of every change made.",
     ],
-    framing: "To give you a firm price, how many separate exports are there, and do any include company accounts? Indicative timeline: one week.",
+    // Upwork : l'enchère exige toujours un prix, même sans budget affiché (plateformes #1).
+    framing: "Fixed price: $550, change report included. Delivery: 7 days.",
+    amountEur: 550,
+    delayDays: 7,
     question: "When two records conflict, which source should win: the most recent one or a specific system?",
   }),
 ];

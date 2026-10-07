@@ -4,6 +4,9 @@ import { AXEL_SENT } from "./calibration";
 import { CODEUR_LAUNCH_MAX_EUR, contactFailures, FLATTERY, INVENTED_CLAIMS, isNoContactPlatform, PRIVATE_MESSAGE_MAX_CHARS, PROPOSAL_JARGON } from "./proposal";
 import { DELAY_CAP_DAYS, developmentAmounts, honestReferences, longestDelayDays, PRICE_CAP_EUR, priceRange, requestedItems, type ProjectKind } from "./requests";
 import type { Platform } from "./types";
+// Plateformes #1 (agent4) : Upwork branché en CONFIGURATION (checklist-en.ts), le moteur reste celui de #32.
+import { upworkChecklistPrompt, upworkCodeChecks } from "./checklist-en";
+import { usdAmounts } from "./platforms";
 
 /**
  * CHECK-LIST DES PROPOSITIONS (Cowork #32) — la grille d'Axel en 8 points,
@@ -72,7 +75,9 @@ export function proposalCodeChecks(text: string, context: ProposalContext): Prop
   const result = (id: ProposalCriterionId, ok: boolean, citation: string): ProposalCriterion => ({ id, label: PROPOSAL_CRITERIA[id].label, kind: "code", ok, citation });
   const blocks = blocksOf(text);
   const signature = blocks[blocks.length - 1] ?? "";
-  const body = blocks.slice(1, -1).join("\n\n");
+  // Upwork (agent4) : pas de salutation, le 1er bloc est l'accroche — il fait partie du corps.
+  const upwork = context.platform === "upwork";
+  const body = blocks.slice(upwork ? 0 : 1, -1).join("\n\n");
   const kind = context.kind ?? "automatisation";
 
   // P2 — chaque élément demandé a sa réponse.
@@ -86,7 +91,7 @@ export function proposalCodeChecks(text: string, context: ProposalContext): Prop
     item === "approche"
       ? approachWords < 30
       : item === "prix"
-        ? developmentAmounts(body).length === 0
+        ? developmentAmounts(body).length === 0 && !(upwork && usdAmounts(body).length > 0)
         : item === "couts_mensuels"
           ? !/(mensuel|par mois|\/\s?mois|per month|monthly)/i.test(body)
           : item === "delai"
@@ -108,6 +113,8 @@ export function proposalCodeChecks(text: string, context: ProposalContext): Prop
     delay !== null && delay > DELAY_CAP_DAYS[kind] ? `délai de ${delay} jours trop long` : "",
   ].filter(Boolean);
   const priced = amounts.length > 0 || !requested.includes("prix");
+  // Upwork (agent4) : P5 et P7 lus par la configuration anglaise (dollars, fixe ou horaire ; accroche, 1 200 caractères).
+  const upworkChecks = upwork ? upworkCodeChecks(text, body, context) : null;
 
   // P7 — courte, salutation, signature.
   const length = text.length;
@@ -120,14 +127,20 @@ export function proposalCodeChecks(text: string, context: ProposalContext): Prop
 
   return [
     result("P2", missing.length === 0, missing.length ? `sans réponse : ${missing.join(", ")}` : requested.length ? `demandés : ${requested.join(", ")}` : "rien de demandé explicitement"),
-    result("P5", priced && priceProblems.length === 0, priceProblems.join(" ; ") || `${amounts.join(", ") || "—"} € · ${delay ?? "—"} j`),
-    result("P7", lengthOk && shapeOk && signed, `${length} caractères · « ${blocks[0] ?? ""} » · signature « ${signature.slice(0, 40)} »`),
+    upworkChecks
+      ? result("P5", upworkChecks.price.ok, upworkChecks.price.citation)
+      : result("P5", priced && priceProblems.length === 0, priceProblems.join(" ; ") || `${amounts.join(", ") || "—"} € · ${delay ?? "—"} j`),
+    upworkChecks
+      ? result("P7", upworkChecks.shape.ok && signed, `${upworkChecks.shape.citation} · signature « ${signature.slice(0, 40)} »`)
+      : result("P7", lengthOk && shapeOk && signed, `${length} caractères · « ${blocks[0] ?? ""} » · signature « ${signature.slice(0, 40)} »`),
     result("P8", tone.length === 0, tone.length ? tone.join(" ; ") : "aucun"),
   ];
 }
 
 /** Prompt FIGÉ : les données vont dans le message. Repères : les 3 propositions envoyées par Axel. */
-export function buildProposalChecklistPrompt(): string {
+export function buildProposalChecklistPrompt(platform?: Platform): string {
+  // Upwork (agent4) : mêmes critères P1, P3, P4, P6, consigne en anglais (checklist-en.ts).
+  if (platform === "upwork") return upworkChecklistPrompt();
   return `Tu es le CLIENT qui a publié l'annonce. Tu ne donnes PAS de note : tu réponds OUI (true) ou NON (false) à chaque critère, avec une CITATION EXACTE de la réponse (pour un NON : le passage fautif, ou le plus proche de ce qui manque).
 La forme (longueur, prix et délai, coordonnées, signature) est vérifiée par un programme : ne la juge pas.
 
@@ -195,7 +208,7 @@ export async function judgeProposalChecklist(
   if (code.some((item) => !item.ok)) return proposalVerdictOf(code);
   const user = `ANNONCE « ${input.title} » (budget : ${input.budget ?? "non indiqué"})\n${input.ad.slice(0, 5000)}\n\nRÉPONSE REÇUE\n${input.text}`;
   const raws = await Promise.all(
-    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildProposalChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
+    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildProposalChecklistPrompt(input.platform), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
   );
   const semantic = proposalMajority(raws.map(parseProposalChecklist));
   if (!semantic) return null;

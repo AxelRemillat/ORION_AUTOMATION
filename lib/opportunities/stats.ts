@@ -37,3 +37,40 @@ export function platformStats(rows: readonly Row[]): PlatformStats[] {
     };
   }).filter((row) => row.total > 0);
 }
+
+/**
+ * COCKPIT (plateformes #1) — par plateforme, sur une fenêtre glissante :
+ * propositions envoyées, réponses, conversations, missions gagnées. Chaque
+ * jalon est compté à SA date (sent_at, replied_at, conversation_at, won_at) ;
+ * une fiche antérieure à ces colonnes retombe sur sa dernière mise à jour.
+ */
+export interface PlatformActivity {
+  platform: Platform;
+  sent: number;
+  replies: number;
+  conversations: number;
+  won: number;
+}
+
+export const ACTIVITY_WINDOWS = [7, 30] as const;
+export type ActivityWindow = (typeof ACTIVITY_WINDOWS)[number];
+
+type ActivityRow = Pick<Opportunity, "platform" | "status" | "sent_at" | "replied_at" | "updated_at"> &
+  Partial<Pick<Opportunity, "conversation_at" | "won_at">>;
+
+const CONVERSATION_STATUSES: readonly string[] = ["entretien", "gagnee"];
+
+export function platformActivity(rows: readonly ActivityRow[], days: number, now = new Date()): PlatformActivity[] {
+  const since = now.getTime() - days * 86_400_000;
+  const within = (iso: string | null | undefined) => Boolean(iso) && Date.parse(iso as string) >= since && Date.parse(iso as string) <= now.getTime();
+  return PLATFORMS.map((platform) => {
+    const own = rows.filter((row) => row.platform === platform);
+    return {
+      platform,
+      sent: own.filter((row) => within(row.sent_at)).length,
+      replies: own.filter((row) => within(row.replied_at)).length,
+      conversations: own.filter((row) => within(row.conversation_at ?? (CONVERSATION_STATUSES.includes(row.status) ? row.updated_at : null))).length,
+      won: own.filter((row) => within(row.won_at ?? (row.status === "gagnee" ? row.updated_at : null))).length,
+    };
+  }).filter((row) => row.sent + row.replies + row.conversations + row.won > 0);
+}
