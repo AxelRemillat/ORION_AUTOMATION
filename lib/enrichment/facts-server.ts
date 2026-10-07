@@ -21,6 +21,8 @@ export interface FactsProspect {
   id: string;
   company_name: string;
   website: string | null;
+  /** Libellé d'activité (NAF) : un fait qui ne fait que le redire plafonne à 1. */
+  sector?: string | null;
   key_figures: Record<string, unknown> | null;
 }
 
@@ -59,7 +61,7 @@ export async function ensureFacts(
   if (known && !options.force) return { facts: known, score: (prospect.key_figures?.facts_score as 0 | 1 | 2 | 3) ?? 0, pages: [], note: "cache" };
   if (!prospect.website) return null;
 
-  const run = await extractFacts(prospect.company_name, prospect.website, options.deps ?? liveFactsDeps(prospect.id));
+  const run = await extractFacts(prospect.company_name, prospect.website, options.deps ?? liveFactsDeps(prospect.id), prospect.sector);
   // Fiche RELUE juste avant l'écriture : on fusionne, on n'écrase rien.
   const { data } = await db.from("prospects").select("key_figures").eq("id", prospect.id).maybeSingle();
   const fresh = ((data as { key_figures?: Record<string, unknown> | null } | null)?.key_figures ?? prospect.key_figures ?? {}) as Record<string, unknown>;
@@ -69,6 +71,7 @@ export async function ensureFacts(
     facts_score: run.score,
     facts_at: now.toISOString(),
     facts_version: FACTS_VERSION,
+    facts_rules: 1,
     ...(run.note ? { facts_note: run.note } : {}),
   };
   await db.from("prospects").update({ key_figures: figures } as never).eq("id", prospect.id);

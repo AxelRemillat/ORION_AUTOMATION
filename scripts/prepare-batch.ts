@@ -5,6 +5,7 @@
  *
  *   npm run prepare:lot -- --target 25 --hunter-cap 40           (sans brouillons)
  *   npm run prepare:lot -- --target 25 --hunter-cap 40 --drafts  (avec brouillons)
+ *   npm run prepare:lot -- --target 10 --linkup-cap 8 --segment agences (plafond Linkup du job, segment)
  *   npm run prepare:lot -- --status <jobId>                      (avancement)
  *
  * Aucun envoi : au plus des brouillons non validés.
@@ -33,7 +34,12 @@ async function main() {
     {
       type: "search_signals",
       target: { label: `Préparation (lot de mesure, ${target} fiches)` },
-      params: { kind: "prepare", digLimit: target, dailyTarget: target, skipDrafts, hunterCap, trigger: "manuel" },
+      params: {
+        kind: "prepare", digLimit: target, dailyTarget: target, skipDrafts, hunterCap, trigger: "manuel",
+        // Linkup (Cowork #37) : plafond du job et segment (part réservée LINKUP_RESERVE).
+        ...(value("--linkup-cap") ? { linkupCap: Math.max(0, Number(value("--linkup-cap")) || 0) } : {}),
+        ...(value("--segment") ? { segment: value("--segment") } : {}),
+      },
     },
     userId,
   );
