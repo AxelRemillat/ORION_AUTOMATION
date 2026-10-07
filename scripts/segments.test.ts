@@ -113,6 +113,46 @@ check(
 console.log("\nConcurrents et partenaires possibles");
 // ---------------------------------------------------------------------------
 
+/*
+ * Faux positif trouvé par la mesure du 07/10/2026 : REMIX COWORKING, un espace
+ * de coworking, retenu comme agence sur le seul mot « SEO ». Un indice faible
+ * seul ne qualifie plus ; deux, ou un fort, oui.
+ */
+check(
+  "un seul indice faible ne qualifie pas",
+  classifyAgence({
+    naf: "73.11Z",
+    effectifCode: "11",
+    siteText: "Espace de coworking à Lyon. Nos résidents : consultants et experts SEO.",
+  }).fit === "dehors",
+);
+check(
+  "deux indices faibles qualifient",
+  classifyAgence({
+    naf: "73.11Z",
+    effectifCode: "11",
+    siteText: "Nous faisons du référencement naturel et de la boutique en ligne pour nos clients.",
+  }).fit === "dedans",
+);
+check(
+  "un indice fort seul qualifie",
+  classifyAgence({
+    naf: "73.11Z",
+    effectifCode: "11",
+    siteText: "Nous sommes une agence de communication à Lyon.",
+  }).fit === "dedans",
+);
+check(
+  "et le motif nomme l'indice insuffisant",
+  (
+    classifyAgence({
+      naf: "73.11Z",
+      effectifCode: "11",
+      siteText: "Espace de coworking. Nos résidents sont experts SEO.",
+    }).reason ?? ""
+  ).includes("indice faible"),
+);
+
 const rival = classifyAgence({
   naf: "73.11Z",
   effectifCode: "11",
