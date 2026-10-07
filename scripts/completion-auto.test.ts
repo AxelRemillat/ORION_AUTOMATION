@@ -5,7 +5,8 @@
  * Exécution : `npm run test:completion`.
  */
 import { FakeDb } from "./fake-supabase";
-import { linkupGate, linkupCacheKey, linkupDailyBudget, type LinkupGateStore } from "../lib/linkup/gate";
+import { budgetFor, linkupGate, linkupCacheKey, linkupDailyBudget, linkupReserves, type LinkupGateStore } from "../lib/linkup/gate";
+import { withLinkupRun } from "../lib/linkup/run-cap";
 import { candidateDomains, LINKUP_MIN_SCORE, MIN_SITE_CONFIDENCE, resolveSite, siteIdentity } from "../lib/contact-finder/free-site";
 import { completeOne, UNREACHABLE_AFTER, type CompletionDeps } from "../lib/today/complete";
 import { exclusionOf } from "../lib/today/items";
@@ -66,6 +67,19 @@ async function main() {
     check("LINKUP_DAILY_BUDGET=0 coupe Linkup", (await (async () => { const before = process.env.LINKUP_DAILY_BUDGET; process.env.LINKUP_DAILY_BUDGET = "0"; const r = await linkupGate(store(0), "x"); process.env.LINKUP_DAILY_BUDGET = before ?? ""; if (before === undefined) delete process.env.LINKUP_DAILY_BUDGET; return r.status; })()) === "blocked");
     check("budget du jour atteint : refusé", (await linkupGate(store(30), "acme lyon site officiel")).status === "blocked");
     check("sous le budget : appel permis", (await linkupGate(store(3), "acme lyon site officiel")).status === "call");
+
+    // Plafond par job et part réservée par segment (Cowork #37), sans relever le budget du jour.
+    check("LINKUP_RESERVE « agences:10, x:5 » lu", JSON.stringify(linkupReserves({ LINKUP_RESERVE: "agences:10, x:5" })) === '{"agences":10,"x":5}');
+    check("budget accessible : autres segments retirés", budgetFor(30, null, { agences: 10 }) === 20 && budgetFor(30, "agences", { agences: 10 }) === 30);
+    const reserveBefore = process.env.LINKUP_RESERVE;
+    process.env.LINKUP_RESERVE = "agences:10";
+    const since = new Date(Date.now() - 60_000);
+    check("job sans segment, 20/30 utilisés : bloqué (part des agences préservée)", (await withLinkupRun({ segment: null, cap: null, since: new Date() }, () => linkupGate(store(20), "q1"))).status === "blocked");
+    check("job « agences », 20/30 utilisés : permis", (await withLinkupRun({ segment: "agences", since }, () => linkupGate(store(20), "q2"))).status === "call");
+    check("plafond du job atteint (5 depuis son début, cap 5) : bloqué", (await withLinkupRun({ segment: "agences", cap: 5, since }, () => linkupGate(store(5), "q3"))).status === "blocked");
+    check("hors job : aucune réserve appliquée sans segment… sauf la réserve (défaut budget − réserve)", (await linkupGate(store(15), "q4")).status === "call");
+    if (reserveBefore === undefined) delete process.env.LINKUP_RESERVE;
+    else process.env.LINKUP_RESERVE = reserveBefore;
     memory.set(linkupCacheKey("ACME  Lyon site officiel"), [{ url: "https://acme.fr" }]);
     check("même requête déjà payée : servie par le cache, sans appel", (await linkupGate(store(30), "acme lyon site officiel")).status === "cache");
   }

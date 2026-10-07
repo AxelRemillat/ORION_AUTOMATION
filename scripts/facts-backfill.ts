@@ -35,6 +35,7 @@ type Prospect = {
   id: string;
   company_name: string;
   website: string | null;
+  sector: string | null;
   email: string | null;
   do_not_contact: boolean | null;
   contact_source: string | null;
@@ -52,7 +53,7 @@ async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const prospects = await readAll<Prospect>(() =>
-    db.from("prospects").select("id, company_name, website, email, do_not_contact, contact_source, contact_name, key_figures").eq("user_id", userId).is("deleted_at", null).order("id"),
+    db.from("prospects").select("id, company_name, website, sector, email, do_not_contact, contact_source, contact_name, key_figures").eq("user_id", userId).is("deleted_at", null).order("id"),
   );
   const messages = await readAll<MessageRow>(() =>
     db.from("messages").select("id, prospect_id, type, status, send_status, validated_at, edited_by_hand, scheduled_at, deleted_at, created_at, regenerate_reason").eq("user_id", userId).order("id"),

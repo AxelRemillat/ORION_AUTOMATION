@@ -42,6 +42,40 @@ export function linkupDailyBudget(env: Record<string, string | undefined> = proc
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
+/**
+ * PLAFOND PAR JOB ET PART RÉSERVÉE PAR SEGMENT (Cowork #37) — sans relever le
+ * budget du jour :
+ *   - `cap` : un job ne dépasse pas N recherches depuis son début ;
+ *   - `LINKUP_RESERVE` (ex. « agences:10 ») : N recherches du budget du jour
+ *     sont réservées à un segment ; les jobs d'un AUTRE segment (ou sans
+ *     segment) s'arrêtent à budget − réserve. Défaut : aucune réserve.
+ * Le contexte du job vit dans lib/linkup/run-cap.ts (serveur) et s'enregistre ici.
+ */
+export type LinkupRunContext = { cap?: number | null; segment?: string | null; since: Date };
+let readRunContext: () => LinkupRunContext | undefined = () => undefined;
+export function registerLinkupRunReader(reader: () => LinkupRunContext | undefined): void {
+  readRunContext = reader;
+}
+
+/** « agences:10, autre:5 » → { agences: 10, autre: 5 }. */
+export function linkupReserves(env: Record<string, string | undefined> = process.env): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const part of (env.LINKUP_RESERVE ?? "").split(",")) {
+    const [segment, value] = part.split(":").map((item) => item?.trim());
+    const count = Math.floor(Number(value));
+    if (segment && Number.isFinite(count) && count > 0) out[segment.toLowerCase()] = count;
+  }
+  return out;
+}
+
+/** Budget du jour accessible à un job d'un segment donné (réserves des autres segments retirées). */
+export function budgetFor(budget: number, segment: string | null | undefined, reserves: Record<string, number>): number {
+  const others = Object.entries(reserves)
+    .filter(([name]) => name !== (segment ?? "").toLowerCase())
+    .reduce((total, [, count]) => total + count, 0);
+  return Math.max(0, budget - others);
+}
+
 export const linkupCacheKey = (query: string) => `linkup:search:${query.trim().toLowerCase().replace(/\s+/g, " ")}`;
 
 export interface LinkupGateStore {
@@ -61,5 +95,15 @@ export async function linkupGate<T>(store: LinkupGateStore, query: string, now: 
   if (budget === 0) return { status: "blocked", reason: `${LINKUP_EPUISE} (plafond ${kind} = 0)` };
   const used = await store.usedSince(parisMidnight(now), kind).catch(() => budget);
   if (used >= budget) return { status: "blocked", reason: `${LINKUP_EPUISE} (${used}/${budget})` };
+  if (kind === "search") {
+    const run = readRunContext();
+    const reserves = linkupReserves();
+    const allowed = budgetFor(budget, run?.segment, reserves);
+    if (used >= allowed) return { status: "blocked", reason: `${LINKUP_EPUISE} : part réservée à un autre segment (${used}/${allowed} sur ${budget})` };
+    if (run && typeof run.cap === "number" && run.cap >= 0) {
+      const inRun = await store.usedSince(run.since, kind).catch(() => run.cap!);
+      if (inRun >= run.cap) return { status: "blocked", reason: `${LINKUP_EPUISE} : plafond du job atteint (${inRun}/${run.cap})` };
+    }
+  }
   return { status: "call" };
 }
