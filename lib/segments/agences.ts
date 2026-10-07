@@ -49,17 +49,35 @@ export const AGENCES_DAILY_CAP = 5;
 
 /**
  * CE QUI QUALIFIE — l'agence dit elle-même qu'elle vend du web ou du marketing.
- * Un seul de ces motifs suffit : ils sont tous des affirmations d'activité, pas
- * des mots de décor.
+ *
+ * Deux poids, et c'est la leçon de la première mesure (07/10/2026) :
+ *
+ *   FORT — une affirmation de métier. « Nous sommes une agence web », « création
+ *   de sites » : on ne l'écrit pas par hasard. Un seul suffit.
+ *
+ *   FAIBLE — un mot qui peut n'être que du décor. « SEO », « e-commerce » et
+ *   « marketing digital » figurent sur des pages de prestataires comme sur
+ *   celles de leurs clients, et dans n'importe quel billet de blog. Il en faut
+ *   DEUX pour conclure.
+ *
+ * Sans cette distinction, REMIX COWORKING — un espace de coworking — était
+ * retenu comme agence sur le seul mot « SEO ».
  */
-export const AGENCY_SIGNALS: readonly SegmentPattern[] = [
-  { label: "agence web", pattern: /\bagence\s+(?:web|digitale?|num[ée]rique|interactive)\b/i },
-  { label: "création de site", pattern: /\b(?:cr[ée]ation|conception|refonte)\s+(?:de\s+)?sites?\b/i },
-  { label: "marketing digital", pattern: /\bmarketing\s+(?:digital|num[ée]rique|en\s+ligne)\b/i },
-  { label: "SEO/SEA", pattern: /\b(?:seo|sea|sem|r[ée]f[ée]rencement\s+(?:naturel|payant)|google\s+ads|adwords)\b/i },
-  { label: "e-commerce", pattern: /\b(?:e-?commerce|boutique\s+en\s+ligne|shopify|prestashop|woocommerce|magento)\b/i },
-  { label: "agence de communication", pattern: /\bagence\s+(?:de\s+)?(?:communication|publicit[ée]|marketing)\b/i },
+export const AGENCY_SIGNALS: readonly (SegmentPattern & { strong: boolean })[] = [
+  { label: "agence web", strong: true, pattern: /\bagence\s+(?:web|digitale?|num[ée]rique|interactive)\b/i },
+  { label: "création de site", strong: true, pattern: /\b(?:cr[ée]ation|conception|refonte)\s+(?:de\s+)?sites?\b/i },
+  { label: "agence de communication", strong: true, pattern: /\bagence\s+(?:de\s+)?(?:communication|publicit[ée]|marketing)\b/i },
+  { label: "marketing digital", strong: false, pattern: /\bmarketing\s+(?:digital|num[ée]rique|en\s+ligne)\b/i },
+  { label: "SEO/SEA", strong: false, pattern: /\b(?:seo|sea|sem|r[ée]f[ée]rencement\s+(?:naturel|payant)|google\s+ads|adwords)\b/i },
+  { label: "e-commerce", strong: false, pattern: /\b(?:e-?commerce|boutique\s+en\s+ligne|shopify|prestashop|woocommerce|magento)\b/i },
 ];
+
+/** Un signal fort, ou deux faibles : le seuil de qualification. */
+export function qualifies(signals: readonly string[]): boolean {
+  const strong = AGENCY_SIGNALS.filter((item) => item.strong).map((item) => item.label);
+  if (signals.some((label) => strong.includes(label))) return true;
+  return signals.length >= 2;
+}
 
 /**
  * CE QUI DISQUALIFIE — l'agence vend DÉJÀ ce qu'Axel propose.
@@ -167,11 +185,14 @@ export function classifyAgence(input: SegmentInput): SegmentVerdict {
     };
   }
 
-  if (!signals.length) {
+  if (!qualifies(signals)) {
     return {
       ...base,
+      signals,
       fit: "dehors",
-      reason: `NAF ${naf} dans le vivier, mais le site ne revendique ni web ni marketing`,
+      reason: signals.length
+        ? `NAF ${naf} dans le vivier, mais un seul indice faible sur le site (${signals.join(", ")}) : insuffisant pour affirmer qu'il s'agit d'une agence`
+        : `NAF ${naf} dans le vivier, mais le site ne revendique ni web ni marketing`,
     };
   }
 
