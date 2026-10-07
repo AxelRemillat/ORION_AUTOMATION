@@ -48,6 +48,12 @@ export interface F5Check {
 
 export interface F5Criterion {
   id: string;
+  /**
+   * Critère SÉMANTIQUE délégué à la check-list commune (lib/emails/quality).
+   * Sa consigne d'écriture reste ici ; son verdict vient de C1/C2, qui lisent
+   * vraiment la phrase au lieu d'y chercher des mots.
+   */
+  judgedBy?: "checklist";
   label: string;
   /** Consigne de rédaction, injectée dans le prompt. */
   instruction: string;
@@ -55,18 +61,7 @@ export interface F5Criterion {
   check?: (mail: F5Mail) => F5Check;
 }
 
-/** Le problème, tel que F5 doit le formuler : celui des CLIENTS de l'agence. */
-const CLIENT_DEMAND =
-  /\b(?:leurs?|vos|des|ces|les)\s+clients?\b[^.!?]{0,140}\b(?:demand|r[ée]clam|attend|automatis|ia\b|intelligence artificielle|int[ée]gration|outil)/i;
-/**
- * Friction sur un LIVRABLE : la forme la plus fréquente du problème côté
- * client, et elle ne nomme pas toujours « les clients ».
- */
-const DELIVERY_FRICTION =
-  /\b(?:brief|demande|proposition|devis|campagne|livrable|bilan|maquette|rapport|reporting|cahier des charges)\b[^.!?]{0,120}\b(?:incompl[èe]t|manquant|retard|tarde|attend|bloqu|repasse|relanc|ressais)/i;
 
-const CAPACITY =
-  /\b(?:bande passante|capacit[ée]|charge|surcharg|pas le temps|sans recruter|sans embaucher|[ée]quipe (?:r[ée]duite|limit[ée]e)|refus(?:er|ez)? des (?:projets|demandes))\b/i;
 
 /** La marque blanche, dite explicitement : c'est l'offre, pas un sous-entendu. */
 const WHITE_LABEL =
@@ -103,34 +98,24 @@ const FIFTEEN_MIN = /\b(?:15|quinze)\s*(?:min|minutes)\b/i;
 export const F5_CRITERIA: readonly F5Criterion[] = [
   {
     id: "fait-source",
-    label: "Un fait sourcé sur l'agence",
+    label: "Un fait sourcé, propre à CETTE agence",
+    judgedBy: "checklist",
     instruction:
-      "Ouvre sur un fait précis lu sur LEUR site : un client nommé, une réalisation, une offre. Jamais un compliment, jamais une généralité sur « les agences ».",
+      "Ouvre sur un fait précis lu sur LEUR site : un client nommé, une réalisation, un outil, une offre qui n'est qu'à eux. TEST DE SUBSTITUTION : si la phrase reste vraie pour dix autres agences du même métier, elle ne vaut rien — « vous créez des sites pour les artisans et commerçants » décrit une activité, pas cette agence. Jamais un compliment.",
+    // Jugé par C1 : seule une lecture peut dire si la phrase est substituable.
     check: (mail) => {
       const sourced = mail.facts.filter((fact) => typeof fact.url === "string" && fact.url.length > 8);
       return sourced.length > 0
-        ? { ok: true, detail: `${sourced.length} fait(s) avec URL` }
+        ? { ok: true, detail: `${sourced.length} fait(s) avec URL — spécificité jugée par C1` }
         : { ok: false, detail: "aucun fait porteur d'une URL vérifiable" };
     },
   },
   {
     id: "probleme-client",
     label: "Le problème : demandes de leurs clients, ou capacité limitée",
+    judgedBy: "checklist",
     instruction:
-      "Nomme le problème côté AGENCE : des demandes d'automatisation ou d'IA venant de leurs clients qu'ils ne savent pas produire, ou une capacité technique qui les oblige à refuser. Pas de problème inventé : si le site ne le laisse pas voir, dis-le comme une question.",
-    check: (mail) => {
-      const core = argument(mail);
-      const demand = CLIENT_DEMAND.test(core);
-      const capacity = CAPACITY.test(core);
-      const friction = DELIVERY_FRICTION.test(core);
-      if (demand || capacity || friction) {
-        return {
-          ok: true,
-          detail: demand ? "demandes clients" : capacity ? "capacité limitée" : "friction sur un livrable",
-        };
-      }
-      return { ok: false, detail: "ni demande client, ni contrainte de capacité, ni friction sur un livrable" };
-    },
+      "Nomme le problème côté AGENCE, et nomme L'ÉLÉMENT QUI MANQUE puis SA CONSÉQUENCE — pas « une demande sans contenu défini peut retarder le devis », mais « sans budget ni périmètre, votre équipe relance deux fois avant de chiffrer ». Ce sont des demandes d'automatisation ou d'IA de leurs clients qu'ils ne savent pas produire, ou une capacité qui les oblige à refuser. Pas de problème inventé : si le site ne le laisse pas voir, dis-le comme une question.",
   },
   {
     id: "marque-blanche",
@@ -194,6 +179,8 @@ export interface F5Verdict {
   ready: boolean;
   passed: { id: string; detail: string }[];
   failed: { id: string; label: string; detail: string }[];
+  /** Critères dont le verdict vient de la check-list commune (C1, C2). */
+  delegated: { id: string; detail: string }[];
   /** Critères laissés au moteur d'agent2 : non vérifiables sans jugement. */
   deferred: string[];
 }
@@ -203,18 +190,29 @@ export function checkF5(mail: F5Mail): F5Verdict {
   const passed: F5Verdict["passed"] = [];
   const failed: F5Verdict["failed"] = [];
   const deferred: string[] = [];
+  const delegated: F5Verdict["delegated"] = [];
 
   for (const criterion of F5_CRITERIA) {
     if (!criterion.check) {
-      deferred.push(criterion.id);
+      if (criterion.judgedBy === "checklist") delegated.push({ id: criterion.id, detail: "jugé par la check-list commune" });
+      else deferred.push(criterion.id);
       continue;
     }
     const verdict = criterion.check(mail);
+    if (criterion.judgedBy === "checklist") {
+      // Le verdict appartient à C1/C2. Ici on ne retient que l'empêchement
+      // matériel (pas un seul fait sourcé : il n'y a rien à citer).
+      if (!verdict.ok) failed.push({ id: criterion.id, label: criterion.label, detail: verdict.detail });
+      else delegated.push({ id: criterion.id, detail: verdict.detail });
+      continue;
+    }
     if (verdict.ok) passed.push({ id: criterion.id, detail: verdict.detail });
     else failed.push({ id: criterion.id, label: criterion.label, detail: verdict.detail });
   }
 
-  return { ready: failed.length === 0, passed, failed, deferred };
+  // `ready` ne dit plus que le DÉTERMINISTE. La lecture — C1, C2 — vient de
+  // judgeChecklist ; `delegated` nomme ce qui reste à lui demander.
+  return { ready: failed.length === 0, passed, failed, deferred, delegated };
 }
 
 /** Bloc de consignes F5, à concaténer au prompt de rédaction. */
