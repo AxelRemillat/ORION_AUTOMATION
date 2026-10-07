@@ -293,3 +293,34 @@ export const CODEUR_EMAIL_FIXTURES: EmailFixture[] = [
     expect: { platform: "codeur", kind: "message", externalId: "400001" },
   },
 ];
+
+/**
+ * Codeur « Nouveau projet » (plateformes #7) — l'alerte e-mail qui double le flux RSS
+ * (expéditeur notification@compte.codeur.com). Fictifs : projets 490913, 491020, 491021.
+ */
+const codeurProject = (id: string, slug: string, title: string, budget: string, excerpt: string, minute: number): InboundEmail => ({
+  message_id: `<codeur-projet-${id}@compte.codeur.com>`,
+  from: "Codeur.com <notification@compte.codeur.com>",
+  subject: `Nouveau projet : ${title}`,
+  text: `Bonjour Axel,\n\nUn nouveau projet correspondant à vos compétences vient d'être publié :\n\n${title}\nBudget : ${budget}\n\n${excerpt}\n\nVoir le projet : https://www.codeur.com/projects/${id}-${slug}?utm_source=alerte&utm_medium=email` + FOOTER_CODEUR,
+  html: "",
+  received_at: `2026-10-07T17:${String(minute).padStart(2, "0")}:00Z`,
+});
+
+export const CODEUR_PROJECT_FIXTURES: { name: string; email: InboundEmail; externalId: string }[] = [
+  {
+    name: "connu (déjà reçu par le flux RSS)",
+    externalId: "490913",
+    email: codeurProject("490913", "recherche-developpeur", "Recherche développeur", "500 € à 1 000 €", "Nous cherchons un développeur pour automatiser l'envoi de nos devis depuis notre CRM…", 38),
+  },
+  {
+    name: "inconnu, pertinent (automatisation)",
+    externalId: "491020",
+    email: codeurProject("491020", "automatiser-la-saisie-de-nos-factures-fournisseurs", "Automatiser la saisie de nos factures fournisseurs", "1 000 € à 2 000 €", "Nous recevons environ 150 factures PDF par mois par e-mail, saisies à la main dans Pennylane. Nous voulons les extraire et les importer automatiquement…", 41),
+  },
+  {
+    name: "inconnu, hors cible (site WordPress)",
+    externalId: "491021",
+    email: codeurProject("491021", "refonte-de-notre-site-wordpress", "Refonte de notre site WordPress", "500 € à 1 000 €", "Refonte d'un site vitrine WordPress de 8 pages avec un nouveau thème et un blog…", 44),
+  },
+];

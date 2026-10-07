@@ -22,7 +22,7 @@ export interface InboundEmail {
   received_at: string | null;
 }
 
-export type EmailKind = "invitation" | "demande" | "commande" | "message" | "offre" | "gagnee" | "perdue" | "recommandation" | "autre";
+export type EmailKind = "invitation" | "demande" | "commande" | "message" | "offre" | "gagnee" | "perdue" | "recommandation" | "nouveau_projet" | "autre";
 
 export const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
   invitation: "Invitation",
@@ -33,6 +33,7 @@ export const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
   gagnee: "Mission confirmée",
   perdue: "Clôturée",
   recommandation: "Recommandation",
+  nouveau_projet: "Nouveau projet",
   autre: "À trier",
 };
 
@@ -186,6 +187,8 @@ export const SUBJECT_RULES: Record<ParsedPlatform, readonly KindRule[]> = {
   ],
   // Codeur (plateformes #6) : SUIVI seulement — les annonces arrivent par le flux RSS.
   codeur: [
+    // Alerte « Nouveau projet : <titre> » (notification@compte.codeur.com, plateformes #7) : double le flux RSS.
+    { kind: "nouveau_projet", subject: /^\W*(\[?codeur(\.com)?\]?\s*[:-]?\s*)?nouveau projet\s*[:-]/ },
     { kind: "gagnee", subject: /((projet|mission) .{0,120}?(vous )?a ete attribue|vous a ete attribue|vous avez ete (selectionne|retenu|choisi)|votre (offre|proposition) a ete (acceptee|retenue)|attribution du projet)/ },
     { kind: "perdue", subject: /((offre|proposition) (n'a pas ete retenue|a ete refusee|refusee|declinee)|n'a pas retenu votre|projet .{0,120}?(a ete )?(ferme|clos|cloture|annule|attribue a un autre)|(fermeture|cloture) du projet|projet (ferme|clos|cloture|annule))/ },
     { kind: "message", subject: /(nouveau message|vous a (envoye|ecrit) un message|message prive|a repondu a votre offre|message de)/ },
