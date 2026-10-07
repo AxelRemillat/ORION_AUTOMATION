@@ -26,6 +26,7 @@
     "funnel:run": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel-run.js",
     "facts:rattrapage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts-backfill.js",
     "facts:rescore": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts-rescore.js",
+    "drafts:lot": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/drafts-batch.js",
     "prepare:lot": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/prepare-batch.js",
     "openai:ping": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/openai-ping.js",
     "test:faits": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts.test.js",

@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { F4_GUARDS } from "../lib/emails/quality/cowork-d-set";
 import { COWORK_D_SET } from "../lib/emails/quality/cowork-d-set";
 import { isOpenAIQuotaError, OpenAIQuotaError } from "../lib/ai/quota";
 import { buildChecklistPrompt, C5_NEGATIVES, repeatedNounGroups, checklistFeedback, deterministicChecks, judgeChecklist, majority, parseChecklistSample, semanticCriteria, verdictOf } from "../lib/emails/quality/checklist";
@@ -734,6 +735,26 @@ async function main() {
     check("nombre lu sur le site (4 000) : accepté par le garde-fou", !icpSite.failures.some((line) => /Nombre absent/.test(line)), icpSite.failures.join(" | "));
     check("nombre absent du site et des faits : toujours refusé", icpNoSite.failures.some((line) => /Nombre absent/.test(line)));
     check("C1 compare sur le sens et lit le texte du site ; F3 exige un objet concret", /sur le SENS/.test(buildChecklistPrompt()) && /Texte du site/.test(buildChecklistPrompt()) && /objet concret/.test(buildChecklistPrompt()));
+  }
+
+  console.log("\nF4 au niveau de F1 (Cowork #35, VSDM noté 8)");
+  {
+    const vsdmHook = "Vous assurez la maintenance et le déploiement de parcs informatiques en France et en Belgique. Quand une panne change les priorités, le client attend une réponse rapide.";
+    const f4Check = (proposal: string) =>
+      checkMail({ subject: "Demandes d'intervention", hook: vsdmHook, proposal }, assembleFamily("F4", { subject: "Demandes d'intervention", hook: vsdmHook, proposal }, { greeting: GREETING, demo: DEMO_LINKS.emails, cta: ctaFor("p-vsdm") }), {
+        ...ruleContext,
+        family: "F4",
+        subjectArm: "metier",
+        demo: "emails",
+        prospectText: "maintenance et déploiement de parcs informatiques, demandes d'intervention",
+        knownText: "maintenance et déploiement de parcs informatiques, demandes d'intervention",
+      });
+    const iRead = f4Check("Je lis une demande type et prépare une confirmation de délai à valider ; le même principe s'appliquerait à vos demandes d'intervention.");
+    check("F4 VSDM : « Je lis une demande type » → refusé (c'est la démo qui lit)", iRead.failures.some((line) => /la démo pour sujet/.test(line)), iRead.failures.join(" | "));
+    const demoReads = f4Check("La démo montre une demande d'intervention type lue et une confirmation de délai prête à valider ; le même principe s'appliquerait à vos demandes d'intervention.");
+    check("F4 : « La démo montre une demande … type lue et … prête à valider » → formulation acceptée", !demoReads.failures.some((line) => /la démo pour sujet|démo honnête/.test(line)), demoReads.failures.join(" | "));
+    check("C1 en F4 : même exigence qu'en F1, la description du secteur VSDM citée comme refus", /MÊME EXIGENCE qu'en F1/.test(buildChecklistPrompt()) && buildChecklistPrompt().includes("maintenance et le déploiement de parcs informatiques"));
+    check("calibrage : VSDM (nouveau F4) attendu NON sur C1", F4_GUARDS.some((mail) => mail.company.includes("VSDM") && mail.expectFail === "C1"));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

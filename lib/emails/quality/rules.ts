@@ -191,6 +191,8 @@ function familyFailures(family: MailFamily, parts: MailParts, context: RuleConte
   if (family === "F4") {
     // Cowork #34 : la démo vient APRÈS le fait et le problème — jamais en ouverture.
     if (DEMO_OPENING.test(parts.hook)) failures.push("F4 : n'ouvre jamais par la démo (« Elle lit… », « Dans la démo… ») : un fait propre à l'entreprise, puis le problème qui en découle ; la démo vient ensuite, en preuve.");
+    // Cowork #35 : c'est la démo qui lit, pas Axel (« Je lis une demande type… » refusé).
+    if (/^\s*je\s/i.test(parts.proposal)) failures.push("F4 : la phrase de démo a la démo pour sujet (« La démo montre une demande type lue et une confirmation prête à valider… »), jamais « Je lis… ».");
     if (!F4_TYPE_CASE.test(parts.proposal) || !F4_TRANSPOSE.test(parts.proposal)) {
       failures.push("F4 — démo honnête : la démo est générique. Décris un cas TYPE (« Elle lit une commande type et prépare la facture à valider ») puis « le même principe s'appliquerait à vos … ». Ne laisse jamais croire qu'elle a été faite sur leur métier.");
     }

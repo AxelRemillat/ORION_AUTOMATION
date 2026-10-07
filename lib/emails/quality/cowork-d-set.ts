@@ -154,3 +154,20 @@ export const COWORK_D_SET: CoworkGradedMail[] = [
     "note": ""
   }
 ];
+
+/**
+ * GARDE-FOUS F4 (Cowork #35) : mails F4 notés par Cowork, avec le critère qui
+ * doit les refuser. VSDM (nouveau gabarit, 8/10) : fait = description du secteur.
+ */
+export const F4_GUARDS: (CoworkGradedMail & { expectFail: "C1" | "C2" })[] = [
+  {
+    company: "VENDREDI-SAMEDI-DIMANCHE-MAINTENANCE (VSDM)",
+    family: "F4",
+    subject: "Demandes d'intervention",
+    core: "Bonjour Monsieur Vigreux,\n\nVous assurez la maintenance et le déploiement de parcs informatiques en France et en Belgique. Quand une panne change les priorités, le client attend une réponse rapide.\n\nUne démo testable en une minute : axelremillat.com/automatisations?demo=email&v=4\n\nJe lis une demande type et prépare une confirmation de délai à valider ; le même principe s'appliquerait à vos demandes d'intervention.\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "fait = description du secteur ; problème générique ; « Je lis » (c'est la démo qui lit)",
+    expectFail: "C1",
+  },
+];
