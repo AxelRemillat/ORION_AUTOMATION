@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import type { Notification } from "@/lib/notify/ntfy";
 import { ingestOpportunity, type IngestBody, type IngestDeps } from "../ingest";
 import { PLATFORM_LABELS, type OpportunityStatus, type Platform } from "../types";
+
+export { milestones, statusAfterEvent };
+import { milestones, statusAfterEvent } from "./milestones";
 import { ALERT_KINDS, parsePlatformEmail, type EmailKind, type InboundEmail, type ParsedEmail } from "./parse";
 
 /**
@@ -44,39 +47,6 @@ export interface EmailIngestResponse {
 }
 
 const orionUrl = (baseUrl: string, id: string) => `${baseUrl.replace(/\/$/, "")}/opportunites?id=${encodeURIComponent(id)}`;
-
-/** Rang d'avancement : un statut n'avance que vers la droite (« Perdue » à part). */
-const RANK: Record<OpportunityStatus, number> = { a_repondre: 0, ignoree: 0, envoyee: 1, reponse: 2, entretien: 3, gagnee: 4, perdue: -1 };
-
-/**
- * Statut après un événement, ou `null` s'il ne bouge pas :
- *   message → « Réponse » (le client a répondu), puis « Conversation » au suivant ;
- *   offre → « Conversation » au moins ; mission confirmée → « Gagnée » ;
- *   clôture → « Perdue », sauf une mission déjà gagnée.
- */
-export function statusAfterEvent(current: OpportunityStatus, kind: EmailKind): OpportunityStatus | null {
-  const target: OpportunityStatus | null =
-    kind === "message" ? (RANK[current] >= RANK.reponse ? "entretien" : "reponse")
-    : kind === "offre" ? "entretien"
-    : kind === "gagnee" ? "gagnee"
-    : kind === "perdue" ? "perdue"
-    : null;
-  if (!target || target === current) return null;
-  if (target === "perdue") return current === "gagnee" || current === "perdue" ? null : "perdue";
-  // Une affaire perdue qui reprend (nouveau message, offre) revient dans le suivi.
-  if (current === "perdue") return target;
-  return RANK[target] > RANK[current] ? target : null;
-}
-
-/** Champs datés posés avec un statut (jamais effacés). */
-export function milestones(status: OpportunityStatus, current: { sent_at?: string | null; replied_at?: string | null; conversation_at?: string | null; won_at?: string | null }, now: string): Record<string, string> {
-  const patch: Record<string, string> = {};
-  if (RANK[status] >= RANK.envoyee && !current.sent_at) patch.sent_at = now;
-  if (RANK[status] >= RANK.reponse && !current.replied_at) patch.replied_at = now;
-  if (RANK[status] >= RANK.entretien && !current.conversation_at) patch.conversation_at = now;
-  if (status === "gagnee" && !current.won_at) patch.won_at = now;
-  return patch;
-}
 
 const normalize = (value: string | null | undefined) =>
   (value ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
@@ -161,6 +131,98 @@ function asIngestBody(platform: Platform, parsed: ParsedEmail, messageId: string
   };
 }
 
+/**
+ * DÉCISION pour un e-mail analysé (code pur, partagé par l'ingestion et le mode
+ * test `dry_run`) : à trier, recommandations, suivi d'une fiche existante, ou
+ * nouvelle fiche — avec le type retenu, le statut visé et l'alerte.
+ */
+export type EmailDecision =
+  | { action: "a_trier"; kind: EmailKind; reason: string }
+  | { action: "recommandations"; kind: "recommandation"; jobs: number }
+  | { action: "rattache"; kind: EmailKind; opportunityId: string; status: OpportunityStatus; statusChanged: boolean; alert: boolean }
+  | { action: "cree"; kind: EmailKind; status: OpportunityStatus | null; alert: boolean };
+
+export function decideEmail(parsed: ParsedEmail, existing: Pick<OpportunityRow, "id" | "status"> | null): EmailDecision {
+  const platform = parsed.platform;
+  if (!platform || platform === "codeur" || platform === "autre") return { action: "a_trier", kind: parsed.kind, reason: platform ? `${platform} : pas d'ingestion par e-mail` : "expéditeur inconnu" };
+  if (parsed.kind === "autre") return { action: "a_trier", kind: "autre", reason: "type d'e-mail non reconnu" };
+  if (parsed.kind === "recommandation") return { action: "recommandations", kind: "recommandation", jobs: parsed.jobs.length };
+  const tracking = parsed.kind === "message" || parsed.kind === "offre" || parsed.kind === "gagnee" || parsed.kind === "perdue";
+  if (existing && (tracking || parsed.kind === "invitation" || parsed.kind === "demande")) {
+    const next = statusAfterEvent(existing.status, parsed.kind);
+    // Une invitation ou une demande reste une alerte, même sur une annonce déjà connue.
+    return { action: "rattache", kind: parsed.kind, opportunityId: existing.id, status: next ?? existing.status, statusChanged: Boolean(next), alert: ALERT_KINDS.includes(parsed.kind) };
+  }
+  // Mission confirmée ou clôture sans opportunité connue : à trier (rien à faire avancer).
+  if (parsed.kind === "gagnee" || parsed.kind === "perdue") return { action: "a_trier", kind: parsed.kind, reason: "aucune fiche à faire avancer" };
+  // Un message sans opportunité connue : sur Malt et ComeUp, c'est un client qui vient vers Axel
+  // (nouvelle demande) ; sur Upwork, la réponse à une proposition envoyée hors ORION (« Réponse »).
+  const kind: EmailKind = parsed.kind === "message" && platform !== "upwork" ? "demande" : parsed.kind;
+  const status: OpportunityStatus | null = kind === "commande" ? "gagnee" : kind === "offre" ? "entretien" : kind === "message" ? "reponse" : null;
+  return { action: "cree", kind, status, alert: ALERT_KINDS.includes(kind) };
+}
+
+/** Réponse du mode test (`dry_run: true`) : ce qui SERAIT fait, rien d'écrit, aucune alerte, aucun appel au modèle. */
+export interface EmailDryRunResponse {
+  ok: true;
+  dry_run: true;
+  message_id: string;
+  duplicate: boolean;
+  platform: Platform | null;
+  kind: EmailKind;
+  /** cree · rattache · a_trier · recommandations · doublon */
+  action: EmailDecision["action"] | "doublon";
+  reason: string | null;
+  /** Statut que prendrait la fiche (`null` : celui de l'analyse). */
+  opportunity_status: OpportunityStatus | null;
+  would_alert: boolean;
+  /** Fiche visée (suivi) ou déjà liée (doublon). */
+  target: { id: string; title: string; status: OpportunityStatus; orion_url: string } | null;
+  parsed: { title: string | null; url: string | null; external_id: string | null; client_name: string | null; budget: string | null; amount_eur: number | null; jobs: { title: string; url: string | null }[] };
+}
+
+/** MODE TEST : analyse complète, en lecture seule (Cowork teste le workflow n8n sans créer de fausses fiches). */
+export async function planPlatformEmail(deps: Pick<EmailIngestDeps, "db" | "userId" | "baseUrl">, email: InboundEmail): Promise<EmailDryRunResponse> {
+  const parsed = parsePlatformEmail(email);
+  const summary = {
+    title: parsed.title,
+    url: parsed.url,
+    external_id: parsed.externalId,
+    client_name: parsed.clientName,
+    budget: parsed.budget,
+    amount_eur: parsed.amountEur,
+    jobs: parsed.jobs.map((job) => ({ title: job.title, url: job.url })),
+  };
+  const { data: known } = await deps.db.from("opportunity_emails").select("id, opportunity_id").eq("user_id", deps.userId).eq("message_id", email.message_id).limit(1);
+  const seen = (known ?? [])[0] as { opportunity_id: string | null } | undefined;
+  const targetOf = async (id: string | null) => {
+    if (!id) return null;
+    const { data } = await deps.db.from("opportunities").select("id, title, status").eq("id", id).maybeSingle();
+    const row = data as { id: string; title: string; status: OpportunityStatus } | null;
+    return row ? { ...row, orion_url: orionUrl(deps.baseUrl, row.id) } : null;
+  };
+  if (seen) {
+    return { ok: true, dry_run: true, message_id: email.message_id, duplicate: true, platform: parsed.platform, kind: parsed.kind, action: "doublon", reason: "message_id déjà reçu : rien ne serait refait", opportunity_status: null, would_alert: false, target: await targetOf(seen.opportunity_id), parsed: summary };
+  }
+  const usable = parsed.platform && parsed.platform !== "codeur" && parsed.platform !== "autre";
+  const existing = usable ? await findOpportunity(deps.db, deps.userId, parsed.platform as Platform, parsed) : null;
+  const decision = decideEmail(parsed, existing);
+  return {
+    ok: true,
+    dry_run: true,
+    message_id: email.message_id,
+    duplicate: false,
+    platform: parsed.platform,
+    kind: decision.kind,
+    action: decision.action,
+    reason: decision.action === "a_trier" ? decision.reason : null,
+    opportunity_status: decision.action === "rattache" || decision.action === "cree" ? decision.status : null,
+    would_alert: decision.action === "rattache" || decision.action === "cree" ? decision.alert : false,
+    target: decision.action === "rattache" && existing ? { id: existing.id, title: existing.title, status: existing.status, orion_url: orionUrl(deps.baseUrl, existing.id) } : null,
+    parsed: summary,
+  };
+}
+
 export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundEmail): Promise<EmailIngestResponse> {
   const now = (deps.now ?? (() => new Date()))().toISOString();
   const db = deps.db;
@@ -205,15 +267,19 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   };
 
   const platform = parsed.platform;
-  // 2. Non reconnu (expéditeur inconnu, Codeur, ou type d'e-mail inconnu) : à trier, sans alerte.
-  if (!platform || platform === "codeur" || platform === "autre" || parsed.kind === "autre") {
+  const usable = platform && platform !== "codeur" && platform !== "autre";
+  const existing = usable && parsed.kind !== "recommandation" && parsed.kind !== "autre" ? await findOpportunity(db, deps.userId, platform as Platform, parsed) : null;
+  const decision = decideEmail(parsed, existing);
+
+  // 2. Non reconnu (expéditeur inconnu, Codeur, type inconnu, clôture sans fiche) : à trier, sans alerte.
+  if (decision.action === "a_trier" || !platform) {
     return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "a_trier", opportunity_ids: [], alerted: false, orion_url: null };
   }
 
   const ingestDeps: IngestDeps = { ...deps, notify: undefined };
 
   // 3. Recommandations : une opportunité par annonce, analysées comme la veille, sans alerte.
-  if (parsed.kind === "recommandation") {
+  if (decision.action === "recommandations") {
     const ids: string[] = [];
     for (const job of parsed.jobs) {
       const result = await ingestOpportunity(ingestDeps, {
@@ -235,33 +301,20 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   }
 
   // 4. Suivi d'une opportunité existante (message, offre, mission confirmée, clôture… et invitation déjà connue).
-  const existing = await findOpportunity(db, deps.userId, platform, parsed);
-  const tracking = parsed.kind === "message" || parsed.kind === "offre" || parsed.kind === "gagnee" || parsed.kind === "perdue";
-  if (existing && (tracking || parsed.kind === "invitation" || parsed.kind === "demande")) {
-    const next = statusAfterEvent(existing.status, parsed.kind);
+  if (decision.action === "rattache" && existing) {
     const patch: Record<string, unknown> = { last_event_at: base.received_at, updated_at: now };
-    if (next) Object.assign(patch, { status: next }, milestones(next, existing, base.received_at));
+    if (decision.statusChanged) Object.assign(patch, { status: decision.status }, milestones(decision.status, existing, base.received_at));
     if (parsed.clientName && !existing.client_name) patch.client_name = parsed.clientName;
     await db.from("opportunities").update(patch).eq("id", existing.id);
     const url = orionUrl(deps.baseUrl, existing.id);
-    // Une invitation ou une demande reste une alerte, même sur une annonce déjà connue.
-    const alerted = ALERT_KINDS.includes(parsed.kind) ? await sendAlert(deps, alertFor(platform, parsed.kind, parsed, url, null)) : false;
+    const alerted = decision.alert ? await sendAlert(deps, alertFor(platform, parsed.kind, parsed, url, null)) : false;
     await finish({ status: "rattache", opportunity_id: existing.id, alerted });
-    return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "rattache", opportunity_ids: [existing.id], alerted, orion_url: url, opportunity_status: (next ?? existing.status) as OpportunityStatus };
+    return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "rattache", opportunity_ids: [existing.id], alerted, orion_url: url, opportunity_status: decision.status };
   }
 
-  // Mission confirmée ou clôture sans opportunité connue : à trier (rien à faire avancer).
-  if (parsed.kind === "gagnee" || parsed.kind === "perdue") {
-    return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "a_trier", opportunity_ids: [], alerted: false, orion_url: null };
-  }
-
-  // 5. Nouvelle opportunité. Un message sans opportunité connue : sur Malt et ComeUp, c'est un
-  //    client qui vient vers Axel (nouvelle demande) ; sur Upwork, la réponse à une proposition
-  //    envoyée sans passer par ORION (statut « Réponse »).
-  const kind: EmailKind = parsed.kind === "message" && platform !== "upwork" ? "demande" : parsed.kind;
+  // 5. Nouvelle opportunité.
+  const { kind, status } = decision as Extract<EmailDecision, { action: "cree" }>;
   const result = await ingestOpportunity(ingestDeps, asIngestBody(platform, parsed, email.message_id, email.received_at));
-  const status: OpportunityStatus | null =
-    kind === "commande" ? "gagnee" : kind === "offre" ? "entretien" : kind === "message" ? "reponse" : null;
   const patch: Record<string, unknown> = { last_event_at: base.received_at, updated_at: now };
   if (parsed.clientName) patch.client_name = parsed.clientName;
   if (status) Object.assign(patch, { status }, milestones(status, {}, base.received_at));
