@@ -10,7 +10,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const session = await requireSession();
   if (!session.ok) return session.response;
   const db = session.supabase as unknown as { from: (table: string) => any };
-  const { data: current } = await db.from("opportunities").select("status, sent_at, replied_at").eq("id", params.id).maybeSingle();
+  const { data: current } = await db.from("opportunities").select("status, sent_at, replied_at, conversation_at, won_at").eq("id", params.id).maybeSingle();
   if (!current) return NextResponse.json({ error: "Opportunité introuvable." }, { status: 404 });
   const built = buildOpportunityPatch(await readJson<Record<string, unknown>>(request), current);
   if (!built.ok) return NextResponse.json({ error: built.error }, { status: 400 });

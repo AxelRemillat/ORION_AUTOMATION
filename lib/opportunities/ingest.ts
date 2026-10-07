@@ -73,6 +73,8 @@ export interface IngestBody {
   budget_text: string | null;
   categories: string[];
   published_at: string | null;
+  /** Origine : flux RSS Codeur (défaut) ou e-mail de plateforme (/ingest-email). */
+  source?: "rss" | "email";
 }
 
 export type Verdict = "alerte" | "a_voir" | "ignore";
@@ -168,14 +170,16 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promi
             language: analysis.language,
             analyzed_at: now,
             analysis_state: "ok",
-            // Sous 5 : rangée avec les ignorées (Axel peut toujours la rouvrir).
-            ...(statusAfterAnalysis("a_repondre", analysis.score) ? { status: statusAfterAnalysis("a_repondre", analysis.score) } : {}),
             updated_at: now,
           }
         : // Crédit épuisé : « Non analysée » (rattrapée à la recharge), jamais « Ignorée ».
           { analysis_state: quotaHitSince(started) ? NOT_ANALYZED : "a_analyser", updated_at: now },
     )
     .eq("id", id);
+  // Sous 5 : rangée avec les ignorées (Axel peut toujours la rouvrir) — seulement si elle est encore
+  // « À répondre » : une commande ou un message reçu par e-mail a déjà fait avancer son statut.
+  const status = analysis ? statusAfterAnalysis("a_repondre", analysis.score) : null;
+  if (status) await deps.db.from("opportunities").update({ status, updated_at: now }).eq("id", id).eq("status", "a_repondre");
   if (!analysis && quotaHitSince(started)) await alertWithoutAnalysis(deps, id, body);
   return analysis;
 }
@@ -256,6 +260,8 @@ async function proposeRow(deps: IngestDeps, id: string, body: IngestBody, analys
       proposal_on_excerpt: body.description_truncated,
       suggested_amount_eur: proposal.amountEur,
       suggested_delay_days: proposal.delayDays,
+      suggested_currency: proposal.currency,
+      suggested_hourly: proposal.hourly,
       updated_at: (deps.now ?? (() => new Date()))().toISOString(),
     })
     .eq("id", id);
@@ -288,7 +294,7 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
 
   const row = {
     user_id: deps.userId,
-    source: "rss",
+    source: body.source ?? "rss",
     platform: body.platform,
     external_id: body.external_id,
     url: body.url,
@@ -314,7 +320,7 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
 
   // 3. Plafond quotidien d'analyses LLM.
   const dayStart = `${now.toISOString().slice(0, 10)}T00:00:00.000Z`;
-  const { data: today } = await deps.db.from("opportunities").select("id").eq("user_id", deps.userId).eq("source", "rss").gte("analyzed_at", dayStart);
+  const { data: today } = await deps.db.from("opportunities").select("id").eq("user_id", deps.userId).in("source", ["rss", "email"]).gte("analyzed_at", dayStart);
   if ((today ?? []).length >= (deps.llmCap ?? DEFAULT_DAILY_LLM_CAP)) {
     const id = await insert({ analysis_state: "a_analyser" });
     if (!id) return ingestRace(deps, body, base);
