@@ -1,3 +1,4 @@
+import type { FtCursorState } from "@/lib/signals/france-travail";
 import { createHash } from "node:crypto";
 import { collectSignals, type OfficialSignal } from "@/lib/signals";
 import {
@@ -83,6 +84,8 @@ export interface HarvestCriteria {
   days?: number;
   /** Fenêtre France Travail en jours (défaut FUNNEL_FT_DAYS = 30 ; le job de stock passe 60). */
   ftDays?: number;
+  /** Curseur France Travail persistant entre les runs (Cowork #40) ; absent = toute la fenêtre. */
+  ftCursor?: { read(): Promise<FtCursorState | null>; write(cursor: FtCursorState): Promise<void> };
   today?: Date;
   env?: EnvLike;
 }
@@ -116,6 +119,8 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
   const bySource: Record<string, number> = {};
   const ft = emptyFtStats();
   const ftDeadline = Date.now() + FT_READ_BUDGET_MS;
+  const cursor = criteria.ftCursor ? await criteria.ftCursor.read().catch(() => null) : null;
+  let nextCursor: FtCursorState | null = null;
 
   // France Travail EN PREMIER, sur toutes les zones, puis BODACC : une offre
   // dont l'intitulé révèle un pain est le signal le plus direct, et c'est lui
@@ -137,7 +142,7 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
         only,
         romeCodes: FUNNEL_ROME_CODES,
         // Lecture paginée code par code, sur les 30 jours, 8 000 offres au plus.
-        ...(national ? { ftMaxOffers: FUNNEL_FT_MAX_OFFERS, ftStats: ft, ftDeadline } : {}),
+        ...(national ? { ftMaxOffers: FUNNEL_FT_MAX_OFFERS, ftStats: ft, ftDeadline, ftCursor: cursor, onFtCursor: (value: FtCursorState) => void (nextCursor = value) } : {}),
       });
       warnings.push(...collected.warnings);
       for (const official of collected.signals) {
@@ -147,5 +152,6 @@ export async function harvest(criteria: HarvestCriteria): Promise<Harvest> {
       }
     }
   }
+  if (nextCursor && criteria.ftCursor) await criteria.ftCursor.write(nextCursor).catch(() => undefined);
   return { signals: [...seen.values()], warnings, bySource, ft };
 }

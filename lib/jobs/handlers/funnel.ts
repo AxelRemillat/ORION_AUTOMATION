@@ -1,5 +1,6 @@
 import { annuaireLookup } from "@/lib/funnel/identify";
 import { ftWindowDays } from "@/lib/funnel/harvest";
+import { ftCursorStore } from "@/lib/funnel/ft-cursor-store";
 import { runCost } from "@/lib/funnel/cost";
 import { harvest } from "@/lib/funnel/harvest";
 import { liveDigDeps, liveTriageAsk } from "@/lib/funnel/live";
@@ -60,13 +61,14 @@ export async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   const zone = prefs.departements.length ? prefs.departements.join(", ") : "toute la France";
   await ctx.progress(progress(`Moisson France Travail et BODACC · ${zone}`, 10));
   // Fenêtre France Travail réglable par run (`params.ftDays`, Cowork #39) ; 30 jours par défaut.
-  const collected = await harvest({ departements: prefs.departements, days: prefs.days, ftDays: ftWindowDays(ctx.job.params?.ftDays) });
+  const collected = await harvest({ departements: prefs.departements, days: prefs.days, ftDays: ftWindowDays(ctx.job.params?.ftDays), ftCursor: ftCursorStore() });
   const inserted = await insertHarvest(ctx.db, ctx.userId, runId, collected.signals);
   // Les signaux laissés « non examinés » par un run précédent sont repris ici.
   const reopened = await reopenUnexamined(ctx.db, ctx.userId, runId, collected.signals.map((signal) => signal.hash));
   return {
-    state: { runId, startedAt: ctx.job.state.startedAt ?? new Date().toISOString(), warnings: collected.warnings },
-    progress: progress(`${collected.signals.length} signaux moissonnés, ${inserted} nouveaux, ${reopened} repris (non examinés) · France Travail : ${collected.ft.read} offres lues, ${collected.ft.anonymous} anonymes et ${collected.ft.staffing} d'intermédiaires ignorées`, 20, {
+    // Mesure (Cowork #40) : offres lues en tête / sous le curseur, signaux nouveaux vs déjà vus.
+    state: { runId, startedAt: ctx.job.state.startedAt ?? new Date().toISOString(), warnings: collected.warnings, harvest: { collected: collected.signals.length, inserted, reopened, ft: collected.ft } },
+    progress: progress(`${collected.signals.length} signaux moissonnés, ${inserted} nouveaux, ${reopened} repris (non examinés) · France Travail : ${collected.ft.read} offres lues${collected.ft.head !== undefined ? ` (tête ${collected.ft.head}, sous le curseur ${collected.ft.below ?? 0})` : ""}, ${collected.ft.anonymous} anonymes et ${collected.ft.staffing} d'intermédiaires ignorées`, 20, {
       scanned: collected.signals.length,
       signals: 0,
       sheets: 0,
