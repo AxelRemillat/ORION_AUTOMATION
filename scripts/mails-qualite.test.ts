@@ -4,8 +4,9 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { COWORK_D_SET } from "../lib/emails/quality/cowork-d-set";
 import { isOpenAIQuotaError, OpenAIQuotaError } from "../lib/ai/quota";
-import { buildChecklistPrompt, C5_NEGATIVES, checklistFeedback, deterministicChecks, judgeChecklist, majority, parseChecklistSample, semanticCriteria, verdictOf } from "../lib/emails/quality/checklist";
+import { buildChecklistPrompt, C5_NEGATIVES, repeatedNounGroups, checklistFeedback, deterministicChecks, judgeChecklist, majority, parseChecklistSample, semanticCriteria, verdictOf } from "../lib/emails/quality/checklist";
 import { CHECKLIST_SAMPLES } from "../lib/emails/quality/checklist";
 import { factsGate, isFactsInsufficient, keyFactsOf } from "../lib/emails/quality/facts-gate";
 import { keyFactsBlock } from "../lib/emails/quality/writer";
@@ -418,9 +419,10 @@ async function main() {
     const f2 = assembleFamily("F2", { subject: "Demandes de prix", hook: "Pour une boulangerie qui livre la restauration, les commandes arrivent chaque matin par e-mail. Une commande non confirmée laisse le client sans réponse.", proposal: "Je mets en place le tri de chaque commande reçue et je prépare sa confirmation, que vous validez." }, { greeting: GREETING, demo: emails, cta });
     check("F2 : présentation imposée en tête", f2.split("\n\n")[1] === F2_INTRO);
     check("F2 : démo « proche de ce que vous pourriez avoir chez vous » + &v=2 discret (jamais « F2 » en clair)", f2.includes("Une démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2") && !/F[1-4]/.test(f2));
-    const f4 = assembleFamily("F4", { subject: "Devis de tôlerie", hook: "Elle lit une demande de coffret sur mesure et prépare un brouillon de devis à vérifier.", proposal: F4_WHO }, { greeting: GREETING, demo: DEMO_LINKS.devis, cta });
-    check("F4 : le lien en première ligne, ?v=4 sur /agent", f4.split("\n\n")[1] === "Une démo testable en une minute : axelremillat.com/agent?v=4");
-    check("F4 : qui je suis en une ligne, posé par le code", f4.split("\n\n")[3] === F4_WHO);
+    // Cowork #34 : F4 = fait + problème, PUIS la démo en preuve (jamais d'ouverture par la démo).
+    const f4 = assembleFamily("F4", { subject: "Devis de tôlerie", hook: "Vos coffrets électriques sont faits sur mesure. Une cote manquante retarde le devis.", proposal: "Elle lit une demande de devis type et prépare un brouillon à vérifier ; le même principe s'appliquerait à vos coffrets sur mesure." }, { greeting: GREETING, demo: DEMO_LINKS.devis, cta });
+    check("F4 : fait + problème d'abord, puis le lien ?v=4 sur /agent, puis la démo en preuve", f4.split("\n\n")[1].startsWith("Vos coffrets") && f4.split("\n\n")[2] === "Une démo testable en une minute : axelremillat.com/agent?v=4" && f4.split("\n\n")[3].startsWith("Elle lit"));
+    check("F4 : plus de ligne « qui je suis » (la signature le dit)", !f4.includes(F4_WHO));
     check("URL suivie reconnue par la liste blanche", ALLOWED_DEMO_URLS.includes(bareDemoUrl("axelremillat.com/automatisations?demo=email&v=3")) && ALLOWED_DEMO_URLS.includes(bareDemoUrl("axelremillat.com/agent?v=4")));
 
     // Règles par famille.
@@ -437,8 +439,9 @@ async function main() {
     check("F2 : partir de l'activité (« Dans une boulangerie qui… ») est permis", f2Check.ok, f2Check.failures.join(" | "));
 
     // Relecture Cowork + Axel (05/10) : démo honnête (F4), première personne active (F2), faits sourcés.
-    const f4Rule = (hook: string) =>
-      checkMail({ subject: "Factures clients", hook, proposal: F4_WHO }, assembleFamily("F4", { subject: "Factures clients", hook, proposal: F4_WHO }, { greeting: GREETING, demo: DEMO_LINKS.factures, cta }), {
+    const F4_HOOK = "Vos vêtements professionnels sont livrés aux entreprises. Une facture qui part tard retarde le paiement.";
+    const f4Rule = (proposal: string, hook = F4_HOOK) =>
+      checkMail({ subject: "Factures clients", hook, proposal }, assembleFamily("F4", { subject: "Factures clients", hook, proposal }, { greeting: GREETING, demo: DEMO_LINKS.factures, cta }), {
         ...ruleContext,
         prospectText: "vêtements professionnels",
         family: "F4",
@@ -450,6 +453,8 @@ async function main() {
     check("F4 : démo présentée comme faite sur leur métier → refusée (DUPONT-BEAUDEUX)", !dishonest.ok && dishonest.failures.some((line) => /démo honnête/.test(line)), dishonest.failures.join(" | "));
     const honest = f4Rule("Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels.");
     check("F4 : cas type + « le même principe s'appliquerait » → accepté", honest.ok, honest.failures.join(" | "));
+    const demoFirst = f4Rule("Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels.", "Elle lit une commande type et prépare la facture à valider. Le même principe vaut chez vous.");
+    check("F4 : ouverture par la démo (« Elle lit… ») → refusée (gabarit interdit, Cowork #34)", !demoFirst.ok && demoFirst.failures.some((line) => /n'ouvre jamais par la démo/.test(line)), demoFirst.failures.join(" | "));
     const f2Rule = (proposal: string) =>
       checkMail({ ...f2Parts, proposal }, assembleFamily("F2", { ...f2Parts, proposal }, { greeting: GREETING, demo: emails, cta }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "emails", knownText: "Boulangerie bio, commandes des restaurants" });
     const passive = f2Rule("Concrètement, les demandes de pièces reçues par e-mail sont triées, puis une commande fournisseur est préparée pour votre validation.");
@@ -489,7 +494,7 @@ async function main() {
     check("double juge des mails : un verdict manquant → pas de mail « Nouveau »", combineJudges({ score: 10, criteria: {}, reasons: [], fix: null }, null) === null);
 
     // Rédacteur et juge par famille.
-    check("F4 : le modèle n'écrit pas la ligne « qui je suis »", parseParts(JSON.stringify({ subject: "Devis", hook: "Elle lit une demande." }), "F4")?.proposal === F4_WHO);
+    check("F4 : le modèle écrit le fait + problème ET la démo en preuve", parseParts(JSON.stringify({ subject: "Devis", hook: "Vos coffrets sont sur mesure.", proposal: "Elle lit une demande type." }), "F4")?.proposal === "Elle lit une demande type." && parseParts(JSON.stringify({ subject: "Devis", hook: "Vos coffrets sont sur mesure." }), "F4") === null);
     check("F3 : grille du juge propre (question 4, phrase 3, clarté 2, naturel 1)", parseVerdict(JSON.stringify({ criteria: { question: 4, phrase: 3, clarte: 2, naturel: 1, fait: 2 } }), "F3")?.score === 10);
     const f2Prompt = buildWriterPrompt({ brief, facts: [OWN_FACT], own: [], activity: "Boulangerie bio", companyName: "Le Pain de Belledonne", demo: emails, greeting: GREETING, cta, family: "F2" });
     check("F2 : le rédacteur voit la présentation imposée et la démo « proche de chez vous »", f2Prompt.includes(F2_INTRO) && f2Prompt.includes("Une démo proche"));
@@ -497,7 +502,7 @@ async function main() {
     // Routage : pain incertain → F2 ou F4, jamais F1 ; sans activité → bloqué.
     const doubtful = { ...brief, pain: { ...brief.pain, task: "suivi des commandes, à confirmer" } } as typeof brief;
     const f2Good = JSON.stringify(f2Parts);
-    const f4Good = JSON.stringify({ subject: "Commandes de restauration", hook: "Elle lit une commande type et prépare sa confirmation à valider ; le même principe s'appliquerait à vos commandes de pain pour la restauration.", proposal: "" });
+    const f4Good = JSON.stringify({ subject: "Commandes de restauration", hook: "Vos fournils livrent les restaurants chaque matin. Une commande non confirmée laisse le client sans réponse.", proposal: "Elle lit une commande type et prépare sa confirmation à valider ; le même principe s'appliquerait à vos commandes de pain pour la restauration." });
     const routed: string[] = [];
     for (const prospectId of ["p-a", "p-b", "p-c", "p-d", "p-e", "p-f"]) {
       const { ask } = scripted([f2Good, f4Good, f2Good, f4Good], [verdictJson(10), verdictJson(10), verdictJson(10)]);
@@ -669,9 +674,18 @@ async function main() {
     check("D4 : F3 garde sa question d'ouverture + la demande finale", failing(["Bonjour,", "Qui vérifie les cotes des plans avant le devis ?", "J'automatise la lecture des plans : les cotes manquantes vous sont signalées.", "Exemple testable en une minute : axelremillat.com/automatisations?demo=email&v=3", "Auriez-vous 15 minutes la semaine prochaine pour en parler ?"].join("\n\n"), "F3", "Bonjour,") === "");
     check("D5 : mot interdit (« workflow »)", failing(f1({ proposal: "J'automatise ce workflow : chaque demande des restaurants arrive dans votre planning de fournée, et les oublis sont signalés." })) === "D5");
 
+    // Cowork #34 : répétitions et gabarit F4.
+    check("D6 : « lunettes de soleil » deux fois → NON (CRISTAFLOR)", repeatedNounGroups("Qui vérifie les références manquantes dans les commandes de lunettes de soleil ? J'automatise le tri des commandes reçues par e-mail et signale les références de lunettes de soleil manquantes.").includes("lunettes soleil"));
+    check("D6 : « références manquantes » deux fois → permis (groupe générique, FIRSTPELLETS prêt pour Cowork)", repeatedNounGroups("Qui repère les références manquantes dans les commandes de granulés de paille ? J'automatise le tri des e-mails : je signale les références manquantes et prépare une confirmation à valider.").length === 0);
+    const f4Old = ["Bonjour Monsieur Martin,", "Une démo testable en une minute : axelremillat.com/automatisations?demo=email&v=4", "Elle lit une demande type et prépare une réponse à valider ; je peux appliquer ce principe à vos demandes de maintenance.", F4_WHO, "Auriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?"].join("\n\n");
+    check("D7 : ancien gabarit F4 (démo en ouverture) → NON", codeOf(f4Old, "F4" as never).find((item) => item.id === "D7")?.ok === false);
+    check("D7 : ouverture « Dans la démo, je lis… » → NON (ARIC)", codeOf(f1({ hook: "Dans la démo, je lis une demande type et prépare un accusé de réception à valider." })).find((item) => item.id === "D7")?.ok === false);
+    check("D7 : fait en ouverture → OUI", codeOf(f1()).find((item) => item.id === "D7")?.ok === true);
     const sample = (ok: Partial<Record<string, boolean>>) => JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C4", "C5"].map((id) => [id, { ok: ok[id] ?? true, citation: ok[id] === false ? `citation ${id}` : "ok" }])));
     const votes = majority([sample({ C2: false }), sample({ C2: false }), sample({})].map(parseChecklistSample), semanticCriteria("F1"));
     check("majorité par critère : C2 NON 2 fois sur 3 → NON, citation gardée", votes?.find((item) => item.id === "C2")?.ok === false && votes.find((item) => item.id === "C2")?.citation === "citation C2" && votes.find((item) => item.id === "C1")?.ok === true);
+    const wide = majority([sample({ C1: false, C2: false }), sample({ C1: false, C2: false }), sample({}), sample({}), sample({})].map(parseChecklistSample), semanticCriteria("F1"));
+    check("C1 sur 5 lectures (2 NON / 5 → OUI), C2 sur les 3 premières (2 NON / 3 → NON)", wide?.find((item) => item.id === "C1")?.ok === true && wide.find((item) => item.id === "C2")?.ok === false);
     check("majorité : égalité (1 lecture illisible) → NON par prudence", majority([sample({ C3: false }), sample({}), null].map((raw) => (raw ? parseChecklistSample(raw) : null)), semanticCriteria("F1"))?.find((item) => item.id === "C3")?.ok === false);
     check("C4 seulement en F4, où il remplace C3", !semanticCriteria("F1").includes("C4") && semanticCriteria("F4").includes("C4") && !semanticCriteria("F4").includes("C3"));
     let reads = 0;
@@ -680,10 +694,10 @@ async function main() {
       return sample({});
     };
     const ready = await judgeChecklist(readsAsk, { subject: "Vos commandes", core: f1(), family: "F1", greeting, company: "Belledonne", facts: "- quatre fournils" });
-    check(`tous à OUI → prêt, 10/10, ${CHECKLIST_SAMPLES} lectures`, ready?.ready === true && ready.score === 10 && reads === CHECKLIST_SAMPLES && ready.items.length === 9);
+    check(`tous à OUI → prêt, 10/10, ${CHECKLIST_SAMPLES} lectures`, ready?.ready === true && ready.score === 10 && reads === CHECKLIST_SAMPLES && ready.items.length === 11);
     reads = 0;
     const refused = await judgeChecklist(readsAsk, { subject: "x", core: f1({ greet: "Bonjour," }), family: "F1", greeting, company: "Belledonne", facts: "" });
-    check("contrôle du code à NON → aucun appel au modèle", reads === 0 && refused?.ready === false && refused.items.length === 5);
+    check("contrôle du code à NON → aucun appel au modèle", reads === 0 && refused?.ready === false && refused.items.length === 7);
     const failed = verdictOf([...codeOf(f1()), ...(majority([parseChecklistSample(sample({ C1: false, C5: false }))], semanticCriteria("F1")) ?? [])]);
     check("note = 10 − pénalités (C1 3, C5 1) → 6, pas prêt", failed.score === 6 && !failed.ready);
     check("réécriture ciblée : seuls les critères à NON, avec leur citation", checklistFeedback(failed) === "- C1 NON — Le fait cité est spécifique et figure dans les faits de la fiche : « citation C1 »\n- C5 NON — Aucune formulation passive, vague ou à double sens : « citation C5 »", checklistFeedback(failed));
@@ -697,6 +711,29 @@ async function main() {
     };
     const raised = await judgeChecklist(noCredit, { subject: "x", core: f1(), family: "F1", greeting, company: "B", facts: "" }).then(() => null, (error: unknown) => error);
     check("crédit épuisé (OpenAIQuotaError, agent1 #100) : l'erreur remonte, jamais « relecture indisponible »", isOpenAIQuotaError(raised));
+  }
+
+  console.log("\nJeu d'étalonnage D — verdict humain de Cowork (#34)");
+  {
+    check("jeu D versionné : 15 mails, 5 prêts selon Cowork", COWORK_D_SET.length === 15 && COWORK_D_SET.filter((mail) => mail.coworkReady).length === 5);
+    const codeVerdict = (mail: (typeof COWORK_D_SET)[number]) => deterministicChecks(mail.core, { family: mail.family, greeting: mail.core.split("\n\n")[0] });
+    for (const mail of COWORK_D_SET.filter((item) => item.family === "F4")) {
+      check(`D7 : ${mail.company} (F4, Cowork ${mail.coworkScore}) refusé par le code (démo en ouverture)`, codeVerdict(mail).find((item) => item.id === "D7")?.ok === false);
+    }
+    const cristaflor = COWORK_D_SET.find((mail) => mail.company.includes("CRISTAFLOR"))!;
+    check("D6 : CRISTAFLOR (« lunettes de soleil » ×2) refusé par le code", codeVerdict(cristaflor).find((item) => item.id === "D6")?.ok === false);
+    for (const mail of COWORK_D_SET.filter((item) => item.coworkReady)) {
+      const failed = codeVerdict(mail).filter((item) => !item.ok);
+      check(`prêt pour Cowork : ${mail.company} passe les contrôles du code`, failed.length === 0, failed.map((item) => `${item.id} ${item.citation}`).join(" | "));
+    }
+    // ICP LOGISTIQUE : « 4 000 commandes par heure » vient du site → le garde-fou des nombres ne refuse plus.
+    const icp = { subject: "Tri des commandes", hook: "Avec votre trieuse de plus de 4 000 commandes par heure, chaque commande doit rejoindre le bon transporteur. Un e-mail de commande mal aiguillé retarde l'expédition.", proposal: "J'automatise le tri des commandes reçues par e-mail : chaque message arrive au bon interlocuteur." };
+    const icpBody = assemble(icp, { greeting: GREETING, demo: DEMO_LINKS.emails, cta: ctaFor("p-icp") });
+    const icpSite = checkMail(icp, icpBody, { ...ruleContext, prospectText: "Notre trieuse traite plus de 4 000 commandes par heure.", demo: "emails" });
+    const icpNoSite = checkMail(icp, icpBody, { ...ruleContext, demo: "emails" });
+    check("nombre lu sur le site (4 000) : accepté par le garde-fou", !icpSite.failures.some((line) => /Nombre absent/.test(line)), icpSite.failures.join(" | "));
+    check("nombre absent du site et des faits : toujours refusé", icpNoSite.failures.some((line) => /Nombre absent/.test(line)));
+    check("C1 compare sur le sens et lit le texte du site ; F3 exige un objet concret", /sur le SENS/.test(buildChecklistPrompt()) && /Texte du site/.test(buildChecklistPrompt()) && /objet concret/.test(buildChecklistPrompt()));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

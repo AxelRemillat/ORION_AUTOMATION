@@ -86,7 +86,8 @@ export function monthlyAmounts(text: string): number[] {
 
 /** Délai le plus long cité, en jours (« 4 à 6 semaines » → 42). */
 export function longestDelayDays(text: string): number | null {
-  const values = [...plain(text).matchAll(/(\d+)\s*(jours?|j\b|semaines?|sem\b|days?|weeks?|mois|months?)/g)].map((match) => {
+  // Unité en mot ENTIER : « $30 monthly » n'est pas un délai de 30 mois (signalé par agent4).
+  const values = [...plain(text).matchAll(/(\d+)\s*(jours?|j|semaines?|sem|days?|weeks?|mois|months?)\b/g)].map((match) => {
     const value = Number(match[1]);
     if (/^(semaine|sem|week)/.test(match[2])) return value * 7;
     if (/^(mois|month)/.test(match[2])) return value * 30;

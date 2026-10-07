@@ -15,7 +15,7 @@ import type { AskFn } from "../lib/ai/chat";
 import { FakeDb } from "./fake-supabase";
 import { freshScore, ingestOpportunity, parseIngestBody, statusAfterAnalysis, verdictOf, type IngestBody } from "../lib/opportunities/ingest";
 import { prefilterReason } from "../lib/opportunities/prefilter";
-import { requestedItems } from "../lib/opportunities/requests";
+import { longestDelayDays, requestedItems } from "../lib/opportunities/requests";
 import { ageLabel, bucketOf, staleLabel, unseenAlerts } from "../lib/opportunities/view";
 
 /**
@@ -476,6 +476,12 @@ async function main() {
     const oui = await ingestOpportunity({ db: ouiDb as never, userId: "u1", ask: ouiAsk, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-06T13:35:00Z") }, (parseIngestBody(OUIGLASS) as { ok: true; value: IngestBody }).value);
     check("OuiGlass → alerte (texte exact du flux, catégories « refonte de site » comprises)", oui.verdict === "alerte" && !oui.filtered, JSON.stringify(oui));
   }
+
+  console.log("\n9a. Délais en anglais (agent4)");
+  check("« $30 monthly » n'est pas un délai de 30 mois", longestDelayDays("Hosting about $30 monthly, maintenance optional.") === null);
+  check("« 10 days, then $90 monthly » → 10 jours", longestDelayDays("Delivery in 10 days, then $90 monthly for maintenance.") === 10);
+  check("« 2 months » reste 60 jours, « 3 weeks » 21", longestDelayDays("about 2 months") === 60 && longestDelayDays("within 3 weeks") === 21);
+  check("français inchangé : « 15 jours », « 4 à 6 semaines », « 3 j »", longestDelayDays("Délai : 15 jours.") === 15 && longestDelayDays("4 à 6 semaines") === 42 && longestDelayDays("en 3 j.") === 3);
 
   console.log("\n9. Check-list des propositions (Cowork #32)");
   {
