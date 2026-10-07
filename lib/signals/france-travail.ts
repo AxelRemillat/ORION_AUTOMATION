@@ -226,8 +226,10 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
     const state = previous[code];
     const make = (kind: Segment["kind"], min: string, max: string): Segment => ({ kind, min, max, start: 0, oldest: null, done: min >= max, read: 0 });
     if (!state?.newest || !state.oldest) return [make("fenetre", window.min, window.max)];
-    const head = make("tete", state.newest > window.min ? state.newest : window.min, window.max);
-    const below = make("dessous", window.min, state.oldest > window.min ? state.oldest : window.min);
+    const newest = ftDateBound(state.newest);
+    const oldest = ftDateBound(state.oldest);
+    const head = make("tete", newest > window.min ? newest : window.min, window.max);
+    const below = make("dessous", window.min, oldest > window.min ? oldest : window.min);
     return [head, below];
   };
   const cursors = query.romeCodes.map((code) => ({ code, segments: segmentsOf(code), newest: null as string | null, done: false }));
@@ -323,7 +325,8 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
   query.onCursor?.(next);
 
   if (!signals.length && failures && failures === pages) {
-    return { ok: false, error: "France Travail — offres illisibles" };
+    // Avertissement EXPLICITE (Cowork #42) : un run à 0 offre ne doit jamais passer pour « rien de nouveau ».
+    return { ok: false, error: `France Travail — offres illisibles : les ${pages} requête(s) ont toutes échoué (bornes de dates refusées ou accès à l'API) — aucune offre lue` };
   }
   return { ok: true, data: signals };
 }
@@ -331,8 +334,8 @@ export async function paginatedJobSignals(query: PaginatedJobQuery): Promise<Res
 /** Une page réelle de l'API, mise en cache un jour. */
 async function fetchFtPage(request: FtPageRequest, token: string): Promise<SearchResponse | null> {
   const params = new URLSearchParams({
-    minCreationDate: request.min,
-    maxCreationDate: request.max,
+    minCreationDate: ftDateBound(request.min),
+    maxCreationDate: ftDateBound(request.max),
     codeROME: request.code,
     range: `${request.start}-${request.end}`,
     sort: "1",
@@ -521,6 +524,17 @@ export interface JobQuery {
 /** L'API attend un ISO complet en UTC, pas une date seule. */
 function isoSecond(date: Date): string {
   return date.toISOString().slice(0, 19) + "Z";
+}
+
+/**
+ * Borne minCreationDate / maxCreationDate au format de l'API (« AAAA-MM-JJTHH:MM:SSZ »,
+ * sans millisecondes — celui de `isoSecond`). Le curseur garde des `dateCreation`
+ * brutes (avec millisecondes) : envoyées telles quelles, TOUTES les requêtes
+ * échouaient (07/10, run de 21 h : « offres illisibles », 0 offre lue).
+ */
+export function ftDateBound(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : isoSecond(parsed);
 }
 
 /**
