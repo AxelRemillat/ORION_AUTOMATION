@@ -67,6 +67,17 @@ async function main() {
   const { data: openai } = await db.from("api_usage").select("cost, prospect_id").eq("service", "openai").in("prospect_id", rows.map((row) => row.id));
   const eur = ((openai ?? []) as { cost: number | null }[]).reduce((total, row) => total + (Number(row.cost) || 0), 0);
   console.log(`Coût OpenAI imputé : ${eur.toFixed(3)} € (${(eur / rows.length).toFixed(3)} € par fiche)`);
+  if (process.argv.includes("--examples")) {
+    // Un exemple par score (3, 2, 0) : les faits tels qu'écrits sur la fiche.
+    for (const score of [3, 2, 0]) {
+      const row = rows.find((item) => Array.isArray(item.key_figures?.facts) && Number(item.key_figures?.facts_score ?? 0) === score);
+      if (!row) continue;
+      console.log(`\nExemple facts_score ${score} — ${row.company_name}`);
+      const facts = row.key_figures!.facts as { text: string; page_kind: string; distinctiveness: number; process_hint: string | null }[];
+      for (const fact of facts) console.log(`  [${fact.distinctiveness}] « ${fact.text} » (${fact.page_kind}${fact.process_hint ? ` → ${fact.process_hint}` : ""})`);
+      if (!facts.length) console.log(`  (aucun fait sûr${row.key_figures?.facts_note ? ` : ${String(row.key_figures.facts_note)}` : ""})`);
+    }
+  }
   console.log("\nSans adresse nominative :");
   for (const row of rows.filter((item) => !nominative.includes(item))) {
     const trace = (row.key_figures?.nominative ?? null) as { steps?: string[]; version?: number } | null;
