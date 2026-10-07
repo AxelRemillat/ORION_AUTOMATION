@@ -516,6 +516,8 @@ export type ApiUsage = {
   unit_cost: number;
   cost: number;
   prospect_id: string | null;
+  /** Qui a consommé : agent1…agent4, prod, cron (USAGE_SOURCE, migration 20261007132518). NULL = d'avant. */
+  source?: string | null;
   created_at: string;
 }
 
