@@ -9,7 +9,7 @@
  * (« prêt » = 9 ou plus). Cible : au moins 13 accords sur 15. Rien n'est écrit.
  */
 import { db, liveAsk, ownerId, spentSince } from "./quality-live";
-import { COWORK_D_SET } from "@/lib/emails/quality/cowork-d-set";
+import { COWORK_D_SET, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
 import { judgeChecklist } from "@/lib/emails/quality/checklist";
 import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { buildFacts } from "@/lib/emails/derived-facts";
@@ -23,8 +23,10 @@ async function main() {
   const started = new Date().toISOString();
   const loose = db as never as { from: (table: string) => any };
   let agree = 0;
+  const guards: string[] = [];
   const rows: string[] = [];
-  for (const mail of COWORK_D_SET) {
+  for (const mail of [...COWORK_D_SET, ...F4_GUARDS]) {
+    const guard = "expectFail" in mail ? (mail as { expectFail: string }).expectFail : null;
     const name = mail.company.replace(/\s*\(.*$/, "").slice(0, 30);
     const { data } = await loose.from("prospects").select("*").eq("user_id", userId).ilike("company_name", `%${name}%`).is("deleted_at", null).limit(1);
     const prospect = (data ?? [])[0] as Prospect | undefined;
@@ -46,14 +48,17 @@ async function main() {
       "qualite:etalonnage",
     );
     const ready = Boolean(verdict?.ready);
-    const ok = verdict !== null && ready === mail.coworkReady;
-    if (ok) agree += 1;
+    // Garde-fou F4 (Cowork #35) : refus attendu sur un critère précis, compté à part.
+    const ok = verdict !== null && ready === mail.coworkReady && (!guard || verdict.items.some((item) => item.id === guard && !item.ok));
+    if (ok && !guard) agree += 1;
+    if (guard) guards.push(`${mail.company} : ${ok ? `refusé sur ${guard} comme attendu` : `ÉCART (attendu ${guard} NON)`}`);
     const failed = verdict?.items.filter((item) => !item.ok).map((item) => `${item.id} « ${item.citation.slice(0, 70)} »`).join(" ; ") ?? "relecture indisponible";
     rows.push(`| ${mail.company} | ${mail.family} | ${mail.coworkReady ? "prêt" : `non (${mail.coworkScore})`} | ${ready ? "prêt" : "non"} | ${ok ? "accord" : "**ÉCART**"} | ${failed || "—"} |`);
   }
   console.log("| Mail | Famille | Cowork | Check-list | Accord | Critères à NON |");
   console.log("| --- | --- | --- | --- | --- | --- |");
   console.log(rows.join("\n"));
+  console.log(`\nGarde-fous F4 : ${guards.join(" · ")}`);
   console.log(`\nAccords avec Cowork : ${agree}/${COWORK_D_SET.length} (cible ${TARGET}) · coût ${(await spentSince(userId, started)).toFixed(3)} €`);
   if (agree < TARGET) process.exitCode = 1;
 }
