@@ -116,11 +116,21 @@ interface Candidate {
   siteStatus: string;
   headcount: number | null;
   leader: string | null;
-  /** Dirigeant personne physique, decoupe : `email-finder` demande les deux. */
+  /** Dirigeant personne physique, découpé : `email-finder` demande les deux. */
   leaderFirst: string | null;
   leaderLast: string | null;
   revenue: number | null;
   verdict: ReturnType<typeof classifyAgence>;
+}
+
+/**
+ * « Prénom Nom » de l'annuaire, découpé pour `email-finder`. Le dernier mot
+ * fait le nom de famille : l'annuaire rend « Jean-Paul Mercier », pas une liste.
+ */
+function splitLeader(person: string | null): { leaderFirst: string | null; leaderLast: string | null } {
+  const parts = (person ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { leaderFirst: null, leaderLast: null };
+  return { leaderFirst: parts[0], leaderLast: parts[parts.length - 1] };
 }
 
 async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Candidate[] }> {
@@ -161,8 +171,6 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
     let pappersWebsite: string | null = null;
     let headcount: number | null = null;
     let leader: string | null = null;
-    let leaderFirst: string | null = null;
-    let leaderLast: string | null = null;
     let revenue: number | null = null;
     if (base.siren && pappersUsed < PAPPERS_CAP) {
       const pappers = await fetchPappers(base.siren);
@@ -170,11 +178,6 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
         pappersWebsite = pappers.data.website;
         headcount = pappers.data.headcount;
         leader = pappers.data.leader;
-        const person = (pappers.data.representatives ?? []).find(
-          (item) => !item.isCompany && item.firstName && item.lastName,
-        );
-        leaderFirst = person?.firstName ?? null;
-        leaderLast = person?.lastName ?? null;
         revenue = pappers.data.revenue_eur;
       }
     }
@@ -208,8 +211,15 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
       siteStatus: site.status,
       headcount,
       leader,
-      leaderFirst,
-      leaderLast,
+      /*
+       * Dirigeant personne physique : il vient de l'ANNUAIRE GRATUIT, lu à
+       * l'identification. Le chercher chez Pappers était une erreur — la
+       * politique de sobriété (pappers-policy.ts) ne l'appelle que si aucun
+       * chiffre financier n'est publié, donc presque jamais : la mesure du
+       * 07/10 n'a consommé aucun crédit et mon essai nominatif n'a jamais eu
+       * de nom à donner à `email-finder`.
+       */
+      ...splitLeader(base.leader_person),
       revenue,
       verdict,
     };
