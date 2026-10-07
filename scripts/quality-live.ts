@@ -41,6 +41,8 @@ const { runStrategist } = require("@/lib/emails/strategist") as typeof import("@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const factsGate = require("@/lib/emails/quality/facts-gate") as typeof import("@/lib/emails/quality/facts-gate");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const emailHandler = require("@/lib/jobs/handlers/email") as typeof import("@/lib/jobs/handlers/email");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const greeting = require("@/lib/emails/quality/greeting") as typeof import("@/lib/emails/quality/greeting");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const quality = require("@/lib/emails/quality/generate") as typeof import("@/lib/emails/quality/generate");
@@ -118,6 +120,10 @@ export async function prepareMail(
   userId: string,
   options: { usedCliches?: readonly string[]; readSite?: boolean; persist?: boolean; dayOpenings?: { total: number; avec: number }; family?: MailFamily; ask?: AskFn } = {},
 ): Promise<PreparedMail> {
+  // Même garde-fou que le job de production : « ne plus contacter », opposé, perdu, hors cible → aucun mail,
+  // y compris dans une mesure ou un jeu d'étalonnage (Cowork #36).
+  const blocker = emailHandler.emailBlocker(prospect);
+  if (blocker && blocker.status === 409) return { outcome: { error: blocker.message }, civilities: {}, greeting: "" };
   const ask = options.ask ?? liveAsk(prospect.id);
   // Comme le job : site inconnu → recherche GRATUITE (domaines du nom, validés
   // par les mentions légales). Écrit seulement si `persist` (régénération).

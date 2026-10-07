@@ -149,7 +149,8 @@ function knownBlock(input: WriterInput): string {
  */
 const REVIEWER_GRID = `CE QUI SERA EXIGÉ PAR LE RELECTEUR (consultant B2B senior qui signe le mail) — coche TOUT :
 - Le fait le plus DISTINCTIF que l'on sait d'eux (leurs produits, leur clientèle, un service précis), jamais une catégorie générique (« vos demandes de devis », « votre bureau d'étude »).
-- Un problème concret, crédible, lié à CE fait (une demande qui attend, une référence manquante, un devis qui part tard) — dit en une phrase simple.
+- Un problème concret, crédible, lié à CE fait : il NOMME l'élément manquant précis (une référence, une dimension, un n° de véhicule, une quantité) ET sa conséquence dans leur process — jamais « le client attend », « les devis tardent ».
+- Le fait passe le test de substitution : il ne resterait pas vrai pour 10 concurrents (pas une activité, un formulaire, une page du site) ; il est cité fidèlement, sans en changer le sens.
 - Ce que je fais, à la 1re personne, et le RÉSULTAT visible pour eux ou leur client (ce qui arrive, ce qui est signalé, ce que le client reçoit) — jamais « prépare un dossier / une fiche / son classement ».
 - Aucun mot à double sens dans leur métier, aucune tournure lourde, phrases courtes.
 - Toujours la VOIX ACTIVE : « je signale », « je prépare » — jamais « sont signalées », « est préparé ».
