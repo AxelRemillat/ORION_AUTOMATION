@@ -1,4 +1,5 @@
 import { annuaireLookup } from "@/lib/funnel/identify";
+import { ftWindowDays } from "@/lib/funnel/harvest";
 import { runCost } from "@/lib/funnel/cost";
 import { harvest } from "@/lib/funnel/harvest";
 import { liveDigDeps, liveTriageAsk } from "@/lib/funnel/live";
@@ -58,7 +59,8 @@ export async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   // Aucun département : toute la France.
   const zone = prefs.departements.length ? prefs.departements.join(", ") : "toute la France";
   await ctx.progress(progress(`Moisson France Travail et BODACC · ${zone}`, 10));
-  const collected = await harvest({ departements: prefs.departements, days: prefs.days });
+  // Fenêtre France Travail réglable par run (`params.ftDays`, Cowork #39) ; 30 jours par défaut.
+  const collected = await harvest({ departements: prefs.departements, days: prefs.days, ftDays: ftWindowDays(ctx.job.params?.ftDays) });
   const inserted = await insertHarvest(ctx.db, ctx.userId, runId, collected.signals);
   // Les signaux laissés « non examinés » par un run précédent sont repris ici.
   const reopened = await reopenUnexamined(ctx.db, ctx.userId, runId, collected.signals.map((signal) => signal.hash));
