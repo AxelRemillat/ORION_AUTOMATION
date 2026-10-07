@@ -33,6 +33,7 @@ import { checkF5, type F5Verdict } from "@/lib/segments/mail-f5";
 import { coverSite } from "@/lib/enrichment/site";
 import { searchCompanies } from "@/lib/enrichment/gouv";
 import { fetchPappers } from "@/lib/enrichment/pappers";
+import { withLinkupRun } from "@/lib/linkup/run-cap";
 import type { CompanyBase } from "@/lib/enrichment/types";
 
 // ---------------------------------------------------------------------------
@@ -62,7 +63,16 @@ const LIMIT = Number(flag("limit", "10")) || 10;
 const HUNTER_CAP = Number(flag("hunter-cap", "15")) || 15;
 const OPENAI_CAP = Number(flag("openai-cap", "1")) || 1;
 /** Crédits Pappers que la mesure s'autorise : un par candidat examiné. */
-const PAPPERS_CAP = Number(flag("pappers-cap", "24")) || 24;
+const PAPPERS_CAP = Number(flag("pappers-cap", "25")) || 25;
+/**
+ * Candidats examinés — la LARGEUR du vivier, distincte du plafond Pappers.
+ *
+ * Le rendement du ciblage est d'environ 15 % (mesure du 07/10/2026 : 6 agences
+ * sur 60, puis 4 sur 24) : atteindre dix agences demande donc d'en examiner
+ * près de quatre-vingts. Quand les deux notions étaient confondues, `--limit 10`
+ * s'arrêtait à 4 sans rien dire.
+ */
+const SCAN = Number(flag("scan", String(Math.min(LIMIT * 8, 80)))) || Math.min(LIMIT * 8, 80);
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE;
@@ -109,7 +119,7 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
   let total = 0;
 
   for (const naf of NAF_ORDER) {
-    if (pool.length >= PAPPERS_CAP) break;
+    if (pool.length >= SCAN) break;
     const search = await searchCompanies(
       { naf: [naf], tranches: [...AGENCES_EFFECTIF_CODES], zone: ZONE },
       25,
@@ -119,32 +129,31 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
       continue;
     }
     total += search.data.total;
-    const page = search.data.companies.slice(0, PAPPERS_CAP - pool.length);
+    const page = search.data.companies.slice(0, SCAN - pool.length);
     console.log(
       `  ${naf} ${AGENCES_NAF[naf]} : ${search.data.total} en zone ${ZONE}, ${page.length} retenues pour examen`,
     );
     pool.push(...page);
   }
 
-  console.log(`\nVivier : ${total} entreprises, ${pool.length} examinées une à une\n`);
+  console.log(
+    `\nVivier : ${total} entreprises, ${pool.length} examinées une à une (objectif ${LIMIT})\n`,
+  );
 
   const kept: Candidate[] = [];
   const rejected: Candidate[] = [];
 
   for (const base of pool) {
     if (kept.length >= LIMIT) break;
-    const used = (await spend("pappers", since)).calls;
-    if (used >= PAPPERS_CAP) {
-      console.log(`  (plafond Pappers atteint : ${used}/${PAPPERS_CAP})`);
-      break;
-    }
+    // Plafond de CRÉDITS, pas de candidats : au-delà on continue sans Pappers,
+    // le site se devine depuis le nom (lib/enrichment/site.ts).
+    const pappersUsed = (await spend("pappers", since)).calls;
 
-    // Pappers : site officiel et effectif réel, en un crédit.
     let pappersWebsite: string | null = null;
     let headcount: number | null = null;
     let leader: string | null = null;
     let revenue: number | null = null;
-    if (base.siren) {
+    if (base.siren && pappersUsed < PAPPERS_CAP) {
       const pappers = await fetchPappers(base.siren);
       if (pappers.ok) {
         pappersWebsite = pappers.data.website;
@@ -280,7 +289,10 @@ async function runJob(
       user_id: userId,
       type,
       target: { prospectId, label: label.slice(0, 160) },
-      params: { prospectId, ...params },
+      // `segment` active la part réservée de LINKUP_RESERVE (agent1, #105) pour
+      // les handlers qui la lisent ; le contexte posé plus bas la garantit de
+      // toute façon pour les appels de CE processus.
+      params: { prospectId, segment: "agences", ...params },
       status: "queued",
       progress: EMPTY_PROGRESS,
     } as never)
@@ -306,6 +318,9 @@ function report(input: {
   costs: Record<string, { eur: number; calls: number }>;
 }): string {
   const total = input.measured.length;
+  const examined = input.kept.length + input.rejected.length;
+  const sitesRead = [...input.kept, ...input.rejected].filter((row) => row.siteStatus === "lu").length;
+  const undecided = input.rejected.filter((row) => row.verdict.fit === "indécidable").length;
   const nominative = input.measured.filter((row) => row.nominative).length;
   const withEmail = input.measured.filter((row) => row.email).length;
   const drafted = input.measured.filter((row) => row.draft).length;
@@ -347,6 +362,10 @@ function report(input: {
     "",
     "| Indicateur | Taux | Détail |",
     "| --- | --- | --- |",
+    `| Sites lus | ${examined ? `${Math.round((sitesRead / examined) * 100)} %` : "—"} | ${sitesRead}/${examined} candidats |`,
+    `| Qualifiées | — | ${input.kept.length} |`,
+    `| Indécidables (site non lu) | — | ${undecided} |`,
+    `| Concurrents / partenaires | — | ${input.rejected.filter((row) => row.verdict.competitor).length} |`,
     `| Adresse trouvée | ${pct(withEmail)} | ${withEmail}/${total} |`,
     `| Contact NOMINATIF | ${pct(nominative)} | ${nominative}/${total} |`,
     `| Brouillon F5 généré | ${pct(drafted)} | ${drafted}/${total} |`,
@@ -567,7 +586,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
+/*
+ * Tout le run tourne sous le contexte Linkup du segment : la part réservée
+ * (LINKUP_RESERVE=agences:20) s'applique aux recherches de site de CE
+ * processus, jobs compris — `withLinkupRun` passe par AsyncLocalStorage, donc
+ * le contexte traverse `driveJob` sans rien changer chez agent1.
+ */
+withLinkupRun({ segment: "agences", cap: null, since: new Date() }, main).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
