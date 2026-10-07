@@ -316,41 +316,47 @@ check(
   checkF5({ subject: "x", body: STORED, facts }).failed.some((item) => item.id === "preuve"),
 );
 
-const friction = checkF5({
-  subject: "x",
-  body: GOOD_F5.replace(
-    "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
-    "Un brief incomplet peut retarder la proposition commerciale.",
-  ),
-  facts,
-});
+/*
+ * Cowork #3 : UN SEUL JUGE. `fait-source` et `probleme-client` ne sont plus
+ * tranchés par des motifs — ils partent à la check-list commune (C1 avec son
+ * test de substitution, C2 avec l'élément manquant et sa conséquence). Les
+ * tests portent donc sur la DÉLÉGATION, pas sur un verdict que `checkF5` ne
+ * prononce plus. Ce qui précède ces lignes mesurait des motifs qui, par
+ * construction, ne savaient pas lire : EODYS passait mon grill avec « vous
+ * créez des sites pour les artisans et commerçants », vrai pour dix agences.
+ */
+const judged = checkF5({ subject: "x", body: GOOD_F5, facts });
 check(
-  "une friction sur un livrable vaut problème (ELIOPHOT, 07/10)",
-  !friction.failed.some((item) => item.id === "probleme-client"),
-  friction.failed.map((item) => item.id).join(", "),
+  "le problème part au juge commun, pas à un motif",
+  judged.delegated.some((item) => item.id === "probleme-client"),
+  judged.delegated.map((item) => item.id).join(", "),
+);
+check(
+  "le fait sourcé aussi : seule une lecture voit la substituabilité",
+  judged.delegated.some((item) => item.id === "fait-source"),
+  judged.delegated.map((item) => item.id).join(", "),
 );
 
-/*
- * Défauts trouvés par la mesure #2 (80 candidats, zone 69) :
- *   - ADFORALL écrivait « LES clients demandent de rapprocher dépenses et
- *     conversions » — une demande client que le motif ne reconnaissait pas,
- *     faute du déterminant « les » ;
- *   - ELIOPHOT sortait à 78 mots et EODYS à 77 pour un plafond de 75, parce
- *     que les budgets par bloc du gabarit (40 + 25) ignoraient les 25 mots
- *     posés par le code (salutation, ligne de démo, demande).
- */
-const lesClients = checkF5({
+const flattery = checkF5({
   subject: "x",
   body: GOOD_F5.replace(
     "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
-    "Les clients demandent de rapprocher dépenses et conversions par campagne.",
+    "Votre agence a une expertise reconnue.",
   ),
   facts,
 });
 check(
-  "« Les clients demandent… » vaut demande client (ADFORALL, mesure #2)",
-  !lesClients.failed.some((item) => item.id === "probleme-client"),
-  lesClients.failed.map((item) => item.id).join(", "),
+  "un compliment ne fait plus échouer le déterministe : C2 le refusera",
+  !flattery.failed.some((item) => item.id === "probleme-client"),
+  flattery.failed.map((item) => item.id).join(", "),
+);
+
+/* Seul empêchement MATÉRIEL encore tranché ici : rien à citer. */
+const noFacts = checkF5({ subject: "x", body: GOOD_F5, facts: [] });
+check(
+  "sans un seul fait porteur d'URL : refusé avant toute lecture",
+  noFacts.failed.some((item) => item.id === "fait-source"),
+  noFacts.failed.map((item) => item.id).join(", "),
 );
 
 check(
@@ -359,15 +365,14 @@ check(
   `${F5_HOOK_WORDS} + ${F5_PROPOSAL_WORDS} + ${F5_FIXED_WORDS} > ${FAMILY_LIMITS.F5.max}`,
 );
 
-const noProblem = checkF5({
-  subject: "x",
-  body: GOOD_F5.replace(
-    "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
-    "Votre agence a une expertise reconnue.",
-  ),
-  facts,
-});
-check("sans problème formulé : refusé", noProblem.failed.some((item) => item.id === "probleme-client"));
+check(
+  "la consigne C1 porte le test de substitution (#36)",
+  f5Instructions().includes("TEST DE SUBSTITUTION"),
+);
+check(
+  "la consigne C2 demande l'élément manquant ET sa conséquence",
+  f5Instructions().includes("L'ÉLÉMENT QUI MANQUE"),
+);
 
 check("les consignes listent les six critères", f5Instructions().includes("75 mots au plus"));
 

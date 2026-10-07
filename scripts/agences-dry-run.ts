@@ -30,9 +30,13 @@ import { createClient } from "@supabase/supabase-js";
 import { AGENCES_EFFECTIF_CODES, AGENCES_NAF, classifyAgence } from "@/lib/segments/agences";
 import { segmentMarks } from "@/lib/segments";
 import { checkF5, type F5Verdict } from "@/lib/segments/mail-f5";
+import { judgeChecklist, type ChecklistVerdict } from "@/lib/emails/quality/checklist";
+import { countedText } from "@/lib/mail-preflight/words";
+import { liveAsk } from "./quality-live";
 import { coverSite } from "@/lib/enrichment/site";
 import { searchCompanies } from "@/lib/enrichment/gouv";
 import { fetchPappers } from "@/lib/enrichment/pappers";
+import { findEmailByName } from "@/lib/enrichment/hunter";
 import { withLinkupRun } from "@/lib/linkup/run-cap";
 import type { CompanyBase } from "@/lib/enrichment/types";
 
@@ -61,6 +65,8 @@ const WRITE = args.includes("--write");
 const ZONE = flag("zone", "69");
 const LIMIT = Number(flag("limit", "10")) || 10;
 const HUNTER_CAP = Number(flag("hunter-cap", "15")) || 15;
+/** Credits reserves a l'essai nominatif (dirigeant du registre + domaine). */
+const FINDER_CAP = Number(flag("finder-cap", "10")) || 10;
 const OPENAI_CAP = Number(flag("openai-cap", "1")) || 1;
 /** Crédits Pappers que la mesure s'autorise : un par candidat examiné. */
 const PAPPERS_CAP = Number(flag("pappers-cap", "25")) || 25;
@@ -110,6 +116,9 @@ interface Candidate {
   siteStatus: string;
   headcount: number | null;
   leader: string | null;
+  /** Dirigeant personne physique, decoupe : `email-finder` demande les deux. */
+  leaderFirst: string | null;
+  leaderLast: string | null;
   revenue: number | null;
   verdict: ReturnType<typeof classifyAgence>;
 }
@@ -152,6 +161,8 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
     let pappersWebsite: string | null = null;
     let headcount: number | null = null;
     let leader: string | null = null;
+    let leaderFirst: string | null = null;
+    let leaderLast: string | null = null;
     let revenue: number | null = null;
     if (base.siren && pappersUsed < PAPPERS_CAP) {
       const pappers = await fetchPappers(base.siren);
@@ -159,6 +170,11 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
         pappersWebsite = pappers.data.website;
         headcount = pappers.data.headcount;
         leader = pappers.data.leader;
+        const person = (pappers.data.representatives ?? []).find(
+          (item) => !item.isCompany && item.firstName && item.lastName,
+        );
+        leaderFirst = person?.firstName ?? null;
+        leaderLast = person?.lastName ?? null;
         revenue = pappers.data.revenue_eur;
       }
     }
@@ -192,6 +208,8 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
       siteStatus: site.status,
       headcount,
       leader,
+      leaderFirst,
+      leaderLast,
       revenue,
       verdict,
     };
@@ -219,6 +237,8 @@ interface Measured {
   nominative: boolean;
   draft: { subject: string; body: string } | null;
   f5: F5Verdict | null;
+  /** Verdict de la check-list commune (D1-D7, C1-C5) : la lecture, pas mes motifs. */
+  checklist?: ChecklistVerdict | null;
   error: string | null;
 }
 
@@ -315,6 +335,9 @@ function report(input: {
   kept: Candidate[];
   rejected: Candidate[];
   measured: Measured[];
+  finderWins: string[];
+  finderMisses: string[];
+  finderSkipped: string[];
   costs: Record<string, { eur: number; calls: number }>;
 }): string {
   const total = input.measured.length;
@@ -324,7 +347,8 @@ function report(input: {
   const nominative = input.measured.filter((row) => row.nominative).length;
   const withEmail = input.measured.filter((row) => row.email).length;
   const drafted = input.measured.filter((row) => row.draft).length;
-  const ready = input.measured.filter((row) => row.f5?.ready).length;
+  // Prêt = la check-list commune dit oui. Mes motifs sont un préalable, pas le juge.
+  const ready = input.measured.filter((row) => row.f5?.ready && row.checklist?.ready).length;
   const pct = (part: number) => (total ? `${Math.round((part / total) * 100)} %` : "—");
 
   const examples = input.measured
@@ -368,8 +392,9 @@ function report(input: {
     `| Concurrents / partenaires | — | ${input.rejected.filter((row) => row.verdict.competitor).length} |`,
     `| Adresse trouvée | ${pct(withEmail)} | ${withEmail}/${total} |`,
     `| Contact NOMINATIF | ${pct(nominative)} | ${nominative}/${total} |`,
+    `| dont reconstruits (dirigeant + domaine) | — | ${input.finderWins.length} |`,
     `| Brouillon F5 généré | ${pct(drafted)} | ${drafted}/${total} |`,
-    `| Mail prêt (grille F5 complète) | ${pct(ready)} | ${ready}/${total} |`,
+    `| Mail prêt (check-list commune) | ${pct(ready)} | ${ready}/${total} |`,
     "",
     "## Coûts réels (api_usage, depuis le début du run)",
     "",
@@ -378,6 +403,12 @@ function report(input: {
     ...Object.entries(input.costs).map(
       ([service, value]) => `| ${service} | ${value.calls} | ${value.eur.toFixed(4)} € |`,
     ),
+    "",
+    "## Essai nominatif — dirigeant du registre + domaine → Hunter email-finder",
+    "",
+    ...(input.finderWins.length ? input.finderWins.map((item) => `- trouvé : ${item}`) : ["- aucune adresse reconstruite"]),
+    ...input.finderMisses.map((item) => `- sans réponse : ${item}`),
+    ...input.finderSkipped.map((item) => `- non tenté : ${item}`),
     "",
     "## Écartées",
     "",
@@ -429,6 +460,10 @@ async function main(): Promise<void> {
   console.log(`\n${kept.length} retenues, ${rejected.length} écartées.`);
 
   const measured: Measured[] = [];
+  // Essai nominatif : ce qu'il a donne, nommement.
+  const finderWins: string[] = [];
+  const finderMisses: string[] = [];
+  const finderSkipped: string[] = [];
 
   if (WRITE) {
     for (const candidate of kept) {
@@ -467,9 +502,39 @@ async function main(): Promise<void> {
           business_profile: Record<string, unknown> | null;
         } | null;
         const figures = row?.key_figures ?? {};
-        const email = row?.email ?? null;
-        const nominative =
+        let email = row?.email ?? null;
+        let nominative =
           figures.contact_tier === "nominatif" || figures.email_type === "nominatif";
+
+        /*
+         * Essai nominatif (Cowork #3). La chaine d'agent1 cherche le dirigeant
+         * SUR le domaine ; quand le site n'expose que contact@, elle ne trouve
+         * rien a trouver. Le registre, lui, le nomme : on redonne ce nom a
+         * `email-finder`, qui reconstruit l'adresse depuis le schema du domaine.
+         * Plafond propre, et le resultat ne remplace jamais l'adresse de la
+         * fiche — il est seulement mesure.
+         */
+        const domain = candidate.website?.replace(/^https?:\/\//, "").replace(/\/.*$/, "") ?? null;
+        if (!nominative && domain && candidate.leaderFirst && candidate.leaderLast) {
+          const used = (await spend("hunter", since)).calls;
+          if (used < HUNTER_CAP + FINDER_CAP) {
+            const found = await findEmailByName(domain, candidate.leaderFirst, candidate.leaderLast, prospectId);
+            const hit = "data" in found ? found.data : null;
+            if (hit?.email) {
+              email = hit.email;
+              nominative = true;
+              finderWins.push(`${name} — ${candidate.leaderFirst} ${candidate.leaderLast} (score ${hit.confidence ?? "?"})`);
+              console.log(`  nominatif : ${hit.email} (score ${hit.confidence ?? "?"})`);
+            } else {
+              finderMisses.push(`${name} — ${candidate.leaderFirst} ${candidate.leaderLast}`);
+              console.log(`  nominatif : aucune adresse pour ${candidate.leaderFirst} ${candidate.leaderLast}`);
+            }
+          } else {
+            console.log(`  nominatif : plafond finder atteint`);
+          }
+        } else if (!nominative) {
+          finderSkipped.push(`${name} — ${!domain ? "pas de domaine" : "pas de dirigeant personne physique au registre"}`);
+        }
 
         // --- Brouillon F5 ---------------------------------------------------
         const openai = await spend("openai", since);
@@ -544,6 +609,29 @@ async function main(): Promise<void> {
           .map((value) => ({ label: value, url: candidate.website }));
         const facts = scored.length ? scored : fromSite;
         const f5 = checkF5({ subject: text.subject ?? "", body: text.body, signature, facts });
+
+        /*
+         * Un seul juge (Cowork #3). Mes motifs ne tranchent plus que le
+         * déterministe ; la lecture — fait propre à l'agence (C1, avec le test
+         * de substitution de #36) et problème qui en découle (C2) — vient de la
+         * check-list commune d'agent2, celle que le pipeline utilise en vrai.
+         */
+        const checklist = f5.ready
+          ? await judgeChecklist(
+              liveAsk(prospectId),
+              {
+                subject: text.subject ?? "",
+                core: countedText(text.body, signature),
+                family: "F5",
+                greeting: text.body.split("\n")[0] ?? "",
+                company: name,
+                facts: facts.map((fact) => `- ${fact.label}`).join("\n"),
+                siteText: [profile.offer, profile.clients].filter((value) => typeof value === "string").join(" · "),
+              },
+              "agences:checklist",
+            )
+          : null;
+
         measured.push({
           name,
           prospectId,
@@ -551,11 +639,17 @@ async function main(): Promise<void> {
           nominative,
           draft: { subject: text.subject ?? "", body: text.body },
           f5,
+          checklist,
           error: null,
         });
-        console.log(
-          `  brouillon : ${f5.ready ? "grille F5 complète" : f5.failed.map((item) => item.id).join(", ")}`,
-        );
+        const verdict = !f5.ready
+          ? f5.failed.map((item) => item.id).join(", ")
+          : checklist === null
+            ? "relecture indisponible"
+            : checklist.ready
+              ? `prêt (check-list ${checklist.score}/10)`
+              : `${checklist.items.filter((item) => !item.ok).map((item) => item.id).join(", ")} (${checklist.score}/10)`;
+        console.log(`  brouillon : ${verdict}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : "erreur";
         measured.push({
@@ -565,6 +659,7 @@ async function main(): Promise<void> {
           nominative: false,
           draft: null,
           f5: null,
+          checklist: null,
           error: message,
         });
         console.log(`  erreur : ${message}`);
@@ -579,7 +674,7 @@ async function main(): Promise<void> {
 
   mkdirSync("evals/agences", { recursive: true });
   const path = `evals/agences/report-${new Date().toISOString().slice(0, 10)}.md`;
-  writeFileSync(path, report({ kept, rejected, measured, costs }));
+  writeFileSync(path, report({ kept, rejected, measured, finderWins, finderMisses, finderSkipped, costs }));
   console.log(`\n${path}`);
   for (const [service, value] of Object.entries(costs)) {
     console.log(`  ${service.padEnd(8)} ${value.calls} appel(s), ${value.eur.toFixed(4)} €`);
