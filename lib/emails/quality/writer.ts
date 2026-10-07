@@ -165,6 +165,17 @@ RÈGLES COMMUNES :
 - Aucune URL, aucune salutation, aucune signature, aucun chiffre absent des faits.
 ${input.brief.avoid.length ? `- À NE PAS DIRE : ${input.brief.avoid.join(" ; ")}\n` : ""}`;
 
+/**
+ * BUDGETS DE MOTS DE F5 — explicites, donc vérifiables.
+ *
+ * Le code pose lui-même la salutation (3 mots), la ligne de démo (9 avec son
+ * URL) et la demande (13) : 25 mots du plafond sont déjà consommés avant que
+ * le modèle n'écrive quoi que ce soit. L'argumentaire doit tenir dans le reste.
+ */
+export const F5_FIXED_WORDS = 25;
+export const F5_HOOK_WORDS = 30;
+export const F5_PROPOSAL_WORDS = 20;
+
 /** Consignes de F2 (présentation directe), F3 (question courte) et F4 (démo d'abord). */
 function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">): string {
   const { min, max } = FAMILY_LIMITS[family];
@@ -187,8 +198,8 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
         ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier, et qui NOMME UN OBJET CONCRET PROPRE À L'ENTREPRISE (un produit, un type de commande, un document précis : « Qui confirme les délais de vos commandes d'épandeurs ? »). Jamais un objet vague (« vos documents clients », « vos demandes »). Directe, polie, jamais intrusive.
 2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise », À LA VOIX ACTIVE : je fais, je signale, je prépare (« J'automatise la lecture des plans et je signale les cotes manquantes au bureau d'étude. ») — JAMAIS « sont signalées », « est préparé ». Elle décrit ce que montre la démo « ${input.demo.label} ». Ne répète pas le nom de l'objet de la question : reprends-le par « ces commandes », « ces plans ».`
         : family === "F5"
-          ? `1. "hook" = LE FAIT PUIS LE PROBLÈME, deux phrases, 40 mots au plus. Phrase 1 : un fait PRÉCIS lu sur leur site (client nommé, réalisation, offre) — jamais un compliment. Phrase 2 : ce que ce type de client leur demande ensuite et qu'une petite équipe ne peut pas produire (automatisations, agents IA, intégrations), ou la capacité qui les oblige à refuser. C'est une situation TYPE du métier d'agence, jamais un défaut affirmé chez eux.
-2. "proposal" = UNE phrase de 25 mots au plus, À LA PREMIÈRE PERSONNE : je réalise en MARQUE BLANCHE, ils vendent, gardent la relation et facturent (« Je les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom. »). Jamais proposer de travailler en direct avec leurs clients. Elle décrit ce que montre la démo « ${input.demo.label} ».`
+          ? `1. "hook" = LE FAIT PUIS LE PROBLÈME, deux phrases, ${F5_HOOK_WORDS} mots au plus — la salutation, la ligne de démo et la demande prennent déjà ${F5_FIXED_WORDS} mots du plafond de ${max}. Phrase 1 : un fait PRÉCIS lu sur leur site (client nommé, réalisation, offre) — jamais un compliment. Phrase 2 : ce que ce type de client leur demande ensuite et qu'une petite équipe ne peut pas produire (automatisations, agents IA, intégrations), ou la capacité qui les oblige à refuser. C'est une situation TYPE du métier d'agence, jamais un défaut affirmé chez eux.
+2. "proposal" = UNE phrase de ${F5_PROPOSAL_WORDS} mots au plus, À LA PREMIÈRE PERSONNE : je réalise en MARQUE BLANCHE, ils vendent, gardent la relation et facturent (« Je les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom. »). Jamais proposer de travailler en direct avec leurs clients. Elle décrit ce que montre la démo « ${input.demo.label} ».`
         : `1. "hook" = FAIT + PROBLÈME, comme un mail classique : DEUX phrases de 20 mots au plus. Phrase 1 : un FAIT PROPRE à l'entreprise tiré de ce que l'on sait d'elle — un produit, un client, un chiffre ou un process NOMMÉ ; JAMAIS une description du secteur (« vous assurez la maintenance de parcs informatiques » est refusé). Phrase 2 : le problème concret qui découle de CE fait (une demande qui attend, une référence manquante, un devis qui part tard) — pas un problème générique (« le client attend une réponse rapide »). JAMAIS d'ouverture par la démo (« Elle lit… », « Dans la démo… », « Une démo… » : interdits, Cowork #34).
 2. "proposal" = CE QUE MONTRE LA DÉMO, HONNÊTEMENT, en preuve : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus, dont le sujet est LA DÉMO (c'est elle qui lit, pas moi) : « La démo montre une <demande d'intervention / commande / facture> type lue et <une confirmation de délai / un devis / une facture> prête à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent>. » Jamais « Je lis… ». <le résultat> est UN DOCUMENT ou UNE RÉPONSE que le client reçoit (accusé de réception, confirmation de commande ou de délai, brouillon de devis, facture, réponse au client) — JAMAIS « le tri », « le classement », « les informations à valider ». La démo est « ${input.demo.label} ».`;
   return `Tu écris, à la place d'Axel Remillat (indépendant, automatisation et IA pour PME), des morceaux d'un mail de prospection à froid pour ${input.companyName}. Le reste est déjà écrit par le code.

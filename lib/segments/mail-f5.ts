@@ -57,7 +57,7 @@ export interface F5Criterion {
 
 /** Le problème, tel que F5 doit le formuler : celui des CLIENTS de l'agence. */
 const CLIENT_DEMAND =
-  /\b(?:leurs?|vos|des|ces)\s+clients?\b[^.!?]{0,140}\b(?:demand|r[ée]clam|attend|automatis|ia\b|intelligence artificielle|int[ée]gration|outil)/i;
+  /\b(?:leurs?|vos|des|ces|les)\s+clients?\b[^.!?]{0,140}\b(?:demand|r[ée]clam|attend|automatis|ia\b|intelligence artificielle|int[ée]gration|outil)/i;
 /**
  * Friction sur un LIVRABLE : la forme la plus fréquente du problème côté
  * client, et elle ne nomme pas toujours « les clients ».
