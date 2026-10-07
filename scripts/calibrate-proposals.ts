@@ -7,7 +7,8 @@
  * Aucune écriture en base (hors journal de coût), aucun envoi.
  */
 import { liveAsk, ownerId, spentSince } from "./quality-live";
-import { judgeProposal, judgeProposalClient, combineVerdicts, generateProposal, PROPOSAL_PASS, assembleProposal, checkProposal } from "@/lib/opportunities/proposal";
+import { judgeProposal, generateProposal, PROPOSAL_PASS, assembleProposal, checkProposal } from "@/lib/opportunities/proposal";
+import { judgeProposalChecklist } from "@/lib/opportunities/proposal-checklist";
 import { analyzeOpportunity } from "@/lib/opportunities/analyze";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "@/lib/opportunities/calibration";
 import { requestedItems } from "@/lib/opportunities/requests";
@@ -49,16 +50,13 @@ async function main() {
     }
   }
   // Les 3 propositions RÉELLEMENT envoyées par Axel (Cowork #31) : les deux juges doivent leur donner 9 ou plus.
-  console.log("Propositions envoyées par Axel (double juge)");
+  // Les 3 propositions RÉELLEMENT envoyées par Axel : la check-list (Cowork #32) doit les passer à 100 %.
+  console.log("Propositions envoyées par Axel (check-list, 8 critères)");
   for (const item of AXEL_SENT) {
-    const [relecteur, client] = await Promise.all([
-      judgeProposal(ask, { title: item.title, body: item.ad, budget: item.budget, text: item.text, platform: "codeur" }, "opportunites:calibrage"),
-      judgeProposalClient(ask, { title: item.title, body: item.ad, budget: item.budget, text: item.text, platform: "codeur" }, "opportunites:calibrage-client"),
-    ]);
-    const verdict = combineVerdicts(relecteur, client);
-    const ok = verdict !== null && verdict.score >= PROPOSAL_PASS;
+    const verdict = await judgeProposalChecklist(ask, { title: item.title, text: item.text, platform: "codeur", ad: item.ad, budget: item.budget, amountEur: item.amountEur, delayDays: item.delayDays }, "opportunites:calibrage");
+    const ok = Boolean(verdict?.ready);
     if (!ok) failures += 1;
-    console.log(`  ${ok ? "ok  " : "ÉCART"} « ${item.title.slice(0, 50)} » (${item.text.length} car.) : relecteur ${relecteur?.score ?? "?"} · client ${client?.score ?? "?"}${ok ? "" : ` — ${verdict?.reasons.slice(1, 3).join(" ; ")}`}`);
+    console.log(`  ${ok ? "ok  " : "ÉCART"} « ${item.title.slice(0, 50)} » (${item.text.length} car.) : ${verdict ? verdict.items.map((criterion) => `${criterion.id} ${criterion.ok ? "OUI" : `NON (« ${criterion.citation.slice(0, 60)} »)`}`).join(" · ") : "relecture indisponible"}`);
   }
   const calibrationCost = await spentSince(userId, started);
 
