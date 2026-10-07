@@ -26,6 +26,13 @@ export const TODAY_TAGS = [
   "À revoir",
   // Porte « faits » (Cowork #31) : aucun fait distinctif, aucun mail rédigé.
   "Faits insuffisants",
+  /*
+   * SEGMENT (agent3) — étiquette NON bloquante : elle dit de quel marché la
+   * fiche relève, et c'est par elle qu'on filtre « Aujourd'hui » par segment
+   * (les étiquettes sont déjà affichées sur la ligne et comptées dans
+   * Réglages › Données).
+   */
+  "Agences",
 ] as const;
 export type TodayTag = (typeof TODAY_TAGS)[number];
 

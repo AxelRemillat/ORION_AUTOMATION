@@ -5,6 +5,7 @@
  */
 import { extractFacts, factPages, factsScore, normalizeForQuote, validateFacts, type FactPage } from "../lib/enrichment/facts";
 import { ensureFacts } from "../lib/enrichment/facts-server";
+import { hasProperNoun, rescoreFacts } from "../lib/enrichment/facts-rules";
 import type { Db } from "../lib/trash/scope";
 import { FakeDb } from "./fake-supabase";
 
@@ -99,6 +100,31 @@ async function main() {
     const unreadable = await ensureFacts(fake2 as unknown as Db, { id: "p3", company_name: "MORT", website: "mort.fr", key_figures: { a: 1 } }, { deps: dead });
     const written = fake2.rows("prospects")[0].key_figures as Record<string, unknown>;
     check("site illisible : facts [] + motif, score 0, champs conservés", unreadable?.note === "site illisible" && Array.isArray(written.facts) && (written.facts as unknown[]).length === 0 && written.facts_score === 0 && written.a === 1, written);
+  }
+
+  console.log("\n4. Règles déterministes (Cowork #37) — sans appel LLM");
+  {
+    const fact = (text: string, distinctiveness: 0 | 1 | 2 | 3, hint: string | null = "tâche") => ({ text, source_url: "https://x.fr", page_kind: "produits" as const, distinctiveness, process_hint: hint });
+    const veto = rescoreFacts([
+      fact("Un devis chiffré sera établi. La date de l’opération sera alors déterminée", 3),
+      fact("Notre service d’accueil est en sous-effectif pendant la période estivale.", 2),
+      fact("Nous accompagnons nos clients avec réactivité et professionnalisme au quotidien", 3),
+    ], "Activités vétérinaires");
+    check("Centre vétérinaire des Alpes : « devis » (verbe de process) garde 3", veto.facts[0].distinctiveness === 3 && veto.score === 3, veto.facts);
+    check("… un 3 sans chiffre, nom propre ni process redescend à 2", veto.facts.find((item) => item.text.startsWith("Nous accompagnons"))?.distinctiveness === 2);
+
+    const master = rescoreFacts([
+      fact("The key requirements for the concrete in this project were ensuring a high-quality finish and fast curing times", 2),
+      fact("Use of the 2-component admixture system MasterSuna SBS 6080 / MasterGlenium 700", 3),
+      fact("Fabrication de produits en béton pour la construction", 2),
+    ], "Fabrication de produits en béton pour la construction");
+    check("Master Builders : chiffre + nom de produit → 3 gardé", master.facts[0].distinctiveness === 3 && master.score === 3, master.facts);
+    check("Master Builders : fait sans preuve à 2 → reste 2 (jamais relevé)", master.facts.some((item) => item.text.startsWith("The key") && item.distinctiveness === 2));
+    check("paraphrase du libellé NAF → plafond 1", master.facts.find((item) => item.text.startsWith("Fabrication"))?.distinctiveness === 1);
+
+    check("IANESCO (site illisible, aucun fait) : score 0", rescoreFacts([], "Ingénierie").score === 0);
+    check("nom propre détecté (ville, client), pas un début de phrase", hasProperNoun("Nos clients à Grenoble et chez Bonduelle") && !hasProperNoun("Nous livrons. Chaque semaine nous livrons"));
+    check("sans process_hint : jamais plus de 1", rescoreFacts([fact("Livraison sous 48 h dans toute la France", 3, null)]).score === 1);
   }
 
   console.log(failures === 0 ? "\nTous les tests des faits distinctifs passent.\n" : `\n${failures} test(s) en échec.\n`);

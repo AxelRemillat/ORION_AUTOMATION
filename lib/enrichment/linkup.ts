@@ -54,7 +54,14 @@ export function buildQuery(company: {
   name: string;
   city?: string | null;
   website?: string | null;
+  /**
+   * Requête complète, quand l'appelant sait mieux que nous ce qu'il cherche.
+   * Le nom reste entre guillemets côté appelant : les guillemets autour d'une
+   * phrase entière (« "X site officiel" ») ne renvoient rien.
+   */
+  query?: string | null;
 }): string {
+  if (company.query?.trim()) return company.query.trim();
   const parts = [`"${company.name}"`];
   if (company.city) parts.push(company.city);
   parts.push("actualité entreprise");
@@ -117,6 +124,8 @@ export async function fetchWebResults(company: {
   name: string;
   city?: string | null;
   website?: string | null;
+  /** Requête complète imposée par l'appelant (cf. `buildQuery`). */
+  query?: string | null;
 }): Promise<Result<WebResult[]>> {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };

@@ -168,6 +168,7 @@ C1 — Le mail s'appuie sur un fait SPÉCIFIQUE à l'entreprise (produit, gamme,
 C2 — (toutes familles, F4 comprise) Un problème est ÉNONCÉ et il DÉCOULE de ce fait (même tâche, même objet) et concerne le rôle du destinataire quand on le connaît (DAF : factures, relances ; commercial : devis, commandes ; service client : demandes reçues). Une situation TYPE du métier dite simplement suffit (« une quantité manquante retarde son envoi ») : elle n'a pas à être prouvée.
    OUI : « Qui repère les cotes manquantes dans les plans de découpe laser avant le devis ? » (fait : analyse des plans et devis sous 48 h).
    NON : un problème sans lien avec le fait cité, ou affirmé comme un défaut constaté chez eux (« vous perdez des commandes »).
+   Cas du mail à une AGENCE (famille F5, segment Agences) : le problème est celui de SES CLIENTS, ou sa capacité à produire — « ces clients demandent ensuite des automatisations qu'une équipe de six personnes ne peut pas livrer » est un OUI. Ne le refuse pas au motif qu'il ne décrit pas un défaut de l'agence elle-même.
 C3 — (pas en F4) La proposition dit ce que JE fais, à la 1re personne et à la voix active (« J'automatise… », « Je mets en place… »), avec un geste concret lié au problème.
    OUI : « J'automatise la préparation des devis : je reprends les références et quantités demandées, signale les manques et prépare le chiffrage pour votre validation. »
    NON : « Les demandes sont triées puis une réponse est préparée. » (passif) ; « J'optimise vos processus. » (vague).

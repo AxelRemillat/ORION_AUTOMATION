@@ -174,7 +174,10 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
       ? `${input.greeting}\n\n${F2_INTRO}\n\n<BESOIN — c'est toi>\n\n<PROPOSITION — c'est toi>\n\n${proof}\n\n${input.cta}`
       : family === "F3"
         ? `${input.greeting}\n\n<QUESTION — c'est toi>\n\n<CE QUE JE FAIS — c'est toi>\n\n${proof}\n\n${F3_CTA}`
-        : `${input.greeting}\n\n<FAIT + PROBLÈME — c'est toi>\n\n${proof}\n\n<CE QUE MONTRE LA DÉMO — c'est toi>\n\n${input.cta}`;
+        // F5 « partenaire » (agent3) : même ordre que F1, contenu différent.
+        : family === "F5"
+          ? `${input.greeting}\n\n<FAIT SUR L'AGENCE + PROBLÈME DE SES CLIENTS — c'est toi>\n\n<PROPOSITION EN MARQUE BLANCHE — c'est toi>\n\n${proof}\n\n${input.cta}`
+          : `${input.greeting}\n\n<FAIT + PROBLÈME — c'est toi>\n\n${proof}\n\n<CE QUE MONTRE LA DÉMO — c'est toi>\n\n${input.cta}`;
   const parts =
     family === "F2"
       ? `1. "hook" = BESOIN PROBABLE lié à leur activité, UNE ou DEUX phrases de 20 mots au plus : nomme leur activité précisément (« Pour une entreprise qui fabrique des emballages sur mesure, … ») et la tâche qui revient souvent, avec ce qu'elle produit (client qui attend, devis qui part tard, double saisie).
@@ -183,6 +186,9 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
       : family === "F3"
         ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier, et qui NOMME UN OBJET CONCRET PROPRE À L'ENTREPRISE (un produit, un type de commande, un document précis : « Qui confirme les délais de vos commandes d'épandeurs ? »). Jamais un objet vague (« vos documents clients », « vos demandes »). Directe, polie, jamais intrusive.
 2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise », À LA VOIX ACTIVE : je fais, je signale, je prépare (« J'automatise la lecture des plans et je signale les cotes manquantes au bureau d'étude. ») — JAMAIS « sont signalées », « est préparé ». Elle décrit ce que montre la démo « ${input.demo.label} ». Ne répète pas le nom de l'objet de la question : reprends-le par « ces commandes », « ces plans ».`
+        : family === "F5"
+          ? `1. "hook" = LE FAIT PUIS LE PROBLÈME, deux phrases, 40 mots au plus. Phrase 1 : un fait PRÉCIS lu sur leur site (client nommé, réalisation, offre) — jamais un compliment. Phrase 2 : ce que ce type de client leur demande ensuite et qu'une petite équipe ne peut pas produire (automatisations, agents IA, intégrations), ou la capacité qui les oblige à refuser. C'est une situation TYPE du métier d'agence, jamais un défaut affirmé chez eux.
+2. "proposal" = UNE phrase de 25 mots au plus, À LA PREMIÈRE PERSONNE : je réalise en MARQUE BLANCHE, ils vendent, gardent la relation et facturent (« Je les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom. »). Jamais proposer de travailler en direct avec leurs clients. Elle décrit ce que montre la démo « ${input.demo.label} ».`
         : `1. "hook" = FAIT + PROBLÈME, comme un mail classique : DEUX phrases de 20 mots au plus. Phrase 1 : un FAIT PROPRE à l'entreprise tiré de ce que l'on sait d'elle (produit, gamme, clientèle, service précis). Phrase 2 : le problème concret qui en découle (une demande qui attend, une référence manquante, un devis qui part tard). JAMAIS d'ouverture par la démo (« Elle lit… », « Dans la démo… », « Une démo… » : interdits, Cowork #34).
 2. "proposal" = CE QUE MONTRE LA DÉMO, HONNÊTEMENT, en preuve : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent>. » <le résultat> est UN DOCUMENT ou UNE RÉPONSE que le client reçoit (accusé de réception, confirmation de commande ou de délai, brouillon de devis, facture, réponse au client) — JAMAIS « le tri », « le classement », « les informations à valider ». La démo est « ${input.demo.label} ».`;
   return `Tu écris, à la place d'Axel Remillat (indépendant, automatisation et IA pour PME), des morceaux d'un mail de prospection à froid pour ${input.companyName}. Le reste est déjà écrit par le code.

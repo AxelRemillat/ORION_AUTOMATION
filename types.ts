@@ -142,6 +142,18 @@ export interface ProspectSignal {
 
 /** Chiffres clés issus des données légales / financières. */
 export interface ProspectKeyFigures {
+  /**
+   * SEGMENT (agent3) — marché dont la fiche relève, qualifié par lib/segments.
+   * Absent = aucun segment reconnu. Se recalcule à chaque ré-enrichissement.
+   */
+  segment?: string;
+  /** Ce qui a qualifié : signaux lus sur le site officiel. */
+  segment_signals?: string[];
+  /**
+   * L'entreprise vend déjà la prestation : concurrent, donc partenaire
+   * possible. Porte le motif. Aucun mail n'est préparé (cf. off-target).
+   */
+  segment_competitor?: string;
   revenue_eur?: number;
   headcount?: number;
   founded_year?: number;

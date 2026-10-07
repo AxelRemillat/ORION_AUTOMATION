@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bell, Briefcase, Check, ClipboardPaste, Copy, ExternalLink, Inbox, Mail, RefreshCw, Send } from "lucide-react";
+import { Bell, Briefcase, ClipboardPaste, Copy, ExternalLink, Inbox, Mail, RefreshCw, Send } from "lucide-react";
 import { Badge, Button, Card, CardContent, EmptyState, Input, Label, Modal, Select, Textarea, useToast } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { OPPORTUNITY_STATUSES, PLATFORMS, PLATFORM_LABELS, STATUS_LABELS, type Opportunity, type OpportunityStatus, type Platform } from "@/lib/opportunities/types";
 import { ageLabel, BUCKET_LABELS, bucketOf, staleLabel, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
 import { EMAIL_KIND_LABELS } from "@/lib/opportunities/email/parse";
 import { emailsOf, emailsToSort, suggestedPrice, type OpportunityEmail } from "@/lib/opportunities/email/view";
+import { TriagePanel } from "./triage-panel";
 
 // « Coller une annonce » : Upwork d'abord (plus de flux RSS, l'annonce se copie à la main).
 const EMPTY_FORM = { platform: "upwork" as Platform, url: "", title: "", body: "", budget: "", deadline: "" };
@@ -22,8 +23,9 @@ const BUDGET_PLACEHOLDER: Record<Platform, string> = {
 
 const scoreTone = (score: number | null) => (score == null ? "neutral" : score >= 8 ? "success" : score >= 5 ? "warning" : "danger");
 
-type Filter = Bucket | "toutes";
-const FILTERS: Filter[] = ["alertes", "a_voir", "ignorees", "toutes"];
+// « À trier » (plateformes #3) : les e-mails de plateforme non reconnus, avec leurs trois actions.
+type Filter = Bucket | "toutes" | "a_trier";
+const FILTERS: (Bucket | "toutes")[] = ["alertes", "a_voir", "ignorees", "toutes"];
 
 /**
  * Opportunités : alertes de la veille Codeur en tête, filtres, fiche. Aucun
@@ -46,7 +48,7 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
   const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? null, [items, selectedId]);
   const alerts = useMemo(() => unseenAlerts(items), [items]);
   const counts = useMemo(() => {
-    const result: Record<Filter, number> = { alertes: 0, a_voir: 0, ignorees: 0, toutes: items.length };
+    const result: Record<Bucket | "toutes", number> = { alertes: 0, a_voir: 0, ignorees: 0, toutes: items.length };
     for (const item of items) result[bucketOf(item)] += 1;
     return result;
   }, [items]);
@@ -58,11 +60,9 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
   const platformsPresent = useMemo(() => PLATFORMS.filter((platform) => items.some((item) => item.platform === platform)), [items]);
   const selectedEmails = useMemo(() => (selectedId ? emailsOf(emails, selectedId) : []), [emails, selectedId]);
 
-  /** E-mail « à trier » classé à la main (rien n'est supprimé). */
-  async function markSorted(id: string) {
-    const response = await fetch(`/api/opportunites/emails/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "trie" }) });
-    if (!response.ok) return toast.error("Non enregistré.");
-    setEmails((current) => current.map((email) => (email.id === id ? { ...email, status: "trie" } : email)));
+  /** E-mail « à trier » ignoré ou rattaché (rien n'est supprimé). */
+  function emailChanged(id: string, patch: Partial<OpportunityEmail>) {
+    setEmails((current) => current.map((email) => (email.id === id ? { ...email, ...patch } : email)));
   }
 
   /** Relecture complète (analyse et proposition sont écrites côté serveur), sur l'opportunité concernée. */
@@ -202,33 +202,6 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
         </section>
       )}
 
-      {toSort.length > 0 && (
-        <details className="mb-6 rounded-xl border border-line bg-surface p-3">
-          <summary className="flex cursor-pointer items-center gap-2 text-[14px] font-medium text-text">
-            <Inbox className="h-4 w-4 text-muted" aria-hidden /> E-mails à trier <span className="font-data text-muted">{toSort.length}</span>
-            <span className="text-[12px] font-normal text-faint">non reconnus par l&apos;ingestion, sans alerte</span>
-          </summary>
-          <ul className="mt-2 divide-y divide-line-soft">
-            {toSort.map((email) => (
-              <li key={email.id} className="flex flex-wrap items-start justify-between gap-2 py-2">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] text-text">{email.subject || "(sans sujet)"}</p>
-                  <p className="truncate text-[12px] text-muted">
-                    {email.platform ? PLATFORM_LABELS[email.platform] : email.from_address ?? "expéditeur inconnu"}
-                    {email.received_at ? ` · ${ageLabel(email.received_at)}` : ""}
-                    {email.kind !== "autre" ? ` · ${EMAIL_KIND_LABELS[email.kind]}` : ""}
-                  </p>
-                  {email.excerpt && <p className="mt-0.5 line-clamp-2 text-[12px] text-faint">{email.excerpt}</p>}
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => markSorted(email.id)}>
-                  <Check className="h-3.5 w-3.5" aria-hidden /> Classé
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-
       {platformsPresent.length > 1 && (
         <div className="mb-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filtrer par plateforme">
           {(["toutes", ...platformsPresent] as const).map((key) => (
@@ -265,9 +238,23 @@ export function OpportunitiesClient({ initial, emails: initialEmails = [], focus
             {BUCKET_LABELS[key]} <span className="font-data">{counts[key]}</span>
           </button>
         ))}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={filter === "a_trier"}
+          onClick={() => setFilter("a_trier")}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[12px]",
+            filter === "a_trier" ? "border-primary/30 bg-primary/10 text-primary-ink" : "border-line text-muted hover:bg-surface-2",
+          )}
+        >
+          <Inbox className="h-3.5 w-3.5" aria-hidden /> À trier <span className="font-data">{toSort.length}</span>
+        </button>
       </div>
 
-      {items.length === 0 ? (
+      {filter === "a_trier" ? (
+        <TriagePanel emails={toSort} opportunities={items} onChanged={emailChanged} onCreated={(id) => reload(id)} />
+      ) : items.length === 0 ? (
         <EmptyState
           icon={<Briefcase className="h-6 w-6" aria-hidden />}
           title="Aucune opportunité"

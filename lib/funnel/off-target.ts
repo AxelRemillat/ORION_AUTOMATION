@@ -2,6 +2,7 @@ import { disqualify, isSmallB2C, type DigFacts } from "./eligible";
 import type { Prospect } from "@/types";
 import { thirdPartyEmployer } from "@/lib/emails/quality/third-party";
 import { subsidiaryOf } from "@/lib/enrichment/subsidiary";
+import { competitorReason } from "@/lib/segments";
 
 /**
  * HORS CIBLE — la même règle, appliquée aux fiches DÉJÀ OUVERTES.
@@ -38,6 +39,14 @@ export function offTargetReason(
     activity: typeof profile.offer === "string" ? profile.offer : null,
   });
   if (forClient) return `signal pour un client : ${forClient}`;
+  /*
+   * SEGMENT (agent3) : l'entreprise vend déjà la prestation qu'on lui
+   * proposerait. C'est un partenaire possible, pas une cible — et surtout, lui
+   * écrire une offre de sous-traitance qu'elle produit elle-même est le plus
+   * sûr moyen de griller le contact. Deux lignes, lues sur la fiche.
+   */
+  const competitor = competitorReason(prospect);
+  if (competitor) return `concurrent / partenaire possible : ${competitor}`;
   /*
    * FILIALE DE GROUPE : la décision se prend au siège — pas proposée par défaut
    * (Cowork, 05/10/2026 : MAVIFLEX, groupe Hörmann, affichée en « Nouveaux »

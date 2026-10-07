@@ -13,7 +13,7 @@ import { OpenAiQuotaBanner } from "@/components/layout/openai-quota-banner";
 import { GMAIL_AUTH_MESSAGE, isGmailAuthError } from "@/lib/outbox/send-errors";
 import { readPrefs } from "@/lib/funnel/settings";
 import { PlatformsCard } from "./_components/platforms/platforms-card";
-import { platformActivity } from "@/lib/opportunities/stats";
+import { freelanceSources, platformActivity } from "@/lib/opportunities/stats";
 import type { Opportunity } from "@/lib/opportunities/types";
 
 export const metadata = { title: "Cockpit — ORION" };
@@ -78,6 +78,7 @@ export default async function CockpitPage({
         title="Cockpit"
         subtitle={subtitle}
         date={date.charAt(0).toUpperCase() + date.slice(1)}
+        sources={freelanceSources(opportunities, now)}
       />
 
       <OpenAiQuotaBanner />
