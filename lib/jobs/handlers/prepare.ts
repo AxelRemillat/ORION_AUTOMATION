@@ -19,6 +19,7 @@ import { needsIntroDraft } from "@/lib/today/tags";
 import type { InboundMessage, Prospect } from "@/types";
 import { createJob } from "../store";
 import { withHunterRunCap } from "@/lib/hunter/run-cap";
+import { withLinkupRun } from "@/lib/linkup/run-cap";
 import { EMPTY_PROGRESS } from "../types";
 import type { JobHandler, StepContext, StepOutcome } from "../runner";
 import { digStep, FILTER_STEPS, filterStep, finishStep, harvestStep, prefsOf, SITE_STEPS, siteStep, STEP_BUDGET_MS, TRIAGE_STEPS, triageStep } from "./funnel";
@@ -157,8 +158,8 @@ async function factsStep(ctx: StepContext): Promise<StepOutcome> {
   let found = 0;
   for (const item of items) {
     if (read >= FACTS_PER_STEP || Date.now() > end) break;
-    const { data } = await ctx.db.from("prospects").select("id, company_name, website, key_figures").eq("id", item.prospectId!).maybeSingle();
-    const prospect = data as { id: string; company_name: string; website: string | null; key_figures: Record<string, unknown> | null } | null;
+    const { data } = await ctx.db.from("prospects").select("id, company_name, website, sector, key_figures").eq("id", item.prospectId!).maybeSingle();
+    const prospect = data as { id: string; company_name: string; website: string | null; sector: string | null; key_figures: Record<string, unknown> | null } | null;
     if (!prospect || Array.isArray(prospect.key_figures?.facts)) continue;
     const run = await ensureFacts(ctx.db, prospect).catch(() => null);
     read += 1;
@@ -325,8 +326,16 @@ export function openAiGuarded(step: Step, budget: () => Promise<OpenAiBudgetStat
  * sous ce plafond, compté depuis la création du job (lib/hunter/gate.ts).
  */
 const capped = (step: Step): Step => (ctx) => {
-  const cap = typeof ctx.job.params?.hunterCap === "number" ? (ctx.job.params.hunterCap as number) : null;
-  return withHunterRunCap(cap, new Date(ctx.job.created_at ?? Date.now()), () => step(ctx));
+  const params = ctx.job.params ?? {};
+  const cap = typeof params.hunterCap === "number" ? (params.hunterCap as number) : null;
+  const since = new Date(ctx.job.created_at ?? Date.now());
+  // Linkup (Cowork #37) : plafond du job (`linkupCap`) et segment (`segment`, part réservée LINKUP_RESERVE).
+  const linkup = {
+    cap: typeof params.linkupCap === "number" ? (params.linkupCap as number) : null,
+    segment: typeof params.segment === "string" ? (params.segment as string) : null,
+    since,
+  };
+  return withLinkupRun(linkup, () => withHunterRunCap(cap, since, () => step(ctx)));
 };
 
 const STEPS: Step[] = [

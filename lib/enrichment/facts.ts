@@ -1,4 +1,5 @@
 import { blocksOf } from "@/lib/contact-finder/site-people";
+import { rescoreFacts } from "./facts-rules";
 
 /**
  * FAITS DISTINCTIFS SOURCÉS — contrat de données avec le générateur de mails
@@ -161,7 +162,7 @@ export function factsPrompt(company: string, pages: readonly FactPage[]): string
  * Faits validés à partir de la réponse du modèle : JSON lisible, extrait
  * présent dans SA page, URL connue, bornes respectées. Pur.
  */
-export function validateFacts(raw: string, pages: readonly FactPage[]): SourcedFact[] {
+export function validateFacts(raw: string, pages: readonly FactPage[], activity?: string | null, company?: string | null): SourcedFact[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -187,7 +188,8 @@ export function validateFacts(raw: string, pages: readonly FactPage[]): SourcedF
     if (facts.some((existing) => normalizeForQuote(existing.text) === normalizeForQuote(quote))) continue;
     facts.push({ text: quote, source_url: page.url, page_kind: kind, distinctiveness: level, process_hint: hint });
   }
-  return facts.sort((a, b) => b.distinctiveness - a.distinctiveness).slice(0, 5);
+  // Règles déterministes (facts-rules.ts) : 3 exige une preuve, 1 pour une paraphrase de l'activité.
+  return rescoreFacts(facts, activity, company).facts.slice(0, 5);
 }
 
 export const factsScore = (facts: readonly SourcedFact[]): 0 | 1 | 2 | 3 =>
@@ -207,7 +209,7 @@ export interface FactsRun {
 }
 
 /** Lecture du site (accueil + 6 pages au plus) et extraction des faits. */
-export async function extractFacts(company: string, website: string, deps: FactsDeps): Promise<FactsRun> {
+export async function extractFacts(company: string, website: string, deps: FactsDeps, activity?: string | null): Promise<FactsRun> {
   const origin = /^https?:\/\//i.test(website) ? website : `https://${website}`;
   const home = await deps.fetchHtml(origin);
   if (!home) return { facts: [], score: 0, pages: [], note: "site illisible" };
@@ -221,6 +223,6 @@ export async function extractFacts(company: string, website: string, deps: Facts
   const readable = pages.filter((page) => page.text.length > 80);
   if (!readable.length) return { facts: [], score: 0, pages: [], note: "aucun texte exploitable" };
   const raw = await deps.ask(FACTS_SYSTEM, factsPrompt(company, readable));
-  const facts = validateFacts(raw, readable);
+  const facts = validateFacts(raw, readable, activity, company);
   return { facts, score: factsScore(facts), pages: readable.map((page) => page.url), note: null };
 }
