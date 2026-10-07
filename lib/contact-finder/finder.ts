@@ -1,3 +1,4 @@
+import { isRoleBox } from "./role-boxes";
 import { domainOfEmail, exclusionReason, isFreeMailbox, isServiceProvider, toDomain } from "./domains";
 import { classifyEmail, emailDomains, extractEmails, extractPhones, namesSomeone, type EmailKind } from "./extract";
 import { pagesToVisit, textOf } from "./links";
@@ -303,7 +304,7 @@ export async function runContactSearch(
   for (const domain of hunterSkip ? [] : domains) {
     if (!can("hunterDomainSearch")) break;
     use("hunterDomainSearch");
-    const hits = (await deps.hunterDomainSearch(domain)) ?? [];
+    const hits = ((await deps.hunterDomainSearch(domain)) ?? []).filter((hit) => !isRoleBox(hit.email));
     trace.steps.push(`Hunter domain-search ${domain} : ${hits.length} adresse(s)`);
     trace.hunter!.push({ call: "domain-search", target: domain, result: `${hits.length} adresse(s)` });
     for (const hit of hits) {
@@ -324,7 +325,7 @@ export async function runContactSearch(
     const found = await deps.hunterFinder(domains[0], person.firstName, person.lastName);
     trace.steps.push(`Hunter email-finder ${person.firstName} ${person.lastName} @${domains[0]} : ${found?.email ?? "rien"}`);
     trace.hunter!.push({ call: "email-finder", target: `${person.firstName} ${person.lastName} @${domains[0]}`, result: found?.email ?? "rien" });
-    if (found) nominals.unshift({ email: found.email, url: siteUrl ?? `https://${domains[0]}`, by: "hunter:email-finder", verified: null, guessed: true });
+    if (found && !isRoleBox(found.email)) nominals.unshift({ email: found.email, url: siteUrl ?? `https://${domains[0]}`, by: "hunter:email-finder", verified: null, guessed: true });
   }
   // Le dirigeant d'abord : c'est à lui qu'on écrit.
   nominals.sort((a, b) => Number(matchesPerson(b.email, person)) - Number(matchesPerson(a.email, person)));

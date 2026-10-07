@@ -108,7 +108,7 @@ export function prospectItem(input: {
   const tags = tagsOf({
     email: contact.email,
     emailDoubtful: card?.emailDoubtful ?? false,
-    contactToCheck: Boolean(contactDomainMismatch(contact.email, prospect.website)) && !contactConfirmed(figures, contact.email),
+    contactToCheck: (Boolean(contactDomainMismatch(contact.email, prospect.website)) && !contactConfirmed(figures, contact.email)) || Boolean(figures.contact_review),
     // Connue seulement si Pappers l'a lue ou si elle a été vérifiée (Pappers,
     // INPI, à la main) : une fiche ancienne sans ces marques n'est PAS sûre.
     oppositionUnverified: !oppositionKnown(prospect.key_figures as Record<string, unknown> | undefined),
