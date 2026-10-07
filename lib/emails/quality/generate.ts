@@ -3,24 +3,25 @@ import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { withOptOut } from "@/lib/mail-preflight/opt-out";
 import { DEMO_LINKS, demoFor, demoForProposal } from "./demo-links";
-import { combineJudges, judgeMail, judgeMailSenior, PASS_SCORE, type JudgeVerdict } from "./judge";
+import { checklistFeedback, checklistReason, judgeChecklist, type ChecklistVerdict } from "./checklist";
 import { checkMail, type RuleResult } from "./rules";
-import { ctaFor, type MailParts } from "./template";
-import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyFor, subjectArmFor, type MailFamily } from "./families";
+import { countWords, ctaFor, type MailParts } from "./template";
+import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyFor, FAMILY_LIMITS, subjectArmFor, type MailFamily } from "./families";
 import { buildWriterPrompt, parseParts } from "./writer";
 import { avecAllowed, mailReadiness } from "./readiness";
 import type { SubjectArm } from "./experiment";
 import type { KeyFact } from "./facts-gate";
 
 /**
- * GÉNÉRATION QUALITÉ — objectif « envoyable sans retouche » (≥ 9/10).
+ * GÉNÉRATION QUALITÉ — objectif « envoyable sans retouche ».
  *
- *   rédaction → garde-fou déterministe → juge (modèle léger)
- *   → réécriture si une règle casse ou si la note est < 9 (2 essais au plus)
- *   → toujours < 9 : brouillon gardé, marqué « À revoir » avec la raison.
+ *   rédaction → (trop long : raccourcissement dédié) → garde-fou déterministe
+ *   → CHECK-LIST (Cowork #32 : critères OUI/NON avec citation, plus de note
+ *   globale) → réécriture CIBLÉE sur les seuls critères à NON (3 essais au plus)
+ *   → un critère toujours à NON : brouillon gardé, « À revoir » avec la raison.
  *
- * Le meilleur essai est retenu : d'abord celui qui passe le garde-fou, puis la
- * meilleure note. Rien n'est jamais envoyé ici.
+ * Le meilleur essai est retenu : d'abord celui qui passe le garde-fou, puis le
+ * plus de critères à OUI. Rien n'est jamais envoyé ici.
  */
 
 export const MAX_REWRITES = 2;
@@ -61,7 +62,7 @@ export interface QualityAttempt {
   /** Corps complet : mention « stop » et signature comprises. */
   body: string;
   rules: RuleResult;
-  verdict: JudgeVerdict | null;
+  verdict: ChecklistVerdict | null;
   /** Démo retenue pour cet essai. */
   demo?: string;
 }
@@ -69,7 +70,10 @@ export interface QualityAttempt {
 export interface QualityOutcome {
   subject: string;
   body: string;
+  /** 10 − pénalités des critères à NON (check-list) ; `null` = relecture indisponible. */
   score: number | null;
+  /** Verdict critère par critère du brouillon retenu. */
+  checklist?: ChecklistVerdict | null;
   /** `true` → « À revoir » : pas dans « Nouveaux prospects ». */
   needsReview: boolean;
   /** Pourquoi il est à revoir, en une ligne ; `null` sinon. */
@@ -84,6 +88,15 @@ export interface QualityOutcome {
 }
 
 const rank = (attempt: QualityAttempt) => (attempt.rules.ok ? 100 : 0) - attempt.rules.failures.length + (attempt.verdict?.score ?? 0);
+
+/** Raccourcissements dédiés par essai, HORS des essais (Cowork #32 : F2 au-delà de 80 mots). */
+export const SHORTEN_PASSES = 2;
+
+export function buildShortenMailPrompt(family: MailFamily, words: number, max: number): string {
+  return `Tu raccourcis un mail de prospection d'Axel Remillat. Il fait ${words} mots une fois assemblé ; la limite de cette famille (${family}) est ${max}. Retire environ ${words - max + 5} mots dans l'accroche et la proposition.
+GARDE : le fait sur l'entreprise, le problème qui en découle, la proposition à la 1re personne et à la voix active, l'objet. COUPE : adjectifs, répétitions, détails secondaires. N'ajoute rien, ne change pas le sens.
+Réponds UNIQUEMENT en JSON, mêmes clés : {"subject":"…","hook":"…","proposal":"…"}`;
+}
 
 /** Pas de mail : la fiche part en « À revoir » avec cette raison, sans appel payant. */
 export type QualityBlocked = { blocked: string };
@@ -119,8 +132,16 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     ...[...new Set([...facts, ...own])].map((fact) => `- ${fact.label} : ${fact.value}`),
     ...(input.keyFacts ?? []).map((fact) => `- Fait vérifié (${fact.distinctiveness}/3) : ${fact.text}`),
   ].join("\n");
-  // Faits vérifiés (key_figures.facts, Cowork #31) : le juge de grille vérifie que le fait cité en vient.
-  const verifiedFacts = (input.keyFacts ?? []).map((fact) => fact.text);
+  // Faits soumis au critère C1 : key_figures.facts quand la fiche en a (Cowork #31), sinon ce que l'on sait d'elle.
+  // Le juge voit EXACTEMENT ce que voit le rédacteur (mesure #32 : C1 refusait « épandeurs pour granulés »,
+  // lu dans le profil, faute de le trouver dans les 5 extraits) : faits vérifiés + ce que l'on sait d'elle.
+  // (`factText` porte déjà les faits vérifiés de key_figures.facts.)
+  const checklistFacts = [
+    factText,
+    input.activity ? `- Activité (leur site) : ${input.activity}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
 
@@ -132,7 +153,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
     ).catch(() => "");
-    const parts = parseParts(raw, family);
+    let parts = parseParts(raw, family);
     if (!parts) {
       feedback = "La réponse n'était pas le JSON demandé : {\"subject\",\"hook\",\"proposal\"}.";
       continue;
@@ -145,7 +166,23 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     const fromText = demoFor(`${parts.subject} ${parts.hook}`);
     // Jamais la page générique (ANTARES, 06/10) : à défaut, la démo des e-mails reçus.
     const chosen = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo.key !== "general" ? demo : DEMO_LINKS.emails;
-    const core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta });
+    let core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta });
+    // Trop long : raccourcissement dédié AVANT le jugement, hors des essais.
+    const { max } = FAMILY_LIMITS[family];
+    for (let pass = 0; pass < SHORTEN_PASSES && countWords(core) > max; pass += 1) {
+      const shorter = parseParts(
+        await input
+          .ask("writer", buildShortenMailPrompt(family, countWords(core), max), JSON.stringify({ subject: parts.subject, hook: parts.hook, proposal: parts.proposal }), 0.3, "qualite:raccourci")
+          .catch(() => ""),
+        family,
+      );
+      if (!shorter) continue;
+      const next = assembleFamily(family, shorter, { greeting: input.greeting, demo: chosen, cta });
+      if (countWords(next) < countWords(core)) {
+        parts = shorter;
+        core = next;
+      }
+    }
     const rules = checkMail(parts, core, {
       greeting: input.greeting,
       facts,
@@ -160,41 +197,39 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       family,
       knownText: [input.activity, input.sector, input.brief.pain.task, input.brief.pain.automationIdea, factText].filter(Boolean).join(" "),
     });
-    // Le juge ne note qu'un mail qui passe le garde-fou : inutile de payer pour
-    // une note que la règle a déjà tranchée.
-    // Double juge : la grille de la famille ET le relecteur senior ; les deux doivent donner 9 ou plus.
+    // La check-list n'est demandée que pour un mail qui passe le garde-fou :
+    // inutile de payer pour ce que la règle a déjà tranché.
     const verdict = rules.ok
-      ? combineJudges(
-          ...(await Promise.all([
-            judgeMail(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, family, verifiedFacts }, `qualite:juge:${attempt}`),
-            judgeMailSenior(input.ask, { subject: parts.subject, body: core, company: input.companyName, facts: factText, contactRole: input.recipientRole }, `qualite:juge-senior:${attempt}`),
-          ])),
-        )
+      ? await judgeChecklist(input.ask, { subject: parts.subject, core, family, greeting: input.greeting, company: input.companyName, facts: checklistFacts, recipientRole: input.recipientRole }, `qualite:checklist:${attempt}`)
       : null;
     const body = withOptOut(`${core}\n\n${input.signature}`, input.signature);
     history.push({ parts, body, rules, verdict, demo: chosen.path });
-    if (rules.ok && verdict && verdict.score >= PASS_SCORE) break;
+    if (rules.ok && verdict?.ready) break;
 
+    // Réécriture CIBLÉE : seulement les critères à NON, avec leur citation.
     feedback = rules.ok
-      ? [`Note du relecteur : ${verdict?.score ?? "?"}/10.`, ...(verdict?.reasons ?? []).map((line) => `- ${line}`), verdict?.fix ? `Consigne : ${verdict.fix}` : ""].filter(Boolean).join("\n")
+      ? verdict
+        ? `Critères à corriger (tous les autres sont bons, ne les change pas) :\n${checklistFeedback(verdict)}`
+        : "Relecture indisponible : reprends le mail tel quel, sans changer le fond."
       : rules.failures.map((line) => `- ${line}`).join("\n");
   }
 
   if (!history.length) return { error: "Brouillon inexploitable : le rédacteur n'a rendu aucun texte utilisable." };
   const best = [...history].sort((a, b) => rank(b) - rank(a))[0];
   const score = best.verdict?.score ?? null;
-  const passed = best.rules.ok && score !== null && score >= PASS_SCORE;
+  const passed = best.rules.ok && Boolean(best.verdict?.ready);
   const reviewReason = passed
     ? null
     : !best.rules.ok
       ? best.rules.failures[0]
-      : score === null
+      : !best.verdict
         ? "Relecture automatique indisponible : à relire avant envoi."
-        : `Note ${score}/10 (double relecture) : ${best.verdict?.reasons[0] ?? "sous le seuil de 9"}`;
+        : checklistReason(best.verdict);
   return {
     subject: best.parts.subject,
     body: best.body,
     score,
+    checklist: best.verdict,
     needsReview: !passed,
     reviewReason,
     attempts: history.length,

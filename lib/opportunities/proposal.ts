@@ -3,6 +3,7 @@ import { countWords } from "@/lib/emails/quality/template";
 import { DEMO_LINKS, type DemoLink } from "@/lib/emails/quality/demo-links";
 import { opportunityDemoUrl } from "./analyze";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "./calibration";
+import { judgeProposalChecklist, proposalChecklistFeedback, proposalChecklistReason, type ProposalChecklist } from "./proposal-checklist";
 import type { Language, Platform } from "./types";
 import {
   DELAY_CAP_DAYS,
@@ -81,7 +82,10 @@ export interface ProposalInput {
 
 export interface ProposalOutcome {
   text: string;
+  /** 10 − pénalités des critères à NON (check-list, Cowork #32) ; `null` = relecture indisponible. */
   score: number | null;
+  /** Verdict critère par critère de la proposition retenue. */
+  checklist?: ProposalChecklist | null;
   needsReview: boolean;
   reason: string | null;
   attempts: number;
@@ -117,6 +121,7 @@ export type PortfolioTitle = (typeof PORTFOLIO_TITLES)[number];
 /** Besoin de prospection : trouver des clients, leur écrire, mails commerciaux. */
 export const PROSPECTION_NEED = /(prospect|recherche de clients?|trouver (des |de nouveaux )?clients|g[ée]n[ée]ration de leads?|\bleads?\b|mails? commerciaux|e-?mails? de prospection|emailing|d[ée]marchage|lead gen)/i;
 
+const DOCUMENT_NEED = /(excel|xlsx|tarif|fichiers? de prix|colonnes?|import(er)? dans|pdf|bons? de commande|documents? fournisseurs?)/i;
 const EMAIL_NEED = /e-?mails?|courriels?|gmail|outlook|bo[iî]te (de r[ée]ception|mail)|\bmails?\b/i;
 
 /**
@@ -136,7 +141,8 @@ export function portfolioTitle(demo: DemoLink["key"], context = "", kind: Projec
     case "factures":
       return "Extraction automatique de factures";
     case "fichier":
-      return EMAIL_NEED.test(context) ? "Tri automatique des e-mails entrants" : null;
+      // Fichiers de prix, tableaux, documents à lire et importer : Axel cite l'extraction de factures (P2, 06/10).
+      return EMAIL_NEED.test(context) ? "Tri automatique des e-mails entrants" : DOCUMENT_NEED.test(context) ? "Extraction automatique de factures" : null;
     default:
       return "Tri automatique des e-mails entrants";
   }
@@ -299,7 +305,9 @@ export function checkProposal(
   const written = [parts.reading, ...parts.steps, parts.framing, parts.references ?? "", parts.question].join("\n");
   const words = countWords(core);
   const limits = wordsFor(context.platform);
-  if (words < limits.min || words > limits.max) {
+  // Codeur, Malt, ComeUp : la vraie limite est celle du message privé (1 000 caractères, contrôlée plus bas) ;
+  // la proposition Sage réellement envoyée par Axel fait ~155 mots.
+  if (words < limits.min || (words > limits.max && !isNoContactPlatform(platform))) {
     failures.push(`${words} mots : la proposition fait ${limits.min} à ${limits.max} mots (signature non comprise).`);
   }
   if (isNoContactPlatform(platform) && text.length > PRIVATE_MESSAGE_MAX_CHARS) {
@@ -554,7 +562,7 @@ export async function judgeProposal(
 interface Attempt {
   text: string;
   rules: ProposalRules;
-  verdict: ProposalVerdict | null;
+  verdict: ProposalChecklist | null;
   parts: ProposalParts;
 }
 
@@ -617,36 +625,39 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
     const parts = isNoContactPlatform(input.platform) ? await shortenIfLong(input, written, assemble) : written;
     const { core, text } = assemble(parts);
     const rules = checkProposal(parts, core, { language: input.language, budget: input.budget, platform: input.platform, kind: input.kind, requested: requestedItems(input.body), ad: input.body }, text);
-    // Le juge ne note qu'une proposition qui passe les règles.
-    // Double juge : le relecteur (grille) ET le client exigeant ; les deux doivent donner 9 ou plus.
-    const judged = rules.ok
-      ? await Promise.all([
-          judgeProposal(input.ask, { title: input.title, body: input.body, budget: input.budget, text: core, platform: input.platform }, `opportunites:juge:${round}`),
-          judgeProposalClient(input.ask, { title: input.title, body: input.body, budget: input.budget, text, platform: input.platform }, `opportunites:juge-client:${round}`),
-        ])
+    // Check-list (Cowork #32) : la grille d'Axel en 8 critères OUI/NON, seulement si les règles passent.
+    const verdict = rules.ok
+      ? await judgeProposalChecklist(
+          input.ask,
+          { title: input.title, text, platform: input.platform, ad: input.body, budget: input.budget, amountEur: parts.amountEur ?? null, delayDays: parts.delayDays ?? null, kind: input.kind },
+          `opportunites:checklist:${round}`,
+        )
       : null;
-    const verdict = judged ? combineVerdicts(judged[0], judged[1]) : null;
     attempts.push({ text, rules, verdict, parts });
-    if (rules.ok && verdict && verdict.score >= PROPOSAL_PASS) break;
+    if (rules.ok && verdict?.ready) break;
+    // Réécriture CIBLÉE : seulement les critères à NON, avec leur citation.
     feedback = rules.ok
-      ? [`Note du relecteur : ${verdict?.score ?? "?"}/10.`, ...(verdict?.reasons ?? []).map((line) => `- ${line}`), verdict?.fix ? `Consigne : ${verdict.fix}` : ""].filter(Boolean).join("\n")
+      ? verdict
+        ? `Critères à corriger (les autres sont bons, ne les change pas) :\n${proposalChecklistFeedback(verdict)}`
+        : "Relecture indisponible : reprends la réponse telle quelle."
       : rules.failures.map((line) => `- ${line}`).join("\n");
   }
   if (!attempts.length) return { error: "Proposition inexploitable : le rédacteur n'a rendu aucun texte utilisable." };
   const best = [...attempts].sort((a, b) => rank(b) - rank(a))[0];
   const score = best.verdict?.score ?? null;
-  const passed = best.rules.ok && score !== null && score >= PROPOSAL_PASS;
+  const passed = best.rules.ok && Boolean(best.verdict?.ready);
   return {
     text: best.text,
     score,
+    checklist: best.verdict,
     needsReview: !passed,
     reason: passed
       ? null
       : !best.rules.ok
         ? best.rules.failures[0]
-        : score === null
+        : !best.verdict
           ? "Relecture automatique indisponible : à relire."
-          : `Note ${score}/10 (${best.verdict?.reasons[0] ?? "double relecture"}) : ${best.verdict?.reasons[1] ?? "sous le seuil de 9"}`,
+          : proposalChecklistReason(best.verdict),
     attempts: attempts.length,
     amountEur: best.parts.amountEur ?? null,
     delayDays: best.parts.delayDays ?? null,
