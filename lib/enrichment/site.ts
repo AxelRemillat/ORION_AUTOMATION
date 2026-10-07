@@ -55,7 +55,7 @@ export interface SiteCoverage {
   status: SiteStatus;
   pages: SitePage[];
   /** D'où vient le domaine retenu. */
-  discoveredBy: "pappers" | "annuaire" | "email" | "hunter" | "linkup" | null;
+  discoveredBy: "pappers" | "annuaire" | "email" | "hunter" | "devine" | "linkup" | null;
   /** Coûts engagés ici : lectures Linkup de repli, recherche Linkup. */
   linkupCalls: number;
   /** Raison d'un échec, affichée telle quelle. */
@@ -364,7 +364,36 @@ export function candidateDomains(
     seen.add(item.domain);
     candidates.push({ domain: item.domain, by: item.by });
   }
+
+  // Dernier recours GRATUIT, avant la recherche web payante : le domaine déduit
+  // du nom. Il n'est jamais `nameProven` — la page devra nommer l'entreprise.
+  if (!candidates.length) {
+    for (const domain of guessedDomains(input.name)) {
+      if (seen.has(domain) || NOT_OFFICIAL.test(domain)) continue;
+      seen.add(domain);
+      candidates.push({ domain, by: "devine" });
+    }
+  }
   return candidates;
+}
+
+/**
+ * Domaines plausibles pour un nom d'entreprise : `.fr` puis `.com`.
+ *
+ * Le nom est réduit à son noyau — forme juridique, enseignes entre parenthèses
+ * et mots génériques retirés. « MAETVA (MA & VA DIRECT) » donne « maetva.fr »
+ * et « maetva.com ». Sous cinq caractères on n'essaie pas : « UMT » ou « CB »
+ * donneraient n'importe quoi.
+ */
+export function guessedDomains(name: string): string[] {
+  const core = (name.split("(")[0] ?? name)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(sas|sasu|sarl|eurl|sa|snc|scop|sci|societe|ste|groupe|france|holding)\b/g, " ")
+    .replace(/[^a-z0-9]/g, "");
+  if (core.length < 5 || core.length > 30) return [];
+  return [`${core}.fr`, `${core}.com`];
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +585,9 @@ export async function coverSite(
       candidate.nameProven === true ||
       (options.trustKnownWebsite === true && candidate.by === "annuaire") ||
       pageConfirmsCompany(joined, input) ||
+      // Domaine deviné : la page doit nommer l'entreprise. Le label du domaine
+      // EST le nom ; la mention sur la page est la seconde preuve.
+      (candidate.by === "devine" && namesCompany(joined, input)) ||
       (namesCompany(joined, input) && (await legalNoticeConfirms(origin, read.html, joined, input, prospectId)));
     if (!confirmed) {
       base.note = `Site ${candidate.domain} écarté : la page ne mentionne ni le nom, ni le SIREN, ni la ville`;

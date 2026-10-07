@@ -1,5 +1,5 @@
 import { DEMO_HOST } from "@/lib/emails/quality/demo-links";
-import { countWords } from "@/lib/emails/quality/template";
+import { countedText, wordCount } from "@/lib/mail-preflight/words";
 
 /**
  * FAMILLE F5 « PARTENAIRE » — le mail du segment Agences.
@@ -28,8 +28,14 @@ export const F5_MIN_WORDS = 40;
 /** Ce que la vérification lit : le mail produit, et ce qui a servi à l'écrire. */
 export interface F5Mail {
   subject: string;
-  /** Corps complet, salutation et demande comprises, sans signature. */
+  /** Corps tel qu'il est stocké, signature et mention « stop » comprises. */
   body: string;
+  /**
+   * Signature posée par le code. Fournie, elle est RETIRÉE avant toute
+   * vérification : elle contient un lien du domaine de démo et une vingtaine
+   * de mots qui ne sont pas de l'argumentaire.
+   */
+  signature?: string | null;
   /** Faits employés, avec leur URL. Un fait sans URL n'est pas sourcé. */
   facts: readonly { label: string; url?: string | null }[];
 }
@@ -52,6 +58,13 @@ export interface F5Criterion {
 /** Le problème, tel que F5 doit le formuler : celui des CLIENTS de l'agence. */
 const CLIENT_DEMAND =
   /\b(?:leurs?|vos|des|ces)\s+clients?\b[^.!?]{0,140}\b(?:demand|r[ée]clam|attend|automatis|ia\b|intelligence artificielle|int[ée]gration|outil)/i;
+/**
+ * Friction sur un LIVRABLE : la forme la plus fréquente du problème côté
+ * client, et elle ne nomme pas toujours « les clients ».
+ */
+const DELIVERY_FRICTION =
+  /\b(?:brief|demande|proposition|devis|campagne|livrable|bilan|maquette|rapport|reporting|cahier des charges)\b[^.!?]{0,120}\b(?:incompl[èe]t|manquant|retard|tarde|attend|bloqu|repasse|relanc|ressais)/i;
+
 const CAPACITY =
   /\b(?:bande passante|capacit[ée]|charge|surcharg|pas le temps|sans recruter|sans embaucher|[ée]quipe (?:r[ée]duite|limit[ée]e)|refus(?:er|ez)? des (?:projets|demandes))\b/i;
 
@@ -71,6 +84,15 @@ const FIRST_PERSON = /\bj(?:e|'|’)\s*\w|\bje\b|\bmoi\b|\bmon\b|\bma\b|\bmes\b/
  */
 const questions = (body: string) =>
   (stripUrls(body).match(/\?/g) ?? []).length;
+
+/**
+ * Le CORPS ARGUMENTATIF : sans la signature ni la mention « stop ».
+ *
+ * `countedText` est le comptage unique de l'application (lib/mail-preflight) :
+ * l'éditeur, le validateur de génération et le contrôle avant envoi l'emploient
+ * déjà. La grille F5 s'y aligne plutôt que de recompter à sa façon.
+ */
+const argument = (mail: F5Mail): string => countedText(mail.body, mail.signature ?? null);
 
 /** Retire les URL, nues ou protocolées. */
 const stripUrls = (text: string) =>
@@ -97,12 +119,17 @@ export const F5_CRITERIA: readonly F5Criterion[] = [
     instruction:
       "Nomme le problème côté AGENCE : des demandes d'automatisation ou d'IA venant de leurs clients qu'ils ne savent pas produire, ou une capacité technique qui les oblige à refuser. Pas de problème inventé : si le site ne le laisse pas voir, dis-le comme une question.",
     check: (mail) => {
-      const demand = CLIENT_DEMAND.test(mail.body);
-      const capacity = CAPACITY.test(mail.body);
-      if (demand || capacity) {
-        return { ok: true, detail: demand ? "demandes clients" : "capacité limitée" };
+      const core = argument(mail);
+      const demand = CLIENT_DEMAND.test(core);
+      const capacity = CAPACITY.test(core);
+      const friction = DELIVERY_FRICTION.test(core);
+      if (demand || capacity || friction) {
+        return {
+          ok: true,
+          detail: demand ? "demandes clients" : capacity ? "capacité limitée" : "friction sur un livrable",
+        };
       }
-      return { ok: false, detail: "ni demande client ni contrainte de capacité formulée" };
+      return { ok: false, detail: "ni demande client, ni contrainte de capacité, ni friction sur un livrable" };
     },
   },
   {
@@ -111,8 +138,9 @@ export const F5_CRITERIA: readonly F5Criterion[] = [
     instruction:
       "Propose de réaliser en marque blanche, à la première personne : « je construis », « je livre sous votre nom ». L'agence garde la relation client et la facturation.",
     check: (mail) => {
-      const white = WHITE_LABEL.test(mail.body);
-      const first = FIRST_PERSON.test(mail.body);
+      const core = argument(mail);
+      const white = WHITE_LABEL.test(core);
+      const first = FIRST_PERSON.test(core);
       if (white && first) return { ok: true, detail: "marque blanche explicite, à la 1re personne" };
       if (!white) return { ok: false, detail: "la marque blanche n'est pas dite explicitement" };
       return { ok: false, detail: "proposition pas à la première personne" };
@@ -124,8 +152,9 @@ export const F5_CRITERIA: readonly F5Criterion[] = [
     instruction:
       "Donne un lien de démo testable en une minute, ou cite ORION comme preuve de ce que tu construis seul. Un lien, pas trois.",
     check: (mail) => {
-      const links = (mail.body.match(new RegExp(DEMO_HOST.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
-      const orion = /\bORION\b/.test(mail.body);
+      const core = argument(mail);
+      const links = (core.match(new RegExp(DEMO_HOST.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
+      const orion = /\bORION\b/.test(core);
       if (links === 1) return { ok: true, detail: "une démo liée" };
       if (links === 0 && orion) return { ok: true, detail: "ORION cité comme preuve" };
       if (links === 0) return { ok: false, detail: "aucune preuve : ni démo ni ORION" };
@@ -138,10 +167,11 @@ export const F5_CRITERIA: readonly F5Criterion[] = [
     instruction:
       "Termine par UNE question, et une seule : un créneau de 15 minutes cette semaine. Aucune autre question dans le mail.",
     check: (mail) => {
-      const count = questions(mail.body);
+      const core = argument(mail);
+      const count = questions(core);
       if (count === 0) return { ok: false, detail: "aucune demande" };
       if (count > 1) return { ok: false, detail: `${count} questions : une seule est permise` };
-      return FIFTEEN_MIN.test(mail.body)
+      return FIFTEEN_MIN.test(core)
         ? { ok: true, detail: "une question, 15 minutes" }
         : { ok: false, detail: "la demande ne propose pas de créneau de 15 minutes" };
     },
@@ -151,7 +181,7 @@ export const F5_CRITERIA: readonly F5Criterion[] = [
     label: `${F5_MAX_WORDS} mots au plus`,
     instruction: `Le corps tient en ${F5_MAX_WORDS} mots au maximum, signature exclue. En dessous de ${F5_MIN_WORDS}, il ne dit rien.`,
     check: (mail) => {
-      const words = countWords(mail.body);
+      const words = wordCount(argument(mail));
       if (words > F5_MAX_WORDS) return { ok: false, detail: `${words} mots (max ${F5_MAX_WORDS})` };
       if (words < F5_MIN_WORDS) return { ok: false, detail: `${words} mots seulement (min ${F5_MIN_WORDS})` };
       return { ok: true, detail: `${words} mots` };
