@@ -1,4 +1,5 @@
 import { HeroScene } from "./hero-scene/hero-scene";
+import type { FreelanceSource } from "@/lib/opportunities/stats";
 
 /**
  * En-tête du Cockpit — la signature visuelle d'ORION.
@@ -10,10 +11,13 @@ export function CockpitHeader({
   title,
   subtitle,
   date,
+  sources,
 }: {
   title: string;
   subtitle: string;
   date: string;
+  /** Prospection freelance (Codeur, Upwork, Malt/ComeUp) : envoyées et taux de réponse sur 30 jours. */
+  sources?: FreelanceSource[];
 }) {
   return (
     <header
@@ -48,6 +52,23 @@ export function CockpitHeader({
         <p className="mt-1.5 max-w-xl text-sm leading-relaxed" style={{ color: "var(--muted)" }}>
           {subtitle}
         </p>
+        {sources && sources.length > 0 && (
+          <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Prospection freelance, 30 derniers jours">
+            {sources.map((source) => (
+              <li
+                key={source.key}
+                className="rounded-full border border-line bg-surface/80 px-2.5 py-1 text-[12px]"
+                title={`${source.label} : ${source.sent} proposition(s) envoyée(s), ${source.replies} réponse(s) sur 30 jours`}
+              >
+                <span className="text-text">{source.label}</span>{" "}
+                <span className="font-data text-muted">
+                  {source.sent} env. · {source.replyRate === null ? "—" : `${Math.round(source.replyRate * 100)} %`} de réponse
+                </span>
+              </li>
+            ))}
+            <li className="px-1 py-1 text-[11px] text-faint">30 j</li>
+          </ul>
+        )}
       </div>
     </header>
   );

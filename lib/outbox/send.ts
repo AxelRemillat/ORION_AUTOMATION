@@ -8,6 +8,9 @@ import { buildDeliverability, DELIVERABILITY_COLUMNS, type SentRow } from "./del
 import { offWeekend } from "./paris-time";
 import { RELANCE_TYPES, replySinceLastSend } from "./relances";
 import { followUpBlock, followUpRefusal, oppositionVerified } from "./follow-up-policy";
+import { segmentOf } from "@/lib/segments";
+import { allowanceLabel, segmentAllowance } from "@/lib/segments/quota";
+import { sentTodayForSegment } from "@/lib/segments/sent-today";
 
 /**
  * LE chemin d'envoi d'un mail — manuel (/api/emails/send) comme programmé
@@ -150,6 +153,26 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
       `Plafond d'envois du jour atteint (${cap.sentToday}/${cap.dailyCap}) : réessayez demain.`,
       429,
     );
+  }
+
+  /*
+   * QUOTA DE SEGMENT (agent3) — après le plafond commun, et jamais à sa place.
+   *
+   * Un segment se réserve une part du plafond du jour (5 pour « agences ») pour
+   * qu'une journée ne devienne pas un envoi de masse sur un seul marché. Il ne
+   * débloque rien : si le commun est atteint, le test ci-dessus a déjà refusé.
+   * Les réponses ne sont pas concernées — répondre à quelqu'un qui a écrit n'est
+   * pas de la prospection.
+   */
+  const segment = segmentOf(row);
+  if (segment && message.type !== "reponse") {
+    const sentForSegment = await sentTodayForSegment(db, message.user_id, segment, now);
+    const allowance = segmentAllowance({
+      segment,
+      sent: sentForSegment,
+      commonRemaining: cap.remaining,
+    });
+    if (allowance.remaining <= 0) return fail("blocked", `${allowanceLabel(allowance)}.`, 429);
   }
   return null;
 }

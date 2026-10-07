@@ -284,6 +284,8 @@ export function buildSearchParams(
 
   if (criteria.q?.trim()) params.set("q", criteria.q.trim());
   if (criteria.section) params.set("section_activite_principale", criteria.section);
+  // Codes NAF précis (agent3) : l'API accepte une liste séparée par des virgules.
+  if (criteria.naf?.length) params.set("activite_principale", criteria.naf.join(","));
   if (criteria.tranches?.length) {
     params.set("tranche_effectif_salarie", criteria.tranches.join(","));
   }

@@ -35,6 +35,8 @@ export interface TagInput {
   qualityReview?: boolean;
   /** Porte « faits » (Cowork #31) : aucun fait distinctif, mail volontairement non rédigé. */
   factsInsufficient?: boolean;
+  /** Segment de la fiche (lib/segments) : étiquette d'appartenance, non bloquante. */
+  segment?: string | null;
 }
 
 export function tagsOf(input: TagInput): TodayTag[] {
@@ -53,6 +55,8 @@ export function tagsOf(input: TagInput): TodayTag[] {
   if (input.subsidiary) tags.push("Filiale de groupe");
   if (input.factsInsufficient) tags.push("Faits insuffisants");
   else if (input.qualityReview) tags.push("À revoir");
+  // Appartenance à un segment : information, jamais un blocage.
+  if (input.segment === "agences") tags.push("Agences");
   return tags;
 }
 

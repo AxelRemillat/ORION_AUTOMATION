@@ -54,6 +54,19 @@ export const FAMILY_GRIDS: Record<Exclude<MailFamily, "F1">, readonly { id: stri
     { id: "clarte", points: 2, rule: "Très court, mots simples, se lit en cinq secondes. 0 = mot à DOUBLE SENS dans leur métier (« pièces administratives » chez un fabricant de pièces mécaniques) ou tournure lourde (« documents des dossiers de pièces de précision »)." },
     { id: "naturel", points: 1, rule: "Direct et poli, sans superlatif ni flatterie." },
   ],
+  /*
+   * F5 « Partenaire » (agent3, segment Agences). Mêmes 10 points, mais le
+   * problème n'est pas celui du destinataire : il est à SES clients. Une
+   * agence n'achète pas une solution à son propre défaut, elle achète de la
+   * capacité de production qu'elle revend.
+   */
+  F5: [
+    { id: "fait", points: 2, rule: "Phrase 1 : un FAIT PROPRE à l'agence, lu sur son site (client nommé, réalisation, offre, techno affichée). 2 = propre à elle et vérifiable. 1 = vrai mais valable pour n'importe quelle agence. 0 = aucun fait, compliment (« votre expertise reconnue »), ou fait inventé." },
+    { id: "probleme", points: 2, rule: "Le problème est celui de SES CLIENTS, ou sa capacité : des demandes d'automatisation ou d'IA qu'elle ne sait pas produire, ou une équipe trop petite pour les prendre. C'est une situation TYPE du métier d'agence, jamais un défaut affirmé chez elle. 2 = demande client ou contrainte de capacité, concrète. 1 = abstrait (« des besoins croissants »). 0 = défaut affirmé (« vous ne savez pas faire »), ou problème du client final présenté comme le sien." },
+    { id: "proposition", points: 3, rule: "La marque blanche, à la PREMIÈRE PERSONNE : je réalise, l'agence vend, garde la relation et facture. 3 = geste concret + qui garde quoi, dit explicitement. 2 = marque blanche dite mais sans ce qu'elle produit. 1 = voix passive, ou propose de travailler POUR leurs clients en direct (c'est les concurrencer). 0 = jargon, liste d'étapes techniques." },
+    { id: "clarte", points: 2, rule: "Mots simples, phrases courtes, aucun jargon (« synergie », « bout en bout », « scalable »). Une agence lit vite : elle doit comprendre l'offre en deux phrases." },
+    { id: "naturel", points: 1, rule: "Écrit à la main par un indépendant, d'égal à égal : ni candidature, ni flatterie, ni superlatif." },
+  ],
   F4: [
     { id: "demo", points: 4, rule: `Après le lien (posé en première ligne), ce que fait la démo, HONNÊTEMENT : elle est GÉNÉRIQUE, faite sur un cas TYPE, pas sur leur métier ni leurs données. Attendu : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels. » 4 = cas type clair, résultat UTILE et concret (facture, devis, réponse au client, confirmation de délai, commande fournisseur), puis transposition explicite à leur activité. 2 = honnête mais résultat vague ou sans valeur (« prépare son classement dans la catégorie commandes »). 0 = laisse croire que la démo a été faite sur LEUR métier ou LEURS données (« Elle lit une commande de vêtements professionnels et prépare la facture »), promesse vague, fait inventé ou jargon. La ligne « ${F4_WHO} » est imposée : ne la note pas.` },
     { id: "lien", points: 3, rule: "Le cas décrit correspond à leur activité réelle (ce que l'on sait d'eux) et donne envie de cliquer. 3 = évident. 2 = plausible. 1 = lien faible. 0 = hors sujet." },
@@ -66,6 +79,7 @@ export const FAMILY_GRIDS: Record<Exclude<MailFamily, "F1">, readonly { id: stri
 const FAMILY_TARGETS: Record<Exclude<MailFamily, "F1">, string> = {
   F2: `Bonjour Monsieur Gatine,\n\n${F2_INTRO}\n\nPour une entreprise qui fabrique des tubes et bouchons en carton, les demandes de prix arrivent avec des références variées. Un message mal aiguillé retarde la réponse au client.\n\nJe mets en place le tri de vos e-mails entre devis et commandes, et je transmets chacun à la bonne personne.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
   F3: `Bonjour Monsieur Gomez,\n\nQui confirme aujourd'hui les délais de vos commandes de tôlerie sur mesure ?\n\nJ'automatise ce tri : chaque commande reçue par e-mail est repérée et sa confirmation préparée.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?`,
+  F5: `Bonjour Monsieur Mercier,\n\nVotre page réalisations montre trois refontes e-commerce cette année.\n\nCes clients demandent souvent ensuite des automatisations — relances de panier, synchronisation des stocks — qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.\n\nJe les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom.\n\nCe que je construis seul, testable en une minute : axelremillat.com/automatisations?demo=email&v=5\n\nAuriez-vous 15 minutes cette semaine pour en parler ?`,
   F4: `Bonjour Monsieur Jund,\n\nUne démo testable en une minute : axelremillat.com/agent?v=4\n\nElle lit une demande de devis type et prépare un brouillon à vérifier ; le même principe s'appliquerait à vos demandes de coffrets électriques sur mesure.\n\n${F4_WHO}\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?`,
 };
 
@@ -80,6 +94,10 @@ export const FAMILY_NEGATIVES: Record<Exclude<MailFamily, "F1">, { text: string;
   ],
   F3: [
     { text: "Qui gère les pièces administratives de vos commandes ? J'automatise le tri des documents des dossiers de pièces de précision.", why: "« Pièces administratives » chez un fabricant de pièces mécaniques : double sens ; « documents des dossiers de pièces de précision » : lourd ; lien de démo générique. 6/10 (ANTARES, 06/10)." },
+  ],
+  F5: [
+    { text: "Votre agence a une expertise reconnue en création de sites et un portfolio impressionnant.", why: "Flatterie et aucun fait vérifiable : fait 0. C'est l'ouverture la plus fréquente, et la plus inutile." },
+    { text: "Je peux accompagner directement vos clients sur leurs projets d'automatisation.", why: "Propose de court-circuiter l'agence : c'est la concurrencer, pas la servir. Proposition 1 au plus." },
   ],
   F4: [
     { text: "Elle lit une commande de vêtements professionnels et prépare la facture client à valider.", why: "Laisse croire que la démo a été faite sur LEUR métier alors qu'elle est générique : démo 0." },

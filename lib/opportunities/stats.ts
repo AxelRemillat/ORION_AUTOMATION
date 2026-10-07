@@ -74,3 +74,32 @@ export function platformActivity(rows: readonly ActivityRow[], days: number, now
     };
   }).filter((row) => row.sent + row.replies + row.conversations + row.won > 0);
 }
+
+/**
+ * RÉSUMÉ DU COCKPIT (plateformes #3) — les 3 sources de prospection freelance :
+ * Codeur, Upwork, Malt/ComeUp. Taux de réponse sur 30 jours = part des
+ * propositions ENVOYÉES dans la fenêtre qui ont reçu une réponse.
+ */
+export const FREELANCE_SOURCES = [
+  { key: "codeur", label: "Codeur", platforms: ["codeur"] },
+  { key: "upwork", label: "Upwork", platforms: ["upwork"] },
+  { key: "malt_comeup", label: "Malt/ComeUp", platforms: ["malt", "comeup"] },
+] as const satisfies readonly { key: string; label: string; platforms: readonly Platform[] }[];
+
+export interface FreelanceSource {
+  key: (typeof FREELANCE_SOURCES)[number]["key"];
+  label: string;
+  sent: number;
+  replies: number;
+  /** `null` : rien d'envoyé sur 30 jours. */
+  replyRate: number | null;
+}
+
+export function freelanceSources(rows: readonly Pick<Opportunity, "platform" | "sent_at" | "replied_at">[], now = new Date(), days = 30): FreelanceSource[] {
+  const since = now.getTime() - days * 86_400_000;
+  return FREELANCE_SOURCES.map((source) => {
+    const sent = rows.filter((row) => (source.platforms as readonly Platform[]).includes(row.platform) && row.sent_at && Date.parse(row.sent_at) >= since && Date.parse(row.sent_at) <= now.getTime());
+    const replies = sent.filter((row) => row.replied_at).length;
+    return { key: source.key, label: source.label, sent: sent.length, replies, replyRate: sent.length ? replies / sent.length : null };
+  });
+}

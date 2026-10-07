@@ -13,7 +13,7 @@ import { analyzeOpportunity } from "@/lib/opportunities/analyze";
 import { generateProposal } from "@/lib/opportunities/proposal";
 import { firstSentence, upworkFailures } from "@/lib/opportunities/platforms";
 import { proposalLanguage } from "@/lib/opportunities/types";
-import { UPWORK_ADS } from "./fixtures/upwork-ads";
+import { isPlaceholder, UPWORK_ADS } from "./fixtures/upwork-ads";
 
 const BUDGET_EUR = 0.9;
 
@@ -21,7 +21,12 @@ async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const table = ["| Annonce | Adéquation | Note | Essais | Car. | Prix | Délai | Prête ? |", "| --- | --- | --- | --- | --- | --- | --- | --- |"];
-  for (const ad of UPWORK_ADS) {
+  const ready = UPWORK_ADS.filter((ad) => !isPlaceholder(ad));
+  if (!ready.length) {
+    console.log("Aucune annonce à tester : collez le texte des annonces dans scripts/fixtures/upwork-ads.ts (à la place du marqueur).");
+    return;
+  }
+  for (const ad of ready) {
     if ((await spentSince(userId, started)) > BUDGET_EUR - 0.15) {
       console.log("Plafond de dépense atteint : arrêt.");
       break;
@@ -39,7 +44,7 @@ async function main() {
       continue;
     }
     const price = proposal.amountEur != null ? `$${proposal.amountEur}${proposal.hourly ? "/hr" : ""}` : "?";
-    console.log(`\n=== ${ad.title} (${ad.budget}, ${ad.provenance}) · adéquation ${analysis.score} · ${proposal.score ?? "?"}/10 en ${proposal.attempts} essai(s) · ${proposal.text.length} car. · ${price} / ${proposal.delayDays ?? "?"} j · ${cost.toFixed(3)} €${proposal.needsReview ? ` · À retravailler : ${proposal.reason}` : " · PRÊTE"}`);
+    console.log(`\n=== ${ad.title} (${ad.budget}) · adéquation ${analysis.score} · ${proposal.score ?? "?"}/10 en ${proposal.attempts} essai(s) · ${proposal.text.length} car. · ${price} / ${proposal.delayDays ?? "?"} j · ${cost.toFixed(3)} €${proposal.needsReview ? ` · À retravailler : ${proposal.reason}` : " · PRÊTE"}`);
     console.log(`Aperçu (1re phrase) : ${firstSentence(proposal.text)}`);
     console.log(`--- PROPOSITION ---\n${proposal.text}`);
     const residual = upworkFailures(proposal.text, proposal.text);

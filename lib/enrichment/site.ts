@@ -22,7 +22,7 @@ import { decodeBody } from "./charset";
 import { cleanText } from "./clean";
 import { toDomain } from "./http";
 import { fetchPage, fetchWebResults, hasLinkupKey } from "./linkup";
-import { companyAliases } from "./signals";
+import { companyAliases, guessOwnWebsite } from "./signals";
 import { normalizeForMatch } from "./clean";
 
 /** Identification honnête : un site doit pouvoir nous reconnaître et nous bloquer. */
@@ -317,7 +317,7 @@ export function looksLikeDomain(host: string | null): host is string {
  * un réseau social — profil métier jamais lu.
  */
 export const NOT_OFFICIAL =
-  /(^|[./])(linkedin|facebook|instagram|twitter|youtube|pappers|infogreffe|annuaire-entreprises|indeed|welcometothejungle|google|wikipedia|pagesjaunes|kompass|manageo|bodacc)\.|(^|[./])(x|societe|verif)\.com\b|(^|[./])data\.gouv\.fr\b/i;
+  /(^|[./])(linkedin|facebook|instagram|twitter|youtube|pappers|infogreffe|annuaire-entreprises|indeed|welcometothejungle|google|wikipedia|pagesjaunes|kompass|manageo|bodacc)\.|(^|[./])(x|societe|verif)\.com\b|(^|[./])data\.gouv\.fr\b|(^|[./])(rubypayeur|creditsafe|ellisphere|altares|bilansgratuits|score3|b-reputation|dirigeant|entreprises\.lefigaro|journaldunet|usinenouvelle|lesechos|bfmtv|batiactu)\./i;
 
 export interface DiscoveryInput extends SiteIdentity {
   /** Site donné par Pappers, le plus fiable quand il existe. */
@@ -348,7 +348,7 @@ export function domainOfEmail(email: string | null | undefined): string | null {
 /** Candidats de domaine, dans l'ordre imposé, sans doublon. */
 export function candidateDomains(
   input: DiscoveryInput,
-): { domain: string; by: NonNullable<SiteCoverage["discoveredBy"]> }[] {
+): { domain: string; by: NonNullable<SiteCoverage["discoveredBy"]>; nameProven?: boolean }[] {
   const ordered: { domain: string | null; by: NonNullable<SiteCoverage["discoveredBy"]> }[] = [
     { domain: toDomain(input.pappersWebsite ?? null), by: "pappers" },
     { domain: toDomain(input.knownWebsite ?? null), by: "annuaire" },
@@ -357,7 +357,7 @@ export function candidateDomains(
   ];
 
   const seen = new Set<string>();
-  const candidates: { domain: string; by: NonNullable<SiteCoverage["discoveredBy"]> }[] = [];
+  const candidates: { domain: string; by: NonNullable<SiteCoverage["discoveredBy"]>; nameProven?: boolean }[] = [];
   for (const item of ordered) {
     if (!looksLikeDomain(item.domain)) continue;
     if (seen.has(item.domain) || NOT_OFFICIAL.test(item.domain)) continue;
@@ -511,18 +511,26 @@ export async function coverSite(
   // Dernier recours : demander le site officiel à Linkup.
   if (!candidates.length && options.allowLinkupSearch !== false && hasLinkupKey()) {
     const search = await fetchWebResults({
-      name: `${input.name} site officiel`,
+      name: input.name,
       city: input.city,
       website: null,
+      // Guillemets autour du NOM seul : « "ELIOPHOT" Villeurbanne site officiel ».
+      query: [`"${input.name}"`, input.city, "site officiel"].filter(Boolean).join(" "),
     });
     base.linkupCalls += 1;
     if (search.ok) {
-      for (const result of search.data) {
-        const domain = toDomain(result.url);
-        if (looksLikeDomain(domain) && !NOT_OFFICIAL.test(domain)) {
-          candidates.push({ domain, by: "linkup" });
-          break;
-        }
+      /*
+       * On ne prend PLUS le premier domaine acceptable : il s'agissait presque
+       * toujours d'un annuaire de notation mieux référencé que l'entreprise
+       * elle-même. `guessOwnWebsite` ne retient qu'un domaine dont le label
+       * porte réellement le nom — c'est la seule preuve gratuite qu'on ait.
+       * Sans correspondance de nom, on préfère ne rien trouver : un faux site
+       * fait écrire un mail sur le métier de quelqu'un d'autre.
+       */
+      const named = toDomain(guessOwnWebsite(input.name, search.data));
+      if (looksLikeDomain(named) && !NOT_OFFICIAL.test(named)) {
+        // `nameProven` : le label du domaine porte le nom de l'entreprise.
+        candidates.push({ domain: named, by: "linkup", nameProven: true });
       }
     }
   }
@@ -539,6 +547,13 @@ export async function coverSite(
 
     const joined = read.pages.map((page) => page.text).join("\n");
     const confirmed =
+      /*
+       * Un domaine dont le LABEL porte le nom de l'entreprise vaut
+       * identification : « serensia.com » pour SERENSIA. Exiger en plus le
+       * SIREN ou la ville sur la page d'accueil écartait des sites parfaitement
+       * bons — une page d'accueil vend, elle ne récite pas le registre.
+       */
+      candidate.nameProven === true ||
       (options.trustKnownWebsite === true && candidate.by === "annuaire") ||
       pageConfirmsCompany(joined, input) ||
       (namesCompany(joined, input) && (await legalNoticeConfirms(origin, read.html, joined, input, prospectId)));
