@@ -171,3 +171,92 @@ export const F4_GUARDS: (CoworkGradedMail & { expectFail: "C1" | "C2" })[] = [
     expectFail: "C1",
   },
 ];
+
+/**
+ * JEU D'ÉTALONNAGE N°2 (Cowork #36, 07/10/2026) : 10 mails du pipeline #35 notés
+ * par Cowork ; CAMEL DIAM retirée (« STOP » reçu : plus jamais de mail, même en
+ * étalonnage). 2 prêts sur 9. La check-list était trop indulgente sur C1 et C2.
+ */
+export const COWORK_SET_2: CoworkGradedMail[] = [
+  {
+    "company": "TELMA",
+    "family": "F4",
+    "subject": "Accès des distributeurs",
+    "core": "Bonjour Monsieur Akafou,\n\nVotre espace Telma est réservé aux distributeurs. Une demande d’accès sans précision sur le distributeur concerné peut nécessiter un échange avant de recevoir une réponse.\n\nUne démo testable en une minute : axelremillat.com/automatisations?demo=email&v=4\n\nLa démo lit une demande type reçue par e-mail et prépare une réponse à valider ; le même principe s’appliquerait aux demandes d’accès de vos distributeurs.\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    "coworkReady": false,
+    "coworkScore": "7",
+    "note": "C1 NON : « espace réservé aux distributeurs » décrit une page ; C2 NON : « peut nécessiter un échange » est abstrait"
+  },
+  {
+    "company": "VENDREDI-SAMEDI-DIMANCHE-MAINTENANCE (VSDM)",
+    "family": "F4",
+    "subject": "Demandes de déploiement",
+    "core": "Bonjour Monsieur Vigreux,\n\nVous proposez le stockage et la configuration d’équipements informatiques pour vos clients. Une demande de déploiement incomplète peut retarder la confirmation d’une date d’intervention.\n\nUne démo testable en une minute : axelremillat.com/automatisations?demo=email&v=4\n\nLa démo montre une demande type reçue par e-mail et une réponse au client prête à valider ; je pourrais appliquer ce principe à vos demandes de déploiement.\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    "coworkReady": false,
+    "coworkScore": "7",
+    "note": "C1 NON : « stockage et configuration d'équipements » = description d'activité (le problème est bon)"
+  },
+  {
+    "company": "GARDIEN TRANSPORTS (SOGARPAC) (SOGARPAC)",
+    "family": "F4",
+    "subject": "Factures fournisseurs",
+    "core": "Bonjour,\n\nQualimat accompagne la traçabilité de votre parc de véhicules Fonds Mouvants. Une facture fournisseur sans référence au véhicule concerné complique ce suivi ; je signale l’écart avant validation.\n\nUne démo testable en une minute : axelremillat.com/automatisations?demo=invoice&v=4\n\nLa démo lit une facture type et montre une facture prête à valider ; le même principe s’appliquerait à vos factures fournisseurs.\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    "coworkReady": false,
+    "coworkScore": "6",
+    "note": "refus du code correct ; fait déformé (Qualimat est un référentiel) ; « je signale » dans l'accroche"
+  },
+  {
+    "company": "PARCOME",
+    "family": "F4",
+    "subject": "Confirmations de délai",
+    "core": "Bonjour,\n\nVos entrepôts en France et en Chine desservent vos sites de stockage aux États-Unis, avec des livraisons par magasin. Une référence manquante peut retarder la confirmation du délai du magasin concerné.\n\nUne démo testable en une minute : axelremillat.com/automatisations?demo=email&v=4\n\nLa démo montre comment elle lit une commande et prépare une confirmation de délai à valider ; je peux appliquer ce principe à vos commandes d’emballages sur mesure.\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
+    "coworkReady": false,
+    "coworkScore": "8",
+    "note": "refus du code correct (« type » manquant) ; fait excellent"
+  },
+  {
+    "company": "ARIC S.A.",
+    "family": "F4",
+    "subject": "Demandes d’étude d’éclairage",
+    "core": "Bonjour Monsieur Daric,\n\nVous proposez des études d’éclairage via un formulaire dédié. Quand un message manque de précisions, je peux signaler les éléments manquants et préparer une réponse au client.\n\nUne démo testable en une minute : axelremillat.com/automatisations?demo=email&v=4\n\nLa démo lit une commande type reçue par e-mail et prépare une confirmation à valider ; le même principe s’appliquerait à vos demandes d’étude.\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    "coworkReady": false,
+    "coworkScore": "6",
+    "note": "C1 NON (formulaire d'études) ; C2 NON (le problème est une proposition) ; démo « commande type » incohérente avec des demandes d'étude"
+  },
+  {
+    "company": "DISTEL",
+    "family": "F1",
+    "subject": "Demandes de devis",
+    "core": "Bonjour Monsieur Dellenbach,\n\nVotre formulaire de devis permet de demander conseil sur les accès en hauteur. Quand une demande manque de précisions, le client attend votre réponse.\n\nJ'automatise le tri des demandes reçues par e-mail : je signale les informations manquantes et transmets les autres à votre équipe commerciale pour préparer les devis.\n\nExemple testable en une minute : axelremillat.com/agent?v=1\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    "coworkReady": false,
+    "coworkScore": "7",
+    "note": "C2 NON : « le client attend votre réponse » = problème générique"
+  },
+  {
+    "company": "AERONEFS SERVICES",
+    "family": "F3",
+    "subject": "Qui chiffre les réparations ?",
+    "core": "Bonjour Madame Delugin,\n\nQui vérifie les éléments nécessaires au devis pour vos réparations de sous-ensembles aéronautiques ?\n\nJ'automatise la lecture de ces demandes, je signale les précisions manquantes et je prépare le devis pour validation.\n\nExemple testable en une minute : axelremillat.com/agent?v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?",
+    "coworkReady": true,
+    "coworkScore": "8,5",
+    "note": "prêt"
+  },
+  {
+    "company": "DELIMBE",
+    "family": "F3",
+    "subject": "Des délais à confirmer ?",
+    "core": "Bonjour Monsieur Delimbeuf,\n\nQui suit vos commandes d’épandeurs d’engrais en attente de confirmation de délai ?\n\nJ’automatise le tri de ces commandes reçues par e-mail et je signale celles à confirmer.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?",
+    "coworkReady": true,
+    "coworkScore": "8,5",
+    "note": "prêt"
+  },
+  {
+    "company": "BEYNAT FERMETURES",
+    "family": "F2",
+    "subject": "Devis de fermetures",
+    "core": "Bonjour Monsieur Rodriguez,\n\nJe me permets de vous contacter : je suis Axel Remillat, freelance en IA et automatisation de tâches pour les PME.\n\nVous créez, vendez et installez des fermetures sur mesure. Sans dimensions, les devis tardent.\n\nJe crée un assistant qui signale les manques et préremplit les devis pour validation par votre équipe.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/agent?v=2\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
+    "coworkReady": false,
+    "coworkScore": "7",
+    "note": "C1 NON (« fermetures sur mesure » = activité) ; C2 NON (« sans dimensions, les devis tardent » générique)"
+  }
+];

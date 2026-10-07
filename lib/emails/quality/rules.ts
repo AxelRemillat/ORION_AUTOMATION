@@ -191,6 +191,8 @@ function familyFailures(family: MailFamily, parts: MailParts, context: RuleConte
   if (family === "F4") {
     // Cowork #34 : la démo vient APRÈS le fait et le problème — jamais en ouverture.
     if (DEMO_OPENING.test(parts.hook)) failures.push("F4 : n'ouvre jamais par la démo (« Elle lit… », « Dans la démo… ») : un fait propre à l'entreprise, puis le problème qui en découle ; la démo vient ensuite, en preuve.");
+    // Cowork #36 : l'accroche F4 pose le fait et le problème ; « je signale », « je peux préparer » n'y ont pas leur place.
+    if (/(^|[\s.;:,])(je\s|j['’]\w)/i.test(parts.hook)) failures.push("F4 : l'accroche pose le fait et le problème, sans « je » (« je signale l'écart », « je peux préparer » viennent de la démo, pas de l'accroche).");
     // Cowork #35 : c'est la démo qui lit, pas Axel (« Je lis une demande type… » refusé).
     if (/^\s*je\s/i.test(parts.proposal)) failures.push("F4 : la phrase de démo a la démo pour sujet (« La démo montre une demande type lue et une confirmation prête à valider… »), jamais « Je lis… ».");
     if (!F4_TYPE_CASE.test(parts.proposal) || !F4_TRANSPOSE.test(parts.proposal)) {

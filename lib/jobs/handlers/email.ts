@@ -369,6 +369,11 @@ export const EMAIL_STAGES = {
 
 /** Vérifications partagées par la route et le job. Rend l'erreur, ou null. */
 export function emailBlocker(prospect: Prospect): { message: string; status: number } | null {
+  // « STOP » reçu ou opposition (Cowork #36, CAMEL DIAM) : jamais de brouillon, ni en production ni en mesure.
+  if (prospect.do_not_contact) return { message: "Ne plus contacter : ce prospect a demandé à ne plus recevoir de mail. Aucun brouillon.", status: 409 };
+  if ((prospect.key_figures as { refuses_prospecting?: unknown } | null)?.refuses_prospecting) {
+    return { message: "Opposé à la prospection : aucun brouillon.", status: 409 };
+  }
   // Un prospect perdu est clos : générer, c'est relancer quelqu'un qui a dit non.
   if (prospect.status === "perdu") {
     return {
