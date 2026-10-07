@@ -9,6 +9,7 @@ import { buildAllPeriods, parseSeriesParam } from "./_lib/series";
 import { PilotageCard } from "./_components/pilotage/pilotage-card";
 import { loadPilotage } from "@/lib/usage/pilotage";
 import Link from "next/link";
+import { OpenAiQuotaBanner } from "@/components/layout/openai-quota-banner";
 import { GMAIL_AUTH_MESSAGE, isGmailAuthError } from "@/lib/outbox/send-errors";
 import { readPrefs } from "@/lib/funnel/settings";
 
@@ -72,6 +73,8 @@ export default async function CockpitPage({
         subtitle={subtitle}
         date={date.charAt(0).toUpperCase() + date.slice(1)}
       />
+
+      <OpenAiQuotaBanner />
 
       {gmailFailures > 0 && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-lost/25 bg-lost/10 px-4 py-3 text-[13px] text-lost-ink">

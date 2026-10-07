@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { requireUser } from "@/lib/auth";
 import { ReglagesNav } from "./_components/reglages-nav";
+import { OpenAiQuotaBanner } from "@/components/layout/openai-quota-banner";
 
 export const metadata = { title: "Réglages · ORION" };
 
@@ -16,7 +17,10 @@ export default async function ReglagesLayout({ children }: { children: ReactNode
         <p className="mb-2 px-1 font-data text-[11px] uppercase tracking-wider text-faint lg:px-3">Réglages</p>
         <ReglagesNav />
       </aside>
-      <div className="min-w-0">{children}</div>
+      <div className="flex min-w-0 flex-col gap-4">
+        <OpenAiQuotaBanner withLink={false} />
+        <div>{children}</div>
+      </div>
     </div>
   );
 }

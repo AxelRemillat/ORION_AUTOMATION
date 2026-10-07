@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { waitUntil } from "@/lib/jobs/dispatch";
 import { DEFAULT_DAILY_LLM_CAP, ingestOpportunity, parseIngestBody } from "@/lib/opportunities/ingest";
 import { opportunityAsk } from "@/lib/opportunities/run";
+import { pushNtfy } from "@/lib/notify/ntfy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
         baseUrl: appUrl(request),
         llmCap: Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_DAILY_LLM_CAP,
         background: waitUntil,
+        notify: (notification) => pushNtfy(notification),
       },
       parsed.value,
     );

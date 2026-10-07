@@ -1,4 +1,7 @@
 import type { AskFn } from "@/lib/ai/chat";
+import { quotaHitSince } from "@/lib/ai/quota";
+import type { Notification } from "@/lib/notify/ntfy";
+import { coreSignals } from "./core-signal";
 import { analyzeOpportunity, type Analysis } from "./analyze";
 import { prefilterReason } from "./prefilter";
 import { generateProposal } from "./proposal";
@@ -13,6 +16,11 @@ import { isPlatform, proposalLanguage, type Platform } from "./types";
  *   plafond quotidien d'analyses atteint → « À analyser », sans LLM
  *   sinon analyse d'adéquation (0–10, 3 raisons, démo) sous échéance ;
  *   proposition seulement si score ≥ 7, en arrière-plan (l'alerte part vite).
+ *
+ * CRÉDIT OPENAI ÉPUISÉ (Cowork #35) : l'offre est enregistrée « Non analysée »
+ * (jamais « Ignorée ») ; un signal fort du cœur de cible (IA, automatisation,
+ * n8n, API…) envoie quand même une notification. Dès qu'une analyse repasse,
+ * les « Non analysées » de moins de 48 h sont rattrapées en arrière-plan.
  *
  * Rien n'est lu sur les pages Codeur : le flux ne donne qu'un EXTRAIT, et la
  * proposition faite dessus est un « brouillon sur extrait ».
@@ -80,6 +88,8 @@ export interface IngestResponse {
   duplicate?: true;
   pending?: true;
   filtered?: true;
+  /** Analyse impossible (crédit OpenAI épuisé) : « Non analysée ». */
+  not_analyzed?: true;
 }
 
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
@@ -124,7 +134,15 @@ export interface IngestDeps {
   deadlineMs?: number;
   /** Fait vivre une promesse après la réponse (waitUntil sur Vercel). */
   background?: (work: Promise<unknown>) => void;
+  /** Notification téléphone (ntfy) — « analyse indisponible » sur signal fort. */
+  notify?: (notification: Notification) => Promise<unknown>;
 }
+
+/** Statut d'analyse d'une offre que le crédit OpenAI épuisé n'a pas permis d'analyser. */
+export const NOT_ANALYZED = "non_analysee";
+/** Rattrapage automatique : les « Non analysées » de moins de 48 h, 5 par ingestion. */
+export const CATCH_UP_HOURS = 48;
+const CATCH_UP_BATCH = 5;
 
 /** Texte vu par l'analyse : titre, extrait et catégories (le flux n'a rien de plus). */
 const analysisBody = (body: IngestBody) => [body.description, body.categories.length ? `Catégories : ${body.categories.join(" ; ")}` : ""].filter(Boolean).join("\n\n");
@@ -133,6 +151,7 @@ const orionUrl = (baseUrl: string, id: string) => `${baseUrl.replace(/\/$/, "")}
 
 /** Analyse puis écriture ; renvoie l'analyse (ou null si indisponible). */
 async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promise<Analysis | null> {
+  const started = Date.now();
   const analysis = await analyzeOpportunity(deps.ask, { title: body.title, body: analysisBody(body), budget: body.budget_text, platform: body.platform });
   const clock = (deps.now ?? (() => new Date()))();
   if (analysis) analysis.score = freshScore(analysis.score, body.published_at, clock);
@@ -153,10 +172,64 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promi
             ...(statusAfterAnalysis("a_repondre", analysis.score) ? { status: statusAfterAnalysis("a_repondre", analysis.score) } : {}),
             updated_at: now,
           }
-        : { analysis_state: "a_analyser", updated_at: now },
+        : // Crédit épuisé : « Non analysée » (rattrapée à la recharge), jamais « Ignorée ».
+          { analysis_state: quotaHitSince(started) ? NOT_ANALYZED : "a_analyser", updated_at: now },
     )
     .eq("id", id);
+  if (!analysis && quotaHitSince(started)) await alertWithoutAnalysis(deps, id, body);
   return analysis;
+}
+
+/** Analyse impossible : alerte quand même si l'offre touche le cœur de cible. */
+async function alertWithoutAnalysis(deps: IngestDeps, id: string, body: IngestBody): Promise<void> {
+  const signals = coreSignals({ title: body.title, description: body.description, categories: body.categories });
+  if (!signals.length || !deps.notify) return;
+  await deps
+    .notify({
+      title: `Nouvelle offre (analyse indisponible) : ${body.title}`,
+      body: `Signal fort : ${signals.join(", ")}. Crédit OpenAI épuisé, l'analyse se fera à la recharge.${body.budget_text ? ` Budget : ${body.budget_text}.` : ""}`,
+      priority: "high",
+      tags: ["briefcase"],
+      click: orionUrl(deps.baseUrl, id),
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * Rattrapage : les offres « Non analysées » de moins de 48 h, analysées dès
+ * qu'une analyse repasse (crédit revenu). Les plus anciennes restent sur le
+ * bouton « Analyser ».
+ */
+export async function catchUpUnanalyzed(deps: IngestDeps): Promise<number> {
+  const now = (deps.now ?? (() => new Date()))();
+  const since = new Date(now.getTime() - CATCH_UP_HOURS * 3_600_000).toISOString();
+  const { data } = await deps.db
+    .from("opportunities")
+    .select("id, platform, title, body, budget, categories, published_at, description_truncated, url, external_id")
+    .eq("user_id", deps.userId)
+    .eq("analysis_state", NOT_ANALYZED)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(CATCH_UP_BATCH);
+  let done = 0;
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    const body: IngestBody = {
+      platform: row.platform as Platform,
+      external_id: String(row.external_id ?? ""),
+      url: (row.url as string | null) ?? null,
+      title: String(row.title ?? ""),
+      description: String(row.body ?? ""),
+      description_truncated: row.description_truncated === true,
+      budget_text: (row.budget as string | null) ?? null,
+      categories: Array.isArray(row.categories) ? (row.categories as string[]) : [],
+      published_at: (row.published_at as string | null) ?? null,
+    };
+    const analysis = await analyzeRow(deps, String(row.id), body);
+    if (!analysis) break; // toujours indisponible : on s'arrête là
+    done += 1;
+    if (analysis.score >= PROPOSAL_SCORE) await proposeRow(deps, String(row.id), body, analysis).catch(() => undefined);
+  }
+  return done;
 }
 
 /** Proposition (score ≥ 7) : brouillon sur extrait, une réécriture au plus (coût ≤ ~0,01 €). */
@@ -268,12 +341,15 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   const proposalWork = finish(analysis);
   if (deps.background) deps.background(proposalWork);
   else await proposalWork;
+  // L'analyse repasse : les « Non analysées » récentes sont rattrapées (arrière-plan).
+  if (analysis && deps.background) deps.background(catchUpUnanalyzed(deps).catch(() => 0));
   return {
     ...base,
     id,
     score: analysis?.score ?? null,
     verdict: verdictOf(analysis?.score ?? null),
     reasons: analysis?.reasons ?? ["analyse indisponible : à analyser"],
+    ...(analysis ? {} : { not_analyzed: true as const }),
     orion_url: orionUrl(deps.baseUrl, id),
   };
 }
