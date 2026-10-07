@@ -73,7 +73,7 @@ async function main() {
       "",
     );
     for (const attempt of outcome.history) {
-      lines.push(`  - essai : garde-fou ${attempt.rules.ok ? "ok" : `KO (${attempt.rules.failures.join(" ; ")})`}, juge ${attempt.verdict?.score ?? "—"}${attempt.verdict?.reasons.length ? ` (${attempt.verdict.reasons.join(" ; ")})` : ""}`);
+      lines.push(`  - essai : garde-fou ${attempt.rules.ok ? "ok" : `KO (${attempt.rules.failures.join(" ; ")})`}, check-list ${attempt.verdict ? (attempt.verdict.ready ? "prêt" : attempt.verdict.items.filter((item) => !item.ok).map((item) => `${item.id} NON`).join(", ")) : "—"}`);
     }
     lines.push("");
     console.log(`${item.id} : ${outcome.score}/10${outcome.needsReview ? " (à revoir)" : ""}`);

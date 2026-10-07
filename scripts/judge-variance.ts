@@ -1,28 +1,24 @@
 /**
- * VARIANCE DES DEUX JUGES (Cowork #31) sur des fiches réelles (PAYANT, plafond 1,20 €).
+ * VARIANCE DE LA CHECK-LIST (Cowork #32) sur des fiches réelles (PAYANT, plafond 1,00 €).
  *
  *   npm run eval:variance -- 15
  *
  * Pour chaque fiche : un mail est rédigé comme en production (rien n'est écrit
- * en base), puis la DERNIÈRE paire de relectures (même prompt système, même
- * texte) est rejouée 3 fois — relecteur senior en médiane de 3 lectures, comme en production. Affiche les 3 notes de chaque juge, l'écart
- * max-min, et combien de fiches changent de verdict (≥ 9 ou non).
+ * en base), puis la DERNIÈRE check-list (même prompt figé, même texte) est
+ * rejouée 3 fois, chacune en majorité de CHECKLIST_SAMPLES lectures comme en
+ * production. Affiche les critères à NON de chaque passage, et combien de
+ * fiches changent de verdict « prêt » d'un passage à l'autre. Le texte complet
+ * de chaque mail est imprimé (jeu d'étalonnage pour Cowork).
  */
 import { db, liveAsk, ownerId, prepareMail, spentSince } from "./quality-live";
-import { medianVerdict, PASS_SCORE, parseSeniorVerdict, parseVerdict, SENIOR_SAMPLES } from "@/lib/emails/quality/judge";
+import { CHECKLIST_SAMPLES, deterministicChecks, majority, parseChecklistSample, semanticCriteria, verdictOf } from "@/lib/emails/quality/checklist";
 import type { MailFamily } from "@/lib/emails/quality/families";
 import type { AskFn } from "@/lib/ai/chat";
 import type { Prospect } from "@/types";
 
-const BUDGET_EUR = 1.2;
+const BUDGET_EUR = 1.0;
 const PASSES = 3;
 const count = Math.max(1, Number(process.argv[2]) || 15);
-
-interface Captured {
-  system: string;
-  user: string;
-  operation: string;
-}
 
 async function main() {
   const userId = await ownerId();
@@ -38,63 +34,56 @@ async function main() {
     .limit(count * 3);
   const prospects = ((data ?? []) as Prospect[]).filter((prospect) => prospect.business_profile && Object.keys(prospect.business_profile).length).slice(0, count);
   const rows: string[] = [];
+  const texts: string[] = [];
   let flips = 0;
   let measured = 0;
-  const spreads = { grid: [] as number[], senior: [] as number[], final: [] as number[] };
   for (const prospect of prospects) {
     if ((await spentSince(userId, started)) > BUDGET_EUR - 0.08) {
       rows.push("Arrêt : plafond atteint.");
       break;
     }
     const live = liveAsk(prospect.id);
-    let grid: Captured | null = null;
-    let senior: Captured | null = null;
+    let captured: { system: string; user: string } | null = null;
     const ask: AskFn = (role, system, user, temperature, operation) => {
-      if (role === "judge" && operation.startsWith("qualite:juge-senior")) senior = { system, user, operation };
-      else if (role === "judge" && operation.startsWith("qualite:juge")) grid = { system, user, operation };
+      if (role === "judge" && operation.startsWith("qualite:checklist")) captured = { system, user };
       return live(role, system, user, temperature, operation);
     };
-    const { outcome } = await prepareMail({ ...prospect }, userId, { ask });
-    const gridCall = grid as Captured | null;
-    const seniorCall = senior as Captured | null;
-    if (!("body" in outcome) || !gridCall || !seniorCall) {
-      rows.push(`| ${prospect.company_name} | — | non rédigé | | | |`);
+    const { outcome, greeting } = await prepareMail({ ...prospect }, userId, { ask });
+    const call = captured as { system: string; user: string } | null;
+    if (!("body" in outcome)) {
+      rows.push(`| ${prospect.company_name} | — | non rédigé | | |`);
       continue;
     }
     const family = outcome.family as MailFamily;
-    const gridScores: (number | null)[] = [];
-    const seniorScores: (number | null)[] = [];
+    const core = outcome.body.split("\n\nSi le sujet")[0];
+    const code = deterministicChecks(core, { family, greeting });
+    const passes: string[] = [];
+    const ready: boolean[] = [];
     for (let pass = 0; pass < PASSES; pass += 1) {
-      const [g, s] = await Promise.all([
-        live("judge", gridCall.system, gridCall.user, 0, `qualite:variance:juge:${pass}`).catch(() => ""),
-        // Comme en production : médiane de SENIOR_SAMPLES lectures (lib/emails/quality/judge.ts).
-        Promise.all(Array.from({ length: SENIOR_SAMPLES }, (_, index) => live("judge", seniorCall.system, seniorCall.user, 0, `qualite:variance:senior:${pass}:${index}`).catch(() => ""))),
-      ]);
-      gridScores.push(parseVerdict(g, family)?.score ?? null);
-      seniorScores.push(medianVerdict(s.map(parseSeniorVerdict))?.score ?? null);
+      if (!call || code.some((item) => !item.ok)) {
+        const verdict = verdictOf(code);
+        passes.push(verdict.items.filter((item) => !item.ok).map((item) => item.id).join("+") || "prêt");
+        ready.push(verdict.ready);
+        continue;
+      }
+      const raws = await Promise.all(Array.from({ length: CHECKLIST_SAMPLES }, (_, index) => live("judge", call.system, call.user, 0, `qualite:variance:${pass}:${index}`).catch(() => "")));
+      const semantic = majority(raws.map(parseChecklistSample), semanticCriteria(family));
+      const verdict = semantic ? verdictOf([...code, ...semantic]) : null;
+      passes.push(verdict ? verdict.items.filter((item) => !item.ok).map((item) => item.id).join("+") || "prêt" : "indisponible");
+      ready.push(Boolean(verdict?.ready));
     }
-    const finals = gridScores.map((g, index) => (g === null || seniorScores[index] === null ? null : Math.min(g, seniorScores[index]!)));
-    const spread = (values: (number | null)[]) => {
-      const known = values.filter((value): value is number => value !== null);
-      return known.length ? Math.max(...known) - Math.min(...known) : 0;
-    };
-    const verdicts = new Set(finals.filter((value): value is number => value !== null).map((value) => value >= PASS_SCORE));
-    const flipped = verdicts.size > 1;
+    const flipped = new Set(ready).size > 1;
     if (flipped) flips += 1;
     measured += 1;
-    spreads.grid.push(spread(gridScores));
-    spreads.senior.push(spread(seniorScores));
-    spreads.final.push(spread(finals));
-    const show = (values: (number | null)[]) => values.map((value) => value ?? "?").join(" / ");
-    rows.push(`| ${prospect.company_name} | ${family} | ${show(gridScores)} | ${show(seniorScores)} | ${show(finals)} | ${flipped ? "OUI" : "non"} |`);
+    rows.push(`| ${prospect.company_name} | ${family} | ${passes.join(" / ")} | ${flipped ? "OUI" : "non"} |`);
+    texts.push(`### ${prospect.company_name} (${family})\n\nObjet : ${outcome.subject}\n\n${core}\n\n${(outcome.checklist?.items ?? code).map((item) => `- ${item.id} ${item.ok ? "OUI" : "NON"} — ${item.label} : « ${item.citation} »`).join("\n")}`);
   }
-  const mean = (values: number[]) => (values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2) : "—");
-  console.log("| Fiche | Famille | Juge grille (3 passages) | Relecteur senior (3 passages) | Note retenue | Verdict change ? |");
-  console.log("| --- | --- | --- | --- | --- | --- |");
+  console.log("| Fiche | Famille | Critères à NON (3 passages) | Verdict « prêt » change ? |");
+  console.log("| --- | --- | --- | --- |");
   console.log(rows.join("\n"));
-  console.log(`\nÉcart moyen max-min : grille ${mean(spreads.grid)} · senior ${mean(spreads.senior)} · retenue ${mean(spreads.final)}`);
-  console.log(`Fiches dont le verdict (≥ ${PASS_SCORE}) change d'un passage à l'autre : ${flips}/${measured}`);
+  console.log(`\nFiches dont le verdict « prêt » change d'un passage à l'autre : ${flips}/${measured}`);
   console.log(`Coût : ${(await spentSince(userId, started)).toFixed(3)} €`);
+  console.log(`\n## Mails (texte complet et check-list du 1er jugement)\n\n${texts.join("\n\n")}`);
 }
 
 void main().catch((error) => {

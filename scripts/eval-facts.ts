@@ -47,6 +47,7 @@ async function main() {
   let drafted = 0;
   let ready = 0;
   let factsCost = 0;
+  let failedExtractions = 0;
   for (const prospect of prospects) {
     if ((await spentSince(userId, started)) > BUDGET_EUR - 0.08) {
       lines.push("Arrêt : plafond atteint.");
@@ -55,7 +56,16 @@ async function main() {
     examined += 1;
     const figures = { ...((prospect.key_figures ?? {}) as Record<string, unknown>) };
     const before = await spentSince(userId, started);
-    const facts = storedFacts(figures) ?? (await extractFacts(prospect.company_name, prospect.website!, liveFactsDeps(prospect.id)).catch(() => ({ facts: [] }))).facts;
+    // Extraction en ÉCHEC (quota, débit, réseau) ≠ « Faits insuffisants » : comptée à part, hors des taux.
+    const stored = storedFacts(figures);
+    const extracted = stored ? null : await extractFacts(prospect.company_name, prospect.website!, liveFactsDeps(prospect.id)).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+    if (extracted instanceof Error) {
+      failedExtractions += 1;
+      examined -= 1;
+      lines.push(`- ${prospect.company_name} · extraction des faits en échec (${extracted.message.slice(0, 80)}) — hors mesure`);
+      continue;
+    }
+    const facts = stored ?? extracted!.facts;
     figures.facts = facts;
     factsCost += (await spentSince(userId, started)) - before;
     const gate = factsGate(figures);
@@ -86,7 +96,7 @@ async function main() {
   const gatedRate = drafted ? ready / drafted : 0;
   const allRate = examined ? ready / examined : 0;
   console.log(lines.join("\n"));
-  console.log(`\nFiches examinées : ${examined} · « Faits insuffisants » : ${insufficient} · passent la porte : ${examined - insufficient} (${Math.round(100 * passRate)} %)`);
+  console.log(`\nFiches examinées : ${examined} (extractions en échec, hors mesure : ${failedExtractions}) · « Faits insuffisants » : ${insufficient} · passent la porte : ${examined - insufficient} (${Math.round(100 * passRate)} %)`);
   console.log(`Mails prêts (≥ 9) : ${ready}/${drafted} rédigés (${Math.round(100 * gatedRate)} % des fiches qui passent la porte) · ${Math.round(100 * allRate)} % de toutes les fiches`);
   console.log(`Fiches à préparer par jour pour ${TARGET_READY_PER_DAY} mails prêts : ${allRate ? Math.ceil(TARGET_READY_PER_DAY / allRate) : "—"}`);
   console.log(`Coût : ${spent.toFixed(3)} € (faits ${factsCost.toFixed(3)} €) · ${ready ? (spent / ready).toFixed(3) : "—"} € par mail prêt`);
