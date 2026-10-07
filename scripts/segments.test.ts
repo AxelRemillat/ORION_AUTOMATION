@@ -217,7 +217,7 @@ const GOOD_F5 = [
   "",
   "Votre page réalisations montre trois refontes e-commerce cette année.",
   "",
-  "Ces clients demandent souvent ensuite des automatisations — relances de panier, synchronisation des stocks — qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
+  "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
   "",
   "Je les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom.",
   "",
@@ -255,10 +255,44 @@ const tooLong = checkF5({
 });
 check("au-delà de 75 mots : refusé", tooLong.failed.some((item) => item.id === "longueur"));
 
+/*
+ * Défaut trouvé par la mesure à blanc du 07/10/2026 : la grille comptait le
+ * corps ENTIER. La mention « stop » et la signature — posées par le code,
+ * identiques partout, et la signature contient un lien du domaine de démo —
+ * faisaient échouer « longueur » et « preuve » sur tout mail correct.
+ */
+const SIGNATURE = "Axel Remillat\nAutomatisation & IA pour PME · https://axelremillat.com/pme · 0749727192";
+const STORED = `${GOOD_F5}\n\nSi le sujet ne vous concerne pas, un simple « stop » en réponse et je ne vous relancerai pas.\n\n${SIGNATURE}`;
+
+const stored = checkF5({ subject: "x", body: STORED, signature: SIGNATURE, facts });
+check(
+  "signature et mention « stop » exclues du comptage",
+  stored.ready,
+  stored.failed.map((item) => `${item.id} (${item.detail})`).join(" · "),
+);
+check(
+  "sans la signature fournie, le lien de la signature fait un faux doublon",
+  checkF5({ subject: "x", body: STORED, facts }).failed.some((item) => item.id === "preuve"),
+);
+
+const friction = checkF5({
+  subject: "x",
+  body: GOOD_F5.replace(
+    "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
+    "Un brief incomplet peut retarder la proposition commerciale.",
+  ),
+  facts,
+});
+check(
+  "une friction sur un livrable vaut problème (ELIOPHOT, 07/10)",
+  !friction.failed.some((item) => item.id === "probleme-client"),
+  friction.failed.map((item) => item.id).join(", "),
+);
+
 const noProblem = checkF5({
   subject: "x",
   body: GOOD_F5.replace(
-    "Ces clients demandent souvent ensuite des automatisations — relances de panier, synchronisation des stocks — qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
+    "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
     "Votre agence a une expertise reconnue.",
   ),
   facts,
