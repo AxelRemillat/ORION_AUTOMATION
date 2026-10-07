@@ -63,8 +63,14 @@ export function examinationPlan<T extends Examinable>(rows: readonly T[], budget
   const offers = rows.filter((row) => row.source === "france-travail").sort(freshestFirst);
   const others = rows.filter((row) => row.source !== "france-travail").sort(bestBodaccFirst);
 
-  const otherTake = Math.min(others.length, Math.floor(cap * BODACC_MAX_SHARE));
-  const offerTake = Math.min(offers.length, cap - otherTake);
+  /*
+   * FRANCE TRAVAIL D'ABORD, BODACC REPREND CE QUI RESTE (Cowork #39) : tant que
+   * les offres ont du volume, BODACC garde ses 20 % ; quand elles sont
+   * épuisées (le 07/10, toutes déjà examinées), BODACC récupère la part non
+   * utilisée. Le plafond total du run ne change jamais.
+   */
+  const offerTake = Math.min(offers.length, cap - Math.floor(cap * BODACC_MAX_SHARE));
+  const otherTake = Math.min(others.length, cap - offerTake);
 
   const examine = [...offers.slice(0, offerTake), ...others.slice(0, otherTake)];
   const chosen = new Set(examine.map((row) => row.id));
