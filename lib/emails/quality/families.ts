@@ -53,7 +53,8 @@ export const FAMILY_LIMITS: Record<MailFamily, { min: number; max: number }> = {
   F1: { min: 45, max: 75 },
   F2: { min: 50, max: 80 },
   F3: { min: 30, max: 55 },
-  F4: { min: 40, max: 75 },
+  // F4 (Cowork #34) : fait + problème PUIS la démo en preuve — 5 mots de plus que F1.
+  F4: { min: 45, max: 80 },
 };
 
 export function isFamily(value: unknown): value is MailFamily {
@@ -111,11 +112,12 @@ export function assembleFamily(family: MailFamily, parts: MailParts, frame: { gr
     case "F3":
       return [frame.greeting, clean(parts.hook), clean(parts.proposal), proof, F3_CTA].join("\n\n");
     case "F4":
-      return [frame.greeting, proof, clean(parts.hook), F4_WHO, frame.cta].join("\n\n");
+      // Cowork #34 : jamais d'ouverture par la démo. Fait propre + problème, puis la démo comme PREUVE.
+      return [frame.greeting, clean(parts.hook), proof, clean(parts.proposal), frame.cta].join("\n\n");
     default:
       return [frame.greeting, clean(parts.hook), clean(parts.proposal), proof, frame.cta].join("\n\n");
   }
 }
 
 /** Le texte dont la démo doit être l'illustration : la proposition, ou (F4) la description de la démo. */
-export const demoTextOf = (family: MailFamily, parts: MailParts) => (family === "F4" ? parts.hook : parts.proposal);
+export const demoTextOf = (_family: MailFamily, parts: MailParts) => parts.proposal;
