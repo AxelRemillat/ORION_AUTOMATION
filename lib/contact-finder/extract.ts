@@ -1,3 +1,4 @@
+import { isRoleBox } from "./role-boxes";
 import { domainOfEmail, isServiceProvider } from "./domains";
 
 /**
@@ -61,6 +62,8 @@ export function extractEmails(content: string): string[] {
     const email = match[0].toLowerCase().replace(/\.+$/, "");
     const [local, domain] = email.split("@");
     if (!local || !domain || FILE_EXT.test(email) || JUNK_DOMAIN.test(domain) || JUNK_LOCAL.test(local)) continue;
+    // Boîte de rôle juridique (rgpd@, dpo@, no-reply@…) : jamais un contact (Cowork #41).
+    if (isRoleBox(email)) continue;
     found.add(email);
   }
   return [...found];
@@ -125,7 +128,8 @@ export function classifyEmail(email: string, person?: { firstName: string; lastN
     const flat = local.replace(/[^a-z]/g, "");
     if ((last.length >= 3 && flat.includes(last)) || (first.length >= 3 && flat.startsWith(first))) return "nominatif";
   }
-  return /^[a-z]{2,}[._-][a-z]{2,}$/.test(local) ? "nominatif" : "generique";
+  // « prenom.nom » ou « initiale.nom » (« e.lahmadi », LORMEDO 07/10) : nominatif.
+  return /^[a-z]{2,}[._-][a-z]{2,}$/.test(local) || /^[a-z][._-][a-z]{3,}$/.test(local) ? "nominatif" : "generique";
 }
 
 /** Domaines d'adresses différents du site : le mail peut vivre ailleurs (BRIOL). */

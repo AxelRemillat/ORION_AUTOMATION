@@ -1,3 +1,4 @@
+import { isRoleBox, ROLE_BOX_REASON } from "@/lib/contact-finder/role-boxes";
 import { advanceStatus } from "@/lib/constants";
 import { TRASHED_ERROR, type Db } from "@/lib/trash/scope";
 import type { Message, MessageType, ProspectStatus } from "@/types";
@@ -83,6 +84,8 @@ const fail = (kind: SendFailureKind, error: string, status: number): SendResult 
 /** Règles communes : `null` si l'envoi est permis, sinon le refus à afficher. */
 export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown, now: Date): Promise<SendResult | null> {
   if (!isEmail(to)) return fail("invalid", "Destinataire invalide.", 400);
+  // Boîte de rôle juridique (rgpd@, dpo@, no-reply@…) : jamais destinataire d'une prospection (Cowork #41).
+  if (isRoleBox(to as string)) return fail("blocked", `Adresse ${String(to)} : ${ROLE_BOX_REASON}.`, 409);
   if (message.status === "sent") return fail("conflict", "Ce message a déjà été envoyé.", 409);
   // Anti-doublon : un identifiant d'envoi Gmail prouve que le mail est parti.
   if (message.gmail_message_id) return fail("conflict", "Ce mail a déjà un identifiant d'envoi Gmail : il est parti, pas de renvoi.", 409);
