@@ -9,14 +9,15 @@
  * (« prêt » = 9 ou plus). Cible : au moins 13 accords sur 15. Rien n'est écrit.
  */
 import { db, liveAsk, ownerId, spentSince } from "./quality-live";
-import { COWORK_D_SET, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
+import { COWORK_D_SET, COWORK_SET_2, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
 import { judgeChecklist } from "@/lib/emails/quality/checklist";
 import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { buildFacts } from "@/lib/emails/derived-facts";
 import { storedProfile } from "@/lib/emails/business-profile";
 import type { Prospect } from "@/types";
 
-const TARGET = 13;
+/** Cible Cowork #36 : 22 accords sur 25 (88 %), rapportée au nombre de mails jugés. */
+const TARGET_RATE = 22 / 25;
 
 async function main() {
   const userId = await ownerId();
@@ -25,11 +26,18 @@ async function main() {
   let agree = 0;
   const guards: string[] = [];
   const rows: string[] = [];
-  for (const mail of [...COWORK_D_SET, ...F4_GUARDS]) {
+  let judged = 0;
+  for (const mail of [...COWORK_D_SET, ...COWORK_SET_2, ...F4_GUARDS]) {
     const guard = "expectFail" in mail ? (mail as { expectFail: string }).expectFail : null;
     const name = mail.company.replace(/\s*\(.*$/, "").slice(0, 30);
     const { data } = await loose.from("prospects").select("*").eq("user_id", userId).ilike("company_name", `%${name}%`).is("deleted_at", null).limit(1);
     const prospect = (data ?? [])[0] as Prospect | undefined;
+    // « Ne plus contacter » (Cowork #36, CAMEL DIAM) : exclue de toute génération ET de l'étalonnage.
+    if (prospect?.do_not_contact) {
+      rows.push(`| ${mail.company} | ${mail.family} | — | — | exclue (ne plus contacter) | — |`);
+      continue;
+    }
+    if (!guard) judged += 1;
     const figures = (prospect?.key_figures ?? {}) as Record<string, unknown>;
     const keyFacts = keyFactsOf(figures) ?? [];
     const derived = prospect ? buildFacts(prospect, null).facts : [];
@@ -59,8 +67,9 @@ async function main() {
   console.log("| --- | --- | --- | --- | --- | --- |");
   console.log(rows.join("\n"));
   console.log(`\nGarde-fous F4 : ${guards.join(" · ")}`);
-  console.log(`\nAccords avec Cowork : ${agree}/${COWORK_D_SET.length} (cible ${TARGET}) · coût ${(await spentSince(userId, started)).toFixed(3)} €`);
-  if (agree < TARGET) process.exitCode = 1;
+  const target = Math.ceil(TARGET_RATE * judged);
+  console.log(`\nAccords avec Cowork : ${agree}/${judged} (cible ${target}) · coût ${(await spentSince(userId, started)).toFixed(3)} €`);
+  if (agree < target) process.exitCode = 1;
 }
 
 void main().catch((error) => {

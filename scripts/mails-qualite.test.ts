@@ -4,6 +4,8 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { COWORK_SET_2 } from "../lib/emails/quality/cowork-d-set";
+import { emailBlocker } from "../lib/jobs/handlers/email";
 import { F4_GUARDS } from "../lib/emails/quality/cowork-d-set";
 import { COWORK_D_SET } from "../lib/emails/quality/cowork-d-set";
 import { isOpenAIQuotaError, OpenAIQuotaError } from "../lib/ai/quota";
@@ -755,6 +757,33 @@ async function main() {
     check("F4 : « La démo montre une demande … type lue et … prête à valider » → formulation acceptée", !demoReads.failures.some((line) => /la démo pour sujet|démo honnête/.test(line)), demoReads.failures.join(" | "));
     check("C1 en F4 : même exigence qu'en F1, la description du secteur VSDM citée comme refus", /MÊME EXIGENCE qu'en F1/.test(buildChecklistPrompt()) && buildChecklistPrompt().includes("maintenance et le déploiement de parcs informatiques"));
     check("calibrage : VSDM (nouveau F4) attendu NON sur C1", F4_GUARDS.some((mail) => mail.company.includes("VSDM") && mail.expectFail === "C1"));
+  }
+
+  console.log("\nCowork #36 : « STOP » respecté, juge durci sur C1 et C2");
+  {
+    const base = { id: "p-x", company_name: "Exemple", status: "nouveau", do_not_contact: false, key_figures: {} } as unknown as Prospect;
+    const stop = emailBlocker({ ...base, do_not_contact: true } as Prospect);
+    check("« ne plus contacter » (CAMEL DIAM a répondu STOP) : aucun brouillon, ni en production ni en mesure", stop?.status === 409 && /Ne plus contacter/.test(stop.message));
+    const opposed = emailBlocker({ ...base, key_figures: { refuses_prospecting: true } } as unknown as Prospect);
+    check("opposé à la prospection : aucun brouillon", opposed?.status === 409 && /Opposé/.test(opposed.message));
+    const lost = emailBlocker({ ...base, status: "perdu" } as unknown as Prospect);
+    check("perdu : toujours bloqué", lost?.status === 409);
+    check("jeu n°2 versionné : 9 mails, CAMEL DIAM exclue, 2 prêts (AERONEFS, DELIMBE)", COWORK_SET_2.length === 9 && !COWORK_SET_2.some((mail) => mail.company.includes("CAMEL")) && COWORK_SET_2.filter((mail) => mail.coworkReady).map((mail) => mail.company.split(" ")[0]).join(",") === "AERONEFS,DELIMBE");
+    const f4Parts = (company: string) => {
+      const mail = COWORK_SET_2.find((item) => item.company.includes(company))!;
+      const blocks = mail.core.split("\n\n");
+      return { mail, parts: { subject: mail.subject, hook: blocks[1], proposal: blocks[3] } };
+    };
+    const gardien = f4Parts("GARDIEN");
+    const gardienRules = checkMail(gardien.parts, gardien.mail.core, { ...ruleContext, greeting: gardien.mail.core.split("\n\n")[0], family: "F4", subjectArm: "metier", demo: "factures", prospectText: gardien.mail.core, knownText: gardien.mail.core });
+    check("GARDIEN (Cowork 6) : « je signale l'écart » dans l'accroche F4 → refusé par le code", gardienRules.failures.some((line) => /sans « je »/.test(line)), gardienRules.failures.join(" | "));
+    const parcome = f4Parts("PARCOME");
+    const parcomeRules = checkMail(parcome.parts, parcome.mail.core, { ...ruleContext, greeting: parcome.mail.core.split("\n\n")[0], family: "F4", subjectArm: "metier", demo: "emails", prospectText: parcome.mail.core, knownText: parcome.mail.core });
+    check("PARCOME (Cowork 8) : « type » manquant → refusé par le code (démo honnête)", parcomeRules.failures.some((line) => /démo honnête/.test(line)), parcomeRules.failures.join(" | "));
+    const prompt = buildChecklistPrompt();
+    check("C1 : test de substitution (10 concurrents) et fidélité du fait", /TEST DE SUBSTITUTION/.test(prompt) && /10 concurrents/.test(prompt) && /FIDÉLITÉ/.test(prompt) && /Qualimat/.test(prompt));
+    check("C2 : élément manquant précis + conséquence ; « le client attend » refusé", /élément manquant précis/.test(prompt) && /le client attend votre réponse/.test(prompt));
+    check("C4 : l'objet lu par la démo est celui du prospect", /COHÉRENCE : l'objet lu par la démo/.test(prompt));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
