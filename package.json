@@ -22,6 +22,8 @@
     "contacts:nominatifs": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative-backfill.js",
     "contacts:mesure": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative-measure.js",
     "facts:rattrapage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts-backfill.js",
+    "prepare:lot": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/prepare-batch.js",
+    "openai:ping": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/openai-ping.js",
     "test:faits": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts.test.js",
     "test:quota-openai": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/openai-quota.test.js",
     "test:nominatif": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative.test.js",
