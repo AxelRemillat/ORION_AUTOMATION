@@ -103,6 +103,12 @@ export interface SearchCriteria {
   q?: string;
   /** Section NAF (lettre A-U). */
   section?: string;
+  /**
+   * Codes NAF PRÉCIS (« 73.11Z »), pour cibler un segment (agent3). La section
+   * seule est trop large : « M » mélange les agences de publicité, les cabinets
+   * d'avocats et les laboratoires d'analyse.
+   */
+  naf?: string[];
   /** Codes INSEE de tranche d'effectif. */
   tranches?: string[];
   /** Ville, code postal ou numéro de département. */

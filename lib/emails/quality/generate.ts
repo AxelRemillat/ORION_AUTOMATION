@@ -6,7 +6,7 @@ import { DEMO_LINKS, demoFor, demoForProposal } from "./demo-links";
 import { combineJudges, judgeMail, judgeMailSenior, PASS_SCORE, type JudgeVerdict } from "./judge";
 import { checkMail, type RuleResult } from "./rules";
 import { ctaFor, type MailParts } from "./template";
-import { allowedFamilies, assembleFamily, demoTextOf, familyFor, subjectArmFor, type MailFamily } from "./families";
+import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyFor, subjectArmFor, type MailFamily } from "./families";
 import { buildWriterPrompt, parseParts } from "./writer";
 import { avecAllowed, mailReadiness } from "./readiness";
 import type { SubjectArm } from "./experiment";
@@ -98,7 +98,15 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   if (!ready.ok && !input.activity?.trim()) return { blocked: ready.reason };
   const own = ready.ok ? ready.own : [];
   const allowed = allowedFamilies(ready.ok);
-  const family = input.family && allowed.includes(input.family) ? input.family : familyFor(input.prospectId, allowed);
+  /*
+   * Famille IMPOSÉE (agent3) : une famille de segment — F5 « partenaire » —
+   * ne participe pas au tirage de l'expérience, donc elle n'est pas dans
+   * `allowed`. Sans cette ligne, l'appelant la passait et elle était
+   * silencieusement remplacée par F1.
+   */
+  const imposed = input.family && !ALL_FAMILIES.includes(input.family) ? input.family : null;
+  const family =
+    imposed ?? (input.family && allowed.includes(input.family) ? input.family : familyFor(input.prospectId, allowed));
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
   // Expérience n° 1 en pause : l'objet suit la famille.
   const arm = input.subjectArm ?? subjectArmFor(family);

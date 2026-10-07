@@ -1,4 +1,6 @@
 import { OpenAIQuotaError, QUOTA_MESSAGE, quotaHitSince } from "@/lib/ai/quota";
+import { familyForSegment } from "@/lib/emails/quality/families";
+import { segmentOf } from "@/lib/segments";
 import { singleCompanyName } from "@/lib/company-name";
 import { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
@@ -768,6 +770,9 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       dayOpenings,
       website: prospect.website,
       keyFacts: keyFactsOf(figures as Record<string, unknown>),
+      // SEGMENT (agent3) : une fiche de segment impose sa famille de mail —
+      // F5 « partenaire » pour une agence. `null` laisse le tirage habituel.
+      family: familyForSegment(segmentOf(prospect)) ?? undefined,
     }),
   );
   // Crédit OpenAI épuisé pendant la rédaction : ni « À revoir » ni brouillon.
