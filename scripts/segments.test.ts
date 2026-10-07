@@ -34,6 +34,7 @@ import {
   isFamily,
 } from "../lib/emails/quality/families";
 import { FAMILY_GRIDS } from "../lib/emails/quality/judge";
+import { F5_FIXED_WORDS, F5_HOOK_WORDS, F5_PROPOSAL_WORDS } from "../lib/emails/quality/writer";
 import { offTargetReason } from "../lib/funnel/off-target";
 import type { Prospect } from "../types";
 
@@ -327,6 +328,35 @@ check(
   "une friction sur un livrable vaut problème (ELIOPHOT, 07/10)",
   !friction.failed.some((item) => item.id === "probleme-client"),
   friction.failed.map((item) => item.id).join(", "),
+);
+
+/*
+ * Défauts trouvés par la mesure #2 (80 candidats, zone 69) :
+ *   - ADFORALL écrivait « LES clients demandent de rapprocher dépenses et
+ *     conversions » — une demande client que le motif ne reconnaissait pas,
+ *     faute du déterminant « les » ;
+ *   - ELIOPHOT sortait à 78 mots et EODYS à 77 pour un plafond de 75, parce
+ *     que les budgets par bloc du gabarit (40 + 25) ignoraient les 25 mots
+ *     posés par le code (salutation, ligne de démo, demande).
+ */
+const lesClients = checkF5({
+  subject: "x",
+  body: GOOD_F5.replace(
+    "Ces clients demandent souvent ensuite des automatisations (relances de panier, stocks) qu'une équipe de six personnes ne peut pas produire sans arrêter le reste.",
+    "Les clients demandent de rapprocher dépenses et conversions par campagne.",
+  ),
+  facts,
+});
+check(
+  "« Les clients demandent… » vaut demande client (ADFORALL, mesure #2)",
+  !lesClients.failed.some((item) => item.id === "probleme-client"),
+  lesClients.failed.map((item) => item.id).join(", "),
+);
+
+check(
+  "les budgets par bloc de F5 tiennent dans le plafond de la famille",
+  F5_HOOK_WORDS + F5_PROPOSAL_WORDS + F5_FIXED_WORDS <= FAMILY_LIMITS.F5.max,
+  `${F5_HOOK_WORDS} + ${F5_PROPOSAL_WORDS} + ${F5_FIXED_WORDS} > ${FAMILY_LIMITS.F5.max}`,
 );
 
 const noProblem = checkF5({
