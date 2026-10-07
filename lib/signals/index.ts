@@ -28,6 +28,7 @@ import {
   paginatedJobSignals,
   recentJobSignals,
   type EnvLike,
+  type FtCursorState,
   type FtHarvestStats,
   type FranceTravailStatus,
   type JobSignal,
@@ -278,6 +279,9 @@ export interface SignalSearchCriteria {
   ftStats?: FtHarvestStats;
   /** Horodatage (ms) d'arrêt de la lecture France Travail. */
   ftDeadline?: number;
+  /** Curseur France Travail du run précédent et réception du nouveau (Cowork #40). */
+  ftCursor?: FtCursorState | null;
+  onFtCursor?: (cursor: FtCursorState) => void;
 }
 
 export interface CollectedSignals {
@@ -357,13 +361,16 @@ export async function collectSignals(criteria: SignalSearchCriteria): Promise<Co
   if (ftState?.available && criteria.only !== "bodacc") {
     const jobs = criteria.ftMaxOffers
       ? await paginatedJobSignals({
-          days: Math.min(days, 30),
+          // Entonnoir : fenêtre réglable jusqu'à 90 jours (avant : tronquée à 30, Cowork #40).
+          days: Math.min(days, 90),
           maxOffers: criteria.ftMaxOffers,
           romeCodes: criteria.romeCodes ?? FT_ROME_CODES,
           today: criteria.today,
           env,
           deadline: criteria.ftDeadline,
           stats: criteria.ftStats,
+          cursor: criteria.ftCursor,
+          onCursor: criteria.onFtCursor,
         })
       : await recentJobSignals({
           departement: criteria.departement,

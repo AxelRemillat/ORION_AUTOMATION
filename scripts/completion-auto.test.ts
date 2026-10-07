@@ -12,7 +12,7 @@ import { completeOne, UNREACHABLE_AFTER, type CompletionDeps } from "../lib/toda
 import { exclusionOf } from "../lib/today/items";
 import { subsidiaryOf } from "../lib/enrichment/subsidiary";
 import { offTargetReason } from "../lib/funnel/off-target";
-import { emptyFtStats, FUNNEL_FT_DAYS, FUNNEL_FT_MAX_OFFERS, FUNNEL_ROME_CODES, paginatedJobSignals, toJobSignal } from "../lib/signals/france-travail";
+import { emptyFtStats, FUNNEL_FT_DAYS, FUNNEL_FT_MAX_OFFERS, FUNNEL_ROME_CODES, paginatedJobSignals, toJobSignal, type FtCursorState } from "../lib/signals/france-travail";
 import { communeLookup, uniqueMatch, withParent } from "../lib/funnel/identify";
 import { filterSignal, largeGroupReason } from "../lib/funnel/filter";
 import type { HarvestedSignal, Identity } from "../lib/funnel/types";
@@ -273,6 +273,53 @@ async function main() {
     await paginatedJobSignals({ days: 30, maxOffers: 600, romeCodes: ["LOW", "MID", "BIG"], today, stats: capped, fetchPage });
     check("plafond total respecté, la part non lue des petits codes profite aux gros", capped.read <= 600 && capped.byCode.LOW === 20 && capped.byCode.BIG > 200, JSON.stringify(capped.byCode));
     check("plafond de production : 8 000 offres par run", FUNNEL_FT_MAX_OFFERS === 8000);
+
+    // CURSEUR ENTRE LES RUNS (Cowork #40). Un code « C » : 4 000 offres toutes les
+    // 10 min avant T0 (~28 jours), puis 50 offres nouvelles après T0.
+    {
+      const T0 = new Date("2026-10-07T12:00:00Z");
+      const iso = (ms: number) => new Date(ms).toISOString().slice(0, 19) + "Z";
+      const old = Array.from({ length: 4000 }, (_, i) => ({ id: `old-${i}`, dateCreation: iso(T0.getTime() - (i + 1) * 600_000), entreprise: { nom: `Old ${i}` }, intitule: "Comptable", lieuTravail: { libelle: "69 - LYON", codePostal: "69003" } }));
+      const fresh = Array.from({ length: 50 }, (_, i) => ({ id: `new-${i}`, dateCreation: iso(T0.getTime() + (i + 1) * 60_000), entreprise: { nom: `New ${i}` }, intitule: "Comptable", lieuTravail: { libelle: "69 - LYON", codePostal: "69003" } }));
+      const all = [...fresh.slice().reverse(), ...old]; // du plus récent au plus ancien, comme l'API
+      let calls = 0;
+      const readIds: string[] = [];
+      const api = async (request: { code: string; min: string; max: string; start: number; end: number }) => {
+        calls += 1;
+        if (calls > 400) throw new Error("boucle : trop d'appels");
+        if (request.end - request.start + 1 > 150 || request.end >= 3150) throw new Error(`range refusé ${request.start}-${request.end}`);
+        const rows = all.filter((item) => item.dateCreation >= request.min && item.dateCreation <= request.max).slice(request.start, request.end + 1);
+        readIds.push(...rows.map((row) => row.id));
+        return { resultats: rows };
+      };
+      let cursor: FtCursorState | null = null;
+      const run = async (today: Date, maxOffers: number, days = 60) => {
+        readIds.length = 0;
+        calls = 0;
+        const stats = emptyFtStats();
+        await paginatedJobSignals({ days, maxOffers, romeCodes: ["C"], today, stats, fetchPage: api, cursor, onCursor: (next) => void (cursor = next) });
+        return { stats, ids: [...readIds] };
+      };
+
+      const first = await run(T0, 1000);
+      check("1er run sans curseur : les 1 000 plus récentes, curseur posé", first.ids.length === 1000 && first.ids[0] === "old-0" && cursor!.C.newest === old[0].dateCreation && cursor!.C.oldest === old[999].dateCreation, JSON.stringify(cursor));
+
+      const second = await run(new Date(T0.getTime() + 3_600_000), 1000);
+      const reread = second.ids.filter((id) => first.ids.includes(id));
+      check("2e run : les 50 offres NOUVELLES lues d'abord (tête)", second.ids.slice(0, 50).every((id) => id.startsWith("new-")) && (second.stats.head ?? 0) >= 50, JSON.stringify({ head: second.stats.head, first: second.ids.slice(0, 3) }));
+      check("… puis SOUS le curseur : pas de relecture des 1 000 déjà vues (bornes exceptées)", reread.length <= 2 && second.ids.includes("old-1000") && (second.stats.below ?? 0) >= 940, JSON.stringify({ reread: reread.length, below: second.stats.below }));
+      check("… curseur avancé : tête = offre la plus récente, bas = plus ancienne lue", cursor!.C.newest === fresh[49].dateCreation && cursor!.C.oldest! < old[999].dateCreation);
+
+      // Fenêtre de 60 jours : le reste (~2 050 offres) se lit en tranches de dates (range ≤ 3 150), puis arrêt propre.
+      const third = await run(new Date(T0.getTime() + 7_200_000), 8000);
+      check("3e run : bas de la fenêtre atteint, toutes les anciennes lues, arrêt propre", third.ids.includes("old-3999") && cursor!.C.exhausted === true && calls < 60, JSON.stringify({ calls, exhausted: cursor!.C.exhausted }));
+      const fourth = await run(new Date(T0.getTime() + 10_800_000), 8000);
+      check("4e run : rien de nouveau, rien sous la fenêtre → quelques appels, aucune boucle", fourth.ids.length <= 2 && calls <= 4, JSON.stringify({ calls, ids: fourth.ids.length }));
+
+      cursor = { C: { newest: fresh[49].dateCreation, oldest: old[1999].dateCreation } };
+      const narrow = await run(new Date(T0.getTime() + 3_600_000), 8000, 7);
+      check("fenêtre réduite (7 j) : le bas du curseur, déjà sous la fenêtre, n'est pas relu", narrow.ids.every((id) => id.startsWith("new-") || Number(id.split("-")[1]) <= 1010) && calls < 10, JSON.stringify({ calls, n: narrow.ids.length }));
+    }
 
     // Repli nom + commune : correspondance UNIQUE et NETTE, sinon rejet.
     const base = (siren: string, name: string, city: string) =>
