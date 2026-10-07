@@ -13,6 +13,7 @@ import {
   runStrategist,
   targetingWarningFor,
   validateBrief,
+  briefForDraft,
   type StrategistInput,
   type StrategyBrief,
 } from "../lib/emails/strategist";
@@ -436,6 +437,24 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     const prices = envModelPrices('{"modele-x":{"input":1,"output":4},"casse":{"input":"x"}}');
     check("prix fournis par OPENAI_PRICES_JSON", prices["modele-x"]?.outputPerMillion === 4 && !prices.casse);
     check("modèle hors grille : prix marqué inconnu", openAiCost("modele-inconnu", 1000, 1000).priceKnown === false);
+  }
+
+  console.log("\nRégénération sans stratège (Cowork #37)");
+  {
+    let calls = 0;
+    const strategist = async () => {
+      calls += 1;
+      return validateBrief(rawBrief(), input());
+    };
+    const stored = validateBrief(rawBrief(), input()).brief;
+    const reused = await briefForDraft({ mode: "full", storedBrief: stored, strategist: input() }, strategist);
+    check("brief stocké valide : régénération SANS rappeler le stratège", calls === 0 && Boolean(reused.brief) && reused.reused === true);
+    await briefForDraft({ mode: "full", storedBrief: null, strategist: input() }, strategist);
+    check("première rédaction (brief vide) : le stratège tourne une fois", calls === 1);
+    await briefForDraft({ mode: "full", storedBrief: { angle: "abîmé" }, strategist: input() }, strategist);
+    check("brief stocké refusé par la validation : le stratège tourne", calls === 2);
+    await briefForDraft({ mode: "other_angle", storedBrief: stored, strategist: input() }, strategist);
+    check("« autre angle » : le stratège tourne (il doit changer d'angle)", calls === 3);
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

@@ -417,6 +417,23 @@ export function isBannedPain(text: string): boolean {
  * Valide un brief (sortie du modèle OU brief édité à la main) et le complète.
  * Renvoie une erreur lisible, renvoyée telle quelle au modèle lors du retry.
  */
+/**
+ * Cowork #37 — le stratège ne tourne qu'UNE fois par fiche : une régénération
+ * (mode « full ») repart du brief déjà stocké s'il passe encore la validation.
+ * Brief absent ou refusé (faits qui ont changé, schéma) → le stratège tourne.
+ * « Autre angle » et « réécrire » gardent leur chemin propre.
+ */
+export async function briefForDraft(
+  input: { mode: string; storedBrief: unknown; strategist: StrategistInput },
+  runStrategist: () => Promise<BriefOutcome>,
+): Promise<BriefOutcome & { reused?: boolean }> {
+  if (input.mode === "full" && input.storedBrief) {
+    const reused = validateBrief(input.storedBrief, { ...input.strategist, excludeAngles: [] });
+    if (reused.brief) return { ...reused, reused: true };
+  }
+  return runStrategist();
+}
+
 export function validateBrief(raw: unknown, input: StrategistInput): BriefOutcome {
   const parsed = BRIEF_SCHEMA.safeParse(raw);
   if (!parsed.success) {
