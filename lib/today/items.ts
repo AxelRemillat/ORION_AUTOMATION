@@ -1,4 +1,5 @@
 import { contactConfirmed, contactDomainMismatch } from "./contact-domain";
+import { segmentOf } from "@/lib/segments";
 import { isBlockedReason } from "@/lib/emails/quality/readiness";
 import { isFactsInsufficient } from "@/lib/emails/quality/facts-gate";
 import { offTargetReason } from "@/lib/funnel/off-target";
@@ -119,6 +120,7 @@ export function prospectItem(input: {
     subsidiary,
     qualityReview: Boolean(draft?.quality_reason) || (!draft && Boolean(mailReview)),
     factsInsufficient: isFactsInsufficient(draft?.quality_reason) || (!draft && isFactsInsufficient(mailReview)),
+      segment: segmentOf(prospect),
   });
   return {
     key: `prospect:${prospect.id}`,

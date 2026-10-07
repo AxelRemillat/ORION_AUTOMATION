@@ -1,0 +1,198 @@
+import { DEMO_HOST } from "@/lib/emails/quality/demo-links";
+import { countWords } from "@/lib/emails/quality/template";
+
+/**
+ * FAMILLE F5 « PARTENAIRE » — le mail du segment Agences.
+ *
+ * Les familles F1 à F4 écrivent à une entreprise qui a un problème. F5 écrit à
+ * un intermédiaire qui a des CLIENTS et pas la main-d'œuvre : le problème n'est
+ * pas le sien, il est à ses clients, et la proposition ne doit pas le concurrencer
+ * mais le renforcer. D'où une grille propre.
+ *
+ * Les six critères viennent de Cowork (06/10/2026). Chacun porte :
+ *   - une `instruction`, destinée au prompt de rédaction ;
+ *   - un `check` DÉTERMINISTE quand la conformité est mesurable sur le texte.
+ *
+ * Pourquoi des vérifications déterministes alors que le moteur de check-list
+ * d'agent2 (#32) fera autorité : elles tournent déjà, sans appel LLM et sans
+ * attendre son merge. Quand #32 arrive, `F5_CRITERIA` lui est passé tel quel —
+ * c'est exactement sa forme d'entrée — et les `check` restent utiles comme
+ * garde-fous gratuits avant de payer un juge.
+ */
+
+/** Plafond de mots du corps, hors signature. Cowork : 75 mots. */
+export const F5_MAX_WORDS = 75;
+/** Sous ce nombre, le mail est trop maigre pour dire quoi que ce soit. */
+export const F5_MIN_WORDS = 40;
+
+/** Ce que la vérification lit : le mail produit, et ce qui a servi à l'écrire. */
+export interface F5Mail {
+  subject: string;
+  /** Corps complet, salutation et demande comprises, sans signature. */
+  body: string;
+  /** Faits employés, avec leur URL. Un fait sans URL n'est pas sourcé. */
+  facts: readonly { label: string; url?: string | null }[];
+}
+
+export interface F5Check {
+  ok: boolean;
+  /** Ce qui a été constaté, en clair : sert au rapport et à la correction. */
+  detail: string;
+}
+
+export interface F5Criterion {
+  id: string;
+  label: string;
+  /** Consigne de rédaction, injectée dans le prompt. */
+  instruction: string;
+  /** Vérification gratuite. Absente = le jugement revient au moteur d'agent2. */
+  check?: (mail: F5Mail) => F5Check;
+}
+
+/** Le problème, tel que F5 doit le formuler : celui des CLIENTS de l'agence. */
+const CLIENT_DEMAND =
+  /\b(?:leurs?|vos|des|ces)\s+clients?\b[^.!?]{0,140}\b(?:demand|r[ée]clam|attend|automatis|ia\b|intelligence artificielle|int[ée]gration|outil)/i;
+const CAPACITY =
+  /\b(?:bande passante|capacit[ée]|charge|surcharg|pas le temps|sans recruter|sans embaucher|[ée]quipe (?:r[ée]duite|limit[ée]e)|refus(?:er|ez)? des (?:projets|demandes))\b/i;
+
+/** La marque blanche, dite explicitement : c'est l'offre, pas un sous-entendu. */
+const WHITE_LABEL =
+  /\b(?:marque blanche|sous votre nom|[àa] votre nom|en votre nom|sans appara[îi]tre|votre sous-traitant|pour votre compte)\b/i;
+
+/** Première personne : « je » fait la proposition, pas « nous » ni une tournure passive. */
+const FIRST_PERSON = /\bj(?:e|'|’)\s*\w|\bje\b|\bmoi\b|\bmon\b|\bma\b|\bmes\b/i;
+
+/**
+ * Questions du corps : l'appel à l'action doit être unique.
+ *
+ * Les URL sont retirées AVANT de compter : « ?demo=email&v=5 » contient un
+ * point d'interrogation, et sans cette précaution le mail cible lui-même
+ * échouait au critère « un seul appel à l'action ».
+ */
+const questions = (body: string) =>
+  (stripUrls(body).match(/\?/g) ?? []).length;
+
+/** Retire les URL, nues ou protocolées. */
+const stripUrls = (text: string) =>
+  text.replace(/https?:\/\/\S+/g, " ").replace(/\b[\w.-]+\.[a-z]{2,}\/\S*/gi, " ");
+
+const FIFTEEN_MIN = /\b(?:15|quinze)\s*(?:min|minutes)\b/i;
+
+export const F5_CRITERIA: readonly F5Criterion[] = [
+  {
+    id: "fait-source",
+    label: "Un fait sourcé sur l'agence",
+    instruction:
+      "Ouvre sur un fait précis lu sur LEUR site : un client nommé, une réalisation, une offre. Jamais un compliment, jamais une généralité sur « les agences ».",
+    check: (mail) => {
+      const sourced = mail.facts.filter((fact) => typeof fact.url === "string" && fact.url.length > 8);
+      return sourced.length > 0
+        ? { ok: true, detail: `${sourced.length} fait(s) avec URL` }
+        : { ok: false, detail: "aucun fait porteur d'une URL vérifiable" };
+    },
+  },
+  {
+    id: "probleme-client",
+    label: "Le problème : demandes de leurs clients, ou capacité limitée",
+    instruction:
+      "Nomme le problème côté AGENCE : des demandes d'automatisation ou d'IA venant de leurs clients qu'ils ne savent pas produire, ou une capacité technique qui les oblige à refuser. Pas de problème inventé : si le site ne le laisse pas voir, dis-le comme une question.",
+    check: (mail) => {
+      const demand = CLIENT_DEMAND.test(mail.body);
+      const capacity = CAPACITY.test(mail.body);
+      if (demand || capacity) {
+        return { ok: true, detail: demand ? "demandes clients" : "capacité limitée" };
+      }
+      return { ok: false, detail: "ni demande client ni contrainte de capacité formulée" };
+    },
+  },
+  {
+    id: "marque-blanche",
+    label: "Proposition marque blanche, à la première personne",
+    instruction:
+      "Propose de réaliser en marque blanche, à la première personne : « je construis », « je livre sous votre nom ». L'agence garde la relation client et la facturation.",
+    check: (mail) => {
+      const white = WHITE_LABEL.test(mail.body);
+      const first = FIRST_PERSON.test(mail.body);
+      if (white && first) return { ok: true, detail: "marque blanche explicite, à la 1re personne" };
+      if (!white) return { ok: false, detail: "la marque blanche n'est pas dite explicitement" };
+      return { ok: false, detail: "proposition pas à la première personne" };
+    },
+  },
+  {
+    id: "preuve",
+    label: "Une preuve : démo du portfolio ou ORION",
+    instruction:
+      "Donne un lien de démo testable en une minute, ou cite ORION comme preuve de ce que tu construis seul. Un lien, pas trois.",
+    check: (mail) => {
+      const links = (mail.body.match(new RegExp(DEMO_HOST.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
+      const orion = /\bORION\b/.test(mail.body);
+      if (links === 1) return { ok: true, detail: "une démo liée" };
+      if (links === 0 && orion) return { ok: true, detail: "ORION cité comme preuve" };
+      if (links === 0) return { ok: false, detail: "aucune preuve : ni démo ni ORION" };
+      return { ok: false, detail: `${links} liens de démo : il en faut un seul` };
+    },
+  },
+  {
+    id: "un-seul-cta",
+    label: "Un seul appel à l'action",
+    instruction:
+      "Termine par UNE question, et une seule : un créneau de 15 minutes cette semaine. Aucune autre question dans le mail.",
+    check: (mail) => {
+      const count = questions(mail.body);
+      if (count === 0) return { ok: false, detail: "aucune demande" };
+      if (count > 1) return { ok: false, detail: `${count} questions : une seule est permise` };
+      return FIFTEEN_MIN.test(mail.body)
+        ? { ok: true, detail: "une question, 15 minutes" }
+        : { ok: false, detail: "la demande ne propose pas de créneau de 15 minutes" };
+    },
+  },
+  {
+    id: "longueur",
+    label: `${F5_MAX_WORDS} mots au plus`,
+    instruction: `Le corps tient en ${F5_MAX_WORDS} mots au maximum, signature exclue. En dessous de ${F5_MIN_WORDS}, il ne dit rien.`,
+    check: (mail) => {
+      const words = countWords(mail.body);
+      if (words > F5_MAX_WORDS) return { ok: false, detail: `${words} mots (max ${F5_MAX_WORDS})` };
+      if (words < F5_MIN_WORDS) return { ok: false, detail: `${words} mots seulement (min ${F5_MIN_WORDS})` };
+      return { ok: true, detail: `${words} mots` };
+    },
+  },
+];
+
+export interface F5Verdict {
+  /** Tous les critères vérifiables sont au vert. */
+  ready: boolean;
+  passed: { id: string; detail: string }[];
+  failed: { id: string; label: string; detail: string }[];
+  /** Critères laissés au moteur d'agent2 : non vérifiables sans jugement. */
+  deferred: string[];
+}
+
+/** Applique la grille F5. Gratuit, déterministe, sans appel réseau. */
+export function checkF5(mail: F5Mail): F5Verdict {
+  const passed: F5Verdict["passed"] = [];
+  const failed: F5Verdict["failed"] = [];
+  const deferred: string[] = [];
+
+  for (const criterion of F5_CRITERIA) {
+    if (!criterion.check) {
+      deferred.push(criterion.id);
+      continue;
+    }
+    const verdict = criterion.check(mail);
+    if (verdict.ok) passed.push({ id: criterion.id, detail: verdict.detail });
+    else failed.push({ id: criterion.id, label: criterion.label, detail: verdict.detail });
+  }
+
+  return { ready: failed.length === 0, passed, failed, deferred };
+}
+
+/** Bloc de consignes F5, à concaténer au prompt de rédaction. */
+export function f5Instructions(): string {
+  return [
+    "FAMILLE F5 — PARTENAIRE (agence web ou marketing).",
+    "Tu écris à un intermédiaire : il vend à ses clients, tu réalises sans apparaître.",
+    "",
+    ...F5_CRITERIA.map((criterion, index) => `${index + 1}. ${criterion.label} — ${criterion.instruction}`),
+  ].join("\n");
+}

@@ -22,8 +22,18 @@ import type { MailParts } from "./template";
  * lien de démo porte `&f=<famille>` pour mesurer les clics par famille.
  */
 
-export type MailFamily = "F1" | "F2" | "F3" | "F4";
+/*
+ * F5 « Partenaire » (agent3, segment Agences) — ajout minimal.
+ *
+ * F5 n'entre PAS dans `ALL_FAMILIES` : l'expérience de répartition par hachage
+ * ne doit jamais l'attribuer à une PME ordinaire. Elle est choisie
+ * explicitement, par segment (`familyForSegment`), et sa grille vit avec le
+ * segment : lib/segments/mail-f5.ts.
+ */
+export type MailFamily = "F1" | "F2" | "F3" | "F4" | "F5";
 export const ALL_FAMILIES: readonly MailFamily[] = ["F1", "F2", "F3", "F4"];
+/** Familles valides, F5 comprise : sert à valider une valeur stockée. */
+export const KNOWN_FAMILIES: readonly MailFamily[] = [...ALL_FAMILIES, "F5"];
 /** Sans fait vérifié solide : activité + secteur suffisent à ces deux familles. */
 export const THIN_DATA_FAMILIES: readonly MailFamily[] = ["F2", "F4"];
 
@@ -32,6 +42,7 @@ export const FAMILY_LABELS: Record<MailFamily, string> = {
   F2: "Présentation directe",
   F3: "Question courte",
   F4: "Démo d'abord",
+  F5: "Partenaire",
 };
 
 export const FAMILY_EXPERIMENT = "familles-1";
@@ -54,10 +65,17 @@ export const FAMILY_LIMITS: Record<MailFamily, { min: number; max: number }> = {
   F2: { min: 50, max: 80 },
   F3: { min: 30, max: 55 },
   F4: { min: 40, max: 75 },
+  // F5 : 75 mots au plus (grille Cowork du segment Agences).
+  F5: { min: 40, max: 75 },
 };
 
 export function isFamily(value: unknown): value is MailFamily {
-  return typeof value === "string" && (ALL_FAMILIES as readonly string[]).includes(value);
+  return typeof value === "string" && (KNOWN_FAMILIES as readonly string[]).includes(value);
+}
+
+/** Famille imposée par un segment, quand la fiche en porte un. */
+export function familyForSegment(segment: string | null | undefined): MailFamily | null {
+  return segment === "agences" ? "F5" : null;
 }
 
 /** Familles permises pour ce prospect : F1 et F3 exigent un fait propre et une tâche sûre. */
@@ -84,20 +102,22 @@ export const subjectArmFor = (family: MailFamily): SubjectArm => (family === "F3
  * chiffre : `?demo=invoice&v=4` (ou `/agent?v=4`). Rien à changer côté portfolio :
  * un paramètre inconnu est ignoré par la page.
  */
-export const FAMILY_PARAM: Record<MailFamily, string> = { F1: "1", F2: "2", F3: "3", F4: "4" };
+export const FAMILY_PARAM: Record<MailFamily, string> = { F1: "1", F2: "2", F3: "3", F4: "4", F5: "5" };
 
 export function familyDemoUrl(demo: DemoLink, family: MailFamily): string {
   return `${DEMO_HOST}${demo.path}${demo.path.includes("?") ? "&" : "?"}v=${FAMILY_PARAM[family]}`;
 }
 
 /** URL nue (sans le marqueur de famille, ancien `f=F4` compris), pour la vérifier contre la liste blanche. */
-export const bareDemoUrl = (url: string) => url.replace(/[?&](v=[1-4]|f=F[1-4])\b/, "");
+export const bareDemoUrl = (url: string) => url.replace(/[?&](v=[1-5]|f=F[1-5])\b/, "");
 
 export const PROOF_PREFIXES: Record<MailFamily, string> = {
   F1: "Exemple testable en une minute :",
   F2: "Une démo proche de ce que vous pourriez avoir chez vous :",
   F3: "Exemple testable en une minute :",
   F4: "Une démo testable en une minute :",
+  // F5 : la preuve dit « je construis seul », c'est ce que l'agence achète.
+  F5: "Ce que je construis seul, testable en une minute :",
 };
 
 const clean = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -112,6 +132,9 @@ export function assembleFamily(family: MailFamily, parts: MailParts, frame: { gr
       return [frame.greeting, clean(parts.hook), clean(parts.proposal), proof, F3_CTA].join("\n\n");
     case "F4":
       return [frame.greeting, proof, clean(parts.hook), F4_WHO, frame.cta].join("\n\n");
+    // F5 suit l'ordre de F1 — fait, proposition, preuve, demande — et c'est
+    // voulu : ce qui change dans une approche partenaire, c'est le CONTENU de
+    // chaque bloc, pas leur ordre.
     default:
       return [frame.greeting, clean(parts.hook), clean(parts.proposal), proof, frame.cta].join("\n\n");
   }

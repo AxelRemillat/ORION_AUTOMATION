@@ -172,7 +172,10 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
       ? `${input.greeting}\n\n${F2_INTRO}\n\n<BESOIN — c'est toi>\n\n<PROPOSITION — c'est toi>\n\n${proof}\n\n${input.cta}`
       : family === "F3"
         ? `${input.greeting}\n\n<QUESTION — c'est toi>\n\n<CE QUE JE FAIS — c'est toi>\n\n${proof}\n\n${F3_CTA}`
-        : `${input.greeting}\n\n${proof}\n\n<CE QUE FAIT LA DÉMO — c'est toi>\n\n${F4_WHO}\n\n${input.cta}`;
+        // F5 « partenaire » (agent3) : même ordre que F1, contenu différent.
+        : family === "F5"
+          ? `${input.greeting}\n\n<FAIT SUR L'AGENCE + PROBLÈME DE SES CLIENTS — c'est toi>\n\n<PROPOSITION EN MARQUE BLANCHE — c'est toi>\n\n${proof}\n\n${input.cta}`
+          : `${input.greeting}\n\n${proof}\n\n<CE QUE FAIT LA DÉMO — c'est toi>\n\n${F4_WHO}\n\n${input.cta}`;
   const parts =
     family === "F2"
       ? `1. "hook" = BESOIN PROBABLE lié à leur activité, UNE ou DEUX phrases de 20 mots au plus : nomme leur activité précisément (« Pour une entreprise qui fabrique des emballages sur mesure, … ») et la tâche qui revient souvent, avec ce qu'elle produit (client qui attend, devis qui part tard, double saisie).
@@ -181,6 +184,9 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
       : family === "F3"
         ? `1. "hook" = UNE QUESTION de 14 mots au plus, qui finit par « ? », sur QUI gère une tâche concrète de leur métier (« Qui s'occupe de confirmer les délais de vos commandes de pièces sur mesure ? »). Directe, polie, jamais intrusive.
 2. "proposal" = UNE phrase de 18 mots au plus qui commence par « J'automatise » : ce qui se fait tout seul pour cette tâche. Elle décrit ce que montre la démo « ${input.demo.label} ».`
+        : family === "F5"
+          ? `1. "hook" = LE FAIT PUIS LE PROBLÈME, deux phrases, 40 mots au plus. Phrase 1 : un fait PRÉCIS lu sur leur site (client nommé, réalisation, offre) — jamais un compliment. Phrase 2 : ce que ce type de client leur demande ensuite et qu'une petite équipe ne peut pas produire (automatisations, agents IA, intégrations), ou la capacité qui les oblige à refuser. C'est une situation TYPE du métier d'agence, jamais un défaut affirmé chez eux.
+2. "proposal" = UNE phrase de 25 mots au plus, À LA PREMIÈRE PERSONNE : je réalise en MARQUE BLANCHE, ils vendent, gardent la relation et facturent (« Je les construis en marque blanche : vous vendez et gardez la relation, je livre sous votre nom. »). Jamais proposer de travailler en direct avec leurs clients. Elle décrit ce que montre la démo « ${input.demo.label} ».`
         : `1. "hook" = CE QUE FAIT LA DÉMO, HONNÊTEMENT : la démo est GÉNÉRIQUE, elle n'a pas été faite sur leur métier ni leurs données. UNE phrase, 30 mots au plus, sur ce modèle : « Elle lit une <commande / demande / facture> type et prépare <le résultat> à valider ; le même principe s'appliquerait à vos <ce qu'ils traitent, d'après ce que l'on sait d'eux>, <ce que ça leur change : qui part plus vite, plus de ressaisie…>. » (exemple : « Elle lit une commande type et prépare la facture à valider ; le même principe s'appliquerait à vos commandes de vêtements professionnels, facturées dès la livraison. »). La démo est « ${input.demo.label} ». <le résultat> est UN DOCUMENT ou UNE RÉPONSE que le client reçoit : un accusé de réception, une confirmation de commande ou de délai, un brouillon de devis, une facture, une réponse au client — JAMAIS « le tri », « le classement », « les informations à valider » (critère C4 de la relecture, mesure #32 : « Elle trie des demandes types » refusé à chaque fois).
 2. "proposal" = chaîne vide "" (la ligne « qui je suis » est posée par le code).`;
   return `Tu écris, à la place d'Axel Remillat (indépendant, automatisation et IA pour PME), des morceaux d'un mail de prospection à froid pour ${input.companyName}. Le reste est déjà écrit par le code.
