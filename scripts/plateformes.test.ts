@@ -10,9 +10,10 @@ import { PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { firstSentence, upworkFailures, usdAmounts, usdRange, PLATFORM_RULES } from "../lib/opportunities/platforms";
 import { UPWORK_CHECKLIST } from "../lib/opportunities/checklist-en";
 import { parseInboundEmail, parsePlatformEmail, platformOfSender, htmlToText } from "../lib/opportunities/email/parse";
-import { ingestPlatformEmail, statusAfterEvent } from "../lib/opportunities/email/ingest-email";
-import { suggestedPrice } from "../lib/opportunities/email/view";
-import { platformActivity } from "../lib/opportunities/stats";
+import { decideEmail, ingestPlatformEmail, planPlatformEmail, statusAfterEvent } from "../lib/opportunities/email/ingest-email";
+import { EMAIL_STATUSES, needsProposal, opportunityFromEmail, parseTriageCreate, statusForKind } from "../lib/opportunities/email/triage";
+import { emailsToSort, suggestedPrice } from "../lib/opportunities/email/view";
+import { freelanceSources, platformActivity } from "../lib/opportunities/stats";
 import { buildOpportunityPatch, parseNewOpportunity, titleFromBody } from "../lib/opportunities/input";
 import { requestedItems } from "../lib/opportunities/requests";
 import { STATUS_LABELS } from "../lib/opportunities/types";
@@ -251,6 +252,91 @@ async function main() {
     const old = [{ platform: "codeur", status: "gagnee", sent_at: "2026-09-20T10:00:00Z", replied_at: "2026-09-21T10:00:00Z", updated_at: "2026-09-25T10:00:00Z", conversation_at: null, won_at: null }];
     const codeur30 = platformActivity(old as never, 30, now)[0];
     check("ancienne fiche sans jalons datés : 30 j la compte, 7 j non", codeur30?.won === 1 && codeur30.sent === 1 && platformActivity(old as never, 7, now).length === 0, JSON.stringify(codeur30));
+  }
+
+  console.log("\n10. Mode test /ingest-email (dry_run) : l'analyse, sans rien écrire");
+  {
+    const db = new FakeDb({ opportunities: [], opportunity_emails: [] });
+    const alerts: Notification[] = [];
+    let llm = 0;
+    const ask: AskFn = async () => {
+      llm += 1;
+      return JSON.stringify({ score: 8, reasons: ["a", "b", "c"], need: "x", demo: "general", language: "en", kind: "automatisation" });
+    };
+    const deps = { db: db as never, userId: "u1", ask, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-07T12:00:00Z"), notify: async (notification: Notification) => (alerts.push(notification), true) };
+    const byName = (prefix: string) => EMAIL_FIXTURES.find((fixture) => fixture.name.startsWith(prefix))!.email;
+    const snapshot = () => JSON.stringify(db.tables);
+
+    const before = snapshot();
+    const invitation = await planPlatformEmail(deps, byName("Upwork — invitation"));
+    check(
+      "invitation : créerait une fiche, avec alerte — rien d'écrit, aucun appel, aucune alerte",
+      invitation.dry_run && invitation.action === "cree" && invitation.would_alert && invitation.kind === "invitation" && invitation.parsed.external_id === "~01a2b3c4d5e6f7a8b9" && snapshot() === before && llm === 0 && alerts.length === 0,
+      JSON.stringify(invitation),
+    );
+    const commande = await planPlatformEmail(deps, byName("ComeUp — nouvelle commande"));
+    check("commande ComeUp : fiche « Gagnée » prévue, alerte prévue, montant lu", commande.action === "cree" && commande.opportunity_status === "gagnee" && commande.would_alert && commande.parsed.amount_eur === 120);
+    const unknown = await planPlatformEmail(deps, byName("Expéditeur inconnu"));
+    check("expéditeur inconnu : « à trier » avec la raison", unknown.action === "a_trier" && unknown.reason === "expéditeur inconnu" && !unknown.would_alert);
+    const reco = await planPlatformEmail(deps, byName("Upwork — recommandations"));
+    check("recommandations : 2 annonces listées, aucune créée", reco.action === "recommandations" && reco.parsed.jobs.length === 2 && db.rows("opportunities").length === 0);
+    const maltUnknown = await planPlatformEmail(deps, byName("Malt — message d'un client inconnu"));
+    check("Malt, message sans fiche : deviendrait une nouvelle demande avec alerte", maltUnknown.action === "cree" && maltUnknown.kind === "demande" && maltUnknown.would_alert);
+
+    // Une vraie ingestion, puis le mode test sur le message de suivi et sur le même e-mail rejoué.
+    const real = await ingestPlatformEmail(deps, byName("Upwork — invitation"));
+    db.rows("opportunities")[0].status = "envoyee";
+    const afterReal = snapshot();
+    const alertsAfterReal = alerts.length;
+    const message = await planPlatformEmail(deps, byName("Upwork — nouveau message"));
+    check(
+      "message de suivi : rattacherait à la fiche visée, statut prévu « Réponse », sans alerte",
+      message.action === "rattache" && message.target?.id === real.opportunity_ids[0] && message.target.status === "envoyee" && message.opportunity_status === "reponse" && !message.would_alert,
+      JSON.stringify(message),
+    );
+    const replay = await planPlatformEmail(deps, byName("Upwork — invitation"));
+    check("message_id déjà reçu : « doublon », fiche liée renvoyée", replay.action === "doublon" && replay.duplicate && replay.target?.id === real.opportunity_ids[0]);
+    check("aucune écriture ni alerte pendant les essais à blanc", snapshot() === afterReal && alerts.length === alertsAfterReal);
+    const decided = decideEmail(parsePlatformEmail(byName("Upwork — offre")), { id: "o1", status: "reponse" });
+    check("décision partagée : une offre sur « Réponse » → Conversation", decided.action === "rattache" && decided.status === "entretien" && decided.statusChanged);
+  }
+
+  console.log("\n11. Vue « À trier » : créer une fiche, rattacher, ignorer");
+  {
+    const email = { id: "e1", subject: 'Re: "Automatiser nos devis Excel"', excerpt: "Bonjour,\nPaul Martin souhaite vous confier un projet.\nBudget : 900 €\nNous voulons générer nos devis à partir d'un fichier Excel.", from_address: "contact@exemple.fr", received_at: "2026-10-07T09:00:00Z", external_id: null };
+    const demande = opportunityFromEmail(email, "malt", "demande", "u1");
+    check("demande : titre du sujet, statut « À répondre », budget et client lus", demande.title === "Automatiser nos devis Excel" && demande.status === "a_repondre" && demande.budget === "900 €" && demande.client_name === "Paul Martin" && demande.source === "email", JSON.stringify(demande));
+    check("identifiant stable quand l'e-mail n'en donne pas", demande.external_id === "email-tri:e1");
+    const commande = opportunityFromEmail(email, "comeup", "commande", "u1");
+    check("commande : « Gagnée », jalons posés à la date de l'e-mail", commande.status === "gagnee" && commande.won_at === email.received_at && commande.sent_at === email.received_at);
+    check("offre → Conversation, message → Réponse", statusForKind("offre") === "entretien" && statusForKind("message") === "reponse");
+    check("seules demande et invitation passent par l'analyse et la proposition", needsProposal("demande") && needsProposal("invitation") && !needsProposal("commande") && !needsProposal("message"));
+    check("création : plateforme et type obligatoires", !parseTriageCreate({ platform: "fiverr", kind: "demande" }).ok && !parseTriageCreate({ platform: "malt", kind: "autre" }).ok && parseTriageCreate({ platform: "malt", kind: "demande" }).ok);
+    check("« ignorer » est un statut, pas une suppression", EMAIL_STATUSES.includes("ignore"));
+    const sortable = emailsToSort([
+      { id: "1", status: "a_trier" },
+      { id: "2", status: "ignore" },
+      { id: "3", status: "rattache" },
+    ] as never);
+    check("onglet « À trier » : seulement les e-mails encore à trier", sortable.length === 1 && sortable[0].id === "1");
+  }
+
+  console.log("\n12. Résumé du Cockpit : Codeur, Upwork, Malt/ComeUp, taux de réponse 30 j");
+  {
+    const now = new Date("2026-10-10T12:00:00Z");
+    const rows = [
+      { platform: "codeur", sent_at: "2026-10-01T10:00:00Z", replied_at: "2026-10-02T10:00:00Z" },
+      { platform: "codeur", sent_at: "2026-10-05T10:00:00Z", replied_at: null },
+      { platform: "codeur", sent_at: "2026-08-01T10:00:00Z", replied_at: "2026-08-02T10:00:00Z" },
+      { platform: "malt", sent_at: "2026-10-03T10:00:00Z", replied_at: "2026-10-04T10:00:00Z" },
+      { platform: "comeup", sent_at: "2026-10-04T10:00:00Z", replied_at: null },
+      { platform: "upwork", sent_at: null, replied_at: null },
+    ];
+    const sources = freelanceSources(rows as never, now);
+    check("3 sources, dans l'ordre Codeur, Upwork, Malt/ComeUp", sources.map((source) => source.label).join(",") === "Codeur,Upwork,Malt/ComeUp");
+    check("Codeur : 2 envoyées sur 30 j (l'ancienne exclue), 50 %", sources[0].sent === 2 && sources[0].replyRate === 0.5, JSON.stringify(sources[0]));
+    check("Upwork : rien envoyé → taux « — » (null)", sources[1].sent === 0 && sources[1].replyRate === null);
+    check("Malt et ComeUp réunis : 2 envoyées, 50 %", sources[2].sent === 2 && sources[2].replyRate === 0.5);
   }
 
   console.log(failures === 0 ? "\nTous les tests plateformes passent.\n" : `\n${failures} test(s) en echec.\n`);
