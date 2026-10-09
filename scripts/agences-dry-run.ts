@@ -36,6 +36,7 @@ import { liveAsk } from "./quality-live";
 import { coverSite } from "@/lib/enrichment/site";
 import { searchCompanies } from "@/lib/enrichment/gouv";
 import { resolveZone } from "@/lib/enrichment/geo";
+import { fetchInpiOpposition } from "@/lib/enrichment/inpi";
 import { fetchPappers } from "@/lib/enrichment/pappers";
 import { findEmailByName } from "@/lib/enrichment/hunter";
 import { withLinkupRun } from "@/lib/linkup/run-cap";
@@ -172,6 +173,8 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
 
   const kept: Candidate[] = [];
   const rejected: Candidate[] = [];
+  /** Ecartees gratuitement sur le RNE, avant toute depense. */
+  let opposedCount = 0;
 
   for (const base of pool) {
     if (kept.length >= LIMIT) break;
@@ -197,6 +200,32 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
         leaderFirst = person?.firstName ?? null;
         leaderLast = person?.lastName ?? null;
         revenue = pappers.data.revenue_eur;
+      }
+    }
+
+    /*
+     * PORTE GRATUITE, avant toute depense. 53 % des agences de ces codes NAF
+     * sont opposees a la prospection au RNE (mesure du 09/10, zones 75/33/13) :
+     * lire leur site coutait une recherche Linkup et un credit Hunter pour
+     * finir sur « aucun brouillon ». Le RNE ne coute rien, il passe en premier.
+     */
+    if (base.siren) {
+      const opposition = await fetchInpiOpposition(base.siren);
+      if (opposition.ok && opposition.refuses) {
+        rejected.push({
+          base,
+          website: null,
+          siteStatus: "non lu",
+          headcount: null,
+          leader: null,
+          leaderFirst: null,
+          leaderLast: null,
+          revenue: null,
+          verdict: { segment: "agences", fit: "dehors", reason: "opposée à la prospection (RNE) : aucun mail possible", signals: [], competitor: null },
+        });
+        opposedCount += 1;
+        console.log(`  · ${base.company_name} — opposée à la prospection (RNE)`);
+        continue;
       }
     }
 
@@ -251,6 +280,7 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
       console.log(`  · ${base.company_name} — ${verdict.reason ?? "hors segment"}${why}`);
     }
   }
+  console.log(`\n${opposedCount} candidat(s) ecarte(s) gratuitement sur le RNE (opposition).\n`);
   return { kept, rejected };
 }
 

@@ -537,8 +537,66 @@ export async function coverSite(
 
   const candidates = candidateDomains(input);
 
-  // Dernier recours : demander le site officiel à Linkup.
-  if (!candidates.length && options.allowLinkupSearch !== false && hasLinkupKey()) {
+  /**
+   * Essaie une liste de domaines : rend le premier confirmé, ou `null`.
+   *
+   * Extrait d'une boucle unique pour que Linkup devienne un VRAI dernier
+   * recours : il ne se déclenchait qu'en l'absence totale de candidat, et
+   * `guessedDomains` en fournit presque toujours un. Deux domaines devinés
+   * injoignables suffisaient donc à écarter la recherche web.
+   */
+  const attempt = async (list: ReturnType<typeof candidateDomains>): Promise<SiteCoverage | null> => {
+    for (const candidate of list) {
+      const origin = `https://${candidate.domain}`;
+      const read = await readSite(origin, prospectId);
+      base.linkupCalls += read.linkupCalls;
+
+      if (!read.pages.length) {
+        base.note = `Site ${candidate.domain} injoignable ou interdit par robots.txt`;
+        continue;
+      }
+
+      const joined = read.pages.map((page) => page.text).join("\n");
+      const confirmed =
+        /*
+         * Un domaine dont le LABEL porte le nom de l'entreprise vaut
+         * identification : « serensia.com » pour SERENSIA. Exiger en plus le
+         * SIREN ou la ville sur la page d'accueil écartait des sites parfaitement
+         * bons — une page d'accueil vend, elle ne récite pas le registre.
+         */
+        candidate.nameProven === true ||
+        (options.trustKnownWebsite === true && candidate.by === "annuaire") ||
+        pageConfirmsCompany(joined, input) ||
+        // Domaine deviné : la page doit nommer l'entreprise. Le label du domaine
+        // EST le nom ; la mention sur la page est la seconde preuve.
+        (candidate.by === "devine" && namesCompany(joined, input)) ||
+        (namesCompany(joined, input) && (await legalNoticeConfirms(origin, read.html, joined, input, prospectId)));
+      if (!confirmed) {
+        base.note = `Site ${candidate.domain} écarté : la page ne mentionne ni le nom, ni le SIREN, ni la ville`;
+        continue;
+      }
+
+      return {
+        ...base,
+        domain: candidate.domain,
+        url: origin,
+        status: "lu",
+        pages: read.pages,
+        discoveredBy: candidate.by,
+        note: null,
+      };
+    }
+    return null;
+  };
+
+  // 1. Les pistes gratuites : annuaire, courriel de contact, domaines devinés.
+  const free = await attempt(candidates);
+  if (free) return free;
+
+  // 2. Dernier recours, PAYANT : demander le site officiel à Linkup. La porte
+  //    (lib/linkup/gate.ts) tient le budget quotidien et la part réservée au
+  //    segment ; ici on se contente de poser la question au bon moment.
+  if (options.allowLinkupSearch !== false && hasLinkupKey()) {
     const search = await fetchWebResults({
       name: input.name,
       city: input.city,
@@ -559,50 +617,10 @@ export async function coverSite(
       const named = toDomain(guessOwnWebsite(input.name, search.data));
       if (looksLikeDomain(named) && !NOT_OFFICIAL.test(named)) {
         // `nameProven` : le label du domaine porte le nom de l'entreprise.
-        candidates.push({ domain: named, by: "linkup", nameProven: true });
+        const viaLinkup = await attempt([{ domain: named, by: "linkup", nameProven: true }]);
+        if (viaLinkup) return viaLinkup;
       }
     }
-  }
-
-  for (const candidate of candidates) {
-    const origin = `https://${candidate.domain}`;
-    const read = await readSite(origin, prospectId);
-    base.linkupCalls += read.linkupCalls;
-
-    if (!read.pages.length) {
-      base.note = `Site ${candidate.domain} injoignable ou interdit par robots.txt`;
-      continue;
-    }
-
-    const joined = read.pages.map((page) => page.text).join("\n");
-    const confirmed =
-      /*
-       * Un domaine dont le LABEL porte le nom de l'entreprise vaut
-       * identification : « serensia.com » pour SERENSIA. Exiger en plus le
-       * SIREN ou la ville sur la page d'accueil écartait des sites parfaitement
-       * bons — une page d'accueil vend, elle ne récite pas le registre.
-       */
-      candidate.nameProven === true ||
-      (options.trustKnownWebsite === true && candidate.by === "annuaire") ||
-      pageConfirmsCompany(joined, input) ||
-      // Domaine deviné : la page doit nommer l'entreprise. Le label du domaine
-      // EST le nom ; la mention sur la page est la seconde preuve.
-      (candidate.by === "devine" && namesCompany(joined, input)) ||
-      (namesCompany(joined, input) && (await legalNoticeConfirms(origin, read.html, joined, input, prospectId)));
-    if (!confirmed) {
-      base.note = `Site ${candidate.domain} écarté : la page ne mentionne ni le nom, ni le SIREN, ni la ville`;
-      continue;
-    }
-
-    return {
-      ...base,
-      domain: candidate.domain,
-      url: origin,
-      status: "lu",
-      pages: read.pages,
-      discoveredBy: candidate.by,
-      note: null,
-    };
   }
 
   return base;
