@@ -29,7 +29,7 @@ import {
   type RelanceFiche,
 } from "../lib/outbox/relance-quality";
 import { composeFollowUp, draftFollowUp, ficheOf } from "../lib/outbox/follow-up";
-import { assembleShortRelance, chooseRelanceMode, plainTopicIssue, relanceModeAEnabled, SHORT_QUESTIONS, shortCodeChecks, shortQuestion, whenSent, writeShortRelance } from "../lib/outbox/relance-short";
+import { assembleShortRelance, chooseRelanceMode, plainTopicIssue, relanceGreeting, relanceModeAEnabled, SHORT_QUESTIONS, shortCodeChecks, shortQuestion, whenSent, writeShortRelance } from "../lib/outbox/relance-short";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 import type { AskFn } from "../lib/ai/chat";
 import type { Db } from "../lib/trash/scope";
@@ -331,6 +331,29 @@ async function main() {
     const askFix: AskFn = async (role, system) => (role === "writer" ? (prompts.push(system), topics.shift() ?? "") : JSON.stringify({ R7: { ok: true, citation: "devis" } }));
     const fixed = await writeShortRelance(askFix, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: { companyName: "DON FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now: new Date("2026-10-12T08:00:00Z") });
     check("sujet jargonneux corrigé au 2e essai (la raison 15CDV6 est transmise)", "body" in fixed && fixed.ready && /15CDV6/.test(prompts[1] ?? "") && !/15CDV6/.test(fixed.body), fixed);
+  }
+
+  console.log("\n10. Cowork #18 : salutation nominative, rappel du sujet sans lourdeur");
+  {
+    const base = { introGreeting: "Bonjour,", generic: false, email: "jean.dupont@technamm.fr", contactName: "Jean Dupont" };
+    check("nominative, nom et civilité sûrs, intro en « Bonjour, » → « Bonjour Monsieur Dupont, » (TECHNAMM)", relanceGreeting(base) === "Bonjour Monsieur Dupont,", relanceGreeting(base));
+    check("civilité par le cache de la fiche (prénom hors table)", relanceGreeting({ ...base, email: "kim.leroy@x.fr", contactName: "Kim Leroy", civilities: { kim: "F" } }) === "Bonjour Madame Leroy,", relanceGreeting({ ...base, email: "kim.leroy@x.fr", contactName: "Kim Leroy", civilities: { kim: "F" } }));
+    check("prénom ambigu (Camille, sans cache) → « Bonjour, »", relanceGreeting({ ...base, email: "camille.petit@x.fr", contactName: "Camille Petit" }) === "Bonjour,");
+    check("aucun contact nommé → « Bonjour, »", relanceGreeting({ ...base, contactName: null }) === "Bonjour,");
+    check("adresse au nom d'un autre (p.martin@ ≠ Jean Dupont) → « Bonjour, »", relanceGreeting({ ...base, email: "p.martin@technamm.fr" }) === "Bonjour,");
+    check("adresse générique → « Bonjour, », même avec un contact", relanceGreeting({ ...base, generic: true, email: "contact@technamm.fr" }) === "Bonjour,");
+    check("nom tronqué (« Dupont- ») → « Bonjour, »", relanceGreeting({ ...base, email: "jdupont@technamm.fr", contactName: "Jean Dupont-" }) === "Bonjour,");
+    check("intro déjà nominative : sa salutation est gardée", relanceGreeting({ ...base, introGreeting: "Bonjour Madame Martin," }) === "Bonjour Madame Martin,");
+
+    // Relance courte avec la salutation imposée : R1 attend la nouvelle salutation.
+    const greetAsk: AskFn = async (role) => (role === "writer" ? JSON.stringify({ topic: "le suivi des stocks avant le départ" }) : JSON.stringify({ R7: { ok: true, citation: "stocks" } }));
+    const greeted = await writeShortRelance(greetAsk, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY.replace(/^Bonjour[^\n]*/, "Bonjour,"), generic: false, fiche: { companyName: "TECHNAMM FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now: new Date("2026-10-12T08:00:00Z"), greeting: "Bonjour Monsieur Dupont," });
+    check("relance courte : « Bonjour Monsieur Dupont, » en tête, prête", "body" in greeted && greeted.body.startsWith("Bonjour Monsieur Dupont,") && greeted.ready, greeted);
+
+    check("DON FOSTER « la préparation des devis à partir des appels » → refusé (tournure lourde)", /à partir d/.test(plainTopicIssue("la préparation des devis à partir des appels") ?? ""));
+    check("trois compléments enchaînés refusés (AGM v5)", /compléments/.test(plainTopicIssue("la gestion des dates manquantes dans les modifications de planning") ?? ""));
+    const fine = ["vos devis demandés par téléphone", "la confirmation des délais de commande", "le tri de vos demandes reçues par e-mail", "le suivi des stocks avant le départ", "le signalement des commandes à confirmer", "le tri des demandes de devis"];
+    check("groupes nominaux simples acceptés (exemples de Cowork et v6)", fine.every((topic) => plainTopicIssue(topic) === null), fine.map((topic) => `${topic} → ${plainTopicIssue(topic)}`));
   }
 
   console.log(failures === 0 ? "\nTous les tests relances 9/10 passent.\n" : `\n${failures} test(s) en echec.\n`);

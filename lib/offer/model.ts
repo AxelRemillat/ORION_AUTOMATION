@@ -16,11 +16,25 @@
 import type { EntryOfferType, OfferProof, UserOffer } from "@/types";
 
 /**
- * Lien de la signature : la page d'atterrissage des prospects, SANS paramètres.
- * /pme ne sert qu'à la prospection : ses visites suffisent comme mesure, et un
- * lien court se lit mieux dans un mail en texte brut.
+ * Lien de la signature : la page d'atterrissage des prospects, tracée
+ * `?ref=signature` (demande d'Axel, 09/10/2026 : le portfolio reconnaît ce canal,
+ * PORTFOLIO_V2 #9). Un seul paramètre, pas d'UTM : le lien reste court.
  */
-export const SIGNATURE_URL = "https://axelremillat.com/pme";
+export const SIGNATURE_URL = "https://axelremillat.com/pme?ref=signature";
+
+/**
+ * Ancien lien, sans paramètre : celui des mails déjà rédigés ou envoyés. Une offre
+ * enregistrée avec ce lien signe désormais avec SIGNATURE_URL ; les mails existants,
+ * eux, ne sont jamais réécrits (lib/mail-preflight/words.ts reconnaît les deux).
+ */
+export const LEGACY_SIGNATURE_URL = "https://axelremillat.com/pme";
+
+/** `portfolio_url` de l'offre, l'ancien lien /pme nu étant remplacé par le lien tracé. */
+export function signatureUrl(url: string | null | undefined): string | null {
+  const value = url?.trim();
+  if (!value) return null;
+  return /^(https?:\/\/)?(www\.)?axelremillat\.com\/pme\/?$/i.test(value) ? SIGNATURE_URL : value;
+}
 
 /**
  * Réservation de la démo de 15 min : le lien Google Agenda du site (prise de
@@ -484,7 +498,7 @@ export function credibilityFits(offer: UserOffer, wordCount: number): OfferProof
  * corps. Elle remplace le « Axel » seul qui partait jusqu'ici.
  */
 export function signatureFor(offer: UserOffer): string {
-  const line = [offer.title, offer.portfolio_url, offer.show_phone ? offer.phone : null]
+  const line = [offer.title, signatureUrl(offer.portfolio_url), offer.show_phone ? offer.phone : null]
     .map((part) => part?.trim())
     .filter(Boolean)
     .join(" · ");

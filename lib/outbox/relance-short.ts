@@ -20,6 +20,8 @@ import {
   type RelanceOutcome,
   type SourcedFact,
 } from "./relance-quality";
+import { addresseeOf, isCompleteName, usagePerson } from "@/lib/emails/salutation";
+import { civilityOf, type CivilityCache } from "@/lib/emails/quality/greeting";
 
 /**
  * DEUX MODES DE RELANCE (Cowork #16), choisis par le CODE :
@@ -218,7 +220,36 @@ export function plainTopicIssue(topic: string): string | null {
   if (acronym) return `sigle peu courant « ${acronym} »`;
   const second = topic.match(/\s(et|ainsi que|ou)\s|[,;/+&]/i)?.[0];
   if (second) return `deux idées (« ${second.trim()} ») : n'en garder qu'une`;
+  // Groupe nominal simple (Cowork #18, DON FOSTER « la préparation des devis à partir des appels ») :
+  // ni locution lourde, ni plus de deux compléments enchaînés.
+  const heavy = topic.match(HEAVY_LOCUTION)?.[0];
+  if (heavy) return `tournure lourde « ${heavy.trim()} » : un groupe nominal simple (ex. « vos devis demandés par téléphone »)`;
+  const complements = topic.match(COMPLEMENT)?.length ?? 0;
+  if (complements > 2) return `${complements} compléments enchaînés : un groupe nominal simple, deux compléments au plus`;
   return null;
+}
+
+const HEAVY_LOCUTION = /(?:^|\s)(à partir d|en fonction d|au moyen d|dans le cadre d|lors d|afin d|au niveau d|en vue d|par le biais d|en provenance d)/i;
+/** Prépositions qui ouvrent un complément du nom (« des », « à », « dans »…). */
+const COMPLEMENT = /(?:^|\s)(?:(?:de|des|du|à|au|aux|par|pour|avec|sur|dans|en|avant|après|chez|sans|entre)(?=\s|$)|d['’](?=\p{L}))/giu;
+
+// --- Salutation de la relance -----------------------------------------------------
+
+/**
+ * Salutation de la relance (Cowork #18, TECHNAMM : adresse nominative, intro en « Bonjour, »).
+ * « Bonjour Monsieur/Madame <Nom>, » seulement si TOUT est sûr : adresse nominative,
+ * contact nommé sur la fiche (Hunter, annuaire), nom complet, civilité connue (table des
+ * prénoms ou cache de la fiche — aucun appel au modèle), et l'adresse ne désigne pas
+ * quelqu'un d'autre. Sinon la salutation de l'intro, « Bonjour, » le plus souvent.
+ */
+export function relanceGreeting(input: { introGreeting: string; generic: boolean; email: string | null | undefined; contactName: string | null | undefined; civilities?: CivilityCache | null }): string {
+  if (input.introGreeting !== "Bonjour," || input.generic) return input.introGreeting;
+  const person = usagePerson(input.contactName);
+  if (!person || !isCompleteName(person.last)) return input.introGreeting;
+  const owner = addresseeOf(input.email);
+  if (owner && fold(owner.last) !== fold(person.last)) return input.introGreeting;
+  const civility = civilityOf(person.first, input.civilities ?? {});
+  return civility ? `Bonjour ${civility} ${person.last},` : input.introGreeting;
 }
 
 export function shortCodeChecks(subject: string, body: string, ctx: ShortContext & { introSubject: string }, topic: string): RelanceCriterion[] {
@@ -253,7 +284,8 @@ export function buildShortTopicPrompt(feedback: string | null): string {
   return `Tu prépares la RELANCE COURTE d'un mail de prospection resté sans réponse. Le code l'écrit ainsi :
 « Je remonte mon message de la semaine dernière sur <SUJET>. »
 Tu n'écris QUE <SUJET> : le sujet de l'intro, repris en ${SHORT_TOPIC_WORDS.min} à ${SHORT_TOPIC_WORDS.max} mots, avec un article, sans point final.
-Exemples : « le tri des demandes de devis », « la confirmation des délais de commande », « le tri de vos demandes reçues par e-mail ».
+Exemples : « le tri des demandes de devis », « la confirmation des délais de commande », « vos devis demandés par téléphone ».
+Un GROUPE NOMINAL SIMPLE : deux compléments au plus, jamais « à partir de », « en fonction de », « lors de » (pas « la préparation des devis à partir des appels » → « vos devis demandés par téléphone »).
 Règles :
 - vocabulaire de tous les jours, compréhensible par n'importe quel dirigeant : AUCUNE référence technique, nuance de matériau, code produit, norme, chiffre ou sigle (pas « acier 15CDV6 », pas « mission civile ») ; nomme le PROCESSUS (devis, commandes, délais, planning, demandes…), pas le produit ;
 - UNE seule idée : pas de « et », de « ainsi que » ni de virgule ;
@@ -308,13 +340,13 @@ export async function readShortFidelity(ask: AskFn, input: { body: string; intro
  */
 export async function writeShortRelance(
   ask: AskFn,
-  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: Pick<RelanceFiche, "companyName">; introFamily?: string | null; introSentAt?: string | null; now?: Date; lot?: RelanceLot },
+  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: Pick<RelanceFiche, "companyName">; introFamily?: string | null; introSentAt?: string | null; now?: Date; lot?: RelanceLot; /** Salutation imposée (relanceGreeting), sinon celle de l'intro. */ greeting?: string },
 ): Promise<RelanceOutcome | { error: string }> {
   const intro = introParts(input.introSubject, input.introBody, input.introFamily);
   const subject = relanceSubject(intro);
   const question = shortQuestion(input.fiche.companyName, input.lot);
   const ctx: ShortContext & { introSubject: string } = {
-    greeting: intro.greeting,
+    greeting: input.greeting ?? intro.greeting,
     subject,
     introSubject: intro.subject,
     demoLink: intro.demoLink,
