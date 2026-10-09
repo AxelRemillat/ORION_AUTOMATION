@@ -158,7 +158,8 @@ const REVIEWER_GRID = `CE QUI SERA EXIGÉ PAR LE RELECTEUR (consultant B2B senio
 - Ce que je fais, à la 1re personne, et le RÉSULTAT visible pour eux ou leur client (ce qui arrive, ce qui est signalé, ce que le client reçoit) — jamais « prépare un dossier / une fiche / son classement ».
 - Aucun mot à double sens dans leur métier, aucune tournure lourde, phrases courtes.
 - Toujours la VOIX ACTIVE : « je signale », « je prépare » — jamais « sont signalées », « est préparé ».
-- Jamais deux fois le même groupe nominal (« lunettes de soleil » une seule fois) : reprends-le par « ces commandes », « ces produits ».`;
+- Jamais deux fois le même groupe nominal (« lunettes de soleil » une seule fois) : reprends-le par « ces commandes », « ces produits ».
+- Jamais deux fois la même expression de 3 mots ou plus (« avant la clôture » une seule fois dans le mail).`;
 
 /** Consignes ponctuelles : sujet imposé (DAF / RAF) et ouverture « Entre … et … » à éviter (Cowork #44). */
 function extraRules(input: WriterInput): string {

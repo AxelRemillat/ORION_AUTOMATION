@@ -15,6 +15,8 @@ export interface CoworkGradedMail {
   coworkReady: boolean;
   coworkScore: string;
   note: string;
+  /** Douleur DAF / RAF (Cowork #47) : le juge applique l'arbitrage F3 DAF. */
+  daf?: boolean;
 }
 
 export const COWORK_D_SET: CoworkGradedMail[] = [
@@ -259,4 +261,22 @@ export const COWORK_SET_2: CoworkGradedMail[] = [
     "coworkScore": "7",
     "note": "C1 NON (« fermetures sur mesure » = activité) ; C2 NON (« sans dimensions, les devis tardent » générique)"
   }
+];
+
+/**
+ * GARDE-FOU DAF (Cowork #47) : MAISON JUCLA (#46) répète « avant la clôture ». Avec l'arbitrage F3 DAF, C1 et C2
+ * passent ; le refus attendu est D6 (expression de 3 mots répétée).
+ */
+export const DAF_GUARDS: (CoworkGradedMail & { expectFail: "D6" })[] = [
+  {
+    company: "MAISON JUCLA",
+    family: "F3",
+    subject: "Vos écarts sur factures fournisseurs ?",
+    core: "Bonjour Monsieur Jucla,\n\nQui repère les écarts de quantité sur vos factures fournisseurs avant la clôture ?\n\nJ’automatise leur rapprochement avec les commandes et bons de livraison, et je signale les écarts avant la clôture.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=invoice&v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "« avant la clôture » deux fois",
+    daf: true,
+    expectFail: "D6",
+  },
 ];
