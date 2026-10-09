@@ -120,6 +120,8 @@ export function namesSomeone(email: string): boolean {
 export function classifyEmail(email: string, person?: { firstName: string; lastName: string } | null): EmailKind {
   const local = email.split("@")[0].toLowerCase();
   if (GENERIC_LOCAL.test(local)) return "generique";
+  // « contact.internet », « service.clients » : un mot générique en tête n'est pas un prénom (Cowork #43).
+  if (GENERIC_LOCAL.test(local.split(/[._-]/)[0] ?? "")) return "generique";
   const plain = (value: string) =>
     value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z]/g, "");
   if (person) {

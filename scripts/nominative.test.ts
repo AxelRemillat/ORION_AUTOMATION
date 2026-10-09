@@ -280,6 +280,7 @@ async function main() {
     check("adresses ordinaires non touchées (y compris « legallais », « nolwenn »)", people.every((email) => !isRoleBox(email)), people.filter(isRoleBox));
     check("LORMEDO : « e.lahmadi » (initiale + nom) est nominative", classifyEmail("e.lahmadi@lormedo.fr") === "nominatif");
     check("… sans faire d'un générique un nominatif", classifyEmail("contact@lormedo.fr") === "generique" && classifyEmail("a.b@x.fr") === "generique");
+    check("mot générique en tête : « contact.internet », « service.clients », « contact.sanitaire » restent génériques", ["contact.internet@vsdm.fr", "service.clients@tereva.fr", "contact.sanitaire@carea.fr"].every((email) => classifyEmail(email) === "generique") && classifyEmail("b.gatine@gatine.fr") === "nominatif" && classifyEmail("m.decarvalho@plimetal.fr") === "nominatif");
     check("site : une boîte rgpd@ n'est jamais extraite", !extractEmails("Contact : contact@x.fr — RGPD : rgpd@x.fr, dpo@x.fr").some(isRoleBox) && extractEmails("contact@x.fr rgpd@x.fr").includes("contact@x.fr"));
     const web = hunter({ people: [person("rgpd.service@acme.fr", "Data Protection Officer", 99), person("jeanne.martin@acme.fr", "DAF", 94)] });
     const picked = await findNominativeContact({ domain: "acme.fr", pain: "factures", headcount: 60, leader: null }, web.deps);
