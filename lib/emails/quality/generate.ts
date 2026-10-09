@@ -2,7 +2,7 @@ import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { withOptOut } from "@/lib/mail-preflight/opt-out";
-import { DEMO_LINKS, demoFor, demoForProposal } from "./demo-links";
+import { DEMO_LINKS, demoFor, demoForProposal, demoForSupplierSide } from "./demo-links";
 import { checklistFeedback, checklistReason, judgeChecklist, type ChecklistVerdict } from "./checklist";
 import { checkMail, type RuleResult } from "./rules";
 import { countWords, ctaFor, type MailParts } from "./template";
@@ -170,7 +170,9 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     const fromProposal = demoForProposal(demoTextOf(family, parts));
     const fromText = demoFor(`${parts.subject} ${parts.hook}`);
     // Jamais la page générique (ANTARES, 06/10) : à défaut, la démo des e-mails reçus.
-    const chosen = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo.key !== "general" ? demo : DEMO_LINKS.emails;
+    const picked = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo.key !== "general" ? demo : DEMO_LINKS.emails;
+    // Cowork #40 : devis / commandes FOURNISSEURS → jamais la démo devis client (/agent).
+    const chosen = demoForSupplierSide(`${parts.hook} ${parts.proposal}`, picked);
     let core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta });
     // Trop long : raccourcissement dédié AVANT le jugement, hors des essais.
     const { max } = FAMILY_LIMITS[family];

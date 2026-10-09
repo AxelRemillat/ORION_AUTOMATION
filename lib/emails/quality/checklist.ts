@@ -1,7 +1,7 @@
 import { isOpenAIQuotaError } from "@/lib/ai/quota";
 import type { AskFn } from "@/lib/ai/chat";
 import { ALLOWED_DEMO_URLS, DEMO_HOST } from "./demo-links";
-import { bareDemoUrl, F2_INTRO, F4_WHO, FAMILY_LIMITS, FAMILY_PARAM, type MailFamily } from "./families";
+import { bareDemoUrl, F2_INTRO, F4_WHO, FAMILY_LIMITS, FAMILY_PARAM, LEGACY_F2_INTRO, type MailFamily } from "./families";
 import { DEMO_OPENING, FORBIDDEN_WORDS, wordHit } from "./rules";
 import { countWords } from "./template";
 
@@ -120,7 +120,7 @@ export function deterministicChecks(core: string, context: { family: MailFamily;
   const written = blocks.slice(1).join("\n");
   const forbidden = FORBIDDEN_WORDS.filter((word) => wordHit(written, word));
   // Texte écrit par le rédacteur : sans la salutation, la ligne de démo, les phrases fixes et la demande.
-  const own = blocks.slice(1, -1).filter((block) => !block.includes(DEMO_HOST) && block !== F2_INTRO && block !== F4_WHO);
+  const own = blocks.slice(1, -1).filter((block) => !block.includes(DEMO_HOST) && block !== F2_INTRO && block !== LEGACY_F2_INTRO && block !== F4_WHO);
   const repeated = repeatedNounGroups(own.join(" "));
   const opening = own[0] ?? "";
 

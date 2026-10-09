@@ -40,6 +40,17 @@ export const DEMO_LINKS: Record<DemoLink["key"], DemoLink> = {
 };
 
 /** Toutes les URL qu'un mail peut porter : le validateur refuse les autres. */
+/**
+ * Cowork #40 (CEMA) : /agent est une démo de devis CLIENT. Un problème qui porte sur des devis, commandes ou
+ * confirmations FOURNISSEURS se démontre par les factures/commandes (demo=invoice) ou le tri des e-mails.
+ */
+export const SUPPLIER_SIDE = /(devis|commandes?|confirmations?|bons? de commande|achats?)\s+(de\s+|des\s+|du\s+|aux\s+)?(vos\s+)?fournisseurs?|fournisseurs?\s+(sans|qui|dont)\b/i;
+
+export function demoForSupplierSide(text: string, chosen: DemoLink): DemoLink {
+  if (chosen.key !== "devis" || !SUPPLIER_SIDE.test(text)) return chosen;
+  return /factur/i.test(text) ? DEMO_LINKS.factures : DEMO_LINKS.emails;
+}
+
 export const ALLOWED_DEMO_URLS = Object.values(DEMO_LINKS).map((link) => `${DEMO_HOST}${link.path}`);
 
 export const demoUrl = (link: DemoLink) => `${DEMO_HOST}${link.path}`;

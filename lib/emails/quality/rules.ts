@@ -1,6 +1,6 @@
 import { knownNumbers, type DerivedFact } from "@/lib/emails/derived-facts";
 import { numbersIn, validateSubject } from "@/lib/emails/validate";
-import { ALLOWED_DEMO_URLS, demoForProposal, DEMO_LINKS, type DemoLink } from "./demo-links";
+import { ALLOWED_DEMO_URLS, demoForProposal, DEMO_LINKS, SUPPLIER_SIDE, type DemoLink } from "./demo-links";
 import { avecAllowed, opensWithAvec } from "./readiness";
 import { subjectArmProblem, type SubjectArm } from "./experiment";
 import { countWords, sentencesOf, type MailParts } from "./template";
@@ -148,7 +148,9 @@ export function wordHit(text: string, word: string): boolean {
  * un cas TYPE, puis on dit que le même principe s'appliquerait chez eux.
  */
 export const F4_TYPE_CASE = /\b(types?|g[ée]n[ée]riques?|d['’]exemple|fictive?s?)\b/i;
-export const F4_TRANSPOSE = /(m[êe]me principe|appliqu(er|erais|erait|erions) (ce|le m[êe]me) principe|s['’]appliquerai(t|ent)|pourrai(t|ent) s['’]appliquer|s['’]adapterai(t|ent)|de la m[êe]me (fa[çc]on|mani[èe]re)|m[êe]me logique|chez vous, (elle|cela|ce serait))/i;
+// Cowork #40 : transpositions conditionnelles honnêtes (« un principe que je pourrais adapter à vos… », « pour vos commandes
+// fournisseurs, je signalerais… ») — 5 refus F4 sur 6 venaient d'une formule correcte mais non prévue.
+export const F4_TRANSPOSE = /(m[êe]me principe|appliqu(er|erais|erait|erions) (ce|le m[êe]me) principe|s['’]appliquerai(t|ent)|pourrai(t|ent) s['’]appliquer|s['’]adapterai(t|ent)|de la m[êe]me (fa[çc]on|mani[èe]re)|m[êe]me logique|chez vous, (elle|cela|ce serait)|principe que je pourrais (adapter|appliquer)|que je pourrais (adapter|appliquer) à vos|comme je (peux|pourrais) le faire pour|pour vos [^.;]{3,80}, je (signalerais|préparerais|ferais|repérerais|relèverais))/i;
 
 /**
  * F2 — PREMIÈRE PERSONNE, VOIX ACTIVE (AIRPLANE DELIVERY : « les demandes…
@@ -267,6 +269,9 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
     const said = demoForProposal(demoTextOf(family, parts));
     if (said.key !== "general" && said.key !== context.demo) {
       failures.push(`Démo incohérente : la proposition parle de « ${said.label} » mais le lien montre « ${DEMO_LINKS[context.demo].label} ». Aligne la phrase sur la démo, ou l'inverse.`);
+    }
+    if (context.demo === "devis" && SUPPLIER_SIDE.test(`${parts.hook} ${parts.proposal}`)) {
+      failures.push("Démo incohérente : le lien montre l'agent devis CLIENT, mais le mail parle de devis ou commandes FOURNISSEURS (démo factures ou tri des e-mails).");
     }
     if (said.key === "general" && context.demo === "devis") {
       failures.push("Démo incohérente : le lien montre l'agent devis, mais la proposition ne parle pas de préparer un devis.");

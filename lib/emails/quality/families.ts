@@ -48,7 +48,10 @@ export const FAMILY_LABELS: Record<MailFamily, string> = {
 export const FAMILY_EXPERIMENT = "familles-1";
 
 /** Présentation imposée de F2, posée par le code. */
-export const F2_INTRO = "Je me permets de vous contacter : je suis Axel Remillat, freelance en IA et automatisation de tâches pour les PME.";
+/** Ouverture F2 (Cowork #40) : une phrase, présentation + raison du contact. */
+export const F2_INTRO = "Je suis Axel Remillat, j'automatise les tâches répétitives des PME : je vous écris pour l'une des vôtres.";
+/** Ancienne ouverture F2 (avant le 09/10/2026) : reconnue dans les mails déjà écrits. */
+export const LEGACY_F2_INTRO = "Je me permets de vous contacter : je suis Axel Remillat, freelance en IA et automatisation de tâches pour les PME.";
 /** Qui je suis, en une ligne (F4), posé par le code. */
 export const F4_WHO = "Je suis Axel Remillat, freelance en IA et automatisation de tâches pour les PME.";
 /** Demande courte de F3 (le mail tient en 55 mots). */
