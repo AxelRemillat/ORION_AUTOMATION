@@ -89,6 +89,9 @@ export interface QualityOutcome {
 
 const rank = (attempt: QualityAttempt) => (attempt.rules.ok ? 100 : 0) - attempt.rules.failures.length + (attempt.verdict?.score ?? 0);
 
+/** Clé d'un échec de critère : même critère ET même citation (casse, espaces et ponctuation finale ignorés). */
+export const failureKey = (id: string, citation: string) => `${id}|${citation.toLowerCase().replace(/\s+/g, " ").replace(/[.…!?]+$/, "").trim()}`;
+
 /** Raccourcissements dédiés par essai, HORS des essais (Cowork #32 : F2 au-delà de 80 mots). */
 export const SHORTEN_PASSES = 2;
 
@@ -144,6 +147,8 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     .join("\n");
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
+  let lastFailures = new Set<string>();
+  let stalled: string | null = null;
 
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
@@ -206,6 +211,21 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     history.push({ parts, body, rules, verdict, demo: chosen.path });
     if (rules.ok && verdict?.ready) break;
 
+    // L2 (Cowork #39) : le même critère refusé deux fois avec la MÊME citation = la réécriture ne progresse pas.
+    // On saute l'essai suivant (≈ 0,01 € de rédaction + juge) ; la fiche passe en « À revoir » avec le motif.
+    if (rules.ok && verdict) {
+      const keys = new Map(verdict.items.filter((item) => !item.ok).map((item) => [failureKey(item.id, item.citation), item] as const));
+      const repeated = [...keys.keys()].find((key) => lastFailures.has(key));
+      if (repeated) {
+        const item = keys.get(repeated)!;
+        stalled = `Réécriture sans progrès : ${item.id} ${item.label} refusé deux fois sur « ${item.citation} »`;
+        break;
+      }
+      lastFailures = new Set(keys.keys());
+    } else {
+      lastFailures = new Set();
+    }
+
     // Réécriture CIBLÉE : seulement les critères à NON, avec leur citation.
     feedback = rules.ok
       ? verdict
@@ -224,7 +244,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       ? best.rules.failures[0]
       : !best.verdict
         ? "Relecture automatique indisponible : à relire avant envoi."
-        : checklistReason(best.verdict);
+        : stalled ?? checklistReason(best.verdict);
   return {
     subject: best.parts.subject,
     body: best.body,
