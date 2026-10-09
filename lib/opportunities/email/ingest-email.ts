@@ -397,6 +397,8 @@ function codeurProjectBody(parsed: ParsedEmail, receivedAt: string | null): Inge
     url: parsed.url,
     title,
     description: codeurProjectDescription(parsed.body, title).slice(0, 20_000),
+    // L'alerte ne donne que le titre : pré-filtre sur le titre, puis « À voir » sans analyse.
+    titleOnly: codeurProjectDescription(parsed.body, title) === title,
     description_truncated: true,
     budget_text: parsed.budget,
     categories: [],
