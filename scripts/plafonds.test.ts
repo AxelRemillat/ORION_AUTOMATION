@@ -6,6 +6,7 @@
 import { fetchPappers } from "../lib/enrichment/pappers";
 import { openAiGuarded, relancesStep } from "../lib/jobs/handlers/prepare";
 import { prepCost } from "../lib/usage/prep-cost";
+import { capArg } from "../lib/cli/args";
 import { budgets } from "../lib/settings/costs";
 import { prepareAlert } from "../lib/today/auto-run";
 import {
@@ -116,6 +117,12 @@ async function main() {
     check("Pappers : 24 crédits / jour, utilisés aujourd'hui", pappers?.value === "24 crédits · 12 utilisés aujourd'hui", pappers);
     check("OpenAI : 15 € / mois, dépense et pourcentage", openai?.value === "15,00 € · 3,20 € dépensés (21 %)", openai);
   }
+
+  console.log("\n5. Plafond en ligne de commande : 0 reste 0 (Cowork #45)");
+  check("--hunter-cap 0 → 0 crédit (et non le défaut 40)", capArg("0", 40) === 0);
+  check("--hunter-cap 80 → 80", capArg("80", 40) === 80);
+  check("absent ou illisible → défaut", capArg(null, 40) === 40 && capArg("abc", 40) === 40 && capArg("", 30) === 30);
+  check("négatif → 0", capArg("-5", 40) === 0);
 
   console.log(failures === 0 ? "\nTous les tests des plafonds passent.\n" : `\n${failures} test(s) en échec.\n`);
   process.exit(failures === 0 ? 0 : 1);
