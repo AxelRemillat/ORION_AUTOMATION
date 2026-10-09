@@ -178,7 +178,7 @@ export function prefilterReason(input: PrefilterInput): string | null {
  */
 const TITLE_ONLY_RULES: { reason: string; pattern: RegExp }[] = [
   { reason: "titre : vidéo, montage ou photo", pattern: /(videaste|\bvideos?\b|monteur|montage|photograph|tournage)/ },
-  { reason: "titre : réseaux sociaux, community management ou marketing", pattern: /(reseaux sociaux|instagram|tiktok|facebook|linkedin|community|marketeur|\bmarketing\b|publicite|\bseo\b|referencement)/ },
+  { reason: "titre : réseaux sociaux, community management ou marketing", pattern: /(reseaux sociaux|instagram|tiktok|facebook|linkedin|community|marketeur|\bmarketing\b|publicite|\bseo\b|referencement|\bads\b|\bsea\b|adwords)/ },
   { reason: "titre : site vitrine, e-commerce ou CMS", pattern: /(^(aide |recherche |creation (d'un |de )?)?site (web|internet|vitrine)\s*$|^(creer |un |mon |notre |nouveau )?(un )?site (web|internet|vitrine)\b|createurs? de sites?|creation de site|\be-?commerce\b|presta?s?hop|shopify|wordpress|\bwix\b|webflow)/ },
   { reason: "titre : application mobile", pattern: /(developpeur mobile|^application mobile|\bios\b|android|flutter|swift|kotlin)/ },
   { reason: "titre : data science", pattern: /(data scien|machine learning engineer|deep learning)/ },

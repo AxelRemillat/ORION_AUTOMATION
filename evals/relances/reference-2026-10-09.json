@@ -1,0 +1,94 @@
+{
+  "source": "Cowork #13 — notes sur l’étalonnage du 09/10 (générateur v1). Prête = note ≥ 9.",
+  "date": "2026-10-09",
+  "items": [
+    {
+      "company": "BULLY- LES CARS JURASSIENS",
+      "generic": true,
+      "note": 8,
+      "ready": false,
+      "comment": "Clair et pertinent. « Bonjour Madame, » sans nom est maladroit.",
+      "subject": "Re: Demandes de devis",
+      "introGreeting": "Bonjour Madame,",
+      "introLink": "axelremillat.com/agent?v=1",
+      "body": "Bonjour Madame,\n\nLes transferts vers une gare ou un aéroport figurent parmi vos services. Pour une demande de devis concernant un transfert, la démo repère les informations manquantes et prépare une relance.\n\nLa démo, pour mémoire : axelremillat.com/agent?v=1\n\nSi le sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.\n\nLes demandes de transfert passent-elles aussi par le devis en ligne ?"
+    },
+    {
+      "company": "VEDIS",
+      "generic": false,
+      "note": 8.5,
+      "ready": false,
+      "comment": "Bon fait, bonne question.",
+      "subject": "Re: Combien de caméras à prévoir ?",
+      "introGreeting": "Bonjour Monsieur Perotti,",
+      "introLink": "axelremillat.com/agent?v=3",
+      "body": "Bonjour Monsieur Perotti,\n\nVos technico-commerciaux établissent des devis pour les interventions hors conditions de maintenance. La démo repère ce type d’intervention dans une demande et prépare les informations utiles au devis, pour validation.\n\nLa démo, pour mémoire : axelremillat.com/agent?v=3\n\nCes demandes d’intervention hors maintenance arrivent-elles aussi par e-mail ?"
+    },
+    {
+      "company": "ANTARES-FRANCE",
+      "generic": true,
+      "note": 6,
+      "ready": false,
+      "comment": "Dérive : l’intro parlait de documents clients, la relance parle de candidatures ; citer un recrutement daté fait surveillance (interdit).",
+      "subject": "Re: Qui classe les documents clients ?",
+      "introGreeting": "Bonjour Monsieur,",
+      "introLink": "axelremillat.com/automatisations?demo=email&v=3",
+      "body": "Bonjour Monsieur,\n\nUn recrutement est signalé chez ANTARES-FRANCE le 5 octobre 2026. La démo repère les e-mails de candidature, prépare le classement des pièces jointes et signale les informations manquantes.\n\nLa démo, pour mémoire : axelremillat.com/automatisations?demo=email&v=3\n\nSi le sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.\n\nLes candidatures arrivent-elles aussi par e-mail chez vous ?"
+    },
+    {
+      "company": "POK",
+      "generic": false,
+      "note": 8,
+      "ready": false,
+      "comment": "Correct, reste proche du sujet qualité.",
+      "subject": "Re: Devis et certificats produits",
+      "introGreeting": "Bonjour Monsieur Gao,",
+      "introLink": "axelremillat.com/agent?v=1",
+      "body": "Bonjour Monsieur Gao,\n\nVotre service qualité traite les incidents de non-qualité et y répond. La démo repère une demande liée à un tel incident dans un e-mail et prépare une réponse à valider.\n\nLa démo, pour mémoire : axelremillat.com/agent?v=1\n\nCes incidents de non-qualité vous sont-ils signalés par e-mail ?"
+    },
+    {
+      "company": "SOCIETE D'EXPLOITATION ALBERDI",
+      "generic": true,
+      "note": 6,
+      "ready": false,
+      "comment": "Incohérent : recherches de pièces agricoles → rapprochement des factures ; « Vous indiquez que l’on peut désormais vous contacter… » lourd.",
+      "subject": "Re: Rapprochement des factures",
+      "introGreeting": "Bonjour Monsieur Alberdi,",
+      "introLink": "axelremillat.com/automatisations?demo=invoice&v=2",
+      "body": "Bonjour Monsieur Alberdi,\n\nVous indiquez que l’on peut désormais vous contacter pour des recherches de pièces agricoles. La démo repère les lignes de pièces agricoles sur les factures et prépare leur rapprochement avec les achats correspondants.\n\nLa démo, pour mémoire : axelremillat.com/automatisations?demo=invoice&v=2\n\nSi le sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.\n\nCes recherches de pièces agricoles passent-elles par le magasin ?"
+    },
+    {
+      "company": "SICA SICODIS",
+      "generic": false,
+      "note": 7,
+      "ready": false,
+      "comment": "Méta (« cité dans mon premier message ») et détail produit trop pointu.",
+      "subject": "Re: Demandes de références",
+      "introGreeting": "Bonjour Madame Gofard,",
+      "introLink": "axelremillat.com/automatisations?demo=email&v=1",
+      "body": "Bonjour Madame Gofard,\n\nVotre catalogue présente aussi « Abricot – Oreillons fruit IQF », distinct des purées d’abricot citées dans mon premier message. La démo repère cette référence lorsqu’elle figure dans une demande reçue par e-mail.\n\nLa démo, pour mémoire : axelremillat.com/automatisations?demo=email&v=1\n\nRecevez-vous aussi des demandes pour les oreillons par e-mail ?"
+    },
+    {
+      "company": "AXICLIM",
+      "generic": false,
+      "note": 7,
+      "ready": false,
+      "comment": "Logique conditionnelle alambiquée (« Si une facture fournisseur concerne un dépannage… »).",
+      "subject": "Re: Factures sans référence de commande ?",
+      "introGreeting": "Bonjour,",
+      "introLink": "axelremillat.com/automatisations?demo=invoice&v=3",
+      "body": "Bonjour,\n\nVous proposez une demande de dépannage urgent en ligne. Si une facture fournisseur concerne un dépannage, la démo repère une éventuelle référence de commande manquante avant le rapprochement.\n\nLa démo, pour mémoire : axelremillat.com/automatisations?demo=invoice&v=3\n\nLes factures liées aux dépannages arrivent-elles parfois sans référence ?"
+    },
+    {
+      "company": "IMAGINE OPTIC",
+      "generic": true,
+      "note": 8.5,
+      "ready": false,
+      "comment": "Clair, spécifique ; mais le lien n’a pas son &v (R3).",
+      "subject": "Re: Vos confirmations de délai ?",
+      "introGreeting": "Bonjour Monsieur Bereux,",
+      "introLink": "axelremillat.com/automatisations?demo=email",
+      "body": "Bonjour Monsieur Bereux,\n\nVous proposez un service de recalibrage des capteurs de front d’onde. La démo repère les demandes de recalibrage dans les e-mails reçus et prépare une réponse à partir des informations qu’ils contiennent.\n\nLa démo, pour mémoire : axelremillat.com/automatisations?demo=email\n\nSi le sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.\n\nCes demandes de recalibrage arrivent-elles aussi par e-mail ?"
+    }
+  ]
+}

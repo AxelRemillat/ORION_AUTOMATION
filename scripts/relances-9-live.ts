@@ -12,13 +12,68 @@
  * Jamais : une relance validée, programmée, retouchée à la main ou écrite hors
  * application ; ESPACE 3000 (hors cible, Axel l'écarte). Rien n'est envoyé ni supprimé.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { db, liveAsk, ownerId, spentSince } from "./quality-live";
 import type { Prospect } from "@/types";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { composeFollowUp } = require("@/lib/outbox/follow-up") as typeof import("@/lib/outbox/follow-up");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { isGenericAddress } = require("@/lib/contact-finder/upgrade") as typeof import("@/lib/contact-finder/upgrade");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const relance = require("@/lib/outbox/relance-quality") as typeof import("@/lib/outbox/relance-quality");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { ficheOf } = require("@/lib/outbox/follow-up") as typeof import("@/lib/outbox/follow-up");
+
+/** Jeu de référence versionné (notes de Cowork) : jamais ré-étalonné, sert à mesurer l'accord du juge. */
+const REFERENCE = "evals/relances/reference-2026-10-09.json";
+type ReferenceItem = { company: string; note: number; ready: boolean; subject: string; body: string; generic: boolean };
+const referenceItems = (): ReferenceItem[] => (existsSync(REFERENCE) ? (JSON.parse(readFileSync(REFERENCE, "utf8")) as { items: ReferenceItem[] }).items : []);
+
+/** Intro envoyée d'un prospect (corps sans mention stop ni signature). */
+async function sentIntro(prospectId: string): Promise<{ subject: string | null; body: string } | null> {
+  const { data } = await table.from("messages").select("subject, body").eq("prospect_id", prospectId).eq("type", "intro").eq("status", "sent").order("sent_at", { ascending: true }).limit(1);
+  const row = ((data ?? []) as { subject: string | null; body: string }[])[0];
+  if (!row) return null;
+  const body = row.body.split(/\n\s*Si le sujet ne vous concerne pas/)[0].split(/\nAxel Remillat/)[0].trim();
+  return { subject: row.subject, body };
+}
+
+/**
+ * ACCORD DU JUGE avec les notes de Cowork (prêt = note ≥ 9) : grille complète (code + lecture),
+ * et lecture du modèle SEULE (sans les contrôles du code), pour voir s'il tient sans eux.
+ */
+async function referenceAgreement(userId: string, started: string): Promise<void> {
+  const items = referenceItems();
+  let full = 0;
+  let llmOnly = 0;
+  const lines = ["", "## Accord du juge avec les notes de Cowork", "", "| Relance | Note Cowork | Prête (Cowork) | Grille complète | Lecture seule (R2, R5, R7, R8) |", "| --- | --- | --- | --- | --- |"];
+  for (const item of items) {
+    const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("company_name", item.company).limit(1);
+    const prospect = ((data ?? []) as Prospect[])[0];
+    const intro = prospect ? await sentIntro(prospect.id) : null;
+    if (!prospect || !intro) {
+      console.log(`  ${item.company} : fiche ou intro introuvable`);
+      continue;
+    }
+    const parts = relance.introParts(intro.subject, intro.body);
+    const ctx = { intro: parts, generic: item.generic, seed: item.company };
+    // Une seule lecture du modèle (vote à 3) ; la grille complète y ajoute les contrôles du code.
+    const semantic = await relance.readRelance(liveAsk(prospect.id), { body: item.body, introBody: intro.body, fiche: ficheOf(prospect) }, "relance:reference", 3);
+    const verdict = semantic ? relance.relanceVerdictOf([...relance.relanceCodeChecks(item.subject, item.body, ctx), ...semantic]) : null;
+    const llmReady = Boolean(semantic && semantic.every((criterion) => criterion.ok));
+    const fullReady = Boolean(verdict?.ready);
+    if (fullReady === item.ready) full += 1;
+    if (llmReady === item.ready) llmOnly += 1;
+    const failed = (verdict?.items ?? []).filter((criterion) => !criterion.ok).map((criterion) => criterion.id).join(", ");
+    const llmFailed = (semantic ?? []).filter((criterion) => !criterion.ok).map((criterion) => `${criterion.id} : ${criterion.citation}`).join(" ; ");
+    lines.push(`| ${item.company} | ${item.note} | ${item.ready ? "oui" : "non"} | ${fullReady ? "prête" : `non (${failed})`} | ${llmReady ? "prête" : `non — ${llmFailed}`} |`);
+    console.log(`  ${item.company} (${item.note}) : grille ${fullReady ? "prête" : `non (${failed})`} · lecture seule ${llmReady ? "prête" : `non — ${llmFailed}`}`);
+    if ((await spentSince(userId, started)) > BUDGET_EUR) break;
+  }
+  lines.push("", `Accord, grille complète : ${full}/${items.length} · lecture du modèle seule : ${llmOnly}/${items.length}`);
+  writeFileSync(REFERENCE.replace(".json", "-accord.md"), `# Accord du juge — jeu de référence de Cowork (${started.slice(0, 10)})\n${lines.join("\n")}\n`);
+  console.log(`\nAccord, grille complète : ${full}/${items.length} · lecture seule : ${llmOnly}/${items.length}`);
+}
 
 const BUDGET_EUR = 0.55;
 /** Hors cible (Axel l'écarte) ou déjà validées : jamais touchées, quoi qu'il arrive. */
@@ -52,6 +107,11 @@ async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const apply = process.argv.includes("--appliquer");
+  if (process.argv.includes("--reference")) {
+    await referenceAgreement(userId, started);
+    console.log(`coût ${(await spentSince(userId, started)).toFixed(4)} €`);
+    return;
+  }
   const dry = process.argv.includes("--dry");
   const pending = await pendingRelances(userId);
 
@@ -82,14 +142,16 @@ async function main() {
   }
 
   // Étalonnage : 8 prospects réels (relances en attente d'abord, puis autres contactés), génériques / nominatives.
-  const candidates: Prospect[] = pending.map((item) => item.prospect);
+  // Jamais les prospects du jeu de référence : l'étalonnage porte sur des NOUVEAUX prospects.
+  const known = new Set([...referenceItems().map((item) => item.company), ...(process.argv.find((arg) => arg.startsWith("--exclure="))?.slice(10).split("|") ?? [])]);
+  const candidates: Prospect[] = pending.map((item) => item.prospect).filter((prospect) => !known.has(prospect.company_name));
   if (candidates.length < 12) {
-    const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("status", "contacte").limit(60);
-    for (const prospect of (data ?? []) as Prospect[]) if (!candidates.some((item) => item.id === prospect.id) && !NEVER.test(prospect.company_name)) candidates.push(prospect);
+    const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("status", "contacte").limit(80);
+    for (const prospect of (data ?? []) as Prospect[]) if (!candidates.some((item) => item.id === prospect.id) && !NEVER.test(prospect.company_name) && !known.has(prospect.company_name)) candidates.push(prospect);
   }
   const generic = candidates.filter((prospect) => isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null }));
   const nominative = candidates.filter((prospect) => !generic.includes(prospect));
-  const lines: string[] = [`# Étalonnage des relances — ${started.slice(0, 10)}`, "", "8 relances générées sur des prospects réels, SANS écriture en base. Verdict R1–R7 du générateur ; note d'Axel / Cowork à ajouter.", ""];
+  const lines: string[] = [`# Étalonnage des relances — ${started.slice(0, 10)}`, "", "8 relances générées sur des prospects réels (hors jeu de référence), SANS écriture en base. Verdict R1–R10 du générateur (grille v2) ; note d'Axel / Cowork à ajouter.", ""];
   let done = 0;
   // Alternance générique / nominative, puis le reste de la liste la plus longue.
   const queue: (readonly ["générique" | "nominative", Prospect])[] = [];
@@ -112,7 +174,7 @@ async function main() {
   }
   lines.push(`Coût : ${(await spentSince(userId, started)).toFixed(4)} €`);
   mkdirSync("evals/relances", { recursive: true });
-  const file = `evals/relances/etalonnage-${started.slice(0, 10)}.md`;
+  const file = `evals/relances/etalonnage-${started.slice(0, 10)}-v2.md`;
   writeFileSync(file, `${lines.join("\n")}\n`);
   console.log(`\n${file} · coût ${(await spentSince(userId, started)).toFixed(4)} €`);
 }

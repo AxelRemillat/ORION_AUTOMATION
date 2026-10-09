@@ -1,9 +1,13 @@
 /**
- * RELANCES À 9/10 (Cowork #12) : grille R1–R7, assemblage, rédaction avec une
- * réécriture ciblée au plus, « À revoir » sinon. Fixtures uniquement, aucun appel réel.
+ * RELANCES À 9/10 — grille v2 (Cowork #12 puis #13) : R1–R10, assemblage, rédaction
+ * avec une réécriture ciblée au plus, « À revoir » sinon ; jeu de référence de Cowork
+ * (contrôles du code). Fixtures uniquement, aucun appel réel.
  */
+import { readFileSync } from "node:fs";
 import {
   assembleRelance,
+  DEMO_LEADS,
+  demoLead,
   introParts,
   judgeRelance,
   parseRelanceJudge,
@@ -12,6 +16,8 @@ import {
   relanceSubject,
   relanceVerdictOf,
   TRANSFER_SENTENCE,
+  withoutRecruitment,
+  withFamilyMark,
   writeRelance,
   type RelanceContext,
   type RelanceFiche,
@@ -48,70 +54,80 @@ const INTRO_BODY = [
 const FICHE: RelanceFiche = {
   companyName: "INOX FICTIF",
   facts: ["Fabrique des cuves inox pour la viticulture et la brasserie", "Atelier de 2 400 m² à Mâcon"],
-  signals: ["Recrute un technicien bureau d'études (2026-09-28)"],
+  signals: ["Recrute un technicien bureau d'études (2026-09-28)", "Nouvelle gamme de cuves pour brasseurs (2026-09-20)"],
   activity: "Cuves inox sur mesure pour viticulteurs et brasseurs",
 };
-const NOVELTY = "Vous recrutez un technicien bureau d'études : pendant ce temps, les demandes des brasseurs s'accumulent, et la démo prépare déjà le devis à partir des cotes reçues par e-mail.";
-const CTA = "Ces demandes de brasseurs arrivent-elles aussi par e-mail ?";
+const PARTS = {
+  about: "Vos devis de cuves pour brasseurs arrivent avec des cotes à reprendre une à une.",
+  outcome: "Le brasseur reçoit alors son devis le jour même, sans cote oubliée.",
+  cta: "Ces demandes de brasseurs arrivent-elles aussi par e-mail ?",
+};
+const YES = JSON.stringify({ R2: { ok: true, citation_intro: "demande de devis", citation_relance: "devis de cuves pour brasseurs" }, R5: { ok: true, citation: PARTS.cta }, R7: { ok: true, citation: "brasserie" }, R8: { ok: true, citation: "le brasseur reçoit son devis" } });
+const NO_R2 = JSON.stringify({ R2: { ok: false, citation_intro: "devis", citation_relance: "candidatures" }, R5: { ok: true, citation: "" }, R7: { ok: true, citation: "" }, R8: { ok: true, citation: "" } });
 
 async function main() {
-  console.log("\n1. L'intro envoyée : salutation, objet, lien de démo, appel à l'action");
+  console.log("\n1. L'intro envoyée : salutation (R9), objet, lien de démo, appel à l'action");
   const intro = introParts(`Re: ${INTRO_SUBJECT}`, INTRO_BODY);
-  check("salutation reprise à l'identique", intro.greeting === "Bonjour Madame Martin,");
+  check("salutation nominative reprise à l'identique", intro.greeting === "Bonjour Madame Martin,");
+  check("« Bonjour Madame, » sans nom → « Bonjour, » (R9)", introParts("x", "Bonjour Madame,\n\nTexte").greeting === "Bonjour," && introParts("x", "Bonjour Monsieur,\n\nT").greeting === "Bonjour,");
   check("objet sans « Re: »", intro.subject === INTRO_SUBJECT);
   check("lien de démo avec son &v", intro.demoLink === "axelremillat.com/agent?v=2", intro.demoLink);
   check("appel à l'action de l'intro repéré", /15 minutes/.test(intro.cta ?? ""));
-  check("intro sans salutation « Bonjour » → « Bonjour, »", introParts("x", "Madame,\n\nTexte").greeting === "Bonjour,");
 
-  console.log("\n2. Assemblage et contrôles du code (R1, R3, R4, R6)");
-  const nominative: RelanceContext = { intro, generic: false };
-  const generic: RelanceContext = { intro, generic: true };
-  const body = assembleRelance({ novelty: NOVELTY, cta: CTA }, nominative);
+  console.log("\n2. Assemblage et contrôles du code (R1, R3, R4, R6, R8, R9, R10)");
+  const nominative: RelanceContext = { intro, generic: false, seed: "INOX FICTIF" };
+  const generic: RelanceContext = { intro, generic: true, seed: "INOX FICTIF" };
+  const body = assembleRelance(PARTS, nominative);
   const subject = relanceSubject(intro);
   const code = relanceCodeChecks(subject, body, nominative);
-  check("relance nominative : R1, R3, R4, R6 à OUI", code.every((item) => item.ok), code);
-  check("objet « Re: <objet exact> »", subject === `Re: ${INTRO_SUBJECT}`);
-  check("lien de démo sur sa propre ligne", body.split("\n").some((line) => line === "La démo, pour mémoire : axelremillat.com/agent?v=2"));
-  const genericBody = assembleRelance({ novelty: NOVELTY, cta: CTA }, generic);
-  check("adresse générique : phrase de transfert ajoutée, R4 à OUI", genericBody.includes(TRANSFER_SENTENCE) && relanceCodeChecks(subject, genericBody, generic).find((item) => item.id === "R4")?.ok === true);
-  check("adresse générique SANS transfert → R4 à NON", relanceCodeChecks(subject, body, generic).find((item) => item.id === "R4")?.ok === false);
+  check("relance nominative : tous les contrôles du code à OUI", code.every((item) => item.ok), code);
+  check("ligne du lien variée, jamais « La démo, pour mémoire »", DEMO_LEADS.some((lead) => body.includes(`${lead} axelremillat.com/agent?v=2`)) && !/pour m[ée]moire/.test(body), body);
+  check("même fiche → même ligne ; fiches différentes → lignes variées", demoLead("INOX FICTIF") === demoLead("INOX FICTIF") && new Set(["A", "BULLY", "VEDIS", "POK", "SICA", "AXICLIM", "IMAGINE", "ANTARES"].map(demoLead)).size >= 3);
+  const genericBody = assembleRelance(PARTS, generic);
+  check("adresse générique : transfert ajouté, R4 à OUI", genericBody.includes(TRANSFER_SENTENCE) && relanceCodeChecks(subject, genericBody, generic).find((item) => item.id === "R4")?.ok === true);
   check("adresse nominative AVEC transfert → R4 à NON", relanceCodeChecks(subject, genericBody, nominative).find((item) => item.id === "R4")?.ok === false);
-  const r1 = (s: string, b: string) => relanceCodeChecks(s, b, nominative).find((item) => item.id === "R1")?.ok;
-  check("objet différent → R1 à NON", r1("Relance devis", body) === false);
-  check("salutation différente → R1 à NON", r1(subject, body.replace("Bonjour Madame Martin,", "Bonjour,")) === false);
-  const r3 = (b: string) => relanceCodeChecks(subject, b, nominative).find((item) => item.id === "R3")?.ok;
-  check("lien de démo absent → R3 à NON", r3(body.replace("La démo, pour mémoire : axelremillat.com/agent?v=2", "La démo, pour mémoire.")) === false);
-  check("autre variante de démo (&v=3) → R3 à NON", r3(body.replace("agent?v=2", "agent?v=3")) === false);
-  const r6 = (novelty: string) => relanceCodeChecks(subject, assembleRelance({ novelty, cta: CTA }, nominative), nominative).find((item) => item.id === "R6");
-  for (const phrase of ["Je me permets de revenir vers vous", "L'idée est simple", "Cela peut vous faire gagner du temps", "Sans réponse de votre part", "Je reviens vers vous au sujet de vos devis", "La meilleure solution pour vos devis"]) {
-    check(`formule interdite « ${phrase} » → R6 à NON`, r6(`${phrase}, ${NOVELTY}`)?.ok === false);
+  const at = (id: string, b: string, ctx = nominative) => relanceCodeChecks(subject, b, ctx).find((item) => item.id === id);
+  check("objet différent → R1 à NON", relanceCodeChecks("Relance devis", body, nominative).find((item) => item.id === "R1")?.ok === false);
+  check("lien absent → R3 à NON", at("R3", body.replace(/axelremillat\.com\/agent\?v=2/, ""))?.ok === false);
+  const noV = introParts(INTRO_SUBJECT, INTRO_BODY.replace("agent?v=2", "automatisations?demo=email"));
+  check("lien de l'intro sans &v (cas IMAGINE OPTIC) → R3 à NON", relanceCodeChecks(subject, assembleRelance(PARTS, { intro: noV, generic: false }), { intro: noV, generic: false }).find((item) => item.id === "R3")?.ok === false);
+  const withFamily = introParts(INTRO_SUBJECT, INTRO_BODY.replace("agent?v=2", "automatisations?demo=email"), "F3");
+  check("intro sans &v mais famille connue (F3) → même lien + &v=3, R3 à OUI", withFamily.demoLink === "axelremillat.com/automatisations?demo=email&v=3" && relanceCodeChecks(subject, assembleRelance(PARTS, { intro: withFamily, generic: false }), { intro: withFamily, generic: false }).find((item) => item.id === "R3")?.ok === true, withFamily.demoLink);
+  check("lien déjà marqué : la famille ne le change pas", withFamilyMark("axelremillat.com/agent?v=2", "F4") === "axelremillat.com/agent?v=2" && withFamilyMark("axelremillat.com/agent", "F1") === "axelremillat.com/agent?v=1" && withFamilyMark("axelremillat.com/agent", null) === "axelremillat.com/agent");
+  const r6 = (about: string) => at("R6", assembleRelance({ ...PARTS, about }, nominative));
+  for (const phrase of ["Je me permets de revenir vers vous", "L'idée est simple", "Cela peut vous faire gagner du temps", "Je reviens vers vous au sujet de vos devis", "La meilleure solution pour vos devis"]) {
+    check(`formule interdite « ${phrase} » → R6 à NON`, r6(`${phrase}, ${PARTS.about}`)?.ok === false);
   }
-  check("trop court (moins de 40 mots) → R6 à NON", r6("Vous recrutez.")?.ok === false);
-  check("trop long (plus de 70 mots) → R6 à NON", r6(`${NOVELTY} ${NOVELTY} ${NOVELTY}`)?.ok === false);
-  check("le lien ne compte pas comme des mots", /mots/.test(code.find((item) => item.id === "R6")?.citation ?? ""), code.find((item) => item.id === "R6")?.citation);
+  check("moins de 35 mots → R6 à NON", at("R6", assembleRelance({ about: "Vos devis.", outcome: "Plus vite.", cta: "Oui ?" }, nominative))?.ok === false);
+  check("plus de 60 mots → R6 à NON", r6(`${PARTS.about} ${PARTS.about} ${PARTS.about}`)?.ok === false);
+  check("« La démo repère… » en sujet de phrase → R8 à NON", at("R8", assembleRelance({ ...PARTS, outcome: "La démo repère les cotes manquantes et prépare le devis." }, nominative))?.ok === false);
+  check("phrase méta (« cité dans mon premier message ») → R8 à NON", at("R8", assembleRelance({ ...PARTS, about: "Vos cuves pour brasseurs, distinctes des cuves citées dans mon premier message, demandent d'autres cotes." }, nominative))?.ok === false);
+  check("« Bonjour Madame, » sans nom en tête → R9 à NON", at("R9", body.replace("Bonjour Madame Martin,", "Bonjour Madame,"))?.ok === false);
+  check("recrutement mentionné → R10 à NON", at("R10", assembleRelance({ ...PARTS, about: "Un recrutement est signalé chez vous le 28 septembre pour le bureau d'études et les devis." }, nominative))?.ok === false);
+  check("conditionnelle « Si … concerne … » → R10 à NON", at("R10", assembleRelance({ ...PARTS, outcome: "Si une facture fournisseur concerne un dépannage, la référence manquante est signalée." }, nominative))?.ok === false);
+  check("signaux de recrutement retirés de la fiche donnée au rédacteur", withoutRecruitment(FICHE.signals).length === 1 && !/recrut/i.test(withoutRecruitment(FICHE.signals).join(" ")));
 
-  console.log("\n3. Lecture du modèle (R2, R5, R7) : vote à 3, majorité");
-  const yes = JSON.stringify({ R2: { ok: true, citation_intro: "cotes à ressaisir", citation_relance: "Vous recrutez un technicien" }, R5: { ok: true, citation: CTA }, R7: { ok: true, citation: "recrute" } });
-  const noR2 = JSON.stringify({ R2: { ok: false, citation_intro: "devis", citation_relance: "devis" }, R5: { ok: true, citation: CTA }, R7: { ok: true, citation: "" } });
+  console.log("\n3. Lecture du modèle (R2, R5, R7, R8) : vote à 3, majorité");
   check("lecture illisible → null", parseRelanceJudge("pas du JSON") === null);
-  const majority = relanceMajority([parseRelanceJudge(yes), parseRelanceJudge(noR2), parseRelanceJudge(yes)]);
-  check("majorité 2 contre 1 → R2 à OUI, avec citations intro et relance", majority?.find((item) => item.id === "R2")?.ok === true && /intro : « cotes/.test(majority?.find((item) => item.id === "R2")?.citation ?? ""), majority);
-  check("égalité → NON", relanceMajority([parseRelanceJudge(yes), parseRelanceJudge(noR2)])?.find((item) => item.id === "R2")?.ok === false);
+  const majority = relanceMajority([parseRelanceJudge(YES), parseRelanceJudge(NO_R2), parseRelanceJudge(YES)]);
+  check("majorité 2 contre 1 → R2 à OUI, citations intro et relance", majority?.find((item) => item.id === "R2")?.ok === true && /intro : « demande de devis/.test(majority?.find((item) => item.id === "R2")?.citation ?? ""), majority);
+  check("égalité → NON", relanceMajority([parseRelanceJudge(YES), parseRelanceJudge(NO_R2)])?.find((item) => item.id === "R2")?.ok === false);
   const calls: string[] = [];
-  const judgeAsk: AskFn = async (_role, _system, _user, _t, operation) => (calls.push(operation), yes);
+  const judgeAsk: AskFn = async (_role, _system, _user, _t, operation) => (calls.push(operation), YES);
   const verdict = await judgeRelance(judgeAsk, { subject, body, ctx: nominative, introBody: INTRO_BODY, fiche: FICHE });
-  check("grille complète : 7/7, prête, note 10, 3 lectures", verdict?.ready === true && verdict.score === 10 && calls.length === 3, { verdict, calls });
+  check("grille complète : 10/10 critères, prête, 3 lectures", verdict?.ready === true && verdict.items.length === 10 && verdict.score === 10 && calls.length === 3, { verdict, calls });
+  check("R8 : la partie code ET la lecture doivent passer", relanceVerdictOf([...code.map((item) => (item.id === "R8" ? { ...item, ok: false } : item)), ...(majority ?? [])]).items.find((item) => item.id === "R8")?.ok === false);
   calls.length = 0;
   const failedCode = await judgeRelance(judgeAsk, { subject: "Autre objet", body, ctx: nominative, introBody: INTRO_BODY, fiche: FICHE });
   check("code en échec → pas d'appel au modèle", failedCode?.ready === false && calls.length === 0);
-  check("note : 1 critère à NON → 8,5", relanceVerdictOf([...code, ...(majority ?? [])].map((item) => (item.id === "R5" ? { ...item, ok: false } : item))).score === 8.5);
+  const forced = await judgeRelance(judgeAsk, { subject: "Autre objet", body, ctx: nominative, introBody: INTRO_BODY, fiche: FICHE }, "x", 3, true);
+  check("mesure d'accord (alwaysRead) : le modèle lit quand même", calls.length === 3 && forced?.ready === false);
 
   console.log("\n4. Rédaction : une réécriture ciblée au plus, sinon « À revoir »");
   {
     const scripted = (writer: string[], judge: string[]) => {
       const log: string[] = [];
       const ask: AskFn = async (role, system) => {
-        log.push(role);
         if (role === "writer") {
           log.push(/RÉÉCRITURE/.test(system) ? "rewrite" : "first");
           return writer.shift() ?? "";
@@ -120,28 +136,24 @@ async function main() {
       };
       return { ask, log };
     };
-    const good = JSON.stringify({ novelty: NOVELTY, cta: CTA });
+    const good = JSON.stringify(PARTS);
+    const input = { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1" as const };
     {
-      const { ask, log } = scripted([good], [yes]);
-      const out = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1" });
-      check("prête du premier coup : une rédaction, aucune réécriture", "body" in out && out.ready && out.attempts === 1 && !log.includes("rewrite"), log);
+      const { ask, log } = scripted([good], [YES]);
+      const out = await writeRelance(ask, input);
+      check("prête du premier coup : aucune réécriture", "body" in out && out.ready && out.attempts === 1 && !log.includes("rewrite"), log);
     }
     {
-      const bad = JSON.stringify({ novelty: `Je me permets de revenir vers vous : ${NOVELTY}`, cta: CTA });
-      const { ask, log } = scripted([bad, good], [yes]);
-      const out = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1" });
-      check("R6 en échec → UNE réécriture ciblée, puis prête", "body" in out && out.ready && out.attempts === 2 && log.filter((entry) => entry === "rewrite").length === 1, log);
+      const bad = JSON.stringify({ ...PARTS, outcome: "La démo repère les cotes manquantes et prépare le devis." });
+      const { ask, log } = scripted([bad, good], [YES]);
+      const out = await writeRelance(ask, input);
+      check("R8 en échec → UNE réécriture ciblée, puis prête", "body" in out && out.ready && out.attempts === 2 && log.filter((entry) => entry === "rewrite").length === 1, log);
     }
     {
-      const bad = JSON.stringify({ novelty: `Je me permets de revenir vers vous : ${NOVELTY}`, cta: CTA });
-      const { ask, log } = scripted([bad, bad, good], [yes]);
-      const out = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1" });
-      check("encore en échec après la réécriture → « À revoir » (R6), pas de troisième essai", "body" in out && !out.ready && /R6/.test(out.reason ?? "") && log.filter((entry) => entry === "first" || entry === "rewrite").length === 2, { reason: "body" in out ? out.reason : out, log });
-    }
-    {
-      const { ask } = scripted([good, good], [noR2, noR2, noR2, yes]);
-      const out = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1" });
-      check("R2 à NON → réécriture avec la critique R2", "body" in out && out.attempts === 2, out);
+      const bad = JSON.stringify({ ...PARTS, about: "Je me permets de revenir vers vous au sujet des devis de cuves." });
+      const { ask, log } = scripted([bad, bad, good], [YES]);
+      const out = await writeRelance(ask, input);
+      check("encore en échec après la réécriture → « À revoir », pas de troisième essai", "body" in out && !out.ready && /R6/.test(out.reason ?? "") && log.length === 2, { reason: "body" in out ? out.reason : out, log });
     }
   }
 
@@ -158,25 +170,35 @@ async function main() {
     const seen: string[] = [];
     const ask: AskFn = async (role, _system, user) => {
       seen.push(user);
-      return role === "writer" ? JSON.stringify({ novelty: NOVELTY, cta: CTA }) : yes;
+      return role === "writer" ? JSON.stringify(PARTS) : YES;
     };
     const composed = await composeFollowUp(db as unknown as Db, { userId: USER, prospect, type: "relance_1", ask });
     check("composée sans rien écrire en base", composed.ok && db.rows("messages").length === 1, composed);
     if (composed.ok) {
       const draft = composed.draft;
-      check("même fil (thread, réponse au dernier envoi)", draft.thread_id === "thr-1" && draft.reply_to_gmail_message_id === "gm-1");
-      check("objet « Re: <objet exact> », salutation de l'intro", draft.subject === `Re: ${INTRO_SUBJECT}` && draft.body.startsWith("Bonjour Madame Martin,"));
-      check("adresse générique : transfert demandé ; mention stop une seule fois", draft.body.includes(TRANSFER_SENTENCE) && draft.body.split(OPT_OUT_SENTENCE).length === 2, draft.body);
-      check("prête : note 10, aucun motif", draft.ready && draft.quality_score === 10 && draft.quality_reason === null);
-      check("le rédacteur n'a pas reçu la mention stop de l'intro", !seen.some((user) => user.includes(OPT_OUT_SENTENCE)));
+      check("même fil, objet « Re: <objet exact> », salutation de l'intro", draft.thread_id === "thr-1" && draft.subject === `Re: ${INTRO_SUBJECT}` && draft.body.startsWith("Bonjour Madame Martin,"));
+      check("adresse générique : transfert ; mention stop une seule fois", draft.body.includes(TRANSFER_SENTENCE) && draft.body.split(OPT_OUT_SENTENCE).length === 2, draft.body);
+      check("prête : note 10, aucun motif", draft.ready && draft.quality_score === 10 && draft.quality_reason === null, draft);
+      check("le rédacteur n'a vu ni la mention stop ni le recrutement", !seen.some((user) => user.includes(OPT_OUT_SENTENCE) || /recrute/i.test(user)), seen[0]);
     }
     const drafted = await draftFollowUp(db as unknown as Db, { userId: USER, prospect, type: "relance_1", ask });
     const row = db.rows("messages").find((message) => message.type === "relance_1") as Record<string, unknown>;
-    check("brouillon enregistré avec note et motif", drafted.ok && row.status === "draft" && row.quality_score === 10 && row.quality_reason === null, row);
-    const facts = ficheOf(prospect);
-    check("fiche : faits sourcés et signaux datés", facts.facts.includes("Fabrique des cuves inox pour la viticulture") && facts.signals[0] === "Recrute un technicien bureau d'études (2026-09-28)");
-    const noIntro = await composeFollowUp(new FakeDb({ prospects: [prospect as never], messages: [], inbound_messages: [], offers: [] }) as unknown as Db, { userId: USER, prospect, type: "relance_1", ask });
-    check("aucune intro envoyée → pas de relance", !noIntro.ok);
+    check("brouillon enregistré avec note et motif, sans la grille", drafted.ok && row.quality_score === 10 && row.quality_reason === null && !("checklist" in row), row);
+    check("fiche : faits sourcés", ficheOf(prospect).facts.includes("Fabrique des cuves inox pour la viticulture"));
+  }
+
+  console.log("\n6. Jeu de référence de Cowork (evals/relances) : les contrôles du code");
+  {
+    const reference = JSON.parse(readFileSync("evals/relances/reference-2026-10-09.json", "utf8")) as { items: { company: string; note: number; ready: boolean; subject: string; body: string; introGreeting: string; introLink: string | null; generic: boolean }[] };
+    check("8 relances notées par Cowork, aucune prête (note < 9)", reference.items.length === 8 && reference.items.every((item) => !item.ready && item.note < 9));
+    let caught = 0;
+    for (const item of reference.items) {
+      const ctx: RelanceContext = { intro: { subject: item.subject.replace(/^Re: /, ""), greeting: introParts("", `${item.introGreeting}\n`).greeting, demoLink: item.introLink, cta: null }, generic: item.generic };
+      const failed = relanceCodeChecks(item.subject, item.body, ctx).filter((criterion) => !criterion.ok);
+      if (failed.length) caught += 1;
+      check(`${item.company} (note ${item.note}) : refusée par le code (${failed.map((criterion) => criterion.id).join(", ") || "—"})`, failed.length > 0);
+    }
+    check("accord du code avec Cowork : au moins 7 sur 8", caught >= 7, `${caught}/8`);
   }
 
   console.log(failures === 0 ? "\nTous les tests relances 9/10 passent.\n" : `\n${failures} test(s) en echec.\n`);

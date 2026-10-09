@@ -1,0 +1,16 @@
+# Accord du juge — jeu de référence de Cowork (2026-10-09)
+
+## Accord du juge avec les notes de Cowork
+
+| Relance | Note Cowork | Prête (Cowork) | Grille complète | Lecture seule (R2, R5, R7, R8) |
+| --- | --- | --- | --- | --- |
+| BULLY- LES CARS JURASSIENS | 8 | non | non (R1, R6, R8, R9) | non — R8 : « Pour une demande de devis concernant un transfert, la démo repère les informations manquantes et prépare une relance. » |
+| VEDIS | 8.5 | non | non (R2, R6, R7, R8) | non — R2 : intro : « J'automatise leur lecture et je prépare, pour validation, une question sur ce nombre manquant avant chiffrage. » · relance : « Vos technico-commerciaux établissent des devis pour les interventions hors conditions de maintenance. » ; R7 : Vos technico-commerciaux établissent des devis pour les interventions hors conditions de maintenance. ; R8 : La démo repère ce type d’intervention dans une demande et prépare les informations utiles au devis, pour validation. |
+| ANTARES-FRANCE | 6 | non | non (R1, R2, R6, R7, R8, R9, R10) | non — R2 : intro : « Qui trie et classe les documents qui accompagnent vos commandes clients ? » · relance : « Un recrutement est signalé chez ANTARES-FRANCE le 5 octobre 2026. La démo repère les e-mails de candidature, prépare le classement des pièces jointes et signale les informations manquantes. » ; R7 : Un recrutement est signalé chez ANTARES-FRANCE le 5 octobre 2026. ; R8 : La démo repère les e-mails de candidature, prépare le classement des pièces jointes et signale les informations manquantes. |
+| POK | 8 | non | non (R2, R6, R8) | non — R2 : intro : « Lorsqu’une demande de devis en réclame un, le client attend le document. » · relance : « Votre service qualité traite les incidents de non-qualité et y répond. » ; R8 : La démo repère une demande liée à un tel incident dans un e-mail et prépare une réponse à valider. |
+| SOCIETE D'EXPLOITATION ALBERDI | 6 | non | non (R2, R6, R7, R8) | non — R2 : intro : « Le rachat de métaux ferreux et non ferreux sans rendez-vous complique le rapprochement sans référence d’achat. » · relance : « Vous indiquez que l’on peut désormais vous contacter pour des recherches de pièces agricoles. » ; R7 : La démo repère les lignes de pièces agricoles sur les factures et prépare leur rapprochement avec les achats correspondants. ; R8 : La démo repère les lignes de pièces agricoles sur les factures et prépare leur rapprochement avec les achats correspondants. |
+| SICA SICODIS | 7 | non | non (R6, R8) | non — R8 : La démo repère cette référence lorsqu’elle figure dans une demande reçue par e-mail. |
+| AXICLIM | 7 | non | non (R6, R8, R10) | non — R8 : Si une facture fournisseur concerne un dépannage, la démo repère une éventuelle référence de commande manquante avant le rapprochement. |
+| IMAGINE OPTIC | 8.5 | non | non (R2, R3, R6, R7, R8) | non — R2 : intro : « chaque commande comporte des références à vérifier avant confirmation. » · relance : « Vous proposez un service de recalibrage des capteurs de front d’onde. » ; R7 : La démo repère les demandes de recalibrage dans les e-mails reçus et prépare une réponse à partir des informations qu’ils contiennent. ; R8 : La démo repère les demandes de recalibrage dans les e-mails reçus et prépare une réponse à partir des informations qu’ils contiennent. |
+
+Accord, grille complète : 8/8 · lecture du modèle seule : 8/8
