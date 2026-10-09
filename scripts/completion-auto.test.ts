@@ -28,7 +28,7 @@ import type { CompanyBase } from "../lib/enrichment/types";
 import { painForJob } from "../lib/funnel/pain-map";
 import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { runSiteStage } from "../lib/funnel/site-priority";
-import { REPLAY_PENDING, reopenPending, reopenUnexamined } from "../lib/funnel/store";
+import { REPLAY_LIMIT, REPLAY_PENDING, reopenPending, reopenUnexamined } from "../lib/funnel/store";
 import { runFilterStage } from "../lib/funnel/stages";
 import { DEFAULT_PREFS } from "../lib/funnel/settings";
 import type { ContactDeps } from "../lib/contact-finder/finder";
@@ -260,6 +260,9 @@ async function main() {
     const limited = await reopenPending(many as unknown as Db, "u", "r2", "2026-09-09T00:00:00Z", 2);
     const taken = many.rows("signal_candidates").filter((item) => item.run_id === "r2").map((item) => item.id).sort().join();
     check("au plus `limit` par run, les plus récents d'abord", limited === 2 && taken === "n3,n4", taken);
+    check("reprise limitée à 200 par run (Cowork #48)", REPLAY_LIMIT === 200);
+    const big = new FakeDb({ signal_candidates: Array.from({ length: 250 }, (_, i) => offer(`b${i}`, { motif_rejet: "non examiné : plafond" })) });
+    check("250 en attente : 200 repris par défaut", (await reopenPending(big as unknown as Db, "u", "r3", "2026-09-09T00:00:00Z")) === 200);
     const looked: string[] = [];
     await runFilterStage(db as never, "u", "r2", {
       prefs: DEFAULT_PREFS,
