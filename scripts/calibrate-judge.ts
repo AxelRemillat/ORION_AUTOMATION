@@ -9,7 +9,7 @@
  * (« prêt » = 9 ou plus). Cible : au moins 13 accords sur 15. Rien n'est écrit.
  */
 import { db, liveAsk, ownerId, spentSince } from "./quality-live";
-import { COWORK_D_SET, COWORK_SET_2, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
+import { COWORK_D_SET, COWORK_SET_2, DAF_GUARDS, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
 import { judgeChecklist } from "@/lib/emails/quality/checklist";
 import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { buildFacts } from "@/lib/emails/derived-facts";
@@ -27,7 +27,7 @@ async function main() {
   const guards: string[] = [];
   const rows: string[] = [];
   let judged = 0;
-  for (const mail of [...COWORK_D_SET, ...COWORK_SET_2, ...F4_GUARDS]) {
+  for (const mail of [...COWORK_D_SET, ...COWORK_SET_2, ...F4_GUARDS, ...DAF_GUARDS]) {
     const guard = "expectFail" in mail ? (mail as { expectFail: string }).expectFail : null;
     const name = mail.company.replace(/\s*\(.*$/, "").slice(0, 30);
     const { data } = await loose.from("prospects").select("*").eq("user_id", userId).ilike("company_name", `%${name}%`).is("deleted_at", null).limit(1);
@@ -52,7 +52,7 @@ async function main() {
     const siteText = prospect ? [JSON.stringify(prospect.business_profile ?? {}), prospect.website ?? "", ...(prospect.signals ?? []).map((signal) => signal.label)].join(" ") : "";
     const verdict = await judgeChecklist(
       liveAsk(prospect?.id ?? null),
-      { subject: mail.subject, core: mail.core, family: mail.family, greeting: mail.core.split("\n\n")[0] ?? "", company: prospect?.company_name ?? mail.company, facts, recipientRole: prospect?.contact_role ?? null, siteText },
+      { subject: mail.subject, core: mail.core, family: mail.family, greeting: mail.core.split("\n\n")[0] ?? "", company: prospect?.company_name ?? mail.company, facts, recipientRole: prospect?.contact_role ?? null, siteText, daf: mail.daf },
       "qualite:etalonnage",
     );
     const ready = Boolean(verdict?.ready);
@@ -66,7 +66,7 @@ async function main() {
   console.log("| Mail | Famille | Cowork | Check-list | Accord | Critères à NON |");
   console.log("| --- | --- | --- | --- | --- | --- |");
   console.log(rows.join("\n"));
-  console.log(`\nGarde-fous F4 : ${guards.join(" · ")}`);
+  console.log(`\nGarde-fous F4 / DAF : ${guards.join(" · ")}`);
   const target = Math.ceil(TARGET_RATE * judged);
   console.log(`\nAccords avec Cowork : ${agree}/${judged} (cible ${target}) · coût ${(await spentSince(userId, started)).toFixed(3)} €`);
   if (agree < target) process.exitCode = 1;

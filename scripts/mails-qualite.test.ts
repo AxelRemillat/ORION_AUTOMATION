@@ -4,6 +4,8 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { repeatedExpressions } from "../lib/emails/quality/checklist";
+import { DAF_GUARDS } from "../lib/emails/quality/cowork-d-set";
 import { concreteDafQuestion } from "../lib/emails/quality/daf";
 import { collapseDocumentLists, DANGLING_APPOSITION } from "../lib/emails/quality/rules";
 import { DAF_FOCUS } from "../lib/emails/quality/daf";
@@ -949,6 +951,31 @@ async function main() {
     check("F3 DAF vague : jamais prête, C1 jamais forcé à OUI", vagueVerdict?.ready === false && !vagueVerdict.items.some((item) => item.id === "C1" && item.ok));
     const notDaf = await judgeChecklist(c1No, { subject: mellot.subject, core: body, family: "F3", greeting: GREETING, company: "Joseph Mellot", facts: "" });
     check("hors douleur DAF, C1 ne bouge pas", notDaf?.items.find((item) => item.id === "C1")?.ok === false);
+  }
+
+  console.log("\nCowork #47 : C2 en F3 DAF, renvoi dans la proposition, expression de 3 mots répétée");
+  {
+    const jucla = { subject: "Vos écarts sur factures fournisseurs ?", hook: "Qui repère les écarts de quantité sur vos factures fournisseurs avant la clôture ?", proposal: "J'automatise ce rapprochement et je vous signale chaque écart dès la réception de la facture." };
+    const body = assembleFamily("F3", jucla, { greeting: GREETING, demo: DEMO_LINKS.factures, cta: ctaFor("p-jucla-47") });
+    const verdict = (c1: boolean, c2: boolean) => JSON.stringify({ C1: { ok: c1, citation: "aucun fait d'entreprise" }, C2: { ok: c2, citation: "le problème ne découle d'aucun fait" }, C3: { ok: true, citation: "ok" }, C5: { ok: true, citation: "ok" } });
+    const noFact: AskFn = async () => verdict(false, false);
+    const concrete = await judgeChecklist(noFact, { subject: jucla.subject, core: body, family: "F3", greeting: GREETING, company: "Maison Jucla", facts: "", daf: true });
+    check("F3 DAF concrète (MAISON JUCLA) : C2 passe, le rôle DAF rattache le problème au destinataire", concrete?.items.find((item) => item.id === "C2")?.ok === true, JSON.stringify(concrete?.items.filter((item) => !item.ok)));
+    check("F3 DAF concrète, texte sans répétition : prêt", concrete?.ready === true, JSON.stringify(concrete?.items.filter((item) => !item.ok)));
+    const vague = { ...jucla, hook: "Qui gère vos factures ?" };
+    const vagueBody = assembleFamily("F3", vague, { greeting: GREETING, demo: DEMO_LINKS.factures, cta: ctaFor("p-vague-47") });
+    const vagueVerdict = await judgeChecklist(noFact, { subject: vague.subject, core: vagueBody, family: "F3", greeting: GREETING, company: "Exemple", facts: "", daf: true });
+    check("F3 DAF vague (« Qui gère vos factures ? ») : jamais prêt, C2 jamais forcé à OUI", vagueVerdict?.ready !== true && vagueVerdict?.items.find((item) => item.id === "C2")?.ok !== true);
+    const notDaf = await judgeChecklist(noFact, { subject: jucla.subject, core: body, family: "F3", greeting: GREETING, company: "Maison Jucla", facts: "" });
+    check("hors douleur DAF, C2 ne bouge pas", notDaf?.items.find((item) => item.id === "C2")?.ok === false);
+
+    check("MAISON JUCLA (#46) : « avant la clôture » deux fois → D6", repeatedExpressions("Qui repère les écarts de quantité sur vos factures fournisseurs avant la clôture ? J'automatise leur rapprochement et je signale les écarts avant la clôture.").includes("avant la clôture"));
+    const juclaGuard = DAF_GUARDS[0];
+    const d6 = deterministicChecks(juclaGuard.core, { family: "F3", greeting: juclaGuard.core.split("\n\n")[0] }).find((item) => item.id === "D6");
+    check("garde-fou d'étalonnage MAISON JUCLA : refusé sur D6", d6?.ok === false && /avant la clôture/.test(d6.citation), d6?.citation);
+    check("expression faite de mots-outils et de noms génériques (« les références manquantes », FIRSTPELLETS) : pas une répétition", repeatedExpressions("Les références manquantes bloquent la commande. Je signale les références manquantes.").length === 0);
+    check("expression répétée dans la même phrase aussi détectée", repeatedExpressions("Le suivi de production et le suivi de production.").includes("suivi de production"));
+    check("consigne DAF : la proposition reprend l'objet par un renvoi, sans répéter la question", /renvoi/.test(DAF_FOCUS) && /ce rapprochement/.test(DAF_FOCUS) && !/je signale les écarts avant la clôture/.test(DAF_FOCUS));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

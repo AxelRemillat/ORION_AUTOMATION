@@ -54,7 +54,7 @@ export const CRITERIA: Record<CriterionId, { label: string; kind: "code" | "llm"
   D3: { label: "Salutation correcte", kind: "code", penalty: 1 },
   D4: { label: "Un seul appel à l'action (une seule question finale)", kind: "code", penalty: 1 },
   D5: { label: "Aucun mot interdit", kind: "code", penalty: 1 },
-  D6: { label: "Aucun groupe nominal répété", kind: "code", penalty: 1 },
+  D6: { label: "Aucun groupe nominal ni expression de 3 mots répétés", kind: "code", penalty: 1 },
   D7: { label: "Pas d'ouverture par la démo (fait et problème d'abord)", kind: "code", penalty: 2 },
   C1: { label: "Le fait cité est spécifique et figure dans les faits de la fiche", kind: "llm", penalty: 3 },
   C2: { label: "Le problème découle de ce fait et concerne le rôle du destinataire", kind: "llm", penalty: 2 },
@@ -85,6 +85,25 @@ export function repeatedNounGroups(text: string): string[] {
     if (pair.every((word) => GENERIC.has(word))) continue;
     const key = pair.join(" ");
     seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  return [...seen].filter(([, count]) => count > 1).map(([key]) => key);
+}
+
+/**
+ * D6 (Cowork #47, MAISON JUCLA : « avant la clôture » deux fois) : la même expression de 3 mots ou plus revient,
+ * mots-outils compris, dans deux phrases ou dans la même. Une expression faite UNIQUEMENT de mots-outils et de noms
+ * génériques (« les références manquantes », FIRSTPELLETS prêt selon Cowork) ne compte pas.
+ */
+export function repeatedExpressions(text: string, size = 3): string[] {
+  const seen = new Map<string, number>();
+  for (const sentence of text.split(/[.!?;:…]+/)) {
+    const words = sentence.toLowerCase().replace(/[’']/g, " ").split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
+    for (let index = 0; index + size <= words.length; index += 1) {
+      const gram = words.slice(index, index + size);
+      if (gram.every((word) => STOP.has(word) || GENERIC.has(word))) continue;
+      const key = gram.join(" ");
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
   }
   return [...seen].filter(([, count]) => count > 1).map(([key]) => key);
 }
@@ -122,7 +141,7 @@ export function deterministicChecks(core: string, context: { family: MailFamily;
   const forbidden = FORBIDDEN_WORDS.filter((word) => wordHit(written, word));
   // Texte écrit par le rédacteur : sans la salutation, la ligne de démo, les phrases fixes et la demande.
   const own = blocks.slice(1, -1).filter((block) => !block.includes(DEMO_HOST) && block !== F2_INTRO && block !== LEGACY_F2_INTRO && block !== F4_WHO);
-  const repeated = repeatedNounGroups(own.join(" "));
+  const repeated = [...repeatedNounGroups(own.join(" ")), ...repeatedExpressions(own.join(" \n. "))];
   const opening = own[0] ?? "";
 
   return [
@@ -274,10 +293,12 @@ export async function judgeChecklist(ask: AskFn, input: ChecklistInput, operatio
   const semantic = majority(parsed, semanticCriteria(input.family));
   if (!semantic) return null;
   // Cowork #46 : en F3 DAF, la question qui nomme l'objet concret du rapprochement EST le fait (règle F3 de #36).
+  // Cowork #47 : mêmes conditions pour C2 — le rôle DAF rattache ce problème au destinataire.
   const question = input.core.replace(/\r\n/g, "\n").split(/\n\s*\n/)[1] ?? "";
   if (input.daf && input.family === "F3" && concreteDafQuestion(question)) {
-    const c1 = semantic.find((item) => item.id === "C1");
-    if (c1 && !c1.ok) Object.assign(c1, { ok: true, citation: `question DAF concrète (règle F3, #46) : « ${question} »` });
+    for (const item of semantic) {
+      if ((item.id === "C1" || item.id === "C2") && !item.ok) Object.assign(item, { ok: true, citation: `question DAF concrète (règle F3, #46/#47) : « ${question} »` });
+    }
   }
   return verdictOf([...code, ...semantic]);
 }
