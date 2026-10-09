@@ -35,6 +35,7 @@ import { countedText } from "@/lib/mail-preflight/words";
 import { liveAsk } from "./quality-live";
 import { coverSite } from "@/lib/enrichment/site";
 import { searchCompanies } from "@/lib/enrichment/gouv";
+import { resolveZone } from "@/lib/enrichment/geo";
 import { fetchPappers } from "@/lib/enrichment/pappers";
 import { findEmailByName } from "@/lib/enrichment/hunter";
 import { withLinkupRun } from "@/lib/linkup/run-cap";
@@ -116,22 +117,42 @@ interface Candidate {
   siteStatus: string;
   headcount: number | null;
   leader: string | null;
-  /** Dirigeant personne physique, decoupe : `email-finder` demande les deux. */
+  /** Dirigeant personne physique, découpé : `email-finder` demande les deux. */
   leaderFirst: string | null;
   leaderLast: string | null;
   revenue: number | null;
   verdict: ReturnType<typeof classifyAgence>;
 }
 
+/**
+ * « Prénom Nom » de l'annuaire, découpé pour `email-finder`. Le dernier mot
+ * fait le nom de famille : l'annuaire rend « Jean-Paul Mercier », pas une liste.
+ */
+function splitLeader(person: string | null): { leaderFirst: string | null; leaderLast: string | null } {
+  const parts = (person ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { leaderFirst: null, leaderLast: null };
+  return { leaderFirst: parts[0], leaderLast: parts[parts.length - 1] };
+}
+
 async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Candidate[] }> {
   const pool: CompanyBase[] = [];
   let total = 0;
+
+  /*
+   * `criteria.zone` n'est qu'un LIBELLÉ : le filtre géographique vient de
+   * `options.zone`, une zone résolue (gouv.ts, ligne 296). Sans ça, « zone 69 »
+   * s'affichait partout alors que le vivier était national — défaut trouvé le
+   * 09/10 en comparant trois zones qui rendaient la même liste.
+   */
+  const resolved = await resolveZone(ZONE);
+  if (!resolved.ok) throw new Error(`Zone ${ZONE} non résolue : ${resolved.error}`);
 
   for (const naf of NAF_ORDER) {
     if (pool.length >= SCAN) break;
     const search = await searchCompanies(
       { naf: [naf], tranches: [...AGENCES_EFFECTIF_CODES], zone: ZONE },
       25,
+      { zone: resolved.data },
     );
     if (!search.ok) {
       console.log(`  (${naf} : ${search.error})`);
@@ -208,8 +229,15 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
       siteStatus: site.status,
       headcount,
       leader,
-      leaderFirst,
-      leaderLast,
+      /*
+       * Dirigeant personne physique : il vient de l'ANNUAIRE GRATUIT, lu à
+       * l'identification. Le chercher chez Pappers était une erreur — la
+       * politique de sobriété (pappers-policy.ts) ne l'appelle que si aucun
+       * chiffre financier n'est publié, donc presque jamais : la mesure du
+       * 07/10 n'a consommé aucun crédit et mon essai nominatif n'a jamais eu
+       * de nom à donner à `email-finder`.
+       */
+      ...splitLeader(base.leader_person),
       revenue,
       verdict,
     };
