@@ -28,7 +28,9 @@ import type { CompanyBase } from "../lib/enrichment/types";
 import { painForJob } from "../lib/funnel/pain-map";
 import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { runSiteStage } from "../lib/funnel/site-priority";
-import { reopenUnexamined } from "../lib/funnel/store";
+import { REPLAY_PENDING, reopenPending, reopenUnexamined } from "../lib/funnel/store";
+import { runFilterStage } from "../lib/funnel/stages";
+import { DEFAULT_PREFS } from "../lib/funnel/settings";
 import type { ContactDeps } from "../lib/contact-finder/finder";
 import type { Db } from "../lib/trash/scope";
 import type { Prospect, SignalCandidateRow } from "../types";
@@ -233,6 +235,42 @@ async function main() {
     check("signal non examiné : repris dans le run courant, statut brut", reopened === 1 && row("a").run_id === "r2" && row("a").statut === "brut" && row("a").motif_rejet === null);
     check("rejeté pour un autre motif : inchangé", row("b").statut === "rejeté" && row("b").run_id === "r1");
     check("retenu : inchangé, rien n'est supprimé", row("c").statut === "retenu" && db.rows("signal_candidates").length === 3);
+  }
+
+  console.log("\n7 bis. Non-examinés repris SANS relecture, examinés en premier (Cowork #47)");
+  {
+    // Le curseur France Travail ne relit plus les offres déjà lues : la reprise par hash ne voyait rien.
+    const at = "2026-10-09T15:00:00Z";
+    const offer = (id: string, extra: Record<string, unknown>) => ({
+      id, user_id: "u", run_id: "r1", hash: `h${id}`, source: "france-travail", statut: "rejeté", date_signal: "2026-10-01",
+      texte_brut: "Assistant ADV", company_name: `CO ${id}`, siren: null, facts: { jobTitle: "Assistant ADV", strength: "fort" },
+      badges: [], created_at: at, updated_at: at, ...extra,
+    });
+    const db = new FakeDb({ signal_candidates: [
+      offer("old", { motif_rejet: "non examiné : plafond de 1200 signaux examinés par run (quota par source)" }),
+      offer("ancien", { motif_rejet: "non examiné : plafond de 1200 signaux examinés par run (quota par source)", created_at: "2026-08-01T00:00:00Z" }),
+      offer("autre", { motif_rejet: "entreprise introuvable à l'annuaire" }),
+      offer("frais", { run_id: "r2", statut: "brut", motif_rejet: null, date_signal: "2026-10-10" }),
+    ] });
+    const reopened = await reopenPending(db as unknown as Db, "u", "r2", "2026-09-09T00:00:00Z");
+    const row = (id: string) => db.rows("signal_candidates").find((item) => item.id === id) as Record<string, unknown>;
+    check("non examiné de la fenêtre : repris au run courant, sans relecture", reopened === 1 && row("old").run_id === "r2" && row("old").statut === "brut" && row("old").motif_rejet === REPLAY_PENDING);
+    check("hors fenêtre ou autre motif : inchangés", row("ancien").run_id === "r1" && row("autre").run_id === "r1" && row("autre").statut === "rejeté");
+    const many = new FakeDb({ signal_candidates: Array.from({ length: 5 }, (_, i) => offer(`n${i}`, { motif_rejet: "non examiné : plafond", created_at: `2026-10-0${i + 1}T00:00:00Z` })) });
+    const limited = await reopenPending(many as unknown as Db, "u", "r2", "2026-09-09T00:00:00Z", 2);
+    const taken = many.rows("signal_candidates").filter((item) => item.run_id === "r2").map((item) => item.id).sort().join();
+    check("au plus `limit` par run, les plus récents d'abord", limited === 2 && taken === "n3,n4", taken);
+    const looked: string[] = [];
+    await runFilterStage(db as never, "u", "r2", {
+      prefs: DEFAULT_PREFS,
+      lookup: async (signal) => {
+        looked.push(signal.companyName);
+        return { ok: true, company: null };
+      },
+      known: new Set(),
+      cap: 1,
+    });
+    check("repris examiné AVANT le signal frais, même plus ancien", looked[0] === "CO old", looked.join());
   }
 
   console.log("\n8. France Travail élargi (toute la France, 30 jours, back-office)");
