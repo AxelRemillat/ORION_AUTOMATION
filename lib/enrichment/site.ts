@@ -109,7 +109,16 @@ export function isAllowedByRobots(rules: Robots, pathname: string): boolean {
 // ---------------------------------------------------------------------------
 
 /** GET texte, avec user-agent explicite et délai court. Jamais throw. */
-async function fetchText(url: string, accept = "text/html"): Promise<string | null> {
+/**
+ * Rend l URL REELLEMENT servie apres redirections, avec le texte.
+ *
+ * Indispensable pour l origine : fourmizz.fr, saintlouisconseil.fr et
+ * conversationnel.fr repondent 301 vers « www. ». En gardant le domaine nu
+ * comme origine, `internalLinks` jugeait EXTERNE chaque lien du site et n en
+ * retenait aucun — ORION ne lisait alors que la page d accueil, jamais
+ * « a propos » ni « services ».
+ */
+async function fetchDoc(url: string, accept = "text/html"): Promise<{ text: string; url: string } | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -123,13 +132,17 @@ async function fetchText(url: string, accept = "text/html"): Promise<string | nu
     const type = response.headers.get("content-type") ?? "";
     if (accept === "text/html" && !type.includes("html") && !type.includes("text")) return null;
     // `response.text()` forcerait l'UTF-8 : on respecte le charset annonce.
-    return decodeBody(await response.arrayBuffer(), type).slice(0, 400_000);
+    return { text: decodeBody(await response.arrayBuffer(), type).slice(0, 400_000), url: response.url || url };
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** Le texte seul, pour les appelants qui n ont pas besoin de l URL servie. */
+const fetchText = async (url: string, accept = "text/html"): Promise<string | null> =>
+  (await fetchDoc(url, accept))?.text ?? null;
 
 /** HTML -> texte lisible. Scripts, styles et balises retirés. */
 export function htmlToText(html: string): string {
@@ -475,20 +488,29 @@ async function readSite(
   const robots = await loadRobots(origin);
   let linkupCalls = 0;
 
-  const homeHtml = await fetchText(origin);
+  const document = await fetchDoc(origin);
+  const homeHtml = document?.text ?? null;
   const home = await readPage(origin, robots, prospectId, true);
   linkupCalls += home.linkupCalls;
   if (!home.page) return { pages: [], html: homeHtml, linkupCalls };
 
   const pages = [home.page];
-  const secondary = homeHtml ? pickSecondaryPages(internalLinks(homeHtml, origin), origin) : [];
+  /*
+   * ORIGINE REELLEMENT SERVIE. Un site qui repond 301 vers « www. » faisait
+   * juger EXTERNE chacun de ses propres liens (internalLinks compare a
+   * l origine DEMANDEE) : plus aucune page secondaire, jamais. Mesure du
+   * 09/10/2026 : fourmizz.fr, saintlouisconseil.fr et conversationnel.fr
+   * perdaient ainsi « a propos », « services » et « realisations ».
+   */
+  const served = document ? new URL(document.url).origin : origin;
+  const secondary = homeHtml ? pickSecondaryPages(internalLinks(homeHtml, served), served) : [];
 
   // Le sitemap declare des pages que le HTML ne lie pas (listes construites en
   // JavaScript). C'est la seule facon de trouver certaines offres d'emploi.
   // Il est servi en `application/xml` : sans ce type explicite, `fetchText` le
   // rejetait silencieusement et aucune offre n'etait jamais decouverte.
-  const sitemap = await fetchText(`${origin}/sitemap.xml`, "application/xml");
-  const jobs = sitemap ? jobUrlsFromSitemap(sitemap, origin, 3) : [];
+  const sitemap = await fetchText(`${served}/sitemap.xml`, "application/xml");
+  const jobs = sitemap ? jobUrlsFromSitemap(sitemap, served, 3) : [];
 
   // Les offres passent AVANT les pages de presentation : une offre datee est
   // le signal le plus fort qu'on puisse trouver, « qui sommes-nous » le plus
