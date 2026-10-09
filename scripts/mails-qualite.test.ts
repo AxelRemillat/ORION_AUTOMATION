@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { failureKey } from "../lib/emails/quality/generate";
 import { COWORK_SET_2 } from "../lib/emails/quality/cowork-d-set";
 import { emailBlocker } from "../lib/jobs/handlers/email";
 import { F4_GUARDS } from "../lib/emails/quality/cowork-d-set";
@@ -226,6 +227,14 @@ async function main() {
     check("toujours < 9 : 3 essais (2 réécritures), puis « À revoir »", isDraft(outcome) && outcome.needsReview && outcome.attempts === 3, JSON.stringify(calls));
     check("la raison est donnée", isDraft(outcome) && /critère\(s\) à NON — C2/.test(outcome.reviewReason ?? ""), isDraft(outcome) ? String(outcome.reviewReason) : "");
     check("le meilleur essai est gardé (8/10)", isDraft(outcome) && outcome.score === 8);
+  }
+  {
+    // L2 (Cowork #39) : même critère, même citation, deux fois → le 3e essai est sauté, motif « sans progrès ».
+    const { ask, calls } = scripted([good, good, good], [verdictJson(8), verdictJson(8), verdictJson(10)]);
+    const outcome = await generateQualityDraft({ ...base, ask });
+    check("L2 : C2 refusé deux fois sur la même citation → 2 essais seulement, « À revoir »", isDraft(outcome) && outcome.attempts === 2 && outcome.needsReview && calls.filter((call) => call === "writer").length === 2, JSON.stringify(calls));
+    check("L2 : le motif dit que la réécriture ne progresse pas", isDraft(outcome) && /Réécriture sans progrès : C2/.test(outcome.reviewReason ?? ""), isDraft(outcome) ? String(outcome.reviewReason) : "");
+    check("L2 : clé d'échec insensible à la casse, aux espaces et à la ponctuation finale", failureKey("C2", "Accroche  générique.") === failureKey("C2", "accroche générique"));
   }
   {
     const bad = JSON.stringify(parts({ hook: "Vous recrutez un préparateur. Les commandes s'accumulent." }));
