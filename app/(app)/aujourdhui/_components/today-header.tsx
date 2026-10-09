@@ -46,9 +46,21 @@ export function TodayHeader({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-line bg-surface px-2.5 py-1 font-data text-[11px] text-muted">
-            envois {capacity.sentToday}/{capacity.dailyCap}
+          <span
+            className="rounded-full border border-line bg-surface px-2.5 py-1 font-data text-[11px] text-muted"
+            title={`${capacity.sentToday} envoyé(s), ${capacity.plannedToday} déjà programmé(s) sur le jour d'envoi, plafond ${capacity.dailyCap}`}
+          >
+            envois {capacity.sentToday}
+            {capacity.plannedToday > 0 && ` + ${capacity.plannedToday} prog.`}/{capacity.dailyCap}
           </span>
+          {capacity.remaining === 0 && (
+            /* Sans cette phrase, « 16/25 » laissait croire à neuf places
+               libres : les créneaux restants étaient pris par des envois
+               programmés, et toute relance validée était reportée. */
+            <span className="rounded-full border border-warn/25 bg-warn/10 px-2.5 py-1 font-data text-[11px] text-warn-ink">
+              plafond engagé · plus aucun créneau aujourd&apos;hui
+            </span>
+          )}
           {capacity.warmupDay !== null && (
             <span className="rounded-full border border-line bg-surface px-2.5 py-1 font-data text-[11px] text-muted">
               montée en charge · jour {capacity.warmupDay}

@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { flatten, groupToday, nextTodo, type RawTodayItem } from "../lib/today/group";
 import { completionLabel, isComplete, shouldRetryCompletion, tagsOf } from "../lib/today/tags";
 import { planSchedule, sendDay } from "../lib/today/plan";
+import { loadCapacity } from "../lib/today/capacity";
 import { joinBody, splitBody } from "../lib/today/body";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 import type { TodayItem } from "../lib/today/types";
@@ -199,5 +200,65 @@ console.log("\n9. Migration : aucune perte de données possible");
   check("RLS et GRANT dans la même migration", sql.includes("enable row level security") && sql.includes("grant select, insert, update, delete on public.prospect_discards"));
 }
 
-console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
-process.exit(failures === 0 ? 0 : 1);
+/** Verification asynchrone : le rapport final l'attend (fin du fichier). */
+let capacityChecks: Promise<void> = Promise.resolve();
+
+/*
+ * CRENEAUX DEJA RESERVES (Cowork #7, 09/10/2026).
+ *
+ * Axel voyait « envois 16/25 » et ne pouvait programmer aucune des 14 relances
+ * validees. Le plafond etait pourtant engage a 25/25 : 16 envois partis plus 9
+ * intros PROGRAMMEES sur le meme jour. `remaining` valait bien 0 — c'est
+ * l'affichage qui ne montrait que les envois partis. Ces tests fixent
+ * l'arithmetique et exposent `plannedToday`, pour qu'on puisse le dire a
+ * l'ecran. Aucune valeur de plafond n'est touchee.
+ */
+{
+  const now = new Date("2026-10-09T14:23:00Z"); // vendredi, 16 h 23 a Paris
+  const sentRow = (day: string) => ({ status: "sent", sent_at: `${day}T08:00:00Z`, type: "intro", gmail_message_id: "g1" });
+  // Premier envoi reel il y a 10 jours ouvres : plafond 25.
+  const sent = [
+    sentRow("2026-09-26"),
+    ...Array.from({ length: 16 }, () => sentRow("2026-10-09")),
+  ];
+  const planned = Array.from({ length: 9 }, () => ({ scheduled_at: "2026-10-09T13:00:00Z" }));
+
+  const db = {
+    from: (table: string) => {
+      const chain: Record<string, unknown> = {};
+      const self = () => chain as never;
+      for (const key of ["select", "eq", "in", "is"]) chain[key] = self;
+      // `messages` est lue deux fois : les envois, puis les programmations.
+      chain.select = (columns: string) => {
+        chain.__planned = columns.includes("scheduled_at");
+        return self();
+      };
+      chain.then = (resolve: (value: { data: unknown }) => unknown) =>
+        Promise.resolve({ data: table === "messages" ? (chain.__planned ? planned : sent) : [] }).then(resolve);
+      return chain as never;
+    },
+  };
+
+  capacityChecks = (async () => {
+    const capacity = await loadCapacity(db as never, "u1", now);
+    check("le plafond du jour 10 reste 25", capacity.dailyCap === 25, String(capacity.dailyCap));
+    check("les 16 envois du jour sont comptes", capacity.sentToday === 16, String(capacity.sentToday));
+    check(
+      "les 9 intros programmees sont comptees a part",
+      capacity.plannedToday === 9,
+      String(capacity.plannedToday),
+    );
+    check(
+      "16 envoyes + 9 programmes = plafond engage, plus un creneau",
+      capacity.remaining === 0,
+      String(capacity.remaining),
+    );
+  })();
+}
+
+// `loadCapacity` lit une base (fausse ici) : le rapport attend sa verification
+// avant de conclure, sinon `process.exit` la couperait avant qu'elle ne compte.
+void capacityChecks.then(() => {
+  console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
+  process.exit(failures === 0 ? 0 : 1);
+});

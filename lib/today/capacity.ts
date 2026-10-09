@@ -12,6 +12,12 @@ export interface Capacity {
   day: string;
   dailyCap: number;
   sentToday: number;
+  /**
+   * Envois DÉJÀ PROGRAMMÉS sur le jour d'envoi. Ils occupent le plafond autant
+   * que des envois partis : sans eux à l'écran, « 16/25 » laissait croire à
+   * neuf places libres alors que `remaining` valait 0 (09/10/2026).
+   */
+  plannedToday: number;
   remaining: number;
   warmupDay: number | null;
   /** Instants ISO des envois déjà programmés. */
@@ -34,6 +40,7 @@ export async function loadCapacity(db: Db, userId: string, now = new Date()): Pr
     day,
     dailyCap: deliverability.dailyCap,
     sentToday: deliverability.sentToday,
+    plannedToday: plannedThatDay,
     remaining: Math.max(0, deliverability.dailyCap - sentThatDay - plannedThatDay),
     warmupDay: deliverability.warmupDay,
     taken,
