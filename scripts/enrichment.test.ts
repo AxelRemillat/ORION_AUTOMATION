@@ -22,6 +22,7 @@ import {
   resolvePostedAt,
 } from "../lib/enrichment/dates";
 import { isAnchored, verify, type RawExtraction } from "../lib/enrichment/extract";
+import { internalLinks, pickSecondaryPages } from "../lib/enrichment/site";
 import { extractionToSignals, mergeSignals } from "../lib/enrichment/structured-signals";
 import { heatContextOf, heatScore } from "../lib/scoring";
 import { buildFacts } from "../lib/emails/derived-facts";
@@ -377,6 +378,48 @@ check(
   "le drapeau filiale reste porte par is_large_group_subsidiary",
   heatContextOf({ is_large_group_subsidiary: true }).isLargeGroupSubsidiary === true,
 );
+
+
+/*
+ * ORIGINE REELLEMENT SERVIE (Cowork #9, 09/10/2026).
+ *
+ * fourmizz.fr, saintlouisconseil.fr et conversationnel.fr repondent 301 vers
+ * « www. ». `internalLinks` compare chaque lien a l origine qu on lui donne :
+ * avec le domaine nu, tous les liens du site sont juges EXTERNES et aucune page
+ * secondaire n est jamais lue. `readSite` passe desormais l origine servie.
+ */
+{
+  const html = [
+    `<a href="https://www.fourmizz.fr/a-propos/">Qui sommes-nous</a>`,
+    `<a href="/nos-services/">Nos services</a>`,
+    `<a href="https://www.linkedin.com/company/fourmizz">LinkedIn</a>`,
+  ].join("\n");
+
+  const nu = internalLinks(html, "https://fourmizz.fr");
+  check(
+    "origine nue : le lien absolu en www est juge externe",
+    nu.every((link) => !link.href.includes("www.fourmizz.fr")),
+    nu.map((link) => link.href).join(", "),
+  );
+
+  const servie = internalLinks(html, "https://www.fourmizz.fr");
+  check(
+    "origine servie : les deux pages internes sont retenues",
+    servie.length === 2,
+    servie.map((link) => link.href).join(", "),
+  );
+  check(
+    "et le lien externe reste ecarte",
+    servie.every((link) => !link.href.includes("linkedin")),
+    servie.map((link) => link.href).join(", "),
+  );
+  const pages = pickSecondaryPages(servie, "https://www.fourmizz.fr");
+  check(
+    "« a propos » et « services » sont choisies dans cet ordre",
+    pages.length === 2 && pages[0].includes("a-propos") && pages[1].includes("nos-services"),
+    pages.join(", "),
+  );
+}
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
 process.exit(failures === 0 ? 0 : 1);
