@@ -45,6 +45,7 @@
     "eval:facts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-facts.js",
     "checklist:set": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/checklist-set.js",
     "eval:double": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-double.js",
+    "rattrapage:codeur": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rattrapage-codeur-email.js",
     "eval:relances": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-relances.js",
     "eval:upwork": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-upwork.js",
     "eval:proposals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-proposals.js",

@@ -36,7 +36,11 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
   const opportunity = data as Opportunity;
 
   const analysis = await analyzeOpportunity(ask, opportunity);
-  if (!analysis) return { ok: false, error: "Analyse indisponible : réessayez dans un instant." };
+  if (!analysis) {
+    // Analyse impossible : « Non analysée », jamais « Ignorée » (plateformes #10).
+    await db.from("opportunities").update({ analysis_state: "non_analysee", updated_at: new Date().toISOString() }).eq("id", id);
+    return { ok: false, error: "Analyse indisponible : réessayez dans un instant." };
+  }
   // Annonce ancienne : jamais d'alerte (6 au plus). Une fiche « Ignorée » re-notée à 5 ou plus revient « À répondre ».
   analysis.score = freshScore(analysis.score, opportunity.published_at);
   const status = statusAfterAnalysis(opportunity.status, analysis.score);
