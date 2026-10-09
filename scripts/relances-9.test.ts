@@ -29,7 +29,7 @@ import {
   type RelanceFiche,
 } from "../lib/outbox/relance-quality";
 import { composeFollowUp, draftFollowUp, ficheOf } from "../lib/outbox/follow-up";
-import { assembleShortRelance, chooseRelanceMode, SHORT_QUESTIONS, shortCodeChecks, shortQuestion, whenSent, writeShortRelance } from "../lib/outbox/relance-short";
+import { assembleShortRelance, chooseRelanceMode, plainTopicIssue, relanceModeAEnabled, SHORT_QUESTIONS, shortCodeChecks, shortQuestion, whenSent, writeShortRelance } from "../lib/outbox/relance-short";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 import type { AskFn } from "../lib/ai/chat";
 import type { Db } from "../lib/trash/scope";
@@ -73,6 +73,8 @@ const YES = JSON.stringify({ R2: { ok: true, citation_intro: "demande de devis",
 const NO_R2 = JSON.stringify({ R2: { ok: false, citation_intro: "devis", citation_relance: "candidatures" }, R5: { ok: true, citation: "" }, R7: { ok: true, citation: "" }, R8: { ok: true, citation: "" } });
 
 async function main() {
+  // Sections 1 à 8 : écrites quand le mode A était actif par défaut ; la section 9 vérifie le défaut coupé (Cowork #17).
+  process.env.RELANCE_MODE_A = "on";
   console.log("\n1. L'intro envoyée : salutation (R9), objet, lien de démo, appel à l'action");
   const intro = introParts(`Re: ${INTRO_SUBJECT}`, INTRO_BODY);
   check("salutation nominative reprise à l'identique", intro.greeting === "Bonjour Madame Martin,");
@@ -244,14 +246,14 @@ async function main() {
   console.log("\n8. Cowork #16 : deux modes choisis par le code (A enrichie, B courte)");
   {
     const fact = (text: string, extra: Partial<{ distinctiveness: number; source_url: string | null; process_hint: string | null }> = {}) => ({ text, distinctiveness: 3, source_url: "https://exemple.fr", process_hint: null, ...extra });
-    const a = chooseRelanceMode({ sourcedFacts: [fact("Nouvelle gamme de cuves pour brasseurs", { process_hint: "préparation des devis de cuves sur mesure" })] }, INTRO_SUBJECT, INTRO_BODY);
+    const a = chooseRelanceMode({ sourcedFacts: [fact("Nouvelle gamme de cuves pour brasseurs", { process_hint: "préparation des devis de cuves sur mesure" })] }, INTRO_SUBJECT, INTRO_BODY, { modeA: true });
     check("fait sourcé distinctif sur le processus de l'intro (devis, cuves) → mode A, ancre gardée", a.mode === "A" && /cuves/.test(a.anchor?.text ?? ""), a);
-    check("aucun fait → mode B", chooseRelanceMode({ sourcedFacts: [] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
-    check("fait distinctif mais sur un autre processus (paie) → mode B", chooseRelanceMode({ sourcedFacts: [fact("Logiciel de paie déployé dans 12 sites", { process_hint: "gestion de la paie" })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
-    check("fait peu distinctif (1) → mode B", chooseRelanceMode({ sourcedFacts: [fact("Cuves inox pour la brasserie", { distinctiveness: 1 })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
-    check("fait non sourcé → mode B", chooseRelanceMode({ sourcedFacts: [fact("Cuves inox pour la brasserie", { source_url: null })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
-    check("fait de recrutement, même sur « devis » → ignoré, mode B", chooseRelanceMode({ sourcedFacts: [fact("Recrute un chargé de devis cuves", { process_hint: "recrutement d'un chargé de devis" })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
-    check("mots trop généraux (« suivi des demandes clients ») ne suffisent pas", chooseRelanceMode({ sourcedFacts: [fact("Suivi des demandes clients", { process_hint: "suivi des demandes clients" })] }, "Vos demandes clients", "Suivi des demandes clients en retard.").mode === "B");
+    check("aucun fait → mode B", chooseRelanceMode({ sourcedFacts: [] }, INTRO_SUBJECT, INTRO_BODY, { modeA: true }).mode === "B");
+    check("fait distinctif mais sur un autre processus (paie) → mode B", chooseRelanceMode({ sourcedFacts: [fact("Logiciel de paie déployé dans 12 sites", { process_hint: "gestion de la paie" })] }, INTRO_SUBJECT, INTRO_BODY, { modeA: true }).mode === "B");
+    check("fait peu distinctif (1) → mode B", chooseRelanceMode({ sourcedFacts: [fact("Cuves inox pour la brasserie", { distinctiveness: 1 })] }, INTRO_SUBJECT, INTRO_BODY, { modeA: true }).mode === "B");
+    check("fait non sourcé → mode B", chooseRelanceMode({ sourcedFacts: [fact("Cuves inox pour la brasserie", { source_url: null })] }, INTRO_SUBJECT, INTRO_BODY, { modeA: true }).mode === "B");
+    check("fait de recrutement, même sur « devis » → ignoré, mode B", chooseRelanceMode({ sourcedFacts: [fact("Recrute un chargé de devis cuves", { process_hint: "recrutement d'un chargé de devis" })] }, INTRO_SUBJECT, INTRO_BODY, { modeA: true }).mode === "B");
+    check("mots trop généraux (« suivi des demandes clients ») ne suffisent pas", chooseRelanceMode({ sourcedFacts: [fact("Suivi des demandes clients", { process_hint: "suivi des demandes clients" })] }, "Vos demandes clients", "Suivi des demandes clients en retard.", { modeA: true }).mode === "B");
 
     const now = new Date("2026-10-12T08:00:00Z"); // lundi
     check("« de la semaine dernière » (intro le mardi 6/10, relance le lundi 12/10)", whenSent("2026-10-06T09:00:00Z", now) === "de la semaine dernière");
@@ -273,14 +275,14 @@ async function main() {
 
     const shortIntro = introParts(INTRO_SUBJECT, INTRO_BODY);
     const sctx = { greeting: shortIntro.greeting, subject: `Re: ${INTRO_SUBJECT}`, introSubject: INTRO_SUBJECT, demoLink: shortIntro.demoLink, requireV: shortIntro.requireV, generic: false, seed: "INOX", when: "de la semaine dernière", question: "Est-ce un sujet chez vous en ce moment ?" };
-    const topic = "la préparation de vos devis de cuves sur mesure";
+    const topic = "la préparation de vos devis de cuves";
     const shortBody = assembleShortRelance(topic, sctx);
-    check("relance courte assemblée : « Je remonte mon message de la semaine dernière sur … »", shortBody.includes("Je remonte mon message de la semaine dernière sur la préparation de vos devis de cuves sur mesure.") && shortBody.startsWith("Bonjour Madame Martin,"), shortBody);
+    check("relance courte assemblée : « Je remonte mon message de la semaine dernière sur … »", shortBody.includes("Je remonte mon message de la semaine dernière sur la préparation de vos devis de cuves.") && shortBody.startsWith("Bonjour Madame Martin,"), shortBody);
     const shortChecks = shortCodeChecks(`Re: ${INTRO_SUBJECT}`, shortBody, sctx, topic);
     check("relance courte nominative : R1, R3, R4, R6, R9, R10 à OUI", shortChecks.every((item) => item.ok), shortChecks);
     const genericShort = assembleShortRelance(topic, { ...sctx, generic: true });
     check("relance courte générique : transfert, toujours 25–40 mots", shortCodeChecks(`Re: ${INTRO_SUBJECT}`, genericShort, { ...sctx, generic: true }, topic).every((item) => item.ok));
-    check("sujet trop long (> 10 mots) → R6 à NON", shortCodeChecks(`Re: ${INTRO_SUBJECT}`, assembleShortRelance("la préparation de vos devis de cuves inox sur mesure pour les brasseurs et viticulteurs", sctx), sctx, "la préparation de vos devis de cuves inox sur mesure pour les brasseurs et viticulteurs").find((item) => item.id === "R6")?.ok === false);
+    check("sujet trop long (> 8 mots) → R6 à NON", shortCodeChecks(`Re: ${INTRO_SUBJECT}`, assembleShortRelance("la préparation de vos devis de cuves inox sur mesure pour les brasseurs et viticulteurs", sctx), sctx, "la préparation de vos devis de cuves inox sur mesure pour les brasseurs et viticulteurs").find((item) => item.id === "R6")?.ok === false);
 
     const R7_YES = JSON.stringify({ R7: { ok: true, citation: "la préparation de vos devis" } });
     let writerCalls = 0;
@@ -295,6 +297,40 @@ async function main() {
     const askBad: AskFn = async (role) => (role === "writer" ? JSON.stringify({ topic }) : R7_NO);
     const bad = await writeShortRelance(askBad, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: { companyName: "INOX FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now });
     check("R7 à NON après correction → « À revoir »", "body" in bad && !bad.ready && /R7/.test(bad.reason ?? ""), bad);
+  }
+
+  console.log("\n9. Cowork #17 : mode A coupé par défaut, sujet du mode B simple (4 à 8 mots)");
+  {
+    const anchored = { sourcedFacts: [{ text: "Nouvelle gamme de cuves pour brasseurs", distinctiveness: 3, source_url: "https://exemple.fr", process_hint: "préparation des devis de cuves sur mesure" }] };
+    delete process.env.RELANCE_MODE_A;
+    check("mode A désactivé par défaut : même un fait sourcé sur le processus donne le mode B", chooseRelanceMode(anchored, INTRO_SUBJECT, INTRO_BODY).mode === "B");
+    check("réglage : RELANCE_MODE_A absent → coupé, « on » → actif, « off » → coupé", !relanceModeAEnabled({}) && relanceModeAEnabled({ RELANCE_MODE_A: "on" }) && !relanceModeAEnabled({ RELANCE_MODE_A: "off" }));
+    check("réversible : { modeA: true } rouvre le mode A", chooseRelanceMode(anchored, INTRO_SUBJECT, INTRO_BODY, { modeA: true }).mode === "A");
+    check("raison du mode B quand A est coupé : le réglage est cité", /RELANCE_MODE_A/.test(chooseRelanceMode(anchored, INTRO_SUBJECT, INTRO_BODY, { modeA: false }).reason));
+
+    check("sujet « acier 15CDV6 » refusé (code produit)", /15CDV6/.test(plainTopicIssue("la préparation des devis de pièces en acier 15CDV6") ?? ""));
+    check("sujet avec un chiffre refusé", Boolean(plainTopicIssue("le suivi de vos 300 commandes")));
+    check("sigle peu courant refusé (« GMAO »), sigle courant accepté (« SAV »)", /GMAO/.test(plainTopicIssue("le suivi des demandes GMAO") ?? "") && plainTopicIssue("le tri des demandes de SAV") === null);
+    check("deux idées refusées (« et »)", /deux idées/.test(plainTopicIssue("le suivi des commandes et la confirmation des délais") ?? ""));
+    check("exemples de Cowork acceptés", plainTopicIssue("le tri des demandes de devis") === null && plainTopicIssue("la confirmation des délais de commande") === null && plainTopicIssue("le tri de vos demandes reçues par e-mail") === null);
+
+    const intro9 = introParts(INTRO_SUBJECT, INTRO_BODY);
+    const ctx9 = { greeting: intro9.greeting, subject: `Re: ${INTRO_SUBJECT}`, introSubject: INTRO_SUBJECT, demoLink: intro9.demoLink, requireV: intro9.requireV, generic: false, when: "de lundi", question: "Dites-moi simplement si ce sujet vous parle." };
+    const four = "le tri des devis";
+    const fourOk = ["A", "B", "C", "D", "E", "F"].every((seed) => shortCodeChecks(`Re: ${INTRO_SUBJECT}`, assembleShortRelance(four, { ...ctx9, seed }), { ...ctx9, seed }, four).find((item) => item.id === "R6")?.ok);
+    check("sujet de 4 mots + « de lundi » + question la plus courte : 25 mots tenus (ligne du lien allongée)", fourOk);
+    const tooShort = "les devis";
+    check("sujet de 2 mots → R6 à NON", shortCodeChecks(`Re: ${INTRO_SUBJECT}`, assembleShortRelance(tooShort, { ...ctx9, seed: "A" }), { ...ctx9, seed: "A" }, tooShort).find((item) => item.id === "R6")?.ok === false);
+    const jargon = "les devis en acier 15CDV6";
+    const r6 = shortCodeChecks(`Re: ${INTRO_SUBJECT}`, assembleShortRelance(jargon, { ...ctx9, seed: "A" }), { ...ctx9, seed: "A" }, jargon).find((item) => item.id === "R6");
+    check("jargon dans le sujet → R6 à NON, avec la raison (pour la correction)", r6?.ok === false && /15CDV6/.test(r6.citation), r6);
+
+    // Une 1re rédaction jargonneuse est corrigée par le 2e essai, qui reçoit la raison.
+    const prompts: string[] = [];
+    const topics = [JSON.stringify({ topic: "la préparation des devis de pièces en acier 15CDV6" }), JSON.stringify({ topic: "la préparation de vos devis de pièces" })];
+    const askFix: AskFn = async (role, system) => (role === "writer" ? (prompts.push(system), topics.shift() ?? "") : JSON.stringify({ R7: { ok: true, citation: "devis" } }));
+    const fixed = await writeShortRelance(askFix, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: { companyName: "DON FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now: new Date("2026-10-12T08:00:00Z") });
+    check("sujet jargonneux corrigé au 2e essai (la raison 15CDV6 est transmise)", "body" in fixed && fixed.ready && /15CDV6/.test(prompts[1] ?? "") && !/15CDV6/.test(fixed.body), fixed);
   }
 
   console.log(failures === 0 ? "\nTous les tests relances 9/10 passent.\n" : `\n${failures} test(s) en echec.\n`);
