@@ -13,14 +13,24 @@ import { exclusionOf } from "../lib/today/items";
 import { subsidiaryOf } from "../lib/enrichment/subsidiary";
 import { offTargetReason } from "../lib/funnel/off-target";
 import { emptyFtStats, FUNNEL_FT_DAYS, FUNNEL_FT_MAX_OFFERS, FUNNEL_ROME_CODES, ftDateBound, paginatedJobSignals, toJobSignal, type FtCursorState } from "../lib/signals/france-travail";
-import { communeLookup, uniqueMatch, withParent } from "../lib/funnel/identify";
+import {
+  communeLookup,
+  isChainName,
+  nationalLookup,
+  stripTrailingCity,
+  uniqueMatch,
+  uniqueNationalMatch,
+  withParent,
+} from "../lib/funnel/identify";
 import { filterSignal, largeGroupReason } from "../lib/funnel/filter";
 import type { HarvestedSignal, Identity } from "../lib/funnel/types";
 import type { CompanyBase } from "../lib/enrichment/types";
 import { painForJob } from "../lib/funnel/pain-map";
 import { thirdPartyEmployer } from "../lib/emails/quality/third-party";
 import { runSiteStage } from "../lib/funnel/site-priority";
-import { reopenUnexamined } from "../lib/funnel/store";
+import { REPLAY_PENDING, reopenPending, reopenUnexamined } from "../lib/funnel/store";
+import { runFilterStage } from "../lib/funnel/stages";
+import { DEFAULT_PREFS } from "../lib/funnel/settings";
 import type { ContactDeps } from "../lib/contact-finder/finder";
 import type { Db } from "../lib/trash/scope";
 import type { Prospect, SignalCandidateRow } from "../types";
@@ -227,6 +237,42 @@ async function main() {
     check("retenu : inchangé, rien n'est supprimé", row("c").statut === "retenu" && db.rows("signal_candidates").length === 3);
   }
 
+  console.log("\n7 bis. Non-examinés repris SANS relecture, examinés en premier (Cowork #47)");
+  {
+    // Le curseur France Travail ne relit plus les offres déjà lues : la reprise par hash ne voyait rien.
+    const at = "2026-10-09T15:00:00Z";
+    const offer = (id: string, extra: Record<string, unknown>) => ({
+      id, user_id: "u", run_id: "r1", hash: `h${id}`, source: "france-travail", statut: "rejeté", date_signal: "2026-10-01",
+      texte_brut: "Assistant ADV", company_name: `CO ${id}`, siren: null, facts: { jobTitle: "Assistant ADV", strength: "fort" },
+      badges: [], created_at: at, updated_at: at, ...extra,
+    });
+    const db = new FakeDb({ signal_candidates: [
+      offer("old", { motif_rejet: "non examiné : plafond de 1200 signaux examinés par run (quota par source)" }),
+      offer("ancien", { motif_rejet: "non examiné : plafond de 1200 signaux examinés par run (quota par source)", created_at: "2026-08-01T00:00:00Z" }),
+      offer("autre", { motif_rejet: "entreprise introuvable à l'annuaire" }),
+      offer("frais", { run_id: "r2", statut: "brut", motif_rejet: null, date_signal: "2026-10-10" }),
+    ] });
+    const reopened = await reopenPending(db as unknown as Db, "u", "r2", "2026-09-09T00:00:00Z");
+    const row = (id: string) => db.rows("signal_candidates").find((item) => item.id === id) as Record<string, unknown>;
+    check("non examiné de la fenêtre : repris au run courant, sans relecture", reopened === 1 && row("old").run_id === "r2" && row("old").statut === "brut" && row("old").motif_rejet === REPLAY_PENDING);
+    check("hors fenêtre ou autre motif : inchangés", row("ancien").run_id === "r1" && row("autre").run_id === "r1" && row("autre").statut === "rejeté");
+    const many = new FakeDb({ signal_candidates: Array.from({ length: 5 }, (_, i) => offer(`n${i}`, { motif_rejet: "non examiné : plafond", created_at: `2026-10-0${i + 1}T00:00:00Z` })) });
+    const limited = await reopenPending(many as unknown as Db, "u", "r2", "2026-09-09T00:00:00Z", 2);
+    const taken = many.rows("signal_candidates").filter((item) => item.run_id === "r2").map((item) => item.id).sort().join();
+    check("au plus `limit` par run, les plus récents d'abord", limited === 2 && taken === "n3,n4", taken);
+    const looked: string[] = [];
+    await runFilterStage(db as never, "u", "r2", {
+      prefs: DEFAULT_PREFS,
+      lookup: async (signal) => {
+        looked.push(signal.companyName);
+        return { ok: true, company: null };
+      },
+      known: new Set(),
+      cap: 1,
+    });
+    check("repris examiné AVANT le signal frais, même plus ancien", looked[0] === "CO old", looked.join());
+  }
+
   console.log("\n8. France Travail élargi (toute la France, 30 jours, back-office)");
   {
     const codes: readonly string[] = FUNNEL_ROME_CODES;
@@ -373,6 +419,145 @@ async function main() {
     }) as unknown as Parameters<typeof communeLookup>[1];
     const found = await communeLookup(signal, search);
     check("repli : recherche gratuite par nom + code postal de l'offre", found.ok && found.company?.siren === "1" && asked[0] === "Transports Martin|code_postal=69003", asked.join(" ; "));
+
+    /*
+     * RATTRAPAGE NATIONAL (Cowork #11, diagnostic d'agent1 #46).
+     *
+     * 685 entreprises introuvables sur un lot. Deux causes mecaniques : le nom
+     * publie porte la commune en suffixe, et la recherche ne sort jamais du
+     * departement. Les sept cas ci-dessous sont ceux d'agent1 ; les trois
+     * derniers doivent rester introuvables, parce qu'une devinette coute plus
+     * cher qu'un signal perdu.
+     */
+    const national = (signal: { name: string; city?: string | null }, companies: readonly CompanyBase[]) => {
+      const asked: string[] = [];
+      const search = (async (criteria: { q?: string }, _perPage: number, options?: { zone?: unknown }) => {
+        asked.push(`${criteria.q}|${options?.zone ? "zone" : "france"}`);
+        return { ok: true, data: { companies } };
+      }) as unknown as Parameters<typeof nationalLookup>[1];
+      return {
+        asked,
+        run: nationalLookup(
+          {
+            source: "france-travail",
+            siren: null,
+            companyName: signal.name,
+            facts: { city: signal.city ?? null, postalCode: null },
+          } as unknown as HarvestedSignal,
+          search,
+        ),
+      };
+    };
+
+    for (const [label, name, city, found] of [
+      ["INATEC", "INATEC", "Saint-Priest", "INATEC"],
+      ["GROUPEMENT FRANCE DEFI", "GROUPEMENT FRANCE DEFI", "Paris", "GROUPEMENT FRANCE DEFI"],
+      ["Splayce", "Splayce", "Lille", "SPLAYCE"],
+      ["ALLIANCE TRANSVERSALE", "ALLIANCE TRANSVERSALE", "Nantes", "ALLIANCE TRANSVERSALE"],
+      ["Profinord", "Profinord", "Roubaix", "PROFINORD"],
+      ["Walter Learning", "Walter Learning", "Paris", "WALTER LEARNING"],
+    ] as const) {
+      const probe = national({ name, city }, [base("9", found, "Ailleurs")]);
+      const outcome = await probe.run;
+      check(
+        `rattrapage national : ${label}`,
+        outcome.ok && outcome.company?.siren === "9",
+        outcome.ok ? String(outcome.company?.company_name) : outcome.reason,
+      );
+      check(`${label} : recherche sans zone`, probe.asked[0]?.endsWith("|france") === true, probe.asked.join(" ; "));
+    }
+
+    // Le septieme cas : la commune collee en fin de raison sociale.
+    check(
+      "COMPTOIR ACCESSOIRES AUTOS LIBERCOURT : la commune est retiree",
+      stripTrailingCity("COMPTOIR ACCESSOIRES AUTOS LIBERCOURT", "LIBERCOURT") === "comptoir accessoires autos",
+      stripTrailingCity("COMPTOIR ACCESSOIRES AUTOS LIBERCOURT", "LIBERCOURT"),
+    );
+    {
+      const probe = national(
+        { name: "COMPTOIR ACCESSOIRES AUTOS LIBERCOURT", city: "LIBERCOURT" },
+        [base("7", "COMPTOIR ACCESSOIRES AUTOS", "Libercourt")],
+      );
+      const outcome = await probe.run;
+      check(
+        "rattrapage national : COMPTOIR ACCESSOIRES AUTOS LIBERCOURT",
+        outcome.ok && outcome.company?.siren === "7",
+        outcome.ok ? String(outcome.company?.company_name) : outcome.reason,
+      );
+      check(
+        "la requete part sans la commune",
+        probe.asked[0] === "comptoir accessoires autos|france",
+        probe.asked.join(" ; "),
+      );
+    }
+    check(
+      "un nom qui ne finit pas par la commune n'est pas touche",
+      stripTrailingCity("ELOCE", "Paris") === "ELOCE",
+      stripTrailingCity("ELOCE", "Paris"),
+    );
+    check(
+      "retirer la commune ne laisse jamais un nom trop court",
+      stripTrailingCity("AUTOS LIBERCOURT", "LIBERCOURT") === "AUTOS LIBERCOURT",
+      stripTrailingCity("AUTOS LIBERCOURT", "LIBERCOURT"),
+    );
+
+    // --- Les trois cas qui doivent RESTER introuvables --------------------
+    {
+      const probe = national({ name: "ALLIANCE TRANSVERSALE", city: "Nantes" }, [
+        base("1", "ALLIANCE TRANSVERSALE", "Nantes"),
+        base("2", "Alliance Transversale", "Bordeaux"),
+      ]);
+      const outcome = await probe.run;
+      check(
+        "deux homonymes en France : introuvable, pas de devinette",
+        outcome.ok && outcome.company === null,
+        outcome.ok ? String(outcome.company?.company_name) : outcome.reason,
+      );
+    }
+    {
+      const probe = national({ name: "Profinord", city: "Roubaix" }, [base("3", "PROFINORD DISTRIBUTION", "Roubaix")]);
+      const outcome = await probe.run;
+      check(
+        "nom seulement contenu dans un autre : introuvable",
+        outcome.ok && outcome.company === null,
+        outcome.ok ? String(outcome.company?.company_name) : outcome.reason,
+      );
+    }
+    {
+      const probe = national({ name: "BRICOMARCHE LIBERCOURT", city: "LIBERCOURT" }, [
+        base("4", "BRICOMARCHE", "Libercourt"),
+      ]);
+      const outcome = await probe.run;
+      check(
+        "enseigne (Bricomarche) : introuvable, et aucune recherche lancee",
+        outcome.ok && outcome.company === null && probe.asked.length === 0,
+        `${outcome.ok ? String(outcome.company?.company_name) : outcome.reason} · ${probe.asked.length} appel(s)`,
+      );
+    }
+
+    {
+      /*
+       * LIMITE ASSUMEE. Walter Learning est le nom commercial d'ELOCE : les
+       * deux noms normalises ne sont pas identiques, donc la regle stricte
+       * refuse — et elle a raison. Rattraper ici demanderait d'accepter une
+       * ressemblance, c'est-a-dire de deviner. Ce cas restera introuvable
+       * jusqu'a ce que la source donne un SIREN ou le nom commercial.
+       */
+      const probe = national({ name: "Walter Learning", city: "Paris" }, [base("8", "ELOCE", "Paris")]);
+      const outcome = await probe.run;
+      check(
+        "nom commercial different de la raison sociale : introuvable (limite assumee)",
+        outcome.ok && outcome.company === null,
+        outcome.ok ? String(outcome.company?.company_name) : outcome.reason,
+      );
+    }
+
+    check("enseignes reconnues : Mousquetaires, Bricomarche, Cerfrance", isChainName("LES MOUSQUETAIRES") && isChainName("BRICOMARCHE DOUAI") && isChainName("CERFRANCE NORD PAS DE CALAIS"));
+    check("une entreprise ordinaire n'est pas une enseigne", !isChainName("INATEC") && !isChainName("GROUPEMENT FRANCE DEFI") && !isChainName("Splayce"));
+    check(
+      "les etablissements d'un meme SIREN ne comptent que pour un",
+      uniqueNationalMatch(["INATEC"], [base("5", "INATEC", "Lyon"), base("5", "INATEC", "Paris")])?.siren === "5",
+    );
 
     // Grands groupes.
     const identity = (extra: Partial<Identity>): Identity => ({

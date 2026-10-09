@@ -6,7 +6,9 @@ import type { Db } from "@/lib/trash/scope";
  * de rédaction (brouillons écrits en parallèle par les jobs email_generate et
  * par l'agent2 — elles ne sont pas de la préparation).
  */
-export const WRITING_OPERATIONS = /^(qualite|strategie|redaction|reply|opportunites|ping)/;
+// `relance` (Cowork #47) : les relances écrites par les autres agents (relance:redaction,
+// relance:grille…) comptaient dans le plafond du job de préparation.
+export const WRITING_OPERATIONS = /^(qualite|strategie|redaction|reply|relance|opportunites|ping)/;
 
 /** Plafond par défaut d'un job de préparation, en euros (`params.openaiCapEur`). */
 export const DEFAULT_PREP_OPENAI_CAP_EUR = 0.5;

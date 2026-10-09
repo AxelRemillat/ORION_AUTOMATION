@@ -64,6 +64,47 @@ export async function reopenUnexamined(db: Db, userId: string, runId: string, ha
   return reopened;
 }
 
+/** Motif des signaux repris par `reopenPending` : examinés EN PREMIER (cf. stages.ts, « replay »). */
+export const REPLAY_PENDING = "repris : non examiné au run précédent, examiné en priorité";
+
+/**
+ * REPRISE DES NON-EXAMINÉS, SANS RELECTURE (Cowork #47). `reopenUnexamined` ne
+ * reprend un signal que si la moisson du run le relit ; avec le curseur France
+ * Travail (#40), les offres déjà lues ne reviennent plus : les 319 « non
+ * examinés » du 09/10 ne l'auraient jamais été. Ici, tout signal « non examiné »
+ * créé depuis `since` passe au run courant, avec un motif qui le fait examiner
+ * avant les signaux frais — les PLUS RÉCENTS d'abord, au plus `limit` par run
+ * (1 680 en attente le 09/10 : tout reprendre aurait occupé tout le filtre).
+ */
+export const REPLAY_LIMIT = 600;
+
+export async function reopenPending(db: Db, userId: string, runId: string, since: string, limit = REPLAY_LIMIT): Promise<number> {
+  const { data: rows, error: readError } = await db
+    .from("signal_candidates")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("statut", "rejeté")
+    .like("motif_rejet", `${NOT_EXAMINED}%`)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (readError) throw new Error(`reprise des signaux non examinés impossible : ${readError.message}`);
+  const ids = ((rows ?? []) as { id: string }[]).map((row) => row.id);
+  let reopened = 0;
+  for (let index = 0; index < ids.length; index += 200) {
+    const { data, error } = await db
+      .from("signal_candidates")
+      .update({ run_id: runId, statut: "brut", motif_rejet: REPLAY_PENDING })
+      .eq("user_id", userId)
+      .eq("statut", "rejeté")
+      .in("id", ids.slice(index, index + 200))
+      .select("id");
+    if (error) throw new Error(`reprise des signaux non examinés impossible : ${error.message}`);
+    reopened += data?.length ?? 0;
+  }
+  return reopened;
+}
+
 /** Taille d'une page de lecture : l'API renvoie au plus 1 000 lignes par requête. */
 const PAGE = 1000;
 
