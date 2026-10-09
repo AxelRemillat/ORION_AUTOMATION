@@ -73,7 +73,7 @@ const WIDE: ReadonlySet<CriterionId> = new Set(["C1", "C5"]);
 
 /** Mots de liaison, et mots trop génériques pour qu'une répétition gêne (« références manquantes » ×2 passe). */
 const STOP = new Set(["le", "la", "les", "l", "un", "une", "des", "de", "du", "d", "au", "aux", "à", "a", "et", "ou", "en", "dans", "sur", "pour", "par", "avec", "vos", "votre", "nos", "notre", "leur", "leurs", "ce", "ces", "cette", "qui", "que", "quoi", "je", "j", "vous", "il", "elle", "est", "sont", "se", "s", "ne", "pas", "plus", "chaque", "avant", "après"]);
-const GENERIC = new Set(["référence", "références", "manquante", "manquantes", "manquant", "manquants", "commande", "commandes", "demande", "demandes", "devis", "information", "informations", "client", "clients", "délai", "délais", "e-mail", "e-mails", "mail", "mails", "réponse", "confirmation", "confirmations", "validation", "reçues", "reçus", "reçue"]);
+const GENERIC = new Set(["facture", "factures", "fournisseur", "fournisseurs", "référence", "références", "manquante", "manquantes", "manquant", "manquants", "commande", "commandes", "demande", "demandes", "devis", "information", "informations", "client", "clients", "délai", "délais", "e-mail", "e-mails", "mail", "mails", "réponse", "confirmation", "confirmations", "validation", "reçues", "reçus", "reçue"]);
 
 /** D6 : le même groupe nominal (2 mots pleins consécutifs, dont un non générique) revient. */
 export function repeatedNounGroups(text: string): string[] {

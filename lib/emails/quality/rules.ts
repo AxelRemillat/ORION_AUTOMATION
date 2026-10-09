@@ -162,6 +162,18 @@ export const F4_TRANSPOSE = /(m[êe]me principe|appliqu(er|erais|erait|erions) (
  * sont triées, puis une commande… est préparée » — on ne sait pas qui fait quoi).
  */
 export const F2_FIRST_PERSON = /^\s*(je |j['’])/i;
+/** Documents de gestion : leur énumération (« factures, commandes et bons de livraison ») compte pour un seul objet. */
+const DOCUMENT = String.raw`(factures?(?:\s+fournisseurs?)?|commandes?|bons?\s+de\s+(?:livraison|commande)|BL|devis|avoirs?|relevés?|bordereaux)`;
+const DOCUMENT_LIST = new RegExp(String.raw`${DOCUMENT}(?:\s*,\s*${DOCUMENT})*\s+et\s+${DOCUMENT}`, "gi");
+export const collapseDocumentLists = (text: string) => text.replace(DOCUMENT_LIST, "documents");
+
+/**
+ * Apposition en tête de phrase sans rapport avec le sujet (Cowork #45) : « Grossiste pour les métiers de
+ * bouche, un bon de livraison manquant… ». Un nom de métier, une virgule, puis un AUTRE sujet (déterminant).
+ */
+export const DANGLING_APPOSITION =
+  /^\s*(grossiste|fabricant|distributeur|sp[ée]cialiste|leader|acteur|n[ée]gociant|producteur|transporteur|installateur|concepteur|industriel|importateur|exportateur|entreprise|soci[ée]t[ée]|pme|artisan|prestataire|bureau d['’][ée]tudes?|cabinet)\b[^,.;]{0,90},\s+(un|une|le|la|les|l['’]|des|chaque|aucun|aucune|ce|cette|ces|cet)\b/i;
+
 /** Ouverture par la démo (gabarit F4 refusé par Cowork #34) : « Elle lit… », « Dans la démo… », « Une démo… ». */
 export const DEMO_OPENING = /^\s*(elle\s|dans\s+(la|cette|une)\s+d[ée]mo|(une|la|cette)\s+d[ée]mo)/i;
 export const PASSIVE_VOICE = /\b(est|sont|serait|seraient|sera|seront|soit|soient)\s+(automatiquement\s+|ensuite\s+|alors\s+|directement\s+)?[a-zàâçéèêëîïôûùüÿœ]+(é|ée|és|ées)\b/i;
@@ -254,6 +266,10 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
 
   // --- Règles Cowork : décrire n'est pas accrocher, « prend du temps » n'est pas une conséquence.
   // F1 seulement : F2 et F4 partent justement de l'activité (« Dans une entreprise qui… »).
+  // Cowork #45 (CENTRAL ALCOR) : « Grossiste pour les métiers de bouche, un bon de livraison manquant… » —
+  // l'apposition en tête ne se rapporte pas au sujet de la phrase : faute de français.
+  const apposition = hook.map((sentence) => sentence.match(DANGLING_APPOSITION)).find(Boolean);
+  if (apposition) failures.push(`Apposition qui ne se rapporte pas au sujet (« ${apposition[0].trim()}… ») : écris « Vous êtes grossiste… » ou ouvre directement sur le fait.`);
   const opening = family === "F1" ? (parts.hook.trim().match(DESCRIPTIVE_OPENING) ?? parts.hook.trim().match(NAME_DESCRIBES)) : null;
   if (opening) failures.push(`Accroche descriptive (« ${opening[0].trim()} ») : pose un FAIT PROPRE comme contexte (sites, gamme, clientèle), pas une description de leur métier ou de leur secteur.`);
   const soft = written.match(SOFT_CONSEQUENCE);
@@ -299,7 +315,9 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   const proposalWords = countWords(parts.proposal);
   if (family !== "F4" && proposalWords > LIMITS.proposalWords) failures.push(`Proposition de ${proposalWords} mots : ${LIMITS.proposalWords} au plus.`);
   // « Concrètement, … » (F2) n'est pas une étape.
-  const steps = family === "F4" ? 0 : (parts.proposal.replace(/^\s*concr[èe]tement\s*,/i, "").match(/,|\bpuis\b|\bensuite\b|\bet enfin\b/gi) ?? []).length;
+  // Cowork #45 : « factures fournisseurs, commandes et bons de livraison » est UN objet (une énumération de
+  // documents), pas trois étapes ; elle est ramenée à un seul mot avant de compter.
+  const steps = family === "F4" ? 0 : (collapseDocumentLists(parts.proposal).replace(/^\s*concr[èe]tement\s*,/i, "").match(/,|\bpuis\b|\bensuite\b|\bet enfin\b/gi) ?? []).length;
   if (steps >= 3) failures.push("Proposition : c'est une liste d'étapes techniques. Dis le bénéfice (temps gagné, erreurs ou retards évités).");
 
   // --- Vocabulaire.

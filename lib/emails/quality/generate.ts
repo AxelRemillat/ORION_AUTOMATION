@@ -1,4 +1,4 @@
-import { DAF_FOCUS, ENTRE_OPENING, ENTRE_WINDOW, isDafPain } from "./daf";
+import { DAF_FAMILY, DAF_FOCUS, ENTRE_OPENING, ENTRE_WINDOW, isDafPain } from "./daf";
 import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
@@ -7,7 +7,7 @@ import { DEMO_LINKS, demoFor, demoForProposal, demoForSupplierSide } from "./dem
 import { checklistFeedback, checklistReason, judgeChecklist, type ChecklistVerdict } from "./checklist";
 import { checkMail, type RuleResult } from "./rules";
 import { countWords, ctaFor, type MailParts } from "./template";
-import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyWithSuspension, FAMILY_LIMITS, subjectArmFor, type MailFamily } from "./families";
+import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyWithSuspension, FAMILY_LIMITS, suspendedFamilies, subjectArmFor, type MailFamily } from "./families";
 import { buildWriterPrompt, parseParts } from "./writer";
 import { avecAllowed, mailReadiness } from "./readiness";
 import type { SubjectArm } from "./experiment";
@@ -124,8 +124,11 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
    * silencieusement remplacée par F1.
    */
   const imposed = input.family && !ALL_FAMILIES.includes(input.family) ? input.family : null;
+  // Cowork #45 : douleur DAF / RAF → la question courte (F3) d'abord, quand elle est permise.
+  const dafPain = isDafPain(input.brief.pain, input.recipientRole);
+  const dafFamily = dafPain && allowed.includes(DAF_FAMILY) && !suspendedFamilies().has(DAF_FAMILY) ? DAF_FAMILY : null;
   const family =
-    imposed ?? (input.family && allowed.includes(input.family) ? input.family : familyWithSuspension(input.prospectId, allowed));
+    imposed ?? (input.family && allowed.includes(input.family) ? input.family : dafFamily ?? familyWithSuspension(input.prospectId, allowed));
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
   // Expérience n° 1 en pause : l'objet suit la famille.
   const arm = input.subjectArm ?? subjectArmFor(family);
@@ -149,7 +152,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     .filter(Boolean)
     .join("\n");
   // Cowork #44 : douleur DAF / RAF → sujet imposé et démo factures ; « Entre … et … » limité.
-  const daf = isDafPain(input.brief.pain, input.recipientRole);
+  const daf = dafPain;
   const avoidEntre = (input.recentHooks ?? []).slice(0, ENTRE_WINDOW).some((hook) => ENTRE_OPENING.test(hook));
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
