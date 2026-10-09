@@ -97,6 +97,41 @@ export function familyFor(prospectId: string, allowed: readonly MailFamily[] = A
   return allowed[hash % allowed.length] ?? "F1";
 }
 
+/**
+ * FAMILLES SUSPENDUES pour les NOUVELLES rédactions (Cowork #41, 09/10/2026) :
+ * F4 cumulait 16 refus sur 30 dans « À revoir », et 0 sur 6 après correctif.
+ * Rien n'est supprimé : les brouillons F4 existants restent, et les
+ * statistiques par famille continuent d'afficher F4.
+ *
+ * Réglage : variable d'environnement MAIL_SUSPENDED_FAMILIES (liste séparée par
+ * des virgules). Absente → « F4 ». Vide (MAIL_SUSPENDED_FAMILIES=) → aucune
+ * famille suspendue, F4 revient dans la répartition.
+ */
+export function suspendedFamilies(env: Record<string, string | undefined> = process.env): ReadonlySet<MailFamily> {
+  const raw = env.MAIL_SUSPENDED_FAMILIES;
+  const list = raw === undefined ? ["F4"] : raw.split(/[\s,;]+/).filter(Boolean);
+  return new Set(list.filter(isFamily));
+}
+
+/** F1 et F3 passent le mieux la relecture : la part d'une famille suspendue leur revient (Cowork #41). */
+const REDISTRIBUTE_TO: readonly MailFamily[] = ["F1", "F3"];
+
+/**
+ * Famille attribuée automatiquement : le hachage habituel parmi les familles
+ * permises ; s'il tombe sur une famille suspendue, la fiche part en F1 ou F3
+ * (si ses faits le permettent), sinon dans une autre famille permise. La part
+ * des familles non suspendues ne bouge pas.
+ */
+export function familyWithSuspension(prospectId: string, allowed: readonly MailFamily[], env: Record<string, string | undefined> = process.env): MailFamily {
+  const suspended = suspendedFamilies(env);
+  const first = familyFor(prospectId, allowed);
+  if (!suspended.has(first)) return first;
+  const target = REDISTRIBUTE_TO.filter((family) => allowed.includes(family) && !suspended.has(family));
+  const fallback = allowed.filter((family) => !suspended.has(family));
+  const pool = target.length ? target : fallback;
+  return pool.length ? familyFor(`${prospectId}:redistribution`, pool) : first;
+}
+
 /** Expérience n° 1 en pause : l'objet suit la famille (question pour F3, sujet métier sinon). */
 export const subjectArmFor = (family: MailFamily): SubjectArm => (family === "F3" ? "question" : "metier");
 

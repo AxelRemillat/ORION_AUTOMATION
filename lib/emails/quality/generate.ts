@@ -6,7 +6,7 @@ import { DEMO_LINKS, demoFor, demoForProposal, demoForSupplierSide } from "./dem
 import { checklistFeedback, checklistReason, judgeChecklist, type ChecklistVerdict } from "./checklist";
 import { checkMail, type RuleResult } from "./rules";
 import { countWords, ctaFor, type MailParts } from "./template";
-import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyFor, FAMILY_LIMITS, subjectArmFor, type MailFamily } from "./families";
+import { ALL_FAMILIES, allowedFamilies, assembleFamily, demoTextOf, familyWithSuspension, FAMILY_LIMITS, subjectArmFor, type MailFamily } from "./families";
 import { buildWriterPrompt, parseParts } from "./writer";
 import { avecAllowed, mailReadiness } from "./readiness";
 import type { SubjectArm } from "./experiment";
@@ -122,7 +122,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
    */
   const imposed = input.family && !ALL_FAMILIES.includes(input.family) ? input.family : null;
   const family =
-    imposed ?? (input.family && allowed.includes(input.family) ? input.family : familyFor(input.prospectId, allowed));
+    imposed ?? (input.family && allowed.includes(input.family) ? input.family : familyWithSuspension(input.prospectId, allowed));
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
   // Expérience n° 1 en pause : l'objet suit la famille.
   const arm = input.subjectArm ?? subjectArmFor(family);

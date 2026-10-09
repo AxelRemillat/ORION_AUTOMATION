@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { familyWithSuspension, isFamily, suspendedFamilies } from "../lib/emails/quality/families";
 import { F4_TRANSPOSE, F4_TYPE_CASE } from "../lib/emails/quality/rules";
 import { demoForSupplierSide } from "../lib/emails/quality/demo-links";
 import { LEGACY_F2_INTRO } from "../lib/emails/quality/families";
@@ -839,6 +840,19 @@ async function main() {
     // F2 : ouverture en une phrase, plus courte que l'ancienne.
     check("F2 : nouvelle ouverture en UNE phrase (présentation + raison), plus courte", (F2_INTRO.match(/[.!?](\s|$)/g) ?? []).length === 1 && countWords(F2_INTRO) < countWords(LEGACY_F2_INTRO) && /Axel Remillat/.test(F2_INTRO) && /je vous écris/.test(F2_INTRO));
     check("F2 : l'ancienne ouverture reste reconnue (mails déjà écrits, pas de D6)", deterministicChecks(["Bonjour,", LEGACY_F2_INTRO, "Vos moules sont faits sur mesure. Une date manquante retarde le suivi.", "Je signale les dates manquantes.", "Une démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2", "Auriez-vous 15 minutes la semaine prochaine pour en parler ?"].join("\n\n"), { family: "F2", greeting: "Bonjour," }).find((item) => item.id === "D6")?.ok === true);
+  }
+
+  console.log("\nCowork #41 : F4 suspendue pour les nouvelles rédactions");
+  {
+    const solid = allowedFamilies(true);
+    const ids = Array.from({ length: 400 }, (_, index) => `prospect-${index}`);
+    const auto = ids.map((id) => familyWithSuspension(id, solid, {}));
+    check("défaut : aucune nouvelle attribution en F4", !auto.includes("F4"));
+    check("la part de F4 revient à F1 et F3, celle de F2 ne bouge pas", auto.filter((family) => family === "F2").length === ids.filter((id) => familyFor(id, solid) === "F2").length && ids.every((id, index) => familyFor(id, solid) !== "F4" || ["F1", "F3"].includes(auto[index])));
+    check("données minces (F2 / F4 permises) : F2", ids.slice(0, 50).every((id) => familyWithSuspension(id, allowedFamilies(false), {}) === "F2"));
+    check("réglage vide (MAIL_SUSPENDED_FAMILIES=) : F4 revient", ids.some((id) => familyWithSuspension(id, solid, { MAIL_SUSPENDED_FAMILIES: "" }) === "F4"));
+    check("réglage lu : « F4, F2 » suspend les deux ; absent = F4", suspendedFamilies({ MAIL_SUSPENDED_FAMILIES: "F4, F2" }).size === 2 && suspendedFamilies({}).has("F4"));
+    check("historique : F4 reste une famille connue (statistiques, brouillons existants)", isFamily("F4"));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
