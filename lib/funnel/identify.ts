@@ -58,7 +58,10 @@ async function findCompany(signal: HarvestedSignal): Promise<LookupOutcome> {
   if (!page.ok) return saturated(page.error);
   const loose = page.data.companies.find((company) => sameName(signal.companyName, company.company_name));
   if (loose) return { ok: true, company: loose };
-  return communeLookup(signal);
+  const commune = await communeLookup(signal);
+  // Commune muette : on élargit à la France entière, sous la règle stricte.
+  if (!commune.ok || commune.company) return commune;
+  return nationalLookup(signal);
 }
 
 /**
@@ -79,9 +82,133 @@ export async function communeLookup(
   const city = normalizeCity(signal.facts.city);
   if (!postalCode || !/^\d{5}$/.test(postalCode) || !city) return { ok: true, company: null };
   const zone = { kind: "code_postal" as const, label: postalCode, param: "code_postal" as const, value: postalCode, departement: departementOf(postalCode) };
-  const page = await search({ q: signal.companyName }, 10, { zone });
+  // Le nom publié peut porter la commune en suffixe : on interroge la forme
+  // nettoyée, et on accepte les deux formes à la comparaison.
+  const stripped = stripTrailingCity(signal.companyName, signal.facts.city);
+  const page = await search({ q: stripped }, 10, { zone });
   if (!page.ok) return saturated(page.error);
-  return { ok: true, company: uniqueMatch(signal.companyName, city, page.data.companies) };
+  const match =
+    uniqueMatch(signal.companyName, city, page.data.companies) ??
+    uniqueMatch(stripped, city, page.data.companies);
+  return { ok: true, company: match };
+}
+
+/**
+ * ENSEIGNES ET RÉSEAUX — jamais rattrapés à l'échelle de la France.
+ *
+ * Un nom d'enseigne désigne des centaines d'établissements juridiquement
+ * distincts : « unique à l'échelle nationale » n'y voudrait rien dire, et la
+ * première correspondance serait un hasard. On préfère « introuvable » à une
+ * fiche prise au hasard dans un réseau — c'est tout l'objet du rattrapage de
+ * ne JAMAIS deviner.
+ *
+ * Liste de MARQUES, volontairement : les mots génériques (« groupement »,
+ * « réseau », « union ») écarteraient GROUPEMENT FRANCE DEFI, qui est une
+ * entreprise unique et l'un des cas à rattraper.
+ */
+export const CHAIN_NAMES: readonly string[] = [
+  "mousquetaires",
+  "intermarche",
+  "bricomarche",
+  "brico cash",
+  "netto",
+  "roady",
+  "cerfrance",
+  "leclerc",
+  "super u",
+  "hyper u",
+  "u express",
+  "utile",
+  "carrefour",
+  "casino",
+  "lidl",
+  "aldi",
+  "franprix",
+  "monoprix",
+  "intersport",
+  "decathlon",
+  "point p",
+  "gedimat",
+  "weldom",
+  "mr bricolage",
+  "gamm vert",
+  "point vert",
+  "credit agricole",
+  "credit mutuel",
+  "banque populaire",
+  "caisse d epargne",
+  "la poste",
+  "orange",
+  "mcdonald",
+  "burger king",
+  "subway",
+];
+
+/** Vrai si le nom porte une enseigne connue : on ne le rattrape pas. */
+export function isChainName(name: string): boolean {
+  const simple = simplifyName(name);
+  if (!simple) return false;
+  return CHAIN_NAMES.some((chain) => simple === chain || simple.startsWith(`${chain} `) || simple.endsWith(` ${chain}`) || simple.includes(` ${chain} `));
+}
+
+/**
+ * Retire la commune collée en fin de raison sociale.
+ *
+ * L'annuaire publie « COMPTOIR ACCESSOIRES AUTOS » et l'offre d'emploi
+ * « COMPTOIR ACCESSOIRES AUTOS LIBERCOURT » : le suffixe est la ville de
+ * l'établissement, pas le nom. Rendu tel quel, il fait échouer la comparaison
+ * stricte. On ne retire que ce suffixe, et seulement s'il reste un nom digne
+ * de ce nom — deux mots, cinq caractères — sinon on garde l'original.
+ */
+export function stripTrailingCity(name: string, city: string | null | undefined): string {
+  const simpleCity = normalizeCity(city);
+  if (!simpleCity) return name;
+  const simple = simplifyName(name);
+  const suffix = ` ${simplifyName(simpleCity)}`;
+  if (!simple.endsWith(suffix)) return name;
+  const kept = simple.slice(0, -suffix.length).trim();
+  if (kept.split(" ").length < 2 || kept.length < 5) return name;
+  return kept;
+}
+
+/**
+ * RATTRAPAGE NATIONAL — le dernier recours, et le plus strict.
+ *
+ * Quand ni le département ni la commune n'ont rien donné, on cherche dans
+ * toute la France. Le prix de cette largeur, c'est une exigence absolue :
+ * UN SEUL résultat, dont le nom normalisé est IDENTIQUE au nom cherché — pas
+ * « contient », pas « commence par ». Deux candidats, ou un nom seulement
+ * ressemblant : introuvable. Une enseigne : introuvable, sans même chercher.
+ */
+export async function nationalLookup(
+  signal: HarvestedSignal,
+  search: typeof searchCompanies = searchCompanies,
+): Promise<LookupOutcome> {
+  const raw = signal.companyName?.trim();
+  if (!raw) return { ok: true, company: null };
+  if (isChainName(raw)) return { ok: true, company: null };
+
+  const stripped = stripTrailingCity(raw, signal.facts.city);
+  const page = await search({ q: stripped }, 10);
+  if (!page.ok) return saturated(page.error);
+  return { ok: true, company: uniqueNationalMatch([raw, stripped], page.data.companies) };
+}
+
+/**
+ * La seule fiche dont le nom normalisé est identique à l'une des formes
+ * cherchées (nom publié, ou nom sans la commune en suffixe). Les
+ * établissements d'une même entreprise partagent son SIREN : ils ne comptent
+ * que pour une.
+ */
+export function uniqueNationalMatch(forms: readonly string[], companies: readonly CompanyBase[]): CompanyBase | null {
+  const wanted = new Set(forms.map((form) => simplifyName(form)).filter(Boolean));
+  if (!wanted.size) return null;
+  const matches = new Map<string, CompanyBase>();
+  for (const company of companies) {
+    if (!wanted.has(simplifyName(company.company_name))) continue;
+    matches.set(company.siren ?? company.company_name, company);
+  }
+  return matches.size === 1 ? [...matches.values()][0] : null;
 }
 
 /** La seule fiche dont le nom normalisé est IDENTIQUE et la commune la même, sinon `null`. */
