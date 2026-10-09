@@ -22,6 +22,7 @@ import type { Notification } from "../lib/notify/ntfy";
 import { FakeDb } from "./fake-supabase";
 import { CODEUR_EMAIL_FIXTURES, CODEUR_PROJECT_FIXTURES, EMAIL_FIXTURES } from "./fixtures/opportunity-emails";
 import { ingestOpportunity } from "../lib/opportunities/ingest";
+import { bucketOf, SIZE_BADGE, sizeFlag } from "../lib/opportunities/view";
 import { buildFollowUpPrompt, dueFollowUps, fallbackFollowUp, followUpDue, followUpFailures, generateFollowUp } from "../lib/opportunities/follow-up";
 
 let failures = 0;
@@ -454,6 +455,21 @@ async function main() {
     check("e-mail rejoué : doublon par message_id, rien refait", replay.duplicate === true && db.rows("opportunities").length === 3 && alerts.length === 1);
     const noId = parsePlatformEmail({ ...relevant.email, message_id: "<x>", text: "Nouveau projet sans lien." });
     check("« Nouveau projet » sans identifiant → à trier", decideEmail(noId, null).action === "a_trier");
+  }
+
+  console.log("\n16. Repère de taille : « Trop gros seul : lot IA ou sous-traitance »");
+  {
+    check("« Plus de 10 000 € » → badge", sizeFlag({ budget: "Plus de 10 000 €" }) !== null);
+    check("« 10 000 € à 30 000 € » → badge", sizeFlag({ budget: "10 000 € à 30 000 €" }) !== null);
+    check("« 1 000 à 30 000 € » (tranche large) → pas de badge", sizeFlag({ budget: "1 000 à 30 000 €" }) === null);
+    check("tranche Codeur « 1 000 € à 10 000 € » → pas de badge", sizeFlag({ budget: "1 000 € à 10 000 €" }) === null);
+    check("« $12,000 fixed » → badge ; « 15k€ » → badge", sizeFlag({ budget: "$12,000 fixed" }) !== null && sizeFlag({ budget: "15k€" }) !== null);
+    check("« 9 500 € » ou budget absent → pas de badge", sizeFlag({ budget: "9 500 €" }) === null && sizeFlag({ budget: null }) === null && sizeFlag({}) === null);
+    check("besoin estimé 42 jours → badge ; 30 jours → non", /42 jours/.test(sizeFlag({ suggested_delay_days: 42 }) ?? "") && sizeFlag({ suggested_delay_days: 30 }) === null);
+    check("texte sans devise (« 12 pages ») → pas de badge", sizeFlag({ budget: "12 pages, 20000 visiteurs" }) === null);
+    check("libellé exact du badge", SIZE_BADGE === "Trop gros seul : lot IA ou sous-traitance");
+    const row = { fit_score: 9, status: "a_repondre" as const, budget: "Plus de 10 000 €" };
+    check("le score et le classement ne changent pas", bucketOf(row) === "alertes" && row.fit_score === 9);
   }
 
   console.log(failures === 0 ? "\nTous les tests plateformes passent.\n" : `\n${failures} test(s) en echec.\n`);
