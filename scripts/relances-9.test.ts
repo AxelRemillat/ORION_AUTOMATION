@@ -90,7 +90,9 @@ async function main() {
   check("objet différent → R1 à NON", relanceCodeChecks("Relance devis", body, nominative).find((item) => item.id === "R1")?.ok === false);
   check("lien absent → R3 à NON", at("R3", body.replace(/axelremillat\.com\/agent\?v=2/, ""))?.ok === false);
   const noV = introParts(INTRO_SUBJECT, INTRO_BODY.replace("agent?v=2", "automatisations?demo=email"));
-  check("lien de l'intro sans &v (cas IMAGINE OPTIC) → R3 à NON", relanceCodeChecks(subject, assembleRelance(PARTS, { intro: noV, generic: false }), { intro: noV, generic: false }).find((item) => item.id === "R3")?.ok === false);
+  // Cowork #14, option (b) : intro sans &v ni famille connue → la relance reprend EXACTEMENT son lien.
+  check("intro sans &v ni famille (cas IMAGINE OPTIC) → lien exact de l'intro, R3 à OUI", noV.requireV === false && noV.demoLink === "axelremillat.com/automatisations?demo=email" && relanceCodeChecks(subject, assembleRelance(PARTS, { intro: noV, generic: false }), { intro: noV, generic: false }).find((item) => item.id === "R3")?.ok === true);
+  check("intro AVEC &v → le &v reste obligatoire", intro.requireV === true && relanceCodeChecks(subject, body.replace("agent?v=2", "agent"), { intro: { ...intro, demoLink: "axelremillat.com/agent" }, generic: false }).find((item) => item.id === "R3")?.ok === false);
   const withFamily = introParts(INTRO_SUBJECT, INTRO_BODY.replace("agent?v=2", "automatisations?demo=email"), "F3");
   check("intro sans &v mais famille connue (F3) → même lien + &v=3, R3 à OUI", withFamily.demoLink === "axelremillat.com/automatisations?demo=email&v=3" && relanceCodeChecks(subject, assembleRelance(PARTS, { intro: withFamily, generic: false }), { intro: withFamily, generic: false }).find((item) => item.id === "R3")?.ok === true, withFamily.demoLink);
   check("lien déjà marqué : la famille ne le change pas", withFamilyMark("axelremillat.com/agent?v=2", "F4") === "axelremillat.com/agent?v=2" && withFamilyMark("axelremillat.com/agent", "F1") === "axelremillat.com/agent?v=1" && withFamilyMark("axelremillat.com/agent", null) === "axelremillat.com/agent");
@@ -103,6 +105,8 @@ async function main() {
   check("« La démo repère… » en sujet de phrase → R8 à NON", at("R8", assembleRelance({ ...PARTS, outcome: "La démo repère les cotes manquantes et prépare le devis." }, nominative))?.ok === false);
   check("phrase méta (« cité dans mon premier message ») → R8 à NON", at("R8", assembleRelance({ ...PARTS, about: "Vos cuves pour brasseurs, distinctes des cuves citées dans mon premier message, demandent d'autres cotes." }, nominative))?.ok === false);
   check("« Bonjour Madame, » sans nom en tête → R9 à NON", at("R9", body.replace("Bonjour Madame Martin,", "Bonjour Madame,"))?.ok === false);
+  check("tic « Vos clients recevraient » → R8 à NON", at("R8", assembleRelance({ ...PARTS, outcome: "Vos clients recevraient leur devis plus rapidement." }, nominative))?.ok === false);
+  check("tic « … vous prend-elle du temps ? » → R8 à NON", at("R8", assembleRelance({ ...PARTS, cta: "La vérification des cotes vous prend-elle du temps ?" }, nominative))?.ok === false && at("R8", assembleRelance({ ...PARTS, cta: "Le tri des commandes vous prend-il du temps ?" }, nominative))?.ok === false);
   check("recrutement mentionné → R10 à NON", at("R10", assembleRelance({ ...PARTS, about: "Un recrutement est signalé chez vous le 28 septembre pour le bureau d'études et les devis." }, nominative))?.ok === false);
   check("conditionnelle « Si … concerne … » → R10 à NON", at("R10", assembleRelance({ ...PARTS, outcome: "Si une facture fournisseur concerne un dépannage, la référence manquante est signalée." }, nominative))?.ok === false);
   check("signaux de recrutement retirés de la fiche donnée au rédacteur", withoutRecruitment(FICHE.signals).length === 1 && !/recrut/i.test(withoutRecruitment(FICHE.signals).join(" ")));
@@ -185,6 +189,13 @@ async function main() {
     const row = db.rows("messages").find((message) => message.type === "relance_1") as Record<string, unknown>;
     check("brouillon enregistré avec note et motif, sans la grille", drafted.ok && row.quality_score === 10 && row.quality_reason === null && !("checklist" in row), row);
     check("fiche : faits sourcés", ficheOf(prospect).facts.includes("Fabrique des cuves inox pour la viticulture"));
+    // Cowork #14 : MAVIFLEX, filiale du groupe Hörmann — aucune relance pour une fiche hors cible.
+    const filiale = { ...prospect, id: "p2", company_name: "FILIALE FICTIVE", key_figures: { ...(prospect.key_figures as object), leader: "CHRISTOPH HORMANN", leader_person: "CHRISTOPH HORMANN" } } as unknown as Prospect;
+    const filialeDb = new FakeDb({ prospects: [filiale as never], messages: [{ ...sentIntro, prospect_id: "p2" }], inbound_messages: [], offers: [] });
+    let calls = 0;
+    const counted: AskFn = async () => ((calls += 1), YES);
+    const refused = await composeFollowUp(filialeDb as unknown as Db, { userId: USER, prospect: filiale, type: "relance_1", ask: counted });
+    check("filiale de groupe (Hörmann) : relance refusée, aucun appel au modèle", !refused.ok && /hors cible : filiale de groupe \(Hörmann\)/.test(refused.ok ? "" : refused.error) && calls === 0, refused);
   }
 
   console.log("\n6. Jeu de référence de Cowork (evals/relances) : les contrôles du code");

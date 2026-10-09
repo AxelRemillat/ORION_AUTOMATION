@@ -65,6 +65,11 @@ export interface IntroParts {
   demoLink: string | null;
   /** Dernière question de l'intro (son appel à l'action). */
   cta: string | null;
+  /**
+   * R3 (Cowork #14, option b) : &v exigé seulement si l'intro en avait un ou si sa famille
+   * est connue. Sinon la relance reprend EXACTEMENT le lien de l'intro (pas de &v inventé).
+   */
+  requireV?: boolean;
 }
 
 const DEMO_LINK = /(?:https?:\/\/)?(?:www\.)?axelremillat\.com\/[^\s)>\]]+/i;
@@ -95,6 +100,10 @@ export function introParts(subject: string | null, body: string, family?: string
       return link ? withFamilyMark(link, family) : null;
     })(),
     cta: questions.length ? questions[questions.length - 1].trim() : null,
+    requireV: (() => {
+      const link = body.match(DEMO_LINK)?.[0] ?? "";
+      return /[?&]v=[^&\s]+/i.test(link) || /^F[1-5]$/.test(family ?? "");
+    })(),
   };
 }
 
@@ -161,6 +170,8 @@ export const META = /(premier message|mon (pr[ée]c[ée]dent|dernier|premier) (m
 /** R10 : recrutement, offre d'emploi ; conditionnelle « Si … concerne … ». */
 export const RECRUITMENT = /(recrut|offre d['’]emploi|embauch|poste [àa] pourvoir|candidat|\bcdi\b|\bcdd\b|alternan)/i;
 export const IF_CONCERNS = /\bsi\b[^.?!]{0,100}\bconcern/i;
+/** Tics relevés par Cowork (#14) : 2e phrase passe-partout, question générique. */
+export const TICS = /(vos clients recevraient|vous prend[- ]?(il|elle|ils|elles)?[- ]?(-t-)?(il|elle)? du temps|prend(-t)?-(il|elle) du temps)/i;
 
 const countWords = (text: string) => (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
 const queryParam = (link: string, name: string) => new RegExp(`[?&]${name}=[^&\\s]+`, "i").test(link);
@@ -172,8 +183,9 @@ export function relanceCodeChecks(subject: string, body: string, ctx: RelanceCon
   // R3 : le même lien que l'intro, avec son &v (et &f si l'intro l'avait), sur sa propre ligne.
   const link = ctx.intro.demoLink;
   const demoBlock = link ? blocks.find((block) => block.includes(link)) : undefined;
-  const linkOk = Boolean(link && queryParam(link, "v") && demoBlock && !demoBlock.includes("\n") && body.split(link).length === 2);
-  const r3Citation = !link ? "pas de lien de démo dans l'intro" : !queryParam(link, "v") ? `lien de l'intro sans &v : ${link}` : linkOk ? link : `lien absent ou mêlé au texte : ${link}`;
+  const needV = ctx.intro.requireV !== false;
+  const linkOk = Boolean(link && (!needV || queryParam(link, "v")) && demoBlock && !demoBlock.includes("\n") && body.split(link).length === 2);
+  const r3Citation = !link ? "pas de lien de démo dans l'intro" : needV && !queryParam(link, "v") ? `lien sans &v alors que l'intro en avait un : ${link}` : linkOk ? link : `lien absent ou mêlé au texte : ${link}`;
   const transfer = TRANSFER.test(body);
   const r4 = ctx.generic ? transfer : !transfer;
   const prose = blocks.slice(1).join(" ").replace(new RegExp(DEMO_LINK.source, "gi"), " ");
@@ -185,12 +197,13 @@ export function relanceCodeChecks(subject: string, body: string, ctx: RelanceCon
   const conditional = prose.match(IF_CONCERNS)?.[0];
   const demoSubject = prose.match(DEMO_AS_SUBJECT)?.[0];
   const meta = prose.match(META)?.[0];
+  const tic = prose.match(TICS)?.[0];
   return [
     { id: "R1", ok: r1, citation: r1 ? `${expectedSubject} · ${ctx.intro.greeting}` : `objet « ${subject} » (attendu « ${expectedSubject} ») · salutation « ${blocks[0] ?? ""} » (attendue « ${ctx.intro.greeting} »)` },
     { id: "R3", ok: linkOk, citation: r3Citation },
     { id: "R4", ok: r4, citation: ctx.generic ? (transfer ? "adresse générique : transfert demandé" : "adresse générique : phrase de transfert absente") : transfer ? "adresse nominative : phrase de transfert à retirer" : "adresse nominative : pas de transfert" },
     { id: "R6", ok: r6, citation: forbidden ? `formule interdite « ${forbidden} »` : `${words} mots (${RELANCE_WORDS.min} à ${RELANCE_WORDS.max})` },
-    { id: "R8", ok: !demoSubject && !meta, citation: demoSubject ? `la démo en sujet de phrase : « ${demoSubject} »` : meta ? `phrase méta : « ${meta} »` : "ni démo en sujet, ni phrase méta" },
+    { id: "R8", ok: !demoSubject && !meta && !tic, citation: demoSubject ? `la démo en sujet de phrase : « ${demoSubject} »` : meta ? `phrase méta : « ${meta} »` : tic ? `tic : « ${tic} » — nomme le résultat propre à leur cas, ou l'élément manquant précis` : "ni démo en sujet, ni phrase méta, ni tic" },
     { id: "R9", ok: r9, citation: r9 ? blocks[0] ?? "" : `« ${blocks[0]} » sans nom : « Bonjour, »` },
     { id: "R10", ok: !recruitment && !conditional, citation: recruitment ? `recrutement : « ${recruitment} »` : conditional ? `conditionnelle : « ${conditional.trim()} »` : "aucun" },
   ];
@@ -229,7 +242,7 @@ La forme (objet, salutation, lien, longueur, phrase de transfert, formules inter
 R2 — Nouveauté sur le MÊME sujet : la relance apporte UN élément absent de l'intro, tiré de la fiche, ET reste sur le même processus / la même douleur que l'intro (nouvel angle, pas nouveau sujet). NON si elle reformule l'intro, ou si elle change de sujet (intro sur les documents clients → relance sur les candidatures ; intro sur le rapprochement de factures → relance sur les demandes de pièces). Donne "citation_intro" (le processus de l'intro) et "citation_relance" (l'élément nouveau).
 R5 — Appel à l'action : différent de celui de l'intro ET plus léger — une question fermée (oui/non) liée au sujet, ou « dites-moi simplement si c'est un sujet chez vous ». NON s'il redemande un rendez-vous ou 15 minutes, ou s'il est passe-partout.
 R7 — Fidélité : tout ce que la relance affirme SUR L'ENTREPRISE (son activité, ses chiffres, ses clients, son organisation, son actualité) vient de la fiche ou de l'intro. NON au moindre fait, chiffre, client inventé, ou à une affirmation supposée sur eux (« sont essentiels pour vous », « de nouvelles personnes interviennent »). La phrase qui dit ce que la solution CHANGERAIT pour eux (au conditionnel : « votre client recevrait son devis plus vite ») est un résultat attendu, pas un fait sur l'entreprise : elle ne viole R7 que si elle y glisse un fait, un chiffre ou un client inventé.
-R8 — Ton : la 1re phrase parle d'EUX (leur activité, leur client, leur situation), la 2e de ce que ça CHANGE pour eux (un résultat concret : délai, oubli évité, client qui attend moins). NON si une phrase décrit la mécanique de l'outil ou de la démo, si une phrase est alambiquée ou lourde (« Vous indiquez que l'on peut désormais… »), si un détail produit est trop pointu pour un premier échange, ou si une phrase parle de l'échange lui-même.
+R8 — Ton : la 1re phrase parle d'EUX (leur activité, leur client, leur situation), la 2e DÉCOULE de la 1re et nomme ce que ça CHANGERAIT pour eux dans ce cas précis (rendez-vous fixé, remise juste, devis complet). NON si la 2e phrase n'a pas de lien direct avec la 1re, si elle est passe-partout (« vos clients recevraient une réponse adaptée »), si une phrase décrit la mécanique de l'outil ou de la démo, si une phrase est alambiquée ou lourde (« Vous indiquez que l'on peut désormais… »), si un détail produit est trop pointu pour un premier échange, ou si une phrase parle de l'échange lui-même.
 
 Réponds UNIQUEMENT en JSON : {"R2":{"ok":true|false,"citation_intro":"…","citation_relance":"…"},"R5":{"ok":true|false,"citation":"…"},"R7":{"ok":true|false,"citation":"…"},"R8":{"ok":true|false,"citation":"…"}}`;
 }
@@ -346,9 +359,13 @@ ${input.generic ? "\nSi le sujet est suivi par quelqu'un d'autre chez vous, merc
 
 À ÉCRIRE :
 - "about" — UNE phrase sur EUX : leur activité, leur client ou leur situation, avec un élément de la fiche ABSENT de l'intro, mais sur le MÊME processus que l'intro (si l'intro parlait des devis, tu restes sur les devis ; si elle parlait des factures, sur les factures). Nouvel angle, jamais nouveau sujet. Simple et naturelle : pas de « Vous indiquez que… », pas de détail produit pointu.
-- "outcome" — UNE phrase, AU CONDITIONNEL, sur ce que ça CHANGERAIT pour eux : un résultat concret (« votre client recevrait son devis le jour même », « aucune cote ne serait oubliée »). Le sujet est eux ou leur client, JAMAIS « la démo », « l'outil » ou « l'automatisation » ; aucun chiffre ni fait nouveau sur l'entreprise dans cette phrase.
-- "cta" — plus léger que l'intro et différent d'elle : une question fermée (oui / non) liée à ce sujet, dans leurs mots, ou « Dites-moi simplement si c'est un sujet chez vous. »${last ? " Dernier message : tu peux le dire simplement, sans insister." : ""} Jamais un rendez-vous, jamais « 15 minutes », jamais une formule passe-partout.
+- "outcome" — UNE phrase, AU CONDITIONNEL, qui DÉCOULE de "about" : le résultat concret propre à CE cas (un rendez-vous fixé plus vite, la bonne remise appliquée, un devis complet du premier coup). Le sujet est eux, leur équipe ou l'objet concret (« le rendez-vous », « la remise », « le devis »), JAMAIS « la démo », « l'outil », « l'automatisation » ; JAMAIS « Vos clients recevraient… » ; aucun chiffre ni fait nouveau sur l'entreprise.
+- "cta" — plus léger que l'intro et différent d'elle : une question fermée (oui / non) qui NOMME l'élément manquant ou le blocage précis de leur cas (« Les prescriptions manquantes ralentissent-elles votre accueil l'été ? »), ou « Dites-moi simplement si c'est un sujet chez vous. » JAMAIS « … vous prend-il / elle du temps ? ».${last ? " Dernier message : tu peux le dire simplement, sans insister." : ""} Jamais un rendez-vous, jamais « 15 minutes », jamais une formule passe-partout.
 - Longueur : la relance complète fait ${RELANCE_WORDS.min} à ${RELANCE_WORDS.max} mots (ligne du lien${input.generic ? " et phrase de transfert" : ""} comprises) — ${input.generic ? '"about" 10 à 15 mots, "outcome" 8 à 12 mots, "cta" 5 à 9 mots' : '"about" 12 à 20 mots, "outcome" 10 à 16 mots, "cta" 6 à 10 mots'}.
+
+EXEMPLE DE TON noté 9/10 par Axel (autre cas — n'en reprends AUCUN mot) :
+« Pendant l'été, votre accueil en sous-effectif gère aussi les demandes de rendez-vous d'imagerie. Votre accueil pourrait fixer plus vite les rendez-vous dont la prescription est déjà jointe. » — question : « Les prescriptions manquantes ralentissent-elles votre accueil l'été ? »
+Concret, daté, une situation précise, une 2e phrase qui en découle, une question qui nomme ce qui manque.
 
 INTERDITS : toute mention de recrutement, d'offre d'emploi ou d'embauche ; toute conditionnelle « Si … concerne … » ; toute phrase sur l'échange lui-même (« mon premier message », « comme je vous l'écrivais ») ; « Je me permets », « Je reviens vers vous », « L'idée est », « Cela peut », « sans réponse de votre part », « N'hésitez pas » ; toute culpabilisation ; tout superlatif ; tout fait, chiffre, client ou conséquence absents de la fiche et de l'intro ; toute salutation, signature ou lien.${input.feedback ? `\n\nRÉÉCRITURE — la version précédente a échoué sur ces critères, corrige-les SANS toucher au reste :\n${input.feedback}` : ""}
 

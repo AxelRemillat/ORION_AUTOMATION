@@ -9,6 +9,7 @@ import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { isGenericAddress } from "@/lib/contact-finder/upgrade";
 import type { Db } from "@/lib/trash/scope";
 import { followUpBlock, followUpRefusal } from "./follow-up-policy";
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { replySinceLastSend } from "./relances";
 import { writeRelance, type RelanceFiche } from "./relance-quality";
 import type { MessageType, Prospect } from "@/types";
@@ -107,6 +108,9 @@ export async function composeFollowUp(
   const replied = await replySinceLastSend(db, input.userId, prospect.id).catch(() => null);
   const blocked = followUpBlock(prospect, { replied: Boolean(replied) });
   if (blocked) return { ok: false, error: followUpRefusal(blocked) };
+  // Hors cible (filiale de groupe, concurrent, signal pour un client…) : aucune relance (Cowork #14, MAVIFLEX).
+  const offTarget = offTargetReason(prospect);
+  if (offTarget) return { ok: false, error: followUpRefusal(`hors cible : ${offTarget}`) };
   const { data: previous } = await db
     .from("messages")
     .select("id, type, subject, body, sent_at, thread_id, gmail_message_id")

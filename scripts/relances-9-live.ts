@@ -149,15 +149,28 @@ async function main() {
     const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("status", "contacte").limit(80);
     for (const prospect of (data ?? []) as Prospect[]) if (!candidates.some((item) => item.id === prospect.id) && !NEVER.test(prospect.company_name) && !known.has(prospect.company_name)) candidates.push(prospect);
   }
+  // --prospects=A|B|… : rejouer ces fiches d'abord (même jeu que l'étalonnage précédent), puis compléter jusqu'à 8.
+  const wanted = process.argv.find((arg) => arg.startsWith("--prospects="))?.slice(12).split("|").filter(Boolean) ?? [];
+  if (wanted.length) {
+    const { data } = await table.from("prospects").select("*").eq("user_id", userId).in("company_name", wanted);
+    const chosen = ((data ?? []) as Prospect[]).sort((a, b) => wanted.indexOf(a.company_name) - wanted.indexOf(b.company_name));
+    candidates.splice(0, candidates.length, ...chosen, ...candidates.filter((prospect) => !wanted.includes(prospect.company_name)));
+  }
   const generic = candidates.filter((prospect) => isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null }));
   const nominative = candidates.filter((prospect) => !generic.includes(prospect));
-  const lines: string[] = [`# Étalonnage des relances — ${started.slice(0, 10)}`, "", "8 relances générées sur des prospects réels (hors jeu de référence), SANS écriture en base. Verdict R1–R10 du générateur (grille v2) ; note d'Axel / Cowork à ajouter.", ""];
+  const lines: string[] = [`# Étalonnage des relances — ${started.slice(0, 10)}`, "", "8 relances générées sur des prospects réels (hors jeu de référence), SANS écriture en base. Verdict R1–R10 du générateur ; note d'Axel / Cowork à ajouter.", ""];
   let done = 0;
   // Alternance générique / nominative, puis le reste de la liste la plus longue.
   const queue: (readonly ["générique" | "nominative", Prospect])[] = [];
-  for (let index = 0; index < Math.max(generic.length, nominative.length); index += 1) {
-    if (generic[index]) queue.push(["générique", generic[index]]);
-    if (nominative[index]) queue.push(["nominative", nominative[index]]);
+  const kindOf = (prospect: Prospect) => (generic.includes(prospect) ? "générique" : "nominative") as "générique" | "nominative";
+  if (wanted.length) {
+    // Les fiches demandées dans l'ordre, puis les autres (alternance générique / nominative).
+    for (const prospect of candidates) queue.push([kindOf(prospect), prospect]);
+  } else {
+    for (let index = 0; index < Math.max(generic.length, nominative.length); index += 1) {
+      if (generic[index]) queue.push(["générique", generic[index]]);
+      if (nominative[index]) queue.push(["nominative", nominative[index]]);
+    }
   }
   for (const [kind, prospect] of queue) {
     if (done >= 8) break;
@@ -166,7 +179,10 @@ async function main() {
       break;
     }
     const composed = await composeFollowUp(table as never, { userId, prospect, type: "relance_1", ask: liveAsk(prospect.id) });
-    if (!composed.ok) continue;
+    if (!composed.ok) {
+      console.log(`  ${prospect.company_name} : ${composed.error}`);
+      continue;
+    }
     done += 1;
     const draft = composed.draft;
     lines.push(`## ${done}. ${prospect.company_name} — adresse ${kind}`, "", `Objet : ${draft.subject}`, "", "```", draft.body, "```", "", `Verdict : ${draft.ready ? "PRÊTE" : "À REVOIR"} · ${draft.quality_score ?? "?"}/10${draft.quality_reason ? ` · ${draft.quality_reason}` : ""}`, "", `Grille : ${verdictLine(draft.checklist)}`, "", "Note Axel / Cowork : …", "");
@@ -174,7 +190,8 @@ async function main() {
   }
   lines.push(`Coût : ${(await spentSince(userId, started)).toFixed(4)} €`);
   mkdirSync("evals/relances", { recursive: true });
-  const file = `evals/relances/etalonnage-${started.slice(0, 10)}-v2.md`;
+  const version = process.argv.find((arg) => arg.startsWith("--version="))?.slice(10) ?? "v2";
+  const file = `evals/relances/etalonnage-${started.slice(0, 10)}-${version}.md`;
   writeFileSync(file, `${lines.join("\n")}\n`);
   console.log(`\n${file} · coût ${(await spentSince(userId, started)).toFixed(4)} €`);
 }
