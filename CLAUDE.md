@@ -89,6 +89,23 @@ Vercel de production soit « Ready », puis faire un smoke test en prod — au
 minimum `/login` en 200, plus le parcours que la PR a touché. Si la prod
 casse : `git revert` du commit de merge, via une PR de revert, puis rapport.
 
+**Piège : ne poussez jamais un commit sur une PR déjà mergée.** L'automerge
+merge en squash **et supprime la branche distante**. Un `git push` lancé après
+ce merge ne complète pas la PR : il **recrée** la branche supprimée, hors de
+toute PR, et le commit n'atteint jamais `main` — silencieusement, avec un
+simple message `remote: … pull/new/…` pour seul indice. C'est ce qui est arrivé
+le 07/10 à la PR #120 : son correctif « le dirigeant vient de l'annuaire
+gratuit » est resté sur une branche orpheline pendant deux jours, et a dû être
+remis par la PR #125. Avant de pousser un commit de plus, vérifiez que la PR
+est encore ouverte (`gh pr view <n> --json state`) ; si elle est mergée, le
+travail restant part sur une NOUVELLE branche et une nouvelle PR.
+
+Le workflow, lui, ne merge jamais un commit qui n'a pas passé la CI : il
+compare le head de la PR au `head_sha` du run, s'arrête si la PR a avancé
+pendant l'attente, et passe `--match-head-commit`. Deux commits rapprochés ne
+produisent donc pas un merge partiel — le premier run est abandonné, celui du
+second commit décide.
+
 **Interdits, qui ne bougent pas.** Push direct ou force push sur `main`. Merge
 avec une porte rouge. Migration destructive (`check:migrations`). Suppression
 de données. Affichage d'un secret. Dans ces cas : on s'arrête et on demande
