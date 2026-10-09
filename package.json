@@ -57,6 +57,7 @@
     "regenerate:facts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/regenerate-facts.js",
     "regenerate:drafts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/regenerate-drafts.js",
     "opposition:agences": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/agences-opposition.js",
+    "faits:agences": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/agences-faits.js",
     "dry:agences": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/agences-dry-run.js",
     "eval:mails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-mails.js",
     "test:mails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/mails-quality.test.js",
@@ -100,7 +101,8 @@
     "test:mails-qualite": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/mails-qualite.test.js",
     "test:aujourdhui": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui.test.js && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui-flux.test.js",
     "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js",
-    "check:site-offers": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/check-site-offers.js"
+    "check:site-offers": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/check-site-offers.js",
+    "rome:explore": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rome-explore.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

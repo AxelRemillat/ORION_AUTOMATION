@@ -103,6 +103,31 @@ export const FUNNEL_ROME_CODES = [
   // Conservés de la liste précédente
   "M1501", // Assistant / Assistante RH
   "H1401", // Gestion industrielle et logistique (planification)
+  /*
+   * ÉLARGI le 09/10/2026 (Cowork #46) : à 60 jours, le curseur était épuisé sur
+   * 23 des 24 codes ci-dessus. Codes et libellés relus dans /referentiel/metiers
+   * (`npm run rome:explore`) ; volume sur 30 jours au 09/10 entre parenthèses.
+   */
+  // ADV et relation client (encadrement)
+  "M1701", // Responsable de l'administration des ventes (169)
+  "M1704", // Responsable service clients (540)
+  "D1415", // Chargé / Chargée de relation client (257)
+  // Paie et administration du personnel
+  "M1507", // Gestionnaire paie (2 560)
+  "M1509", // Responsable paie et administration du personnel (186)
+  // Comptabilité, contrôle de gestion, direction financière de PME
+  "M1206", // Responsable comptabilité (1 256)
+  "M1204", // Contrôleur / Contrôleuse de gestion (517)
+  "M1222", // Assistant / Assistante de contrôle budgétaire (24)
+  "M1223", // Chef / Cheffe des services administratifs et financiers (315)
+  "M1205", // Directeur administratif et financier / Directrice administrative et financière (DAF) (400)
+  "K1908", // Responsable de service contentieux et recouvrement (26)
+  // Saisie, import-export, douane
+  "M1606", // Opérateur / Opératrice de saisie (84)
+  "D1429", // Assistant / Assistante import-export (126)
+  "N1203", // Déclarant / Déclarante en douane (57)
+  // Planification de production
+  "H1403", // Gestionnaire de flux de production (798)
 ] as const;
 
 /** Offres France Travail : publiées depuis moins de 30 jours, sur toute la France. */
