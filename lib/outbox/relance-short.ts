@@ -34,6 +34,12 @@ import {
  *
  * Le plafond venait de la 1re phrase quand la fiche n'a pas de matière : le modèle
  * inventait une situation floue (LIFTVRAC, BREYNER, ROBIN à 7,5).
+ *
+ * MODE A DÉSACTIVÉ PAR DÉFAUT (Cowork #17) : à l'étalonnage v5, le mode B atteint
+ * 8,5–9 dès que son sujet est simple, le mode A reste fragile (TECHNAMM 7,5, DISTEL 7).
+ * Toutes les relances partent donc en mode B. Réversible sans toucher au code :
+ * variable d'environnement RELANCE_MODE_A=on (Vercel ou .env.local), ou option
+ * `{ modeA: true }` de chooseRelanceMode. À rouvrir avec un vrai jeu d'essai.
  */
 
 export type RelanceMode = "A" | "B";
@@ -55,6 +61,17 @@ export function processWords(text: string): Set<string> {
   );
 }
 
+/** Réglage par défaut du mode A (Cowork #17) : coupé. */
+export const RELANCE_MODE_A_DEFAULT = false;
+
+/** Mode A autorisé ? RELANCE_MODE_A=on|1|true l'active, off|0|false le coupe, sinon le défaut. */
+export function relanceModeAEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  const value = (env.RELANCE_MODE_A ?? "").trim().toLowerCase();
+  if (["on", "1", "true", "oui"].includes(value)) return true;
+  if (["off", "0", "false", "non"].includes(value)) return false;
+  return RELANCE_MODE_A_DEFAULT;
+}
+
 export interface ModeChoice {
   mode: RelanceMode;
   /** Mode A : le fait sourcé qui ancre la 1re phrase. */
@@ -66,7 +83,13 @@ export interface ModeChoice {
  * Mode A si un fait sourcé (source_url), distinctif (≥ 2), sans rapport avec le
  * recrutement, partage au moins un mot de processus avec l'intro (objet + corps).
  */
-export function chooseRelanceMode(fiche: Pick<RelanceFiche, "sourcedFacts">, introSubject: string | null, introBody: string): ModeChoice {
+export function chooseRelanceMode(
+  fiche: Pick<RelanceFiche, "sourcedFacts">,
+  introSubject: string | null,
+  introBody: string,
+  options: { modeA?: boolean } = {},
+): ModeChoice {
+  if (!(options.modeA ?? relanceModeAEnabled())) return { mode: "B", anchor: null, reason: "mode A désactivé (réglage RELANCE_MODE_A, Cowork #17) : relance courte pour toutes" };
   const intro = processWords(`${introSubject ?? ""} ${introBody}`);
   const candidates = (fiche.sourcedFacts ?? []).filter((fact) => fact.distinctiveness >= 2 && fact.source_url && !RECRUITMENT.test(`${fact.text} ${fact.process_hint ?? ""}`));
   for (const fact of [...candidates].sort((a, b) => b.distinctiveness - a.distinctiveness)) {
@@ -119,10 +142,10 @@ export const SHORT_QUESTIONS = [
  */
 export const SHORT_DEMO_LEADS = ["Exemple testable en une minute :", "À tester en une minute :", "Pour vous faire une idée en une minute :", "Un exemple concret, testable en une minute :"] as const;
 
-function shortDemoLine(link: string, seed: string): string {
+function shortDemoLine(link: string, seed: string, longest = false): string {
   let hash = 0;
   for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return `${SHORT_DEMO_LEADS[hash % SHORT_DEMO_LEADS.length]} ${link}`;
+  return `${longest ? SHORT_DEMO_LEADS[SHORT_DEMO_LEADS.length - 1] : SHORT_DEMO_LEADS[hash % SHORT_DEMO_LEADS.length]} ${link}`;
 }
 
 /** Première question pas encore prise dans le lot (départ variable selon la fiche). */
@@ -150,24 +173,53 @@ export interface ShortContext {
 const clean = (text: string) => text.replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
 
 export function assembleShortRelance(topic: string, ctx: ShortContext): string {
-  return [
-    ctx.greeting,
-    `Je remonte mon message ${ctx.when} sur ${clean(topic)}.`,
-    ctx.demoLink ? shortDemoLine(ctx.demoLink, ctx.seed) : null,
-    ctx.generic ? TRANSFER_SENTENCE : null,
-    ctx.question,
-  ]
-    .filter((block): block is string => Boolean(block))
-    .join("\n\n");
+  const build = (longest: boolean) =>
+    [
+      ctx.greeting,
+      `Je remonte mon message ${ctx.when} sur ${clean(topic)}.`,
+      ctx.demoLink ? shortDemoLine(ctx.demoLink, ctx.seed, longest) : null,
+      ctx.generic ? TRANSFER_SENTENCE : null,
+      ctx.question,
+    ]
+      .filter((block): block is string => Boolean(block))
+      .join("\n\n");
+  const body = build(false);
+  // Sujet court (4 mots) + « de lundi » : la ligne du lien la plus longue garde les 25 mots minimum.
+  return shortProseWords(body) < SHORT_WORDS.min ? build(true) : body;
 }
 
 // --- Mode B : grille --------------------------------------------------------------
 
 export const SHORT_WORDS = { min: 25, max: 40 } as const;
-export const SHORT_TOPIC_WORDS = { min: 5, max: 10 } as const;
+/** Sujet : 4 à 8 mots, vocabulaire courant, une seule idée (Cowork #17). */
+export const SHORT_TOPIC_WORDS = { min: 4, max: 8 } as const;
 export const SHORT_IDS: readonly RelanceCriterionId[] = ["R1", "R3", "R4", "R6", "R7", "R9", "R10"];
 const TRANSFER = /(transf[ée]r|faire suivre|bonne personne|suivi par quelqu)/i;
 const countWords = (text: string) => (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
+
+/** Mots comptés par R6 : tout sauf la salutation, la phrase de transfert et l'URL. */
+function shortProseWords(body: string): number {
+  const blocks = body.replace(/\r\n/g, "\n").split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+  return countWords(blocks.slice(1).filter((block) => block !== TRANSFER_SENTENCE).join(" ").replace(new RegExp(DEMO_LINK.source, "gi"), " "));
+}
+
+/** Sigles assez courants pour un sujet de relance ; tout autre sigle est refusé. */
+const COMMON_ACRONYMS = new Set(["PDF", "SMS", "TVA", "SAV", "RH", "PME"]);
+
+/**
+ * Sujet lisible par tous (Cowork #17, DON FOSTER « acier 15CDV6 ») : ni code produit ou
+ * référence (lettres et chiffres mêlés, chiffres), ni sigle peu courant, une seule idée
+ * (pas de « et », « ainsi que », virgule, point-virgule). `null` si le sujet convient.
+ */
+export function plainTopicIssue(topic: string): string | null {
+  const reference = topic.match(/\b(?=[\p{L}\p{N}-]*\p{N})[\p{L}\p{N}-]{2,}\b|\b\p{N}+\b/u)?.[0];
+  if (reference) return `référence technique ou chiffre « ${reference} »`;
+  const acronym = (topic.match(/\b\p{Lu}{2,}\b/gu) ?? []).find((word) => !COMMON_ACRONYMS.has(word));
+  if (acronym) return `sigle peu courant « ${acronym} »`;
+  const second = topic.match(/\s(et|ainsi que|ou)\s|[,;/+&]/i)?.[0];
+  if (second) return `deux idées (« ${second.trim()} ») : n'en garder qu'une`;
+  return null;
+}
 
 export function shortCodeChecks(subject: string, body: string, ctx: ShortContext & { introSubject: string }, topic: string): RelanceCriterion[] {
   const blocks = body.replace(/\r\n/g, "\n").split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
@@ -180,17 +232,18 @@ export function shortCodeChecks(subject: string, body: string, ctx: ShortContext
   const transfer = TRANSFER.test(body);
   // La phrase de transfert (adresse générique) ne compte pas dans les 25–40 mots : l'exemple de Cowork en fait déjà ~42 avec elle.
   const prose = blocks.slice(1).filter((block) => block !== TRANSFER_SENTENCE).join(" ").replace(new RegExp(DEMO_LINK.source, "gi"), " ");
-  const words = countWords(prose);
+  const words = shortProseWords(body);
   const topicWords = countWords(topic);
   const forbidden = body.match(FORBIDDEN)?.[0] ?? body.match(SUPERLATIVE)?.[0];
-  const r6 = words >= SHORT_WORDS.min && words <= SHORT_WORDS.max && topicWords >= SHORT_TOPIC_WORDS.min && topicWords <= SHORT_TOPIC_WORDS.max && !forbidden;
+  const plain = plainTopicIssue(topic);
+  const r6 = words >= SHORT_WORDS.min && words <= SHORT_WORDS.max && topicWords >= SHORT_TOPIC_WORDS.min && topicWords <= SHORT_TOPIC_WORDS.max && !forbidden && !plain;
   const recruitment = prose.match(RECRUITMENT)?.[0];
   const conditional = prose.match(IF_CONCERNS)?.[0];
   return [
     { id: "R1", ok: r1, citation: r1 ? `${expectedSubject} · ${ctx.greeting}` : `objet « ${subject} » (attendu « ${expectedSubject} »)` },
     { id: "R3", ok: linkOk, citation: link ? (linkOk ? link : `lien absent, mêlé au texte, ou sans &v alors que l'intro en avait un : ${link}`) : "pas de lien de démo dans l'intro" },
     { id: "R4", ok: ctx.generic ? transfer : !transfer, citation: ctx.generic ? (transfer ? "adresse générique : transfert demandé" : "adresse générique : phrase de transfert absente") : transfer ? "adresse nominative : transfert à retirer" : "adresse nominative : pas de transfert" },
-    { id: "R6", ok: r6, citation: forbidden ? `formule interdite « ${forbidden} »` : `${words} mots (${SHORT_WORDS.min} à ${SHORT_WORDS.max}) · sujet en ${topicWords} mots (${SHORT_TOPIC_WORDS.min} à ${SHORT_TOPIC_WORDS.max})` },
+    { id: "R6", ok: r6, citation: forbidden ? `formule interdite « ${forbidden} »` : plain ? `sujet : ${plain}` : `${words} mots (${SHORT_WORDS.min} à ${SHORT_WORDS.max}) · sujet en ${topicWords} mots (${SHORT_TOPIC_WORDS.min} à ${SHORT_TOPIC_WORDS.max})` },
     { id: "R9", ok: !NAMELESS_GREETING.test(blocks[0] ?? ""), citation: blocks[0] ?? "" },
     { id: "R10", ok: !recruitment && !conditional, citation: recruitment ? `recrutement : « ${recruitment} »` : conditional ? `conditionnelle : « ${conditional.trim()} »` : "aucun" },
   ];
@@ -199,8 +252,12 @@ export function shortCodeChecks(subject: string, body: string, ctx: ShortContext
 export function buildShortTopicPrompt(feedback: string | null): string {
   return `Tu prépares la RELANCE COURTE d'un mail de prospection resté sans réponse. Le code l'écrit ainsi :
 « Je remonte mon message de la semaine dernière sur <SUJET>. »
-Tu n'écris QUE <SUJET> : le sujet de l'intro, repris en ${SHORT_TOPIC_WORDS.min} à ${SHORT_TOPIC_WORDS.max} mots, avec un article, sans point final (ex. : « le tri de vos demandes reçues par e-mail », « la préparation de vos devis de cuves sur mesure »).
-Règles : uniquement ce que dit l'intro — aucun fait, chiffre, client, situation ou conséquence nouveaux ; pas de jugement (« fastidieux », « chronophage ») ; pas de mention de recrutement.${feedback ? `\n\nCORRECTION — la version précédente a échoué : ${feedback}` : ""}
+Tu n'écris QUE <SUJET> : le sujet de l'intro, repris en ${SHORT_TOPIC_WORDS.min} à ${SHORT_TOPIC_WORDS.max} mots, avec un article, sans point final.
+Exemples : « le tri des demandes de devis », « la confirmation des délais de commande », « le tri de vos demandes reçues par e-mail ».
+Règles :
+- vocabulaire de tous les jours, compréhensible par n'importe quel dirigeant : AUCUNE référence technique, nuance de matériau, code produit, norme, chiffre ou sigle (pas « acier 15CDV6 », pas « mission civile ») ; nomme le PROCESSUS (devis, commandes, délais, planning, demandes…), pas le produit ;
+- UNE seule idée : pas de « et », de « ainsi que » ni de virgule ;
+- uniquement ce que dit l'intro — aucun fait, client, situation ou conséquence nouveaux ; pas de jugement (« fastidieux », « chronophage ») ; pas de mention de recrutement.${feedback ? `\n\nCORRECTION — la version précédente a échoué : ${feedback}` : ""}
 Réponds UNIQUEMENT en JSON : {"topic":"…"}`;
 }
 
