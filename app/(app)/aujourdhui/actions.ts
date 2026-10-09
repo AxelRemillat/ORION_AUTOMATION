@@ -6,6 +6,9 @@ import { liveDigDeps } from "@/lib/funnel/live";
 import { isEmail } from "@/lib/mail-preflight/recipient";
 import { discard, saveDraft, scheduleBatch, undoDiscard, type CoreResult, type DraftEdit, type ScheduleRequest } from "@/lib/today/actions-core";
 import { loadCapacity } from "@/lib/today/capacity";
+import { applyYield, loadYieldPlan } from "@/lib/today/yield";
+import { loadToday } from "@/lib/today/load";
+import { flatten } from "@/lib/today/group";
 import { completeOne } from "@/lib/today/complete";
 import { liveCompletionDeps } from "@/lib/today/complete-live";
 import { exclusionOf } from "@/lib/today/items";
@@ -66,6 +69,21 @@ export async function scheduleToday(requests: ScheduleRequest[]) {
   if (!ctx) return SESSION;
   const capacity = await loadCapacity(ctx.db, ctx.userId);
   return done(await scheduleBatch(ctx.db, ctx.userId, requests, capacity.remaining));
+}
+
+/**
+ * « Céder la place aux relances » (Cowork #42) : décale, APRÈS confirmation
+ * d'Axel, les intros programmées du jour au jour ouvré suivant. Le plan est
+ * recalculé côté serveur ; seules les intros qu'Axel a vues et confirmées bougent.
+ */
+export async function yieldTodayToRelances(messageIds: string[]): Promise<CoreResult<{ moved: number; skipped: number }>> {
+  const ctx = await session();
+  if (!ctx) return SESSION;
+  const [capacity, data] = await Promise.all([loadCapacity(ctx.db, ctx.userId), loadToday(ctx.db, ctx.userId)]);
+  const plan = await loadYieldPlan(ctx.db, ctx.userId, capacity, flatten(data.groups));
+  if (!plan.show) return { ok: false, error: "Plus rien à décaler : un créneau s'est libéré ou les relances sont déjà programmées." };
+  const result = await applyYield(ctx.db, ctx.userId, plan, messageIds);
+  return done({ ok: true, ...result });
 }
 
 /** « Compléter avec ORION » : la chaîne contact (site → Linkup → Hunter dans le budget). */

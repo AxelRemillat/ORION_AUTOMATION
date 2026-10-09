@@ -1,6 +1,8 @@
 import type { Capacity } from "@/lib/today/capacity";
 import type { TodayItem } from "@/lib/today/types";
 import { RunNowButton } from "./run-now-button";
+import { YieldButton } from "./yield-button";
+import type { YieldPlan } from "@/lib/today/yield";
 
 /**
  * En-tête : la date, ce que la préparation a mis de côté, l'avancement du
@@ -18,6 +20,7 @@ export function TodayHeader({
   blockedReason = null,
   dailyTarget,
   onFinished,
+  yieldPlan = null,
 }: {
   today: string;
   items: TodayItem[];
@@ -29,6 +32,8 @@ export function TodayHeader({
   blockedReason?: string | null;
   dailyTarget: number;
   onFinished: () => void;
+  /** « Céder la place aux relances » (Cowork #42) : plafond engagé et relances validées en attente. */
+  yieldPlan?: YieldPlan | null;
 }) {
   const count = (kind: TodayItem["kind"]) => items.filter((item) => item.kind === kind).length;
   const treated = items.filter((item) => item.status !== "todo").length;
@@ -61,6 +66,7 @@ export function TodayHeader({
               plafond engagé · plus aucun créneau aujourd&apos;hui
             </span>
           )}
+          {yieldPlan && <YieldButton plan={yieldPlan} onDone={onFinished} />}
           {capacity.warmupDay !== null && (
             <span className="rounded-full border border-line bg-surface px-2.5 py-1 font-data text-[11px] text-muted">
               montée en charge · jour {capacity.warmupDay}

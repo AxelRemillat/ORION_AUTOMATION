@@ -6,6 +6,7 @@ import { loadCapacity } from "@/lib/today/capacity";
 import { flatten } from "@/lib/today/group";
 import { openAiBudget } from "@/lib/usage/budgets-server";
 import { loadToday } from "@/lib/today/load";
+import { loadYieldPlan } from "@/lib/today/yield";
 import { TodayClient } from "./_components/today-client";
 
 export const dynamic = "force-dynamic";
@@ -27,10 +28,14 @@ export default async function AujourdhuiPage({ searchParams }: { searchParams: {
     lastPrepareHealth(db, user.id).catch(() => null),
     openAiBudget({ db: db as never }).catch(() => null),
   ]);
+  const items = flatten(data.groups);
+  // « Céder la place aux relances » : calculé seulement quand le plafond est engagé (lecture seule).
+  const yieldPlan = await loadYieldPlan(db, user.id, capacity, items).catch(() => null);
   return (
     <TodayClient
       today={data.today}
-      items={flatten(data.groups)}
+      items={items}
+      yieldPlan={yieldPlan}
       capacity={capacity}
       liveJobId={liveJobId}
       alert={liveJobId ? null : prepareAlert(health)}
