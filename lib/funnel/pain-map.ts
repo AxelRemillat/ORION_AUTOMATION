@@ -67,6 +67,15 @@ const RULES: readonly PainRule[] = [
   { pattern: /office manager|assistant(e)? de direction|assistant(e)? (de |du )?(dirigeant|gerant|pdg)/, pain: "production des documents et classement" },
   { pattern: /support client|support technique|\bsav\b|apres[- ]vente|hotline|helpdesk/, pain: "tri des demandes clients" },
   { pattern: /logisticien|affreteur|affretement|exploitant(e)? transport|gestionnaire (de |du )?transport/, pain: "suivi des approvisionnements et des expéditions" },
+  // Élargi le 09/10/2026 (Cowork #46) avec 15 codes ROME de plus.
+  { pattern: /\bpaie\b|gestionnaire (de |du )?personnel|administration du personnel/, pain: "variables de paie et déclarations sociales" },
+  { pattern: /controle(ur|use)? de gestion|controle budgetaire|controleur financier|controleuse financiere/, pain: "reporting et tableaux de bord" },
+  { pattern: /\bdaf\b|\braf\b|directeur administratif|directrice administrative|responsable administratif|responsable administrative|services administratifs et financiers/, pain: "reporting financier et clôtures mensuelles" },
+  { pattern: /comptabilite|\bcompta\b/, pain: "factures fournisseurs et rapprochement bancaire" },
+  { pattern: /contentieux/, pain: CLIENT_ACCOUNTING_PAIN },
+  { pattern: /import[- ]export|\bdouane|declarant|transit/, pain: "documents d'expédition et déclarations en douane" },
+  { pattern: /\bsaisie\b|operat(eur|rice) de saisie/, pain: "saisie de données" },
+  { pattern: /gestionnaire (de |des )?flux|flux de production|\bmrp\b/, pain: "planning" },
 ];
 
 function normalize(value: string): string {
@@ -99,5 +108,10 @@ export function painMapBlock(): string {
     "- facturation / back-office → édition et suivi des factures",
     "- approvisionneur / supply chain → suivi des approvisionnements",
     "- acheteur → demandes d'achat et commandes fournisseurs",
+    "- gestionnaire de paie / administration du personnel → variables de paie et déclarations sociales",
+    "- contrôleur de gestion / contrôle budgétaire → reporting et tableaux de bord",
+    "- DAF / RAF / responsable administratif et financier → reporting financier et clôtures mensuelles",
+    "- assistant import-export / déclarant en douane → documents d'expédition et déclarations en douane",
+    "- opérateur de saisie → saisie de données",
   ].join("\n");
 }
