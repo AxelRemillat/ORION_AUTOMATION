@@ -49,3 +49,34 @@ export function ageLabel(iso: string | null | undefined, now = new Date()): stri
   if (hours < 24) return `il y a ${hours} h`;
   return `il y a ${Math.round(hours / 24)} j`;
 }
+
+/**
+ * REPÈRE DE TAILLE (Cowork #9) : une mission trop grosse pour Axel seul —
+ * budget de 10 000 € ou plus, ou besoin estimé au-delà de 30 jours — porte le
+ * badge « Trop gros seul : lot IA ou sous-traitance ». Le score d'adéquation
+ * ne change pas : c'est un repère, pas un filtre.
+ *
+ * Budget : le PLUS PETIT montant cité (« Plus de 10 000 € », « 10 000 à
+ * 30 000 € », « $12,000 ») ; une tranche Codeur « 1 000 € à 10 000 € » ne
+ * compte pas. Besoin : le délai estimé par la proposition (suggested_delay_days).
+ */
+export const SIZE_BADGE = "Trop gros seul : lot IA ou sous-traitance";
+export const SIZE_BUDGET_MIN = 10_000;
+export const SIZE_DAYS_MAX = 30;
+
+/** Montants d'un budget : s'il cite une devise (€, $, EUR, USD), tous ses nombres comptent (« 1 000 à 30 000 € »). */
+function amountsIn(text: string): number[] {
+  const clean = text.replace(/\u00a0/g, " ");
+  if (!/€|\$|\beur|\busd|\dk\b/i.test(clean)) return [];
+  return [...clean.matchAll(/(\d[\d\s.,]*\d|\d)\s?(k\b)?/gi)]
+    .map((match) => Number(match[1].replace(/[\s.,]/g, "")) * (match[2] ? 1000 : 1))
+    .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+/** Motif du badge de taille, ou `null`. */
+export function sizeFlag(row: { budget?: string | null; suggested_delay_days?: number | null }): string | null {
+  const amounts = amountsIn(row.budget ?? "");
+  if (amounts.length && Math.min(...amounts) >= SIZE_BUDGET_MIN) return `budget de ${Math.min(...amounts).toLocaleString("fr-FR")} € ou plus`;
+  if (row.suggested_delay_days != null && row.suggested_delay_days > SIZE_DAYS_MAX) return `besoin estimé à ${row.suggested_delay_days} jours`;
+  return null;
+}

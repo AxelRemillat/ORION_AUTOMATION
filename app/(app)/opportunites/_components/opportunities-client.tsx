@@ -5,7 +5,7 @@ import { Bell, Briefcase, ClipboardPaste, Copy, ExternalLink, Inbox, Mail, Refre
 import { Badge, Button, Card, CardContent, EmptyState, Input, Label, Modal, Select, Textarea, useToast } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { OPPORTUNITY_STATUSES, PLATFORMS, PLATFORM_LABELS, STATUS_LABELS, type Opportunity, type OpportunityStatus, type Platform } from "@/lib/opportunities/types";
-import { ageLabel, BUCKET_LABELS, bucketOf, staleLabel, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
+import { ageLabel, BUCKET_LABELS, bucketOf, SIZE_BADGE, sizeFlag, staleLabel, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
 import { EMAIL_KIND_LABELS } from "@/lib/opportunities/email/parse";
 import { emailsOf, emailsToSort, suggestedPrice, type OpportunityEmail } from "@/lib/opportunities/email/view";
 import { TriagePanel } from "./triage-panel";
@@ -316,6 +316,11 @@ export function OpportunitiesClient({
                             {item.analysis_state === "pending" ? " · analyse en cours" : item.analysis_state === "a_analyser" ? " · à analyser" : item.analysis_state === "non_analysee" ? " · non analysée" : ""}
                           </p>
                         </div>
+                        {sizeFlag(item) && (
+                          <span title={`${SIZE_BADGE} : ${sizeFlag(item)}`} className="shrink-0 rounded-full border border-warn/45 bg-warn/15 px-2 py-0.5 text-[11px] text-warn-ink">
+                            Trop gros seul
+                          </span>
+                        )}
                         {item.fit_score != null && <Badge tone={scoreTone(item.fit_score)}>{item.fit_score}/10</Badge>}
                         <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{STATUS_LABELS[item.status]}</span>
                       </button>
@@ -340,6 +345,11 @@ export function OpportunitiesClient({
                   </p>
                   <h2 className="font-display text-lg text-text">{selected.title}</h2>
                   {staleLabel(selected.published_at) && <p className="mt-1 text-[12px] text-warn-ink">{staleLabel(selected.published_at)}</p>}
+                  {sizeFlag(selected) && (
+                    <p className="mt-1.5 inline-flex rounded-full border border-warn/45 bg-warn/15 px-2.5 py-0.5 text-[12px] text-warn-ink">
+                      {SIZE_BADGE} ({sizeFlag(selected)})
+                    </p>
+                  )}
                   <div className="mt-2 flex flex-wrap gap-2">
                     {selected.url && openAd(selected)}
                     {selected.proposal && (
