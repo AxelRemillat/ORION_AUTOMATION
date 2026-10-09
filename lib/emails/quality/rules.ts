@@ -288,7 +288,10 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
   // e-mails dans la phrase, agent devis dans le lien).
   if (context.demo) {
     const said = demoForProposal(demoTextOf(family, parts));
-    if (said.key !== "general" && said.key !== context.demo) {
+    // Cowork #46 : douleur DAF et texte qui parle de factures → la démo factures est cohérente, même si la
+    // proposition cite aussi « commandes » (JOSEPH MELLOT, UNAFERM refusés à tort en #45).
+    const dafInvoice = context.daf === true && context.demo === "factures" && /factur/i.test(`${parts.subject} ${parts.hook} ${parts.proposal}`);
+    if (!dafInvoice && said.key !== "general" && said.key !== context.demo) {
       failures.push(`Démo incohérente : la proposition parle de « ${said.label} » mais le lien montre « ${DEMO_LINKS[context.demo].label} ». Aligne la phrase sur la démo, ou l'inverse.`);
     }
     if (context.demo === "devis" && SUPPLIER_SIDE.test(`${parts.hook} ${parts.proposal}`)) {

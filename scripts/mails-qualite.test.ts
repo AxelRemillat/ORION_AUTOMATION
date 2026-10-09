@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { concreteDafQuestion } from "../lib/emails/quality/daf";
 import { collapseDocumentLists, DANGLING_APPOSITION } from "../lib/emails/quality/rules";
 import { DAF_FOCUS } from "../lib/emails/quality/daf";
 import { dafFailures, ENTRE_OPENING, isDafPain } from "../lib/emails/quality/daf";
@@ -922,6 +923,32 @@ async function main() {
     const ask: AskFn = async (role) => (role === "writer" ? question : JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C5"].map((id) => [id, { ok: true, citation: "ok" }]))));
     const draft = await generateQualityDraft({ ask, brief: dafBrief, facts: [fact], prospectId: "p-unaferm-45", companyName: "Unaferm", activity: "Volets roulants et portails sur mesure", prospectText: "volets roulants portails sur mesure", greeting: "Bonjour,", signature: "Axel Remillat" });
     check("douleur DAF sans famille imposée → F3 (question courte) privilégiée", "body" in draft && draft.family === "F3", JSON.stringify("body" in draft ? { f: draft.family, r: draft.reviewReason } : draft));
+  }
+
+  console.log("\nCowork #46 : démo factures cohérente pour le DAF, C1 et la question F3 DAF");
+  {
+    const mellot = { subject: "Écarts sur factures fournisseurs ?", hook: "Qui repère les écarts de quantité des factures fournisseurs avant la clôture ?", proposal: "J'automatise leur rapprochement avec les commandes et bons de livraison et je signale les écarts avant clôture." };
+    const body = assembleFamily("F3", mellot, { greeting: GREETING, demo: DEMO_LINKS.factures, cta: ctaFor("p-mellot") });
+    const context = { ...ruleContext, family: "F3" as const, subjectArm: "question" as const, demo: "factures" as const, prospectText: "vins en ligne", knownText: "vins en ligne" };
+    const withDaf = checkMail(mellot, body, { ...context, daf: true });
+    check("DAF + factures dans le texte, « commandes » dans la proposition → démo factures cohérente (JOSEPH MELLOT)", !withDaf.failures.some((line) => /Démo incohérente/.test(line)), withDaf.failures.join(" | "));
+    const withoutDaf = checkMail(mellot, body, context);
+    check("hors douleur DAF, la règle de cohérence de la démo s'applique comme avant", withoutDaf.failures.some((line) => /Démo incohérente/.test(line)), withoutDaf.failures.join(" | "));
+
+    check("question DAF concrète (factures fournisseurs + bons de livraison + clôture) reconnue — MAISON JUCLA", concreteDafQuestion("Qui rapproche vos factures fournisseurs des commandes et bons de livraison avant la clôture ?"));
+    check("question DAF concrète (écart de quantité sur les factures) reconnue — JOSEPH MELLOT", concreteDafQuestion(mellot.hook));
+    check("question vague (« vos process comptables ») : pas concrète", !concreteDafQuestion("Qui s'occupe de vos process comptables ?") && !concreteDafQuestion("Qui gère vos factures ?"));
+
+    const verdict = (c1: boolean) => JSON.stringify({ C1: { ok: c1, citation: "aucun fait d'entreprise" }, C2: { ok: true, citation: "ok" }, C3: { ok: true, citation: "ok" }, C5: { ok: true, citation: "ok" } });
+    const c1No: AskFn = async () => verdict(false);
+    const concrete = await judgeChecklist(c1No, { subject: mellot.subject, core: body, family: "F3", greeting: GREETING, company: "Joseph Mellot", facts: "", daf: true });
+    check("F3 DAF concrète : C1 passe sans fait d'entreprise (règle F3 de #36)", concrete?.items.find((item) => item.id === "C1")?.ok === true, JSON.stringify(concrete?.items.filter((item) => !item.ok)));
+    const vague = { ...mellot, hook: "Qui s'occupe de vos process comptables ?" };
+    const vagueBody = assembleFamily("F3", vague, { greeting: GREETING, demo: DEMO_LINKS.factures, cta: ctaFor("p-vague") });
+    const vagueVerdict = await judgeChecklist(c1No, { subject: vague.subject, core: vagueBody, family: "F3", greeting: GREETING, company: "Exemple", facts: "", daf: true });
+    check("F3 DAF vague : jamais prête, C1 jamais forcé à OUI", vagueVerdict?.ready === false && !vagueVerdict.items.some((item) => item.id === "C1" && item.ok));
+    const notDaf = await judgeChecklist(c1No, { subject: mellot.subject, core: body, family: "F3", greeting: GREETING, company: "Joseph Mellot", facts: "" });
+    check("hors douleur DAF, C1 ne bouge pas", notDaf?.items.find((item) => item.id === "C1")?.ok === false);
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
