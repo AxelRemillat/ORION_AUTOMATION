@@ -12,6 +12,7 @@ import { followUpBlock, followUpRefusal } from "./follow-up-policy";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { replySinceLastSend } from "./relances";
 import { writeRelance, type RelanceFiche, type RelanceLot } from "./relance-quality";
+import { chooseRelanceMode, writeShortRelance, type RelanceMode } from "./relance-short";
 import type { MessageType, Prospect } from "@/types";
 
 /**
@@ -58,13 +59,20 @@ const stripOptOut = (body: string) =>
 /** Ce que la relance peut citer : faits sourcés, profil métier vérifié, signaux datés. */
 export function ficheOf(prospect: Prospect): RelanceFiche {
   const figures = (prospect.key_figures ?? null) as Record<string, unknown> | null;
-  const facts = (keyFactsOf(figures) ?? []).map((fact) => fact.text);
+  const keyFacts = keyFactsOf(figures) ?? [];
+  const facts = keyFacts.map((fact) => fact.text);
   const profile = (prospect.business_profile ?? null) as { offer?: string; demandChannels?: string[]; services?: { name: string }[]; counts?: { label: string; count: number }[] } | null;
   if (profile?.demandChannels?.length) facts.push(`Canaux de demande : ${profile.demandChannels.join(", ")}`);
   if (profile?.services?.length) facts.push(`Services : ${profile.services.map((service) => service.name).join(", ")}`);
   if (profile?.counts?.length) facts.push(...profile.counts.map((count) => `${count.count} ${count.label}`));
   const signals = (prospect.signals ?? []).map((signal) => `${signal.label}${signal.date ? ` (${signal.date})` : ""}`);
-  return { companyName: prospect.company_name, facts: facts.slice(0, 12), signals: signals.slice(0, 8), activity: profile?.offer ?? prospect.sector ?? null };
+  return {
+    companyName: prospect.company_name,
+    sourcedFacts: keyFacts.map((fact) => ({ text: fact.text, distinctiveness: fact.distinctiveness, source_url: fact.source_url, process_hint: fact.process_hint })),
+    facts: facts.slice(0, 12),
+    signals: signals.slice(0, 8),
+    activity: profile?.offer ?? prospect.sector ?? null,
+  };
 }
 
 /** Appel du modèle pour les relances, compté dans l'usage (opération « relance:* »). */
@@ -90,7 +98,10 @@ export interface ComposedFollowUp {
   thread_id: string | null;
   reply_to_gmail_message_id: string | null;
   ready: boolean;
-  /** Grille R1–R7 détaillée (rapports, étalonnage) — jamais écrite en base. */
+  /** Mode choisi par le code (Cowork #16) : A relance enrichie, B relance courte — jamais écrit en base. */
+  mode?: RelanceMode;
+  modeReason?: string;
+  /** Grille détaillée (rapports, étalonnage) — jamais écrite en base. */
   checklist?: { id: string; ok: boolean; citation: string }[];
 }
 
@@ -117,7 +128,7 @@ export async function composeFollowUp(
     .eq("prospect_id", prospect.id)
     .eq("status", "sent")
     .order("sent_at", { ascending: true });
-  const sent = (previous ?? []) as { id?: string; type: string; subject: string | null; body: string; thread_id: string | null; gmail_message_id: string | null }[];
+  const sent = (previous ?? []) as { id?: string; type: string; subject: string | null; body: string; sent_at?: string | null; thread_id: string | null; gmail_message_id: string | null }[];
   const intro = sent.find((message) => message.type === "intro");
   const last = sent[sent.length - 1];
   if (!intro) return { ok: false, error: "Aucune intro envoyée : pas de relance possible." };
@@ -128,13 +139,22 @@ export async function composeFollowUp(
   const introBody = stripOptOut(intro.body.split(signature)[0]).trim();
   // Famille de l'intro (message_variants) : elle donne le &v d'un lien d'intro antérieur aux familles.
   const { data: variant } = intro.id ? await db.from("message_variants").select("family").eq("message_id", intro.id).maybeSingle() : { data: null };
-  const written = await writeRelance(input.ask ?? relanceAsk(prospect.id), {
-    introFamily: (variant as { family?: string | null } | null)?.family ?? null,
+  const fiche = ficheOf(prospect);
+  const generic = isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null });
+  const introFamily = (variant as { family?: string | null } | null)?.family ?? null;
+  // Deux modes (Cowork #16) : relance enrichie seulement si un fait sourcé distinctif porte sur le processus de l'intro.
+  const choice = chooseRelanceMode(fiche, intro.subject, introBody);
+  const ask = input.ask ?? relanceAsk(prospect.id);
+  const written = choice.mode === "B"
+    ? await writeShortRelance(ask, { introSubject: intro.subject, introBody, generic, fiche, introFamily, introSentAt: intro.sent_at ?? null, lot: input.lot }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }))
+    : await writeRelance(ask, {
+    anchor: choice.anchor,
+    introFamily,
     lot: input.lot,
     introSubject: intro.subject,
     introBody,
-    generic: isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null }),
-    fiche: ficheOf(prospect),
+    generic,
+    fiche,
     type,
   }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }));
 
@@ -153,6 +173,8 @@ export async function composeFollowUp(
       quality_reason: written.ready ? null : written.reason,
       ready: written.ready,
       checklist: written.verdict?.items,
+      mode: choice.mode,
+      modeReason: choice.reason,
     },
   };
 }
@@ -164,8 +186,10 @@ export async function draftFollowUp(
   const composed = await composeFollowUp(db, input);
   if (!composed.ok) return composed;
   // `ready` et `checklist` ne sont pas des colonnes : seul le reste part en base.
-  const { ready, checklist: _checklist, ...draft } = composed.draft;
+  const { ready, checklist: _checklist, mode: _mode, modeReason: _modeReason, ...draft } = composed.draft;
   void _checklist;
+  void _mode;
+  void _modeReason;
   const { data, error } = await db
     .from("messages")
     .insert({

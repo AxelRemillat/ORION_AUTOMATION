@@ -23,6 +23,8 @@ const { isGenericAddress } = require("@/lib/contact-finder/upgrade") as typeof i
 const relance = require("@/lib/outbox/relance-quality") as typeof import("@/lib/outbox/relance-quality");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { ficheOf } = require("@/lib/outbox/follow-up") as typeof import("@/lib/outbox/follow-up");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { chooseRelanceMode } = require("@/lib/outbox/relance-short") as typeof import("@/lib/outbox/relance-short");
 
 /** Jeu de référence versionné (notes de Cowork) : jamais ré-étalonné, sert à mesurer l'accord du juge. */
 const REFERENCE = "evals/relances/reference-2026-10-09.json";
@@ -107,6 +109,22 @@ async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const apply = process.argv.includes("--appliquer");
+  // --modes=A|B|… : mode qu'aurait chaque fiche (lecture seule, AUCUN appel au modèle) — liste de lundi.
+  const modesArg = process.argv.find((arg) => arg.startsWith("--modes="));
+  if (modesArg) {
+    for (const name of modesArg.slice(8).split(/[|,]/).map((value) => value.trim()).filter(Boolean)) {
+      const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("company_name", name).limit(1);
+      const prospect = ((data ?? []) as Prospect[])[0];
+      const intro = prospect ? await sentIntro(prospect.id) : null;
+      if (!prospect || !intro) {
+        console.log(`  ${name} : fiche ou intro introuvable`);
+        continue;
+      }
+      const choice = chooseRelanceMode(ficheOf(prospect), intro.subject, intro.body);
+      console.log(`  ${name} : mode ${choice.mode} — ${choice.reason}`);
+    }
+    return;
+  }
   if (process.argv.includes("--reference")) {
     await referenceAgreement(userId, started);
     console.log(`coût ${(await spentSince(userId, started)).toFixed(4)} €`);
@@ -145,14 +163,14 @@ async function main() {
 
   // Étalonnage : 8 prospects réels (relances en attente d'abord, puis autres contactés), génériques / nominatives.
   // Jamais les prospects du jeu de référence : l'étalonnage porte sur des NOUVEAUX prospects.
-  const known = new Set([...referenceItems().map((item) => item.company), ...(process.argv.find((arg) => arg.startsWith("--exclure="))?.slice(10).split("|") ?? [])]);
+  const known = new Set([...referenceItems().map((item) => item.company), ...(process.argv.find((arg) => arg.startsWith("--exclure="))?.slice(10).split(/[|,]/).map((name) => name.trim()).filter(Boolean) ?? [])]);
   const candidates: Prospect[] = pending.map((item) => item.prospect).filter((prospect) => !known.has(prospect.company_name));
   if (candidates.length < 12) {
     const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("status", "contacte").limit(80);
     for (const prospect of (data ?? []) as Prospect[]) if (!candidates.some((item) => item.id === prospect.id) && !NEVER.test(prospect.company_name) && !known.has(prospect.company_name)) candidates.push(prospect);
   }
   // --prospects=A|B|… : rejouer ces fiches d'abord (même jeu que l'étalonnage précédent), puis compléter jusqu'à 8.
-  const wanted = process.argv.find((arg) => arg.startsWith("--prospects="))?.slice(12).split("|").filter(Boolean) ?? [];
+  const wanted = process.argv.find((arg) => arg.startsWith("--prospects="))?.slice(12).split(/[|,]/).map((name) => name.trim()).filter(Boolean) ?? [];
   if (wanted.length) {
     const { data } = await table.from("prospects").select("*").eq("user_id", userId).in("company_name", wanted);
     const chosen = ((data ?? []) as Prospect[]).sort((a, b) => wanted.indexOf(a.company_name) - wanted.indexOf(b.company_name));
@@ -187,8 +205,8 @@ async function main() {
     }
     done += 1;
     const draft = composed.draft;
-    lines.push(`## ${done}. ${prospect.company_name} — adresse ${kind}`, "", `Objet : ${draft.subject}`, "", "```", draft.body, "```", "", `Verdict : ${draft.ready ? "PRÊTE" : "À REVOIR"} · ${draft.quality_score ?? "?"}/10${draft.quality_reason ? ` · ${draft.quality_reason}` : ""}`, "", `Grille : ${verdictLine(draft.checklist)}`, "", "Note Axel / Cowork : …", "");
-    console.log(`${done}. ${prospect.company_name} (${kind}) : ${draft.ready ? "PRÊTE" : `À revoir — ${draft.quality_reason}`}`);
+    lines.push(`## ${done}. ${prospect.company_name} — adresse ${kind}`, "", `Objet : ${draft.subject}`, "", "```", draft.body, "```", "", `Verdict : ${draft.ready ? "PRÊTE" : "À REVOIR"} · ${draft.quality_score ?? "?"}/10${draft.quality_reason ? ` · ${draft.quality_reason}` : ""}`, "", `Mode : ${draft.mode ?? "?"} — ${draft.modeReason ?? ""}`, "", `Grille : ${verdictLine(draft.checklist)}`, "", "Note Axel / Cowork : …", "");
+    console.log(`${done}. ${prospect.company_name} (${kind}, mode ${draft.mode ?? "?"}) : ${draft.ready ? "PRÊTE" : `À revoir — ${draft.quality_reason}`}`);
   }
   lines.push(`Coût : ${(await spentSince(userId, started)).toFixed(4)} €`);
   mkdirSync("evals/relances", { recursive: true });

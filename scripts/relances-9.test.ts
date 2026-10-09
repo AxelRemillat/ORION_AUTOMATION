@@ -23,11 +23,13 @@ import {
   rememberInLot,
   RELANCE_MODELS,
   buildRelanceWriterPrompt,
+  questionKey,
   writeRelance,
   type RelanceContext,
   type RelanceFiche,
 } from "../lib/outbox/relance-quality";
 import { composeFollowUp, draftFollowUp, ficheOf } from "../lib/outbox/follow-up";
+import { assembleShortRelance, chooseRelanceMode, SHORT_QUESTIONS, shortCodeChecks, shortQuestion, whenSent, writeShortRelance } from "../lib/outbox/relance-short";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
 import type { AskFn } from "../lib/ai/chat";
 import type { Db } from "../lib/trash/scope";
@@ -237,6 +239,62 @@ async function main() {
     const first = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1", lot: shared });
     const second = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1", lot: shared });
     check("1re relance du lot prête, puis la 2e (même verbe, même question) « À revoir » R8", "body" in first && first.ready && "body" in second && !second.ready && /R8/.test(second.reason ?? "") && shared.verbs[0] === "recev", { first: "body" in first ? first.ready : first, second: "body" in second ? second.reason : second, lot: shared });
+  }
+
+  console.log("\n8. Cowork #16 : deux modes choisis par le code (A enrichie, B courte)");
+  {
+    const fact = (text: string, extra: Partial<{ distinctiveness: number; source_url: string | null; process_hint: string | null }> = {}) => ({ text, distinctiveness: 3, source_url: "https://exemple.fr", process_hint: null, ...extra });
+    const a = chooseRelanceMode({ sourcedFacts: [fact("Nouvelle gamme de cuves pour brasseurs", { process_hint: "préparation des devis de cuves sur mesure" })] }, INTRO_SUBJECT, INTRO_BODY);
+    check("fait sourcé distinctif sur le processus de l'intro (devis, cuves) → mode A, ancre gardée", a.mode === "A" && /cuves/.test(a.anchor?.text ?? ""), a);
+    check("aucun fait → mode B", chooseRelanceMode({ sourcedFacts: [] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
+    check("fait distinctif mais sur un autre processus (paie) → mode B", chooseRelanceMode({ sourcedFacts: [fact("Logiciel de paie déployé dans 12 sites", { process_hint: "gestion de la paie" })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
+    check("fait peu distinctif (1) → mode B", chooseRelanceMode({ sourcedFacts: [fact("Cuves inox pour la brasserie", { distinctiveness: 1 })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
+    check("fait non sourcé → mode B", chooseRelanceMode({ sourcedFacts: [fact("Cuves inox pour la brasserie", { source_url: null })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
+    check("fait de recrutement, même sur « devis » → ignoré, mode B", chooseRelanceMode({ sourcedFacts: [fact("Recrute un chargé de devis cuves", { process_hint: "recrutement d'un chargé de devis" })] }, INTRO_SUBJECT, INTRO_BODY).mode === "B");
+    check("mots trop généraux (« suivi des demandes clients ») ne suffisent pas", chooseRelanceMode({ sourcedFacts: [fact("Suivi des demandes clients", { process_hint: "suivi des demandes clients" })] }, "Vos demandes clients", "Suivi des demandes clients en retard.").mode === "B");
+
+    const now = new Date("2026-10-12T08:00:00Z"); // lundi
+    check("« de la semaine dernière » (intro le mardi 6/10, relance le lundi 12/10)", whenSent("2026-10-06T09:00:00Z", now) === "de la semaine dernière");
+    check("« de mardi » (même semaine)", whenSent("2026-10-13T09:00:00Z", new Date("2026-10-15T08:00:00Z")) === "de mardi");
+    check("« du 28 septembre » (plus ancien)", whenSent("2026-09-28T09:00:00Z", now) === "du 28 septembre");
+
+    const lot = newLot();
+    const q1 = shortQuestion("ROBIN", lot);
+    lot.questions.push(questionKey(q1));
+    const q2 = shortQuestion("ROBIN", lot);
+    check("question de la relance courte : tirée de la liste, jamais deux fois dans un lot", SHORT_QUESTIONS.includes(q1 as never) && q1 !== q2);
+    const bigLot = newLot();
+    const asked = ["A", "B", "C", "D", "E", "F", "G", "H"].map((seed) => {
+      const question = shortQuestion(seed, bigLot);
+      bigLot.questions.push(questionKey(question));
+      return question;
+    });
+    check("lot de 8 relances courtes : 8 questions différentes (cas AGM / TEOPLUS du 09/10)", new Set(asked).size === 8, asked);
+
+    const shortIntro = introParts(INTRO_SUBJECT, INTRO_BODY);
+    const sctx = { greeting: shortIntro.greeting, subject: `Re: ${INTRO_SUBJECT}`, introSubject: INTRO_SUBJECT, demoLink: shortIntro.demoLink, requireV: shortIntro.requireV, generic: false, seed: "INOX", when: "de la semaine dernière", question: "Est-ce un sujet chez vous en ce moment ?" };
+    const topic = "la préparation de vos devis de cuves sur mesure";
+    const shortBody = assembleShortRelance(topic, sctx);
+    check("relance courte assemblée : « Je remonte mon message de la semaine dernière sur … »", shortBody.includes("Je remonte mon message de la semaine dernière sur la préparation de vos devis de cuves sur mesure.") && shortBody.startsWith("Bonjour Madame Martin,"), shortBody);
+    const shortChecks = shortCodeChecks(`Re: ${INTRO_SUBJECT}`, shortBody, sctx, topic);
+    check("relance courte nominative : R1, R3, R4, R6, R9, R10 à OUI", shortChecks.every((item) => item.ok), shortChecks);
+    const genericShort = assembleShortRelance(topic, { ...sctx, generic: true });
+    check("relance courte générique : transfert, toujours 25–40 mots", shortCodeChecks(`Re: ${INTRO_SUBJECT}`, genericShort, { ...sctx, generic: true }, topic).every((item) => item.ok));
+    check("sujet trop long (> 10 mots) → R6 à NON", shortCodeChecks(`Re: ${INTRO_SUBJECT}`, assembleShortRelance("la préparation de vos devis de cuves inox sur mesure pour les brasseurs et viticulteurs", sctx), sctx, "la préparation de vos devis de cuves inox sur mesure pour les brasseurs et viticulteurs").find((item) => item.id === "R6")?.ok === false);
+
+    const R7_YES = JSON.stringify({ R7: { ok: true, citation: "la préparation de vos devis" } });
+    let writerCalls = 0;
+    const askShort: AskFn = async (role) => (role === "writer" ? ((writerCalls += 1), JSON.stringify({ topic })) : R7_YES);
+    const shortLot = newLot();
+    const out1 = await writeShortRelance(askShort, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: { companyName: "INOX FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now, lot: shortLot });
+    const callsAfterFirst = writerCalls;
+    const out2 = await writeShortRelance(askShort, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: { companyName: "INOX FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now, lot: shortLot });
+    check("relance courte prête (grille B : 7 critères), une seule rédaction", "body" in out1 && out1.ready && out1.verdict?.items.length === 7 && callsAfterFirst === 1, out1);
+    check("2e relance courte du lot : autre question", "body" in out1 && "body" in out2 && out1.body.split("\n\n").pop() !== out2.body.split("\n\n").pop());
+    const R7_NO = JSON.stringify({ R7: { ok: false, citation: "situation inventée" } });
+    const askBad: AskFn = async (role) => (role === "writer" ? JSON.stringify({ topic }) : R7_NO);
+    const bad = await writeShortRelance(askBad, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: { companyName: "INOX FICTIF" }, introSentAt: "2026-10-06T09:00:00Z", now });
+    check("R7 à NON après correction → « À revoir »", "body" in bad && !bad.ready && /R7/.test(bad.reason ?? ""), bad);
   }
 
   console.log(failures === 0 ? "\nTous les tests relances 9/10 passent.\n" : `\n${failures} test(s) en echec.\n`);
