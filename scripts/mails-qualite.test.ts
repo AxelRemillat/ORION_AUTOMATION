@@ -4,6 +4,8 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { collapseDocumentLists, DANGLING_APPOSITION } from "../lib/emails/quality/rules";
+import { DAF_FOCUS } from "../lib/emails/quality/daf";
 import { dafFailures, ENTRE_OPENING, isDafPain } from "../lib/emails/quality/daf";
 import { hasDistinctiveFacts } from "../lib/emails/quality/facts-gate";
 import { familyWithSuspension, isFamily, suspendedFamilies } from "../lib/emails/quality/families";
@@ -900,6 +902,26 @@ async function main() {
     // FERBATEQ : filiale de groupe → aucune rédaction (coût évité), la règle d'exclusion ne change pas.
     const filiale = emailBlocker({ id: "p-f", company_name: "FERBATEQ INDUSTRIES", status: "nouveau", do_not_contact: false, key_figures: { parent_group: "JFG HOLDING", is_large_group_subsidiary: true } } as unknown as Prospect);
     check("filiale de groupe (FERBATEQ / JFG HOLDING) → aucun brouillon", filiale?.status === 409 && /filiale de groupe/.test(filiale.message));
+  }
+
+  console.log("\nCowork #45 : énumération de documents, D6, apposition, DAF en F3");
+  {
+    const central = { subject: "Factures fournisseurs", hook: "Grossiste pour les métiers de bouche, un bon de livraison manquant lors du contrôle des arrivages retarde la clôture.", proposal: "Je rapproche factures fournisseurs, commandes et bons de livraison, puis je signale les écarts avant clôture." };
+    const centralRules = checkMail(central, assembleFamily("F2", central, { greeting: GREETING, demo: DEMO_LINKS.factures, cta: ctaFor("p-ca") }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "factures", prospectText: "grossiste métiers de bouche arrivages", knownText: "grossiste métiers de bouche arrivages" });
+    check("« factures fournisseurs, commandes et bons de livraison, puis… » n'est plus une liste d'étapes", !centralRules.failures.some((line) => /liste d'étapes/.test(line)), centralRules.failures.join(" | "));
+    check("énumération de documents ramenée à un seul objet", collapseDocumentLists("Je rapproche factures fournisseurs, commandes et bons de livraison, puis je signale les écarts.") === "Je rapproche documents, puis je signale les écarts.");
+    check("CENTRAL ALCOR (noté 6,5) : apposition « Grossiste pour…, un bon… » → refusée", centralRules.failures.some((line) => /Apposition/.test(line)), centralRules.failures.join(" | "));
+    check("« Vous êtes grossiste pour les métiers de bouche : un bon… » → pas d'apposition", !DANGLING_APPOSITION.test("Vous êtes grossiste pour les métiers de bouche : un bon de livraison manquant retarde la clôture."));
+    check("« Fabricant de volets, Unaferm livre… » (sujet = l'entreprise) → pas d'apposition fautive", !DANGLING_APPOSITION.test("Fabricant de volets, Unaferm livre partout en France."));
+    check("D6 : « facture fournisseur » répété n'est plus un tic (objet du sujet DAF, JOSEPH MELLOT)", repeatedNounGroups("Un écart de quantité sur une facture fournisseur retarde la clôture. Je rapproche chaque facture fournisseur de sa commande.").length === 0);
+    check("consigne DAF : le fait doit MENER au problème, sinon ouverture directe ; modèle F3 fourni", /MENER/.test(DAF_FOCUS) && /Qui rapproche chez vous les factures fournisseurs des bons de livraison avant la clôture/.test(DAF_FOCUS));
+
+    const dafBrief = { companyName: "Unaferm", angle: { type: "metier", hookFactIds: [], insight: "Volets sur mesure" }, pain: { task: "Rapprocher, pour la clôture mensuelle, les achats et les factures avec les dossiers de fabrication et de pose.", whyThem: [], automationIdea: "rapprochement des factures fournisseurs" }, rankedFacts: [], avoid: [], cta: "", proofId: null, targetingWarning: null, excludedAngles: [] } as unknown as StrategyBrief;
+    const fact = { id: "F1", key: "business_locations", label: "Produits", value: "volets roulants et portails sur mesure", source: "Site officiel", hookTier: 1, bodyUsable: true } as unknown as DerivedFact;
+    const question = JSON.stringify({ subject: "Vos factures avant la clôture ?", hook: "Qui rapproche chez vous les factures fournisseurs des bons de livraison avant la clôture ?", proposal: "J'automatise ce rapprochement et je signale chaque écart de prix ou de quantité." });
+    const ask: AskFn = async (role) => (role === "writer" ? question : JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C5"].map((id) => [id, { ok: true, citation: "ok" }]))));
+    const draft = await generateQualityDraft({ ask, brief: dafBrief, facts: [fact], prospectId: "p-unaferm-45", companyName: "Unaferm", activity: "Volets roulants et portails sur mesure", prospectText: "volets roulants portails sur mesure", greeting: "Bonjour,", signature: "Axel Remillat" });
+    check("douleur DAF sans famille imposée → F3 (question courte) privilégiée", "body" in draft && draft.family === "F3", JSON.stringify("body" in draft ? { f: draft.family, r: draft.reviewReason } : draft));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

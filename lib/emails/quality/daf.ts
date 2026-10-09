@@ -17,7 +17,12 @@ export function isDafPain(pain: { task?: string | null; automationIdea?: string 
 }
 
 /** Consigne imposée au rédacteur quand la douleur est DAF / RAF. */
-export const DAF_FOCUS = `DOULEUR DAF / RAF — SUJET IMPOSÉ (Cowork #44) : le rapprochement des factures FOURNISSEURS avec les commandes et les bons de livraison avant la clôture du mois. Le problème nomme un écart précis (quantité ou prix facturé différent de la commande, facture sans bon de commande, bon de livraison manquant) et sa conséquence (clôture retardée, écart découvert trop tard, paiement bloqué). La proposition : je rapproche chaque facture de sa commande et de son bon de livraison et je signale les écarts avant la clôture. JAMAIS un autre sujet (références manquantes dans les commandes clients, dimensions, livraisons gratuites côté client…).`;
+export const DAF_FOCUS = `DOULEUR DAF / RAF — SUJET IMPOSÉ (Cowork #44) : le rapprochement des factures FOURNISSEURS avec les commandes et les bons de livraison avant la clôture du mois. Le problème nomme un écart précis (quantité ou prix facturé différent de la commande, facture sans bon de commande, bon de livraison manquant) et sa conséquence (clôture retardée, écart découvert trop tard, paiement bloqué). La proposition : je rapproche chaque facture de sa commande et de son bon de livraison et je signale les écarts avant la clôture. JAMAIS un autre sujet (références manquantes dans les commandes clients, dimensions, livraisons gratuites côté client…).
+Le fait sur l'entreprise doit MENER à ce problème (ses achats, ses fournisseurs, ses volumes de factures). S'il n'y mène pas naturellement, AUCUN fait d'entreprise : ouvre directement sur le problème. Jamais deux phrases juxtaposées sans lien (Cowork #45 : « livraison gratuite dès 12 bouteilles » puis « écart sur une facture fournisseur » = refusé).
+En question courte (F3), sur ce modèle : « Qui rapproche chez vous les factures fournisseurs des bons de livraison avant la clôture ? »`;
+
+/** DAF / RAF : la question courte (F3) est privilégiée — le sujet n'a pas besoin d'un fait d'entreprise (Cowork #45). */
+export const DAF_FAMILY = "F3" as const;
 
 const DAF_TOPIC = /factur/i;
 const DAF_ANCHOR = /(commande|bons? de livraison|\bBL\b|rapproch|cl[ôo]ture|[ée]cart)/i;
