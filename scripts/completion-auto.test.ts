@@ -12,7 +12,7 @@ import { completeOne, UNREACHABLE_AFTER, type CompletionDeps } from "../lib/toda
 import { exclusionOf } from "../lib/today/items";
 import { subsidiaryOf } from "../lib/enrichment/subsidiary";
 import { offTargetReason } from "../lib/funnel/off-target";
-import { emptyFtStats, FUNNEL_FT_DAYS, FUNNEL_FT_MAX_OFFERS, FUNNEL_ROME_CODES, paginatedJobSignals, toJobSignal, type FtCursorState } from "../lib/signals/france-travail";
+import { emptyFtStats, FUNNEL_FT_DAYS, FUNNEL_FT_MAX_OFFERS, FUNNEL_ROME_CODES, ftDateBound, paginatedJobSignals, toJobSignal, type FtCursorState } from "../lib/signals/france-travail";
 import { communeLookup, uniqueMatch, withParent } from "../lib/funnel/identify";
 import { filterSignal, largeGroupReason } from "../lib/funnel/filter";
 import type { HarvestedSignal, Identity } from "../lib/funnel/types";
@@ -315,6 +315,19 @@ async function main() {
       check("3e run : bas de la fenêtre atteint, toutes les anciennes lues, arrêt propre", third.ids.includes("old-3999") && cursor!.C.exhausted === true && calls < 60, JSON.stringify({ calls, exhausted: cursor!.C.exhausted }));
       const fourth = await run(new Date(T0.getTime() + 10_800_000), 8000);
       check("4e run : rien de nouveau, rien sous la fenêtre → quelques appels, aucune boucle", fourth.ids.length <= 2 && calls <= 4, JSON.stringify({ calls, ids: fourth.ids.length }));
+
+      // Cowork #42 : curseur stocké AVEC millisecondes (dateCreation brute de l'API) → bornes au format de l'API.
+      const bounds: string[] = [];
+      const strict = async (request: { code: string; min: string; max: string; start: number; end: number }) => {
+        bounds.push(request.min, request.max);
+        return api(request);
+      };
+      cursor = { C: { newest: "2026-10-07T12:50:00.000Z", oldest: "2026-10-01T08:00:00.123Z" } };
+      await paginatedJobSignals({ days: 60, maxOffers: 300, romeCodes: ["C"], today: new Date(T0.getTime() + 3_600_000), stats: emptyFtStats(), fetchPage: strict, cursor, onCursor: (next) => void (cursor = next) });
+      check("curseur avec millisecondes : bornes « AAAA-MM-JJTHH:MM:SSZ »", bounds.length > 0 && bounds.every((bound) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(bound)), bounds.slice(0, 4).join(" | "));
+      check("ftDateBound : millisecondes retirées, valeur illisible laissée", ftDateBound("2026-10-07T18:12:33.456Z") === "2026-10-07T18:12:33Z" && ftDateBound("x") === "x");
+      const dead = await paginatedJobSignals({ days: 60, maxOffers: 300, romeCodes: ["C", "D"], today: T0, stats: emptyFtStats(), fetchPage: async () => null });
+      check("toutes les pages illisibles : avertissement explicite, pas un run silencieux à 0", !dead.ok && /toutes échoué/.test(dead.error) && /aucune offre lue/.test(dead.error), dead.ok ? "ok" : dead.error);
 
       cursor = { C: { newest: fresh[49].dateCreation, oldest: old[1999].dateCreation } };
       const narrow = await run(new Date(T0.getTime() + 3_600_000), 8000, 7);

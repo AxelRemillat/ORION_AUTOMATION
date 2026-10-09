@@ -22,6 +22,7 @@
     "contacts:nominatifs": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative-backfill.js",
     "contacts:mesure": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/nominative-measure.js",
     "contacts:lot": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contacts-batch.js",
+    "contacts:roles": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/role-boxes-fix.js",
     "usage:jour": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/usage-today.js",
     "funnel:run": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel-run.js",
     "facts:rattrapage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts-backfill.js",

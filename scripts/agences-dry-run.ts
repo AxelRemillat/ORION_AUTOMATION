@@ -182,6 +182,8 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
     let pappersWebsite: string | null = null;
     let headcount: number | null = null;
     let leader: string | null = null;
+    let leaderFirst: string | null = null;
+    let leaderLast: string | null = null;
     let revenue: number | null = null;
     if (base.siren && pappersUsed < PAPPERS_CAP) {
       const pappers = await fetchPappers(base.siren);
@@ -189,6 +191,11 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
         pappersWebsite = pappers.data.website;
         headcount = pappers.data.headcount;
         leader = pappers.data.leader;
+        const person = (pappers.data.representatives ?? []).find(
+          (item) => !item.isCompany && item.firstName && item.lastName,
+        );
+        leaderFirst = person?.firstName ?? null;
+        leaderLast = person?.lastName ?? null;
         revenue = pappers.data.revenue_eur;
       }
     }

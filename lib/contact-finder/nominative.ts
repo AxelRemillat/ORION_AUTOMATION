@@ -1,3 +1,4 @@
+import { isRoleBox } from "./role-boxes";
 import type { SitePerson } from "./site-people";
 
 /**
@@ -220,7 +221,7 @@ export async function findNominativeContact(input: NominativeInput, deps: Nomina
   const search = await deps.domainSearch(input.domain, { departments });
   const pattern = search?.pattern ?? null;
   const people = (search?.people ?? []).filter(
-    (person) => person.type !== "generic" && person.email.includes("@") && !blocked.has(person.email.toLowerCase()),
+    (person) => person.type !== "generic" && person.email.includes("@") && !blocked.has(person.email.toLowerCase()) && !isRoleBox(person.email),
   );
   outcome.steps.push(`domain-search ${input.domain} [${departments.join(",")}] : ${people.length} personne(s)${pattern ? `, schéma ${pattern}` : ""}`);
   type Pick = { person: HunterPerson; target: RoleTarget; rank: number };
@@ -303,7 +304,7 @@ export async function findNominativeContact(input: NominativeInput, deps: Nomina
     } else if (email) {
       outcome.steps.push(`${item.firstName} ${item.lastName} (${item.origin}, ${item.role}) → ${email} (${source})`);
     }
-    if (!email || blocked.has(email)) continue;
+    if (!email || blocked.has(email) || isRoleBox(email)) continue;
     const ok = await tryVerify({ email, name: `${item.firstName} ${item.lastName}`, role, roleKey: item.roleKey, source, confidence });
     if (ok) return outcome;
   }

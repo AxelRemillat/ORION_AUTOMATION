@@ -1,3 +1,4 @@
+import { isRoleBox } from "./role-boxes";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/server";
 import type { Database, Prospect, ProspectUpdate } from "@/types";
@@ -165,7 +166,7 @@ async function persist(
       ((TIER[result.email_type ?? ""] ?? 0) > (TIER[prospect.email_type ?? ""] ?? 0) ||
         ((TIER[result.email_type ?? ""] ?? 0) === (TIER[prospect.email_type ?? ""] ?? 0) &&
           result.confidence > (prospect.contact_confidence ?? 0))));
-  if (result.email && better) {
+  if (result.email && better && !isRoleBox(result.email)) {
     Object.assign(patch, {
       email: result.email,
       email_type: result.email_type ?? null,

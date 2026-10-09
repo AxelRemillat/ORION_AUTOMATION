@@ -11,6 +11,9 @@ import { planSchedule } from "../lib/today/plan";
 import { buildQualityGreeting } from "../lib/emails/quality/greeting";
 import type { Db } from "../lib/trash/scope";
 import { FakeDb } from "./fake-supabase";
+import { isRoleBox } from "../lib/contact-finder/role-boxes";
+import { classifyEmail, extractEmails } from "../lib/contact-finder/extract";
+import { checkSendRules } from "../lib/outbox/send";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -267,6 +270,22 @@ async function main() {
     fake.rows("prospects").push({ ...mixed });
     await upgradeToNominative(fake as unknown as Db, mixed, { ...spy.deps, verify: async (email: string) => { askedMixed.push(email); return { status: "valid" as const, score: 95 }; } }, { now: new Date("2026-10-06T17:00:00Z") });
     check("casse mixte (« Claude Pierre Jose Binovic ») : nom = dernier mot → claude.binovic@", askedMixed[0] === "claude.binovic@instan.fr", askedMixed);
+  }
+
+  console.log("\n9. Boîtes de rôle juridique et initiale + nom (Cowork #41)");
+  {
+    const roles = ["rgpd-lgs@gerbesavoyarde.com", "rgpd@x.fr", "dpo@x.fr", "privacy@x.com", "donneespersonnelles@x.fr", "donnees-personnelles@x.fr", "cnil@x.fr", "juridique@x.fr", "legal@x.fr", "service.legal@x.fr", "unsubscribe@x.com", "noreply@x.fr", "no-reply@x.fr", "no_reply2@x.fr"];
+    check("boîtes de rôle juridique reconnues (préfixe ou morceau)", roles.every(isRoleBox), roles.filter((email) => !isRoleBox(email)));
+    const people = ["e.lahmadi@lormedo.fr", "jean.dupont@x.fr", "contact@x.fr", "legallais.pierre@x.fr", "nolwenn.reply@x.fr"];
+    check("adresses ordinaires non touchées (y compris « legallais », « nolwenn »)", people.every((email) => !isRoleBox(email)), people.filter(isRoleBox));
+    check("LORMEDO : « e.lahmadi » (initiale + nom) est nominative", classifyEmail("e.lahmadi@lormedo.fr") === "nominatif");
+    check("… sans faire d'un générique un nominatif", classifyEmail("contact@lormedo.fr") === "generique" && classifyEmail("a.b@x.fr") === "generique");
+    check("site : une boîte rgpd@ n'est jamais extraite", !extractEmails("Contact : contact@x.fr — RGPD : rgpd@x.fr, dpo@x.fr").some(isRoleBox) && extractEmails("contact@x.fr rgpd@x.fr").includes("contact@x.fr"));
+    const web = hunter({ people: [person("rgpd.service@acme.fr", "Data Protection Officer", 99), person("jeanne.martin@acme.fr", "DAF", 94)] });
+    const picked = await findNominativeContact({ domain: "acme.fr", pain: "factures", headcount: 60, leader: null }, web.deps);
+    check("recherche nominative : une boîte de rôle n'est jamais retenue", picked.contact?.email === "jeanne.martin@acme.fr", picked.contact);
+    const refused = await checkSendRules({} as Db, { id: "m", status: "draft", type: "intro" } as never, "rgpd-lgs@gerbesavoyarde.com", new Date());
+    check("règles d'envoi : refus d'une boîte de rôle juridique", Boolean(refused && !refused.ok && /rôle juridique/.test(refused.error)), refused);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);

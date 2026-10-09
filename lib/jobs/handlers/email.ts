@@ -24,6 +24,7 @@ import {
   BRIEF_SCHEMA,
   runStrategist,
   validateBrief,
+  briefForDraft,
   type BriefAngle,
   type BriefOutcome,
   type HistoryMessage,
@@ -609,9 +610,11 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
     if (!outcome.brief) throw new JobError(`Brief inexploitable : ${outcome.error}`, false, 502);
   } else {
     const ask = askFor(prospect.id);
-    outcome = await guardAi(() =>
-      runStrategist((system, user, operation) => ask("strategist", system, user, 0.2, operation), input),
+    // Cowork #37 : régénération = brief stocké, sans relancer le stratège (≈ 0,09 € par appel).
+    outcome = await briefForDraft({ mode: params.mode, storedBrief: prospect.brief, strategist: input }, () =>
+      guardAi(() => runStrategist((system, user, operation) => ask("strategist", system, user, 0.2, operation), input)),
     );
+    if ((outcome as { reused?: boolean }).reused) warnings.push({ source: "openai", message: "brief stocké réutilisé (stratège non relancé)" });
     // Sortie du modèle invalide : une nouvelle tentative a ses chances.
     if (!outcome.brief) throw new JobError(`Brief inexploitable : ${outcome.error}`, true, 502);
   }
