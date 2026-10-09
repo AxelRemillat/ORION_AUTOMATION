@@ -102,7 +102,12 @@ async function main() {
     const roomy = { ...(ctx as object), job: { id: "j", params: { openaiCapEur: 2 }, state: {}, result: {}, user_id: "u1", created_at: "" } } as never;
     const under = await openAiGuarded(step as never, async () => openAiBudgetState(3, 15), async () => 0.52)(roomy);
     check("plafond réglé à 2 € : l'étape tourne", ran === 2 && !under.done);
-    check("coût de préparation : la rédaction est exclue", Math.abs(prepCost([{ operation: "facts", cost: 0.1 }, { operation: "qualite:redaction", cost: 1 }, { operation: "strategie", cost: 0.5 }, { operation: "relance", cost: 0.02 }]) - 0.12) < 1e-9);
+    check("coût de préparation : la rédaction est exclue", Math.abs(prepCost([{ operation: "facts", cost: 0.1 }, { operation: "qualite:redaction", cost: 1 }, { operation: "strategie", cost: 0.5 }, { operation: "entonnoir:tri", cost: 0.02 }]) - 0.12) < 1e-9);
+    // Cowork #47 : 09/10, 0,14 € de relances écrites par un autre agent comptées dans le plafond du job.
+    check(
+      "relances des autres agents (relance:redaction, relance:grille…) hors du plafond du job",
+      Math.abs(prepCost([{ operation: "facts", cost: 0.1 }, { operation: "relance:redaction:rewrite", cost: 0.064 }, { operation: "relance:grille:0", cost: 0.002 }, { operation: "relance", cost: 0.02 }]) - 0.1) < 1e-9,
+    );
     // « Sans brouillons » : aucune relance rédigée (07/10 : 14 relances dans un lot sans brouillons).
     const noDraft = await relancesStep({ db: new FakeDb({}) as never, userId: "u1", job: { id: "j", params: { skipDrafts: true }, state: {}, result: {}, user_id: "u1", created_at: "" } } as never);
     check("préparation sans brouillons : les relances ne sont pas rédigées", /non rédigées/.test(noDraft.progress?.step ?? ""), noDraft.progress);
