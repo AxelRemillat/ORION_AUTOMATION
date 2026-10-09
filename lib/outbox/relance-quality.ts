@@ -72,9 +72,9 @@ export interface IntroParts {
   requireV?: boolean;
 }
 
-const DEMO_LINK = /(?:https?:\/\/)?(?:www\.)?axelremillat\.com\/[^\s)>\]]+/i;
+export const DEMO_LINK = /(?:https?:\/\/)?(?:www\.)?axelremillat\.com\/[^\s)>\]]+/i;
 /** « Bonjour Madame, » / « Bonjour Monsieur, » sans nom (R9). */
-const NAMELESS_GREETING = /^bonjour\s+(madame|monsieur|mme|m\.)\s*,?\s*$/i;
+export const NAMELESS_GREETING = /^bonjour\s+(madame|monsieur|mme|m\.)\s*,?\s*$/i;
 
 /**
  * Intro partie AVANT les familles (lien sans &v) : la famille enregistrée de l'intro
@@ -276,8 +276,18 @@ export function relanceCodeChecks(subject: string, body: string, ctx: RelanceCon
 
 // --- Lecture du modèle : R2, R5, R7, R8 (vote à 3) ------------------------------------
 
+/** Fait sourcé de la fiche (key_figures.facts), pour choisir le mode de relance (Cowork #16). */
+export interface SourcedFact {
+  text: string;
+  distinctiveness: number;
+  source_url: string | null;
+  process_hint: string | null;
+}
+
 export interface RelanceFiche {
   companyName: string;
+  /** Faits sourcés bruts (distinctivité, source, processus) : ils décident du mode A / B. */
+  sourcedFacts?: readonly SourcedFact[];
   /** Faits sourcés (key_figures.facts) et signaux datés de la fiche — sans recrutement. */
   facts: readonly string[];
   signals: readonly string[];
@@ -345,7 +355,8 @@ export function relanceMajority(samples: readonly (Sample | null)[]): RelanceCri
 }
 
 /** R8 a une part de code (démo en sujet, méta) et une part de lecture : les deux doivent passer. */
-export function relanceVerdictOf(items: RelanceCriterion[]): RelanceVerdict {
+/** `ids` : critères attendus (mode A : les 10 ; mode B « relance courte » : sa grille réduite). */
+export function relanceVerdictOf(items: RelanceCriterion[], ids: readonly RelanceCriterionId[] = ORDER): RelanceVerdict {
   const merged = new Map<RelanceCriterionId, RelanceCriterion>();
   for (const item of items) {
     const previous = merged.get(item.id);
@@ -353,7 +364,7 @@ export function relanceVerdictOf(items: RelanceCriterion[]): RelanceVerdict {
   }
   const sorted = [...merged.values()].sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
   const misses = sorted.filter((item) => !item.ok).length;
-  return { items: sorted, ready: sorted.length === ORDER.length && misses === 0, score: Math.max(0, Math.round((10 - misses * 1.5) * 10) / 10) };
+  return { items: sorted, ready: ids.every((id) => sorted.some((item) => item.id === id)) && misses === 0, score: Math.max(0, Math.round((10 - misses * 1.5) * 10) / 10) };
 }
 
 /** Crédit OpenAI épuisé : on le fait suivre ; toute autre panne = lecture illisible. */
@@ -474,12 +485,13 @@ export interface RelanceOutcome {
  */
 export async function writeRelance(
   ask: AskFn,
-  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null; lot?: RelanceLot },
+  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null; lot?: RelanceLot; /** Mode A (Cowork #16) : le fait sourcé qui ancre la 1re phrase. */ anchor?: SourcedFact | null },
 ): Promise<RelanceOutcome | { error: string }> {
   const intro = introParts(input.introSubject, input.introBody, input.introFamily);
   const ctx: RelanceContext = { intro, generic: input.generic, seed: input.fiche.companyName, lot: input.lot };
   const subject = relanceSubject(intro);
-  const user = `${ficheBlock(input.fiche)}\n\nINTRO ENVOYÉE (objet : ${intro.subject})\n${input.introBody.slice(0, 3000)}\n\nAppel à l'action de l'intro, à NE PAS reprendre : ${intro.cta ?? "—"}`;
+  const anchor = input.anchor ? `\n\nÉLÉMENT À UTILISER pour "about" (fait sourcé de la fiche, sur le processus de l'intro) : ${input.anchor.text}${input.anchor.process_hint ? ` — processus : ${input.anchor.process_hint}` : ""}` : "";
+  const user = `${ficheBlock(input.fiche)}\n\nINTRO ENVOYÉE (objet : ${intro.subject})\n${input.introBody.slice(0, 3000)}\n\nAppel à l'action de l'intro, à NE PAS reprendre : ${intro.cta ?? "—"}${anchor}`;
   let feedback: string | null = null;
   let best: RelanceOutcome | null = null;
   let rounds = 0;
