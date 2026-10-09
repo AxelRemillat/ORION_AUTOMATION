@@ -45,6 +45,7 @@ import { clichesOf } from "@/lib/emails/quality/rules";
 import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import { acquireAvecLock, closeAvec, type AvecLock, type LockDb } from "@/lib/emails/quality/avec-lock";
 import { factsGate, hasDistinctiveFacts, keyFactsOf } from "@/lib/emails/quality/facts-gate";
+import { ENTRE_WINDOW } from "@/lib/emails/quality/daf";
 import { addresseeHintOf, askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
@@ -385,6 +386,10 @@ export function emailBlocker(prospect: Prospect): { message: string; status: num
   // Offres publiées pour des clients (temps partagé, recrutement…) : aucun
   // brouillon, le signal ne concerne pas l'entreprise elle-même.
   const forClient = offTargetReason(prospect);
+  // Cowork #44 (FERBATEQ) : une filiale de groupe est exclue de la file — aucune rédaction, aucun coût.
+  if (forClient?.startsWith("filiale de groupe")) {
+    return { message: `Hors cible — ${forClient}. Aucun brouillon.`, status: 409 };
+  }
   if (forClient?.startsWith("signal pour un client")) {
     return { message: `Hors cible — ${forClient}. Aucun brouillon.`, status: 409 };
   }
@@ -629,6 +634,22 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   return { state: { brief: outcome.brief, warnings }, progress: EMAIL_STAGES.writer };
 }
 
+/** Accroches des derniers brouillons d'intro PRÊTS (note posée, aucune raison « À revoir »), du plus récent au plus ancien. */
+async function recentReadyHooks(ctx: StepContext, prospectId: string): Promise<string[]> {
+  const { data } = await ctx.db
+    .from("messages")
+    .select("body, quality_score, quality_reason")
+    .eq("user_id", ctx.userId)
+    .eq("type", "intro")
+    .neq("prospect_id", prospectId)
+    .is("deleted_at", null)
+    .not("quality_score", "is", null)
+    .is("quality_reason", null)
+    .order("created_at", { ascending: false })
+    .limit(ENTRE_WINDOW);
+  return ((data ?? []) as { body: string }[]).map((row) => hookOfBody(row.body));
+}
+
 /** Le brouillon précédent n'est réécrit que s'il est à nous, à ce prospect, et pas parti. */
 async function replaceableDraft(
   ctx: StepContext,
@@ -760,6 +781,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
   const counted = openingsOf(todayRows, familyOf);
   const dayOpenings = lock.held ? counted : closeAvec(counted);
   const quotaStart = Date.now();
+  const recentHooks = await recentReadyHooks(ctx, prospect.id);
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -778,6 +800,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       offerNumbers: offerNumbers(loaded.offer),
       usedCliches,
       dayOpenings,
+      recentHooks,
       website: prospect.website,
       keyFacts: keyFactsOf(figures as Record<string, unknown>),
       // SEGMENT (agent3) : une fiche de segment impose sa famille de mail —

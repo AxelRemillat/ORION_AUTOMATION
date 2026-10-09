@@ -1,3 +1,4 @@
+import { DAF_FOCUS, ENTRE_OPENING, ENTRE_WINDOW, isDafPain } from "./daf";
 import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
@@ -53,6 +54,8 @@ export interface QualityInput {
   sector?: string | null;
   /** Poste de la personne réellement contactée : l'angle s'y adapte. */
   recipientRole?: string | null;
+  /** Accroches des derniers brouillons prêts, du plus récent au plus ancien (anti-tic « Entre … et … », Cowork #44). */
+  recentHooks?: readonly string[];
   /** `key_figures.facts` triés (lib/emails/quality/facts-gate.ts) ; absent = fiche d'avant. */
   keyFacts?: readonly KeyFact[] | null;
 }
@@ -145,6 +148,9 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   ]
     .filter(Boolean)
     .join("\n");
+  // Cowork #44 : douleur DAF / RAF → sujet imposé et démo factures ; « Entre … et … » limité.
+  const daf = isDafPain(input.brief.pain, input.recipientRole);
+  const avoidEntre = (input.recentHooks ?? []).slice(0, ENTRE_WINDOW).some((hook) => ENTRE_OPENING.test(hook));
   const history: QualityAttempt[] = [];
   let feedback: string | null = null;
   let lastFailures = new Set<string>();
@@ -153,7 +159,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole, keyFacts: input.keyFacts }),
+      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole, keyFacts: input.keyFacts, focus: daf ? DAF_FOCUS : undefined, avoidEntre }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -172,7 +178,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     // Jamais la page générique (ANTARES, 06/10) : à défaut, la démo des e-mails reçus.
     const picked = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo.key !== "general" ? demo : DEMO_LINKS.emails;
     // Cowork #40 : devis / commandes FOURNISSEURS → jamais la démo devis client (/agent).
-    const chosen = demoForSupplierSide(`${parts.hook} ${parts.proposal}`, picked);
+    const chosen = daf ? DEMO_LINKS.factures : demoForSupplierSide(`${parts.hook} ${parts.proposal}`, picked);
     let core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta });
     // Trop long : raccourcissement dédié AVANT le jugement, hors des essais.
     const { max } = FAMILY_LIMITS[family];
@@ -201,6 +207,8 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       demo: chosen.key,
       subjectArm: arm,
       dayOpenings: input.dayOpenings,
+      daf,
+      avoidEntre,
       family,
       knownText: [input.activity, input.sector, input.brief.pain.task, input.brief.pain.automationIdea, factText].filter(Boolean).join(" "),
     });

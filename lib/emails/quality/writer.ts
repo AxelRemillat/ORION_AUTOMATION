@@ -34,6 +34,10 @@ export interface WriterInput {
   usedCliches?: readonly string[];
   /** Quota d'ouvertures « Avec… » atteint pour la journée (1 mail sur 3). */
   avoidAvec?: boolean;
+  /** « Entre X et Y, … » déjà utilisé dans les derniers brouillons prêts (Cowork #44) : à éviter. */
+  avoidEntre?: boolean;
+  /** Sujet imposé (douleur DAF / RAF, Cowork #44). */
+  focus?: string;
   /** Expérience n° 1 : style d'objet imposé (lib/emails/quality/experiment.ts). */
   subjectArm?: SubjectArm;
   /** Consignes de réécriture (validateur, puis juge). */
@@ -99,7 +103,7 @@ ${input.recipientRole ? `- Destinataire : ${input.recipientRole} — parle de SA
    Phrase 1 : un FAIT PROPRE ci-dessus (nombre de sites ou de fournils, gamme précise, type de clients, zone, produit phare),
    posé comme CONTEXTE de la tâche : « Avec un catalogue qui mêle X et Y, chaque commande… », « Avec quatre fournils et des clients en restauration, … ».
    Phrase 2 : la conséquence OBSERVABLE — un client qui attend, une livraison en retard, une double saisie, une relance oubliée, un devis qui part tard.
-${input.avoidAvec ? "   N'OUVRE PAS par « Avec » (déjà un mail sur trois aujourd'hui) : « Chez … », « Entre … et … », « Quand … », ou le fait en sujet (« Vos quatre fournils livrent … »).\n" : ""}   OUVERTURES INTERDITES : « Dans le/la <secteur> », « <Nom> travaille dans / est spécialisé dans / vend / fabrique », « Vous vendez / fabriquez / êtes ».
+${input.avoidAvec ? "   N'OUVRE PAS par « Avec » (déjà un mail sur trois aujourd'hui) : « Chez … », « Quand … », ou le fait en sujet (« Vos quatre fournils livrent … »).\n" : ""}   OUVERTURES INTERDITES : « Dans le/la <secteur> », « <Nom> travaille dans / est spécialisé dans / vend / fabrique », « Vous vendez / fabriquez / êtes ».
    CONSÉQUENCES INTERDITES : « prend du temps », « peut prendre du temps », « est chronophage », « demande de l'énergie ».
    INTERDIT AUSSI : l'offre d'emploi ou « vous recrutez » ; une donnée de registre (effectif, chiffre d'affaires, date de création) ;
    « sur votre site » ; le point-virgule ; toute hypothèse visible (« si vos demandes… », « éventuellement »).
@@ -114,7 +118,7 @@ ${input.avoidAvec ? "   N'OUVRE PAS par « Avec » (déjà un mail sur trois auj
 MOTS INTERDITS : ${FORBIDDEN_WORDS.join(", ")}, et tout sigle qu'ils n'emploient pas eux-mêmes. Aucune URL, aucune question, aucun chiffre absent des faits, pas de salutation ni de signature.
 Le mail complet fait 75 mots AU PLUS : ton accroche + ta proposition ≈ 35 à 45 mots. Aucune tournure lourde, aucun mot à double sens dans leur métier, aucun passif inutile.
 
-${REVIEWER_GRID}
+${REVIEWER_GRID}${extraRules(input)}
 
 EXEMPLES 10/10 (d'autres entreprises — n'en reprends aucune phrase) :
 ${references}
@@ -156,7 +160,15 @@ const REVIEWER_GRID = `CE QUI SERA EXIGÉ PAR LE RELECTEUR (consultant B2B senio
 - Toujours la VOIX ACTIVE : « je signale », « je prépare » — jamais « sont signalées », « est préparé ».
 - Jamais deux fois le même groupe nominal (« lunettes de soleil » une seule fois) : reprends-le par « ces commandes », « ces produits ».`;
 
-const COMMON_RULES = (input: WriterInput) => `${REVIEWER_GRID}
+/** Consignes ponctuelles : sujet imposé (DAF / RAF) et ouverture « Entre … et … » à éviter (Cowork #44). */
+function extraRules(input: WriterInput): string {
+  return [
+    input.focus ? `\n\n${input.focus}` : "",
+    input.avoidEntre ? "\n\nN'OUVRE PAS par « Entre … et … » : cette ouverture vient d'être utilisée dans les derniers mails. Pose le fait en sujet (« Vos climatiseurs de cave… »), ou « Chez … », « Quand … »." : "",
+  ].join("");
+}
+
+const COMMON_RULES = (input: WriterInput) => `${REVIEWER_GRID}${extraRules(input)}
 
 RÈGLES COMMUNES :
 - AUCUN fait inventé : n'affirme sur eux que ce qui est listé ci-dessus ; chaque précision sur leur activité (« avions régionaux », « vêtements professionnels ») doit y figurer. Un besoin est présenté comme courant dans leur métier, jamais comme un défaut constaté chez eux.
