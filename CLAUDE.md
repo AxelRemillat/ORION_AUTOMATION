@@ -99,6 +99,8 @@ gratuit » est resté sur une branche orpheline pendant deux jours, et a dû êt
 remis par la PR #125. Avant de pousser un commit de plus, vérifiez que la PR
 est encore ouverte (`gh pr view <n> --json state`) ; si elle est mergée, le
 travail restant part sur une NOUVELLE branche et une nouvelle PR.
+La branche orpheline, elle, reste a supprimer a la main sur GitHub : le
+garde-fou local refuse toute suppression d'historique distant.
 
 Le workflow, lui, ne merge jamais un commit qui n'a pas passé la CI : il
 compare le head de la PR au `head_sha` du run, s'arrête si la PR a avancé
