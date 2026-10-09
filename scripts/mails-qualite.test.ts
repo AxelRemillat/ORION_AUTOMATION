@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { dafFailures, ENTRE_OPENING, isDafPain } from "../lib/emails/quality/daf";
 import { hasDistinctiveFacts } from "../lib/emails/quality/facts-gate";
 import { familyWithSuspension, isFamily, suspendedFamilies } from "../lib/emails/quality/families";
 import { F4_TRANSPOSE, F4_TYPE_CASE } from "../lib/emails/quality/rules";
@@ -861,6 +862,44 @@ async function main() {
     const fact = (distinctiveness: number) => ({ text: "Découpe laser sur plan client", source_url: "https://x.fr", page_kind: "produits", distinctiveness, process_hint: "devis" });
     check("un fait de distinctivité ≥ 2 vaut une accroche (CEPM, ACCÈS VISION, COLAERT)", hasDistinctiveFacts({ facts: [fact(1), fact(2)] }) && hasDistinctiveFacts({ facts: [fact(3)] }));
     check("faits tous < 2 ou absents : la porte « signal daté » s'applique comme avant", !hasDistinctiveFacts({ facts: [fact(1), fact(0)] }) && !hasDistinctiveFacts({}) && !hasDistinctiveFacts(null));
+  }
+
+  console.log("\nCowork #44 : DAF / RAF ancré sur les factures, anti-tic « Entre … et … », porte filiale");
+  {
+    // Douleurs DAF / RAF réelles de la mesure #43.
+    check("douleur DAF reconnue (UNAFERM : clôture mensuelle, achats et factures)", isDafPain({ task: "Rapprocher, pour la clôture mensuelle, les achats et les factures avec les dossiers de fabrication et de pose." }));
+    check("douleur DAF reconnue (CENTRAL ALCOR : reporting financier)", isDafPain({ task: "Consolider les commandes et leurs statuts de livraison pour préparer le reporting financier." }));
+    check("destinataire DAF / RAF reconnu même si le brief ne le dit pas", isDafPain({ task: "Suivre les commandes" }, "Responsable administratif et financier"));
+    check("douleur ADV : pas DAF (FRIAX)", !isDafPain({ task: "Saisir les commandes de climatiseurs de cave à vin et confirmer les délais aux clients." }));
+    check("JOSEPH MELLOT (#43, noté 6,5) : livraison gratuite côté client → refusé (hors sujet DAF)", dafFailures("Dès 12 bouteilles, la livraison est gratuite. Une quantité manquante sur la facture empêche de vérifier ces frais.").length === 0 ? false : true);
+    check("mail DAF ancré : facture fournisseur rapprochée de la commande et du bon de livraison → accepté", dafFailures("Une facture fournisseur dont le prix diffère de la commande retarde la clôture. Je rapproche chaque facture de sa commande et de son bon de livraison.").length === 0);
+
+    const dafBrief = { companyName: "Unaferm", angle: { type: "metier", hookFactIds: [], insight: "Volets sur mesure" }, pain: { task: "Rapprocher, pour la clôture mensuelle, les achats et les factures avec les dossiers de fabrication et de pose.", whyThem: [], automationIdea: "rapprochement des factures fournisseurs" }, rankedFacts: [], avoid: [], cta: "", proofId: null, targetingWarning: null, excludedAngles: [] } as unknown as StrategyBrief;
+    const fact = { id: "F1", key: "business_locations", label: "Produits", value: "volets roulants et portails sur mesure", source: "Site officiel", hookTier: 1, bodyUsable: true } as unknown as DerivedFact;
+    const offTopic = JSON.stringify({ subject: "Dimensions des volets", hook: "Vos volets roulants sont fabriqués sur mesure. Une dimension manquante retarde la réponse au client.", proposal: "J'automatise la lecture des demandes et je signale les dimensions manquantes." });
+    const onTopic = JSON.stringify({ subject: "Factures avant clôture", hook: "Vos volets roulants et portails sont fabriqués sur mesure. Une facture fournisseur dont la quantité diffère de la commande retarde la clôture du mois.", proposal: "J'automatise ce rapprochement : je compare chaque facture à sa commande et à son bon de livraison et je signale les écarts." });
+    const prompts: string[] = [];
+    const writer = [offTopic, onTopic];
+    const ask: AskFn = async (role, system) => {
+      if (role === "writer") { prompts.push(system); return writer.shift() ?? onTopic; }
+      return JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C5"].map((id) => [id, { ok: true, citation: "ok" }])));
+    };
+    const outcome = await generateQualityDraft({ ask, brief: dafBrief, facts: [fact], prospectId: "p-unaferm", companyName: "Unaferm", activity: "Volets roulants et portails sur mesure", prospectText: "volets roulants portails sur mesure", greeting: "Bonjour,", signature: "Axel Remillat", family: "F1" });
+    check("brief DAF : le rédacteur reçoit le sujet imposé (rapprochement factures / commandes / BL)", /DOULEUR DAF \/ RAF — SUJET IMPOSÉ/.test(prompts[0] ?? ""));
+    check("brief DAF : le mail hors sujet (dimensions) est refusé et réécrit", "body" in outcome && outcome.attempts === 2 && /rapproche/.test(outcome.body), JSON.stringify("body" in outcome ? { a: outcome.attempts, r: outcome.reviewReason } : outcome));
+    check("brief DAF : la démo est celle des factures", "body" in outcome && /demo=invoice/.test(outcome.body));
+
+    // Anti-tic : « Entre X et Y, … » refusé s'il figure dans les 5 derniers brouillons prêts.
+    check("« Entre prototypes et grandes séries, … » reconnu comme ouverture « Entre … et … »", ENTRE_OPENING.test("Entre prototypes et grandes séries, le suivi de production dépend des quantités commandées."));
+    const entre = parts({ hook: "Entre fournils et restaurants, chaque commande compte. Une commande non confirmée laisse le client sans réponse." });
+    const tic = checkMail(entre, assemble(entre, { greeting: GREETING, demo: DEMO_LINKS.emails, cta: ctaFor("p-tic") }), { ...ruleContext, demo: "emails", avoidEntre: true });
+    check("ouverture « Entre … et … » déjà utilisée récemment → refusée", tic.failures.some((line) => /Entre … et …/.test(line)), tic.failures.join(" | "));
+    const free = checkMail(entre, assemble(entre, { greeting: GREETING, demo: DEMO_LINKS.emails, cta: ctaFor("p-tic") }), { ...ruleContext, demo: "emails" });
+    check("« Entre … et … » permise quand aucun des 5 derniers prêts ne l'utilise", !free.failures.some((line) => /Entre … et …/.test(line)));
+
+    // FERBATEQ : filiale de groupe → aucune rédaction (coût évité), la règle d'exclusion ne change pas.
+    const filiale = emailBlocker({ id: "p-f", company_name: "FERBATEQ INDUSTRIES", status: "nouveau", do_not_contact: false, key_figures: { parent_group: "JFG HOLDING", is_large_group_subsidiary: true } } as unknown as Prospect);
+    check("filiale de groupe (FERBATEQ / JFG HOLDING) → aucun brouillon", filiale?.status === 409 && /filiale de groupe/.test(filiale.message));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

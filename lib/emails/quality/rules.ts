@@ -1,3 +1,4 @@
+import { dafFailures, ENTRE_OPENING } from "./daf";
 import { knownNumbers, type DerivedFact } from "@/lib/emails/derived-facts";
 import { numbersIn, validateSubject } from "@/lib/emails/validate";
 import { ALLOWED_DEMO_URLS, demoForProposal, DEMO_LINKS, SUPPLIER_SIDE, type DemoLink } from "./demo-links";
@@ -119,6 +120,10 @@ export interface RuleContext {
   offerNumbers?: readonly number[];
   /** Clichés de fin déjà servis dans les autres mails du jour : à ne pas reprendre. */
   usedCliches?: readonly string[];
+  /** Douleur DAF / RAF : le mail parle du rapprochement des factures fournisseurs (Cowork #44). */
+  daf?: boolean;
+  /** « Entre … et … » déjà utilisé dans les derniers brouillons prêts (Cowork #44). */
+  avoidEntre?: boolean;
   /** Démo retenue : elle doit illustrer la phrase « J'automatise… ». */
   demo?: DemoLink["key"];
   /** Brouillons déjà écrits aujourd'hui, et combien ouvrent sur « Avec ». */
@@ -278,6 +283,11 @@ export function checkMail(parts: MailParts, body: string, context: RuleContext):
     }
   }
   // Quota « Avec » : un mail sur trois au plus — sur la journée ET au sein de la famille (BULLY, CAMEL DIAM : 2 F1 sur 2).
+  // Cowork #44 : DAF / RAF ancré sur le rapprochement des factures ; « Entre … et … » limité.
+  if (context.daf) failures.push(...dafFailures(`${parts.subject} ${parts.hook} ${parts.proposal}`));
+  if (context.avoidEntre && ENTRE_OPENING.test(parts.hook)) {
+    failures.push("Ouverture « Entre … et … » déjà utilisée dans les derniers mails prêts : pose le fait en sujet, ou « Chez … », « Quand … ».");
+  }
   const familyDay = context.dayOpenings?.byFamily?.[family];
   if (opensWithAvec(parts.hook) && (!avecAllowed(context.dayOpenings) || (familyDay && !avecAllowed(familyDay)))) {
     failures.push("Ouverture « Avec… » déjà trop fréquente aujourd'hui (au plus un mail sur trois) : ouvre autrement (« Chez… », « Entre… et… », « Quand… », ou le fait en sujet).");
