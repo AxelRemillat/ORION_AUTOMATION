@@ -173,9 +173,15 @@ ${input.brief.avoid.length ? `- À NE PAS DIRE : ${input.brief.avoid.join(" ; ")
  * URL) et la demande (13) : 25 mots du plafond sont déjà consommés avant que
  * le modèle n'écrive quoi que ce soit. L'argumentaire doit tenir dans le reste.
  */
+/*
+ * MARGE. 30 + 20 + 25 faisait exactement 75, le plafond : aucune marge, donc
+ * dépassement systématique — trois brouillons sur quatre à 78 mots (mesure du
+ * 09/10, zone 33). Un budget qui tombe pile sur la limite est un budget
+ * dépassé. 27 + 18 + 25 = 70 laisse cinq mots de jeu au modèle.
+ */
 export const F5_FIXED_WORDS = 25;
-export const F5_HOOK_WORDS = 30;
-export const F5_PROPOSAL_WORDS = 20;
+export const F5_HOOK_WORDS = 27;
+export const F5_PROPOSAL_WORDS = 18;
 
 /** Consignes de F2 (présentation directe), F3 (question courte) et F4 (démo d'abord). */
 function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">): string {
