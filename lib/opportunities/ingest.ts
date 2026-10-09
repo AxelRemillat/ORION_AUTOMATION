@@ -172,8 +172,10 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promi
             analysis_state: "ok",
             updated_at: now,
           }
-        : // Crédit épuisé : « Non analysée » (rattrapée à la recharge), jamais « Ignorée ».
-          { analysis_state: quotaHitSince(started) ? NOT_ANALYZED : "a_analyser", updated_at: now },
+        : // Analyse impossible (crédit épuisé, budget de l'app, erreur API, réponse illisible) :
+          // « Non analysée » (rattrapée dès qu'une analyse repasse), jamais « Ignorée ». « À analyser »
+          // reste réservé au plafond quotidien (plateformes #10).
+          { analysis_state: NOT_ANALYZED, updated_at: now },
     )
     .eq("id", id);
   // Sous 5 : rangée avec les ignorées (Axel peut toujours la rouvrir) — seulement si elle est encore
@@ -265,6 +267,17 @@ async function proposeRow(deps: IngestDeps, id: string, body: IngestBody, analys
       updated_at: (deps.now ?? (() => new Date()))().toISOString(),
     })
     .eq("id", id);
+}
+
+/**
+ * RATTRAPAGE (plateformes #10) : ré-analyse d'une fiche existante par le MÊME code
+ * que l'ingestion (analyse, fraîcheur, statut, proposition si score ≥ 7). Aucune
+ * alerte ici : l'appelant décide (même seuil que la veille, verdict « alerte »).
+ */
+export async function reanalyzeOpportunity(deps: IngestDeps, id: string, body: IngestBody): Promise<Analysis | null> {
+  const analysis = await analyzeRow(deps, id, body);
+  if (analysis && analysis.score >= PROPOSAL_SCORE) await proposeRow(deps, id, body, analysis).catch(() => undefined);
+  return analysis;
 }
 
 export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Promise<IngestResponse> {

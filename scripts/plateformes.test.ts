@@ -9,8 +9,9 @@ import { buildProposalChecklistPrompt, judgeProposalChecklist, proposalCodeCheck
 import { PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { firstSentence, upworkFailures, usdAmounts, usdRange, PLATFORM_RULES } from "../lib/opportunities/platforms";
 import { UPWORK_CHECKLIST } from "../lib/opportunities/checklist-en";
-import { parseInboundEmail, parsePlatformEmail, platformOfSender, htmlToText } from "../lib/opportunities/email/parse";
-import { decideEmail, ingestPlatformEmail, planPlatformEmail, statusAfterEvent } from "../lib/opportunities/email/ingest-email";
+import { parseInboundEmail, parsePlatformEmail, platformOfSender, htmlToText, withoutLinks, type InboundEmail } from "../lib/opportunities/email/parse";
+import { codeurProjectDescription, decideEmail, ingestPlatformEmail, planPlatformEmail, statusAfterEvent } from "../lib/opportunities/email/ingest-email";
+import { prefilterReason } from "../lib/opportunities/prefilter";
 import { EMAIL_STATUSES, needsProposal, opportunityFromEmail, parseTriageCreate, statusForKind } from "../lib/opportunities/email/triage";
 import { emailsToSort, suggestedPrice } from "../lib/opportunities/email/view";
 import { freelanceSources, platformActivity } from "../lib/opportunities/stats";
@@ -470,6 +471,80 @@ async function main() {
     check("libellé exact du badge", SIZE_BADGE === "Trop gros seul : lot IA ou sous-traitance");
     const row = { fit_score: 9, status: "a_repondre" as const, budget: "Plus de 10 000 €" };
     check("le score et le classement ne changent pas", bucketOf(row) === "alertes" && row.fit_score === 9);
+  }
+
+  console.log("\n17. Format réel de l'alerte Codeur (08/10) et « Non analysée », jamais « Ignorée »");
+  {
+    // Même structure que les vrais e-mails du 08/10 (logo, liens de suivi, pied de page) ; identifiants fictifs.
+    const realFormat: InboundEmail = {
+      message_id: "<alerte-reelle-0001@compte.codeur.com>",
+      from: "Codeur.com <notification@compte.codeur.com>",
+      subject: "Nouveau projet : Application ia agentiques",
+      text: [
+        "Un projet dans vos compétences vient d’être publié. Codeur.com",
+        "[https://www.codeur.com/system/images/files/000/000/363/original/logo-codeur-ico-90.png?1572951492]",
+        "https://www.codeur.com/projects/499001-application-ia-agentiques",
+        "",
+        "Nouveau projet publié",
+        "",
+        "Projet :  Application ia agentiques",
+        "[https://www.codeur.com/projects/499001-application-ia-agentiques?utm_campaign=KeywordAlert&utm_medium=email&utm_source=codeur]",
+        "",
+        "Déposer une offre",
+        "[https://www.codeur.com/projects/499001-application-ia-agentiques?utm_campaign=KeywordAlert&utm_medium=Email&utm_source=codeur]",
+        "",
+        "Vous pouvez filtrer les projets [https://www.codeur.com/edit-email-alerts] de",
+        "cette alerte selon vos compétences ou par mots-clés.",
+        "",
+        "À bientôt sur Codeur.com !",
+        "",
+        "Vous recevez ce mail car vous êtes inscrit à notre liste de diffusion. Si vous",
+        "souhaitez ne plus recevoir cette alerte email vous avez la possibilité de vous",
+        "désinscrire : Se désinscrire [https://www.codeur.com/email_alerts/xxxx/unsubscribe]",
+      ].join("\n"),
+      html: "",
+      received_at: "2026-10-08T12:42:47Z",
+    };
+    const parsed = parsePlatformEmail(realFormat);
+    check("reconnu « nouveau_projet », identifiant 499001, titre du sujet", parsed.kind === "nouveau_projet" && parsed.externalId === "499001" && parsed.title === "Application ia agentiques", JSON.stringify({ kind: parsed.kind, id: parsed.externalId, title: parsed.title }));
+    check("corps sans lien ni pied de page (le logo ne passe plus)", !/https?:|logo|diffusion|désinscrire/i.test(parsed.body), parsed.body);
+    check("annonce = le titre seul (l'alerte ne donne rien d'autre)", codeurProjectDescription(parsed.body, "Application ia agentiques") === "Application ia agentiques", codeurProjectDescription(parsed.body, "Application ia agentiques"));
+    check("cause du 08/10 reproduite : l'URL du logo déclenchait « graphisme, design »", /graphisme/.test(prefilterReason({ title: "Application ia agentiques", description: "[https://www.codeur.com/system/images/files/original/logo-codeur-ico-90.png]", categories: [], budgetText: null }) ?? ""));
+    check("withoutLinks : liens entre crochets et nus retirés, texte gardé", withoutLinks("Voir [https://x.fr/a?b=1] ici https://y.fr/z et là") === "Voir ici et là");
+    check("recommandations Upwork : les annonces se lisent toujours (liens du texte brut)", parsePlatformEmail(EMAIL_FIXTURES.find((fixture) => fixture.expect.kind === "recommandation")!.email).jobs.length === 2);
+
+    const db = new FakeDb({ opportunities: [], opportunity_emails: [] });
+    const alerts: Notification[] = [];
+    const seen: string[] = [];
+    const ask: AskFn = async (role, system, user) => {
+      if (/Tu analyses une annonce/.test(system)) {
+        seen.push(user);
+        return JSON.stringify({ score: 9, reasons: ["agents IA", "cœur de métier", "à préciser"], need: "Application d'agents IA", demo: "general", language: "fr", kind: "automatisation" });
+      }
+      return "";
+    };
+    const deps = { db: db as never, userId: "u1", ask, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-08T12:43:00Z"), notify: async (notification: Notification) => (alerts.push(notification), true) };
+    const created = await ingestPlatformEmail(deps, realFormat);
+    const row = db.rows("opportunities")[0] as Record<string, unknown>;
+    check("format réel → pas filtré, analysé, alerte (score 9)", created.verdict === "alerte" && !row.filter_reason && row.fit_score === 9 && created.alerted && alerts.length === 1, JSON.stringify({ created, reason: row?.filter_reason }));
+    check("le modèle n'a vu ni lien ni pied de page", seen.length === 1 && !/https?:|logo|diffusion/i.test(seen[0]), seen[0]);
+
+    // Analyse impossible (erreur API, budget, réponse illisible) : « Non analysée », jamais « Ignorée ».
+    const down: AskFn = async () => {
+      throw new Error("500 server error");
+    };
+    const dbDown = new FakeDb({ opportunities: [], opportunity_emails: [] });
+    const viaEmail = await ingestPlatformEmail({ ...deps, db: dbDown as never, ask: down }, { ...realFormat, message_id: "<down-1>", subject: "Nouveau projet : Automatiser nos devis", text: realFormat.text.replace(/499001-application-ia-agentiques/g, "499002-automatiser-nos-devis") });
+    const downRow = dbDown.rows("opportunities")[0] as Record<string, unknown>;
+    check("chemin e-mail, erreur API → « Non analysée », jamais « Ignorée », pas d'alerte", downRow.analysis_state === "non_analysee" && downRow.status !== "ignoree" && viaEmail.verdict === "a_voir" && !viaEmail.alerted, JSON.stringify({ state: downRow.analysis_state, status: downRow.status, verdict: viaEmail.verdict }));
+    const dbRss = new FakeDb({ opportunities: [] });
+    const viaRss = await ingestOpportunity({ ...deps, db: dbRss as never, ask: down, notify: undefined }, { platform: "codeur", external_id: "499003", url: null, title: "CRM sur mesure avec agents IA", description: "Un CRM sur mesure avec des agents IA pour nos commerciaux.", description_truncated: true, budget_text: null, categories: [], published_at: null });
+    const rssRow = dbRss.rows("opportunities")[0] as Record<string, unknown>;
+    check("chemin RSS, erreur API → « Non analysée », jamais « Ignorée »", rssRow.analysis_state === "non_analysee" && rssRow.status !== "ignoree" && viaRss.not_analyzed === true, JSON.stringify({ state: rssRow.analysis_state, status: rssRow.status }));
+    const unreadable: AskFn = async () => "pas du JSON";
+    const dbBad = new FakeDb({ opportunities: [] });
+    await ingestOpportunity({ ...deps, db: dbBad as never, ask: unreadable, notify: undefined }, { platform: "codeur", external_id: "499004", url: null, title: "Agent IA de tri des e-mails", description: "Trier nos e-mails entrants avec un agent IA.", description_truncated: true, budget_text: null, categories: [], published_at: null });
+    check("réponse illisible du modèle → « Non analysée » aussi", (dbBad.rows("opportunities")[0] as Record<string, unknown>).analysis_state === "non_analysee");
   }
 
   console.log(failures === 0 ? "\nTous les tests plateformes passent.\n" : `\n${failures} test(s) en echec.\n`);

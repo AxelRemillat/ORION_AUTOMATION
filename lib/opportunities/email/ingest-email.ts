@@ -372,14 +372,31 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   return { ok: true, message_id: email.message_id, platform, kind, status: "cree", opportunity_ids: [result.id], alerted, orion_url: url, ...(status ? { opportunity_status: status } : {}) };
 }
 
+/** Lignes standard de l'alerte Codeur (pas du contenu d'annonce). */
+const CODEUR_BOILERPLATE = /^(un projet dans vos comp[ée]tences|nouveau projet publi[ée]|d[ée]poser une offre|codeur\.com|projet\s*:|budget\s*:|cordialement|l[’']?[ée]quipe codeur)/i;
+
+/**
+ * Texte d'annonce d'une alerte Codeur « Nouveau projet » : ce qui reste une fois
+ * retirés liens et lignes standard ; à défaut (l'alerte ne donne souvent que le
+ * titre), le titre seul. Jamais le pied de page : il faussait le pré-filtre.
+ */
+export function codeurProjectDescription(body: string, title: string): string {
+  const lines = body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !CODEUR_BOILERPLATE.test(line) && line !== title);
+  return lines.join("\n").trim() || title;
+}
+
 /** Codeur « Nouveau projet » : l'annonce telle que l'e-mail la donne (titre, extrait), comme un item du flux. */
 function codeurProjectBody(parsed: ParsedEmail, receivedAt: string | null): IngestBody {
+  const title = (parsed.title ?? "Nouveau projet Codeur").slice(0, 300);
   return {
     platform: "codeur",
     external_id: parsed.externalId as string,
     url: parsed.url,
-    title: (parsed.title ?? "Nouveau projet Codeur").slice(0, 300),
-    description: parsed.body.slice(0, 20_000),
+    title,
+    description: codeurProjectDescription(parsed.body, title).slice(0, 20_000),
     description_truncated: true,
     budget_text: parsed.budget,
     categories: [],
@@ -389,9 +406,14 @@ function codeurProjectBody(parsed: ParsedEmail, receivedAt: string | null): Inge
 }
 
 function projectAlert(parsed: ParsedEmail, result: IngestResponse, url: string): Notification {
+  return codeurProjectAlert({ title: result.title, score: result.score, reasons: result.reasons, budget: parsed.budget }, url);
+}
+
+/** Alerte « Nouvelle offre Codeur » (ingestion par e-mail et rattrapage : même format). */
+export function codeurProjectAlert(item: { title: string; score: number | null; reasons: readonly string[]; budget: string | null }, url: string, note = "Reçue par e-mail (absente du flux RSS)."): Notification {
   return {
-    title: `Nouvelle offre Codeur (${result.score ?? "?"}/10) : ${result.title}`,
-    body: [result.reasons.slice(0, 3).join(" · "), parsed.budget ? `Budget : ${parsed.budget}.` : null, "Reçue par e-mail (absente du flux RSS)."].filter(Boolean).join(" "),
+    title: `Nouvelle offre Codeur (${item.score ?? "?"}/10) : ${item.title}`,
+    body: [item.reasons.slice(0, 3).join(" · "), item.budget ? `Budget : ${item.budget}.` : null, note].filter(Boolean).join(" "),
     priority: "high",
     tags: ["briefcase"],
     click: url,

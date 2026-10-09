@@ -334,7 +334,7 @@ export function orderAmountEur(body: string): number | null {
 
 /** Corps sans les pieds de page des plateformes (désinscription, adresse, mentions). */
 export function mainContent(body: string): string {
-  const cut = body.search(/\n\s*(unsubscribe|you are receiving this|vous recevez cet|se d[ée]sinscrire|g[ée]rer (mes|vos) (notifications|pr[ée]f[ée]rences)|manage (your )?(email|notification)|this email was sent|cet e-?mail (vous )?a [ée]t[ée] envoy|©|upwork global inc|malt community|comeup sas)/i);
+  const cut = body.search(/\n\s*(unsubscribe|you are receiving this|vous recevez cet|vous recevez ce mail|vous pouvez filtrer les projets|[àa] bient[ôo]t sur codeur|se d[ée]sinscrire|g[ée]rer (mes|vos) (notifications|pr[ée]f[ée]rences)|manage (your )?(email|notification)|this email was sent|cet e-?mail (vous )?a [ée]t[ée] envoy|©|upwork global inc|malt community|comeup sas)/i);
   return (cut > 80 ? body.slice(0, cut) : body).trim();
 }
 
@@ -373,9 +373,28 @@ export function recommendedJobs(email: Pick<InboundEmail, "text" | "html">, body
   return [...jobs.values()].slice(0, 10);
 }
 
+/**
+ * Texte sans liens (plateformes #10) : les URL d'images et de suivi ne sont pas du
+ * contenu — le logo de Codeur (« …/logo-codeur-ico-90.png ») déclenchait le pré-filtre
+ * « graphisme, design » sur toutes les alertes « Nouveau projet » du 08/10.
+ * Les liens restent lus à part (emailLinks).
+ */
+export function withoutLinks(text: string): string {
+  return text
+    .replace(/\[\s*https?:\/\/[^\]]*\]/gi, " ")
+    .replace(/<?https?:\/\/[^\s<>\]]+>?/gi, " ")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function parsePlatformEmail(email: InboundEmail): ParsedEmail {
   const platform = platformOfSender(email.from);
-  const body = mainContent(emailText(email));
+  // Les recommandations Upwork lisent leurs liens dans le texte brut ; tout le reste travaille sur le texte sans liens.
+  const raw = mainContent(emailText(email));
+  const body = withoutLinks(raw);
   const kind = kindOf(platform, email.subject, body);
   const links = emailLinks(email);
   const { url, externalId } = platform ? platformLink(platform, links) : { url: null, externalId: null };
@@ -393,6 +412,6 @@ export function parsePlatformEmail(email: InboundEmail): ParsedEmail {
     budget: budgetOf(body),
     amountEur: platform === "comeup" ? orderAmountEur(body) : null,
     body,
-    jobs: platform === "upwork" && kind === "recommandation" ? recommendedJobs(email, body) : [],
+    jobs: platform === "upwork" && kind === "recommandation" ? recommendedJobs(email, raw) : [],
   };
 }
