@@ -1,3 +1,4 @@
+import { prepCapOf, prepCostSince } from "@/lib/usage/prep-cost";
 import { isOpenAIQuotaError, OpenAIQuotaError, QUOTA_MESSAGE, quotaHitSince } from "@/lib/ai/quota";
 import { autoReplyKind } from "@/lib/inbound/auto-reply";
 import { verifyOpposition } from "@/lib/enrichment/opposition";
@@ -169,6 +170,7 @@ async function factsStep(ctx: StepContext): Promise<StepOutcome> {
 }
 
 async function repliesStep(ctx: StepContext): Promise<StepOutcome> {
+  if (skipsDrafts(ctx)) return { progress: progress("Réponses non rédigées (préparation sans brouillons)", 97) };
   const end = deadline();
   const { data } = await ctx.db
     .from("inbound_messages")
@@ -190,7 +192,12 @@ async function repliesStep(ctx: StepContext): Promise<StepOutcome> {
 }
 
 /** Relances dues sans brouillon : celles que « Aujourd'hui » affiche « Brouillon manquant ». */
-async function relancesStep(ctx: StepContext): Promise<StepOutcome> {
+/** Préparation « sans brouillons » (`params.skipDrafts`) : AUCUNE rédaction — intros, relances, réponses (Cowork #44). */
+export const skipsDrafts = (ctx: Pick<StepContext, "job">) => ctx.job.params?.skipDrafts === true;
+
+export async function relancesStep(ctx: StepContext): Promise<StepOutcome> {
+  // 07/10 (#43) : 14 relances rédigées par un lot « sans brouillons ».
+  if (skipsDrafts(ctx)) return { progress: progress("Relances non rédigées (préparation sans brouillons)", 98) };
   const end = deadline();
   const { groups } = await loadToday(ctx.db, ctx.userId);
   const missing = flatten(groups).filter((item) => item.kind === "relance" && item.status === "todo" && !item.messageId && item.prospectId && item.followUpType);
@@ -211,7 +218,7 @@ export { needsIntroDraft };
 async function draftsStep(ctx: StepContext): Promise<StepOutcome> {
   // Préparation « sans brouillons » (lot de mesure, Cowork #34) : on s'arrête
   // avant la génération des mails.
-  if (ctx.job.params?.skipDrafts === true) return { progress: { ...EMPTY_PROGRESS, step: "Brouillons non lancés (préparation sans brouillons)", pct: 99 } };
+  if (skipsDrafts(ctx)) return { progress: { ...EMPTY_PROGRESS, step: "Brouillons non lancés (préparation sans brouillons)", pct: 99 } };
   const prefs = await prefsOf(ctx);
   const items = flatten((await loadToday(ctx.db, ctx.userId)).groups);
   const ready = items.filter((item) => item.kind === "nouveau" && item.status === "todo").length;
@@ -302,8 +309,25 @@ const whenWidened = (step: Step): Step => async (ctx) => (ctx.job.state.widen ? 
  */
 type Step = (ctx: StepContext) => Promise<StepOutcome>;
 
-export function openAiGuarded(step: Step, budget: () => Promise<OpenAiBudgetState> = () => openAiBudget()): Step {
+export function openAiGuarded(
+  step: Step,
+  budget: () => Promise<OpenAiBudgetState> = () => openAiBudget(),
+  /** Coût OpenAI de préparation du job depuis son début (injecté par les tests). */
+  jobCost: (ctx: StepContext) => Promise<number> = (ctx) => prepCostSince(ctx.db, String(ctx.job.created_at ?? new Date().toISOString())),
+): Step {
   return async (ctx) => {
+    // PLAFOND DU JOB (Cowork #44, `params.openaiCapEur`, 0,5 € par défaut) : arrêt
+    // propre, run clos, avertissement dans le bilan.
+    const cap = prepCapOf(ctx.job.params);
+    const spent = await jobCost(ctx).catch(() => 0);
+    if (spent >= cap) {
+      const closed = await finishStep(ctx).catch(() => ({}) as StepOutcome);
+      return {
+        ...closed,
+        done: true,
+        progress: progress(`Plafond OpenAI du job atteint (${spent.toFixed(2)} € / ${cap.toFixed(2)} €) : préparation arrêtée proprement.`, 100),
+      };
+    }
     const state = await budget().catch(() => null);
     if (state?.level !== "plafond") {
       try {
