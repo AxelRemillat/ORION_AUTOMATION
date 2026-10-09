@@ -4,6 +4,7 @@
  *
  *   npm run contacts:lot -- --since <ISO> --hunter-cap 30            → simulation (liste, 0 crédit)
  *   npm run contacts:lot -- --since <ISO> --hunter-cap 30 --apply    → réel
+ *   npm run contacts:lot -- --job <id> --hunter-cap 80 [--apply]     → fiches creusées par CE job seulement (Cowork #45)
  *
  *   1. adresses GÉNÉRIQUES du lot : recherche nominative (lib/contact-finder/upgrade.ts) ;
  *   2. fiches SANS adresse : module contact (site, pages, Hunter ; pas de Linkup),
@@ -16,6 +17,8 @@ import { findContact } from "@/lib/contact-finder";
 import { upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
 import { isGenericAddress } from "@/lib/contact-finder/upgrade";
 import { withHunterRunCap } from "@/lib/hunter/run-cap";
+import { capArg } from "@/lib/cli/args";
+import { readAll } from "@/lib/supabase/read-all";
 import type { Db } from "@/lib/trash/scope";
 
 const value = (name: string) => {
@@ -23,7 +26,8 @@ const value = (name: string) => {
   return index >= 0 ? process.argv[index + 1] ?? null : null;
 };
 const SINCE = value("--since");
-const CAP = Math.max(0, Number(value("--hunter-cap")) || 30);
+const JOB = value("--job");
+const CAP = capArg(value("--hunter-cap"), 30);
 const APPLY = process.argv.includes("--apply");
 
 type Row = { id: string; company_name: string; email: string | null; email_type: string | null; website: string | null; key_figures: Record<string, unknown> | null };
@@ -53,19 +57,36 @@ async function hunterSince(since: string): Promise<number> {
   return ((data ?? []) as { units: number }[]).reduce((total, row) => total + (Number(row.units) || 0), 0);
 }
 
+/** Fiches d'UN job de préparation : prospects creusés par son run (pas de fenêtre de dates). */
+async function jobRows(userId: string, jobId: string): Promise<Row[]> {
+  const { data: job } = await db.from("jobs").select("state").eq("id", jobId).maybeSingle();
+  const runId = (job as { state: { runId?: string } | null } | null)?.state?.runId;
+  if (!runId) throw new Error(`job ${jobId} : run introuvable`);
+  const candidates = await readAll<{ prospect_id: string | null }>(() =>
+    db.from("signal_candidates").select("prospect_id").eq("user_id", userId).eq("run_id", runId).eq("statut", "creusé").order("id"),
+  );
+  const ids = [...new Set(candidates.map((item) => item.prospect_id).filter(Boolean))] as string[];
+  if (!ids.length) return [];
+  const { data } = await db.from("prospects").select("id, company_name, email, email_type, website, key_figures").eq("user_id", userId).is("deleted_at", null).in("id", ids);
+  return (data ?? []) as Row[];
+}
+
 async function main() {
-  if (!SINCE) throw new Error("--since <ISO> obligatoire (début du lot)");
+  if (!SINCE && !JOB) throw new Error("--job <id> ou --since <ISO> obligatoire (lot visé)");
   const userId = await ownerId();
   const started = new Date();
-  const { data } = await db
-    .from("prospects")
-    .select("id, company_name, email, email_type, website, key_figures")
-    .eq("user_id", userId)
-    .is("deleted_at", null)
-    .gte("contact_checked_at", SINCE)
-    .order("contact_checked_at", { ascending: false })
-    .limit(60);
-  const rows = (data ?? []) as Row[];
+  const rows = JOB
+    ? await jobRows(userId, JOB)
+    : (((
+        await db
+          .from("prospects")
+          .select("id, company_name, email, email_type, website, key_figures")
+          .eq("user_id", userId)
+          .is("deleted_at", null)
+          .gte("contact_checked_at", SINCE as string)
+          .order("contact_checked_at", { ascending: false })
+          .limit(60)
+      ).data ?? []) as Row[]);
   const generic = rows.filter((row) => row.email && isGenericAddress(row));
   const empty = rows.filter((row) => !row.email);
   console.log(`Lot : ${rows.length} fiche(s) — ${generic.length} générique(s), ${empty.length} sans adresse ; plafond Hunter ${CAP} crédits`);

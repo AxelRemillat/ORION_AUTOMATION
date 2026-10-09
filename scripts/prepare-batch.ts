@@ -9,12 +9,14 @@
  *   npm run prepare:lot -- --target 30 --days 30 --france              (entonnoir élargi pour ce run)
  *   npm run prepare:lot -- --target 30 --ft-days 60                    (fenêtre France Travail de 60 jours)
  *   npm run prepare:lot -- --target 15 --openai-cap-eur 0.4               (plafond OpenAI du job, 0,5 € par défaut)
+ *   npm run prepare:lot -- --target 30 --hunter-cap 0                  (aucun crédit Hunter : 0 reste 0)
  *   npm run prepare:lot -- --status <jobId>                      (avancement)
  *
  * Aucun envoi : au plus des brouillons non validés.
  */
 import { db, ownerId } from "./quality-live";
 import { createJob } from "@/lib/jobs/store";
+import { capArg } from "@/lib/cli/args";
 
 const value = (name: string) => {
   const index = process.argv.indexOf(name);
@@ -30,7 +32,7 @@ async function main() {
   }
   const userId = await ownerId();
   const target = Math.max(1, Math.min(30, Number(value("--target")) || 25));
-  const hunterCap = Math.max(0, Number(value("--hunter-cap")) || 40);
+  const hunterCap = capArg(value("--hunter-cap"), 40);
   const skipDrafts = !process.argv.includes("--drafts");
   const created = await createJob(
     db,
