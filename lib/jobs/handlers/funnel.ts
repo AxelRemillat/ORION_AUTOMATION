@@ -6,7 +6,7 @@ import { harvest } from "@/lib/funnel/harvest";
 import { liveDigDeps, liveTriageAsk } from "@/lib/funnel/live";
 import { cleanPrefs, readPrefs, type FunnelPrefs } from "@/lib/funnel/settings";
 import { runDigStage, runFilterStage, runTriageStage } from "@/lib/funnel/stages";
-import { candidatesOf, countFunnel, insertHarvest, reopenUnexamined, yieldBySource } from "@/lib/funnel/store";
+import { candidatesOf, countFunnel, insertHarvest, reopenPending, reopenUnexamined, yieldBySource } from "@/lib/funnel/store";
 import { finishRun } from "@/lib/search/runs";
 import { knownSirens } from "@/lib/trash/exclusions";
 import { runSiteStage } from "@/lib/funnel/site-priority";
@@ -64,7 +64,10 @@ export async function harvestStep(ctx: StepContext): Promise<StepOutcome> {
   const collected = await harvest({ departements: prefs.departements, days: prefs.days, ftDays: ftWindowDays(ctx.job.params?.ftDays), ftCursor: ftCursorStore() });
   const inserted = await insertHarvest(ctx.db, ctx.userId, runId, collected.signals);
   // Les signaux laissés « non examinés » par un run précédent sont repris ici.
-  const reopened = await reopenUnexamined(ctx.db, ctx.userId, runId, collected.signals.map((signal) => signal.hash));
+  const reopenedByHash = await reopenUnexamined(ctx.db, ctx.userId, runId, collected.signals.map((signal) => signal.hash));
+  // Cowork #47 : les non-examinés que la moisson ne relit plus (curseur), sur la fenêtre France Travail.
+  const since = new Date(Date.now() - ftWindowDays(ctx.job.params?.ftDays) * 86_400_000).toISOString();
+  const reopened = reopenedByHash + (await reopenPending(ctx.db, ctx.userId, runId, since));
   return {
     // Mesure (Cowork #40) : offres lues en tête / sous le curseur, signaux nouveaux vs déjà vus.
     state: { runId, startedAt: ctx.job.state.startedAt ?? new Date().toISOString(), warnings: collected.warnings, harvest: { collected: collected.signals.length, inserted, reopened, ft: collected.ft } },

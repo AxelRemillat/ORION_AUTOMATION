@@ -108,7 +108,7 @@ export async function runFilterStage(db: Db, userId: string, runId: string, opti
   // Budget : ce qui reste du plafond du run, réparti par source.
   const budget = Math.max(0, cap - all.filter(examined).length);
   const fresh = pending.filter((row) => !row.motif_rejet);
-  const replay = pending.filter((row) => row.motif_rejet); // annuaire saturé : prioritaire
+  const replay = pending.filter((row) => row.motif_rejet); // annuaire saturé, ou repris du run précédent (REPLAY_PENDING) : prioritaires
   const plan = examinationPlan(
     fresh.map((row) => ({
       id: row.id,
