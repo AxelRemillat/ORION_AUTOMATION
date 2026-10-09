@@ -10,7 +10,7 @@ import { F4_GUARDS } from "../lib/emails/quality/cowork-d-set";
 import { COWORK_D_SET } from "../lib/emails/quality/cowork-d-set";
 import { isOpenAIQuotaError, OpenAIQuotaError } from "../lib/ai/quota";
 import { buildChecklistPrompt, C5_NEGATIVES, repeatedNounGroups, checklistFeedback, deterministicChecks, judgeChecklist, majority, parseChecklistSample, semanticCriteria, verdictOf } from "../lib/emails/quality/checklist";
-import { CHECKLIST_SAMPLES } from "../lib/emails/quality/checklist";
+import { BASE_SAMPLES, CHECKLIST_SAMPLES, unanimousOnWide } from "../lib/emails/quality/checklist";
 import { factsGate, isFactsInsufficient, keyFactsOf } from "../lib/emails/quality/facts-gate";
 import { keyFactsBlock } from "../lib/emails/quality/writer";
 import { INVENTED_FACT_MAX, INVENTED_FACT_REASON, judgeMailSenior, medianVerdict, SENIOR_SAMPLES, verifiedFactsCheck } from "../lib/emails/quality/judge";
@@ -195,14 +195,18 @@ async function main() {
       }
       return JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C4", "C5"].map((id) => [id, { ok: !failing.has(id), citation: failing.has(id) ? "accroche générique" : "ok" }])));
     };
+    // Une nouvelle note par essai : le premier appel du juge après une rédaction (3 à 5 lectures, arrêt anticipé #38).
+    let fresh = true;
     const ask: AskFn = async (role) => {
       if (role === "writer") {
         calls.push(role);
+        fresh = true;
         return writer.shift() ?? "";
       }
-      if (reads % CHECKLIST_SAMPLES === 0) {
+      if (fresh) {
         calls.push(role);
         current = asChecklist(judge.shift() ?? "");
+        fresh = false;
       }
       reads += 1;
       return current;
@@ -697,7 +701,22 @@ async function main() {
       return sample({});
     };
     const ready = await judgeChecklist(readsAsk, { subject: "Vos commandes", core: f1(), family: "F1", greeting, company: "Belledonne", facts: "- quatre fournils" });
-    check(`tous à OUI → prêt, 10/10, ${CHECKLIST_SAMPLES} lectures`, ready?.ready === true && ready.score === 10 && reads === CHECKLIST_SAMPLES && ready.items.length === 11);
+    check(`tous à OUI, unanimes → prêt, 10/10, arrêt après ${BASE_SAMPLES} lectures (Cowork #38)`, ready?.ready === true && ready.score === 10 && reads === BASE_SAMPLES && ready.items.length === 11);
+    {
+      // Désaccord sur C1 dans les 3 premières lectures → les 2 suivantes sont faites, et le verdict est celui de la majorité sur 5.
+      const script = [sample({ C1: false }), sample({}), sample({}), sample({ C1: false }), sample({ C1: false })];
+      let calls = 0;
+      const splitAsk: AskFn = async () => script[calls++] ?? sample({});
+      const split = await judgeChecklist(splitAsk, { subject: "Vos commandes", core: f1(), family: "F1", greeting, company: "Belledonne", facts: "- quatre fournils" });
+      const full = majority(script.map(parseChecklistSample), semanticCriteria("F1"));
+      check(`désaccord sur C1 → ${CHECKLIST_SAMPLES} lectures, verdict = majorité sur ${CHECKLIST_SAMPLES} (C1 NON 3/5)`, calls === CHECKLIST_SAMPLES && split?.items.find((item) => item.id === "C1")?.ok === false && full?.find((item) => item.id === "C1")?.ok === false);
+      // Une lecture illisible parmi les 3 premières → pas d'arrêt anticipé.
+      let calls2 = 0;
+      const brokenAsk: AskFn = async () => (calls2++ === 0 ? "illisible" : sample({}));
+      await judgeChecklist(brokenAsk, { subject: "Vos commandes", core: f1(), family: "F1", greeting, company: "Belledonne", facts: "- quatre fournils" });
+      check("lecture illisible parmi les 3 premières → les 5 lectures sont faites", calls2 === CHECKLIST_SAMPLES);
+      check("arrêt anticipé seulement si unanime sur C1 ET C5", !unanimousOnWide([sample({ C5: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")) && unanimousOnWide([sample({ C2: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")));
+    }
     reads = 0;
     const refused = await judgeChecklist(readsAsk, { subject: "x", core: f1({ greet: "Bonjour," }), family: "F1", greeting, company: "Belledonne", facts: "" });
     check("contrôle du code à NON → aucun appel au modèle", reads === 0 && refused?.ready === false && refused.items.length === 7);
