@@ -11,8 +11,10 @@ import type { Db } from "@/lib/trash/scope";
 import { followUpBlock, followUpRefusal } from "./follow-up-policy";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { replySinceLastSend } from "./relances";
-import { writeRelance, type RelanceFiche, type RelanceLot } from "./relance-quality";
-import { chooseRelanceMode, writeShortRelance, type RelanceMode } from "./relance-short";
+import { introParts, writeRelance, type RelanceFiche, type RelanceLot } from "./relance-quality";
+import { chooseRelanceMode, relanceGreeting, writeShortRelance, type RelanceMode } from "./relance-short";
+import { withoutSignature } from "@/lib/mail-preflight/words";
+import type { CivilityCache } from "@/lib/emails/quality/greeting";
 import type { MessageType, Prospect } from "@/types";
 
 /**
@@ -136,19 +138,28 @@ export async function composeFollowUp(
   const { offer } = await loadOffer(db, input.userId);
   const signature = signatureFor(offer);
   // L'intro envoyée porte la mention d'opposition et la signature : la relance ne lit que son corps.
-  const introBody = stripOptOut(intro.body.split(signature)[0]).trim();
+  const introBody = stripOptOut(withoutSignature(intro.body, signature)).trim();
   // Famille de l'intro (message_variants) : elle donne le &v d'un lien d'intro antérieur aux familles.
   const { data: variant } = intro.id ? await db.from("message_variants").select("family").eq("message_id", intro.id).maybeSingle() : { data: null };
   const fiche = ficheOf(prospect);
   const generic = isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null });
   const introFamily = (variant as { family?: string | null } | null)?.family ?? null;
+  // Adresse nominative au nom connu : « Bonjour Monsieur X, » même si l'intro disait « Bonjour, » (Cowork #18, TECHNAMM).
+  const greeting = relanceGreeting({
+    introGreeting: introParts(intro.subject, introBody, introFamily).greeting,
+    generic,
+    email: prospect.email,
+    contactName: prospect.contact_name ?? null,
+    civilities: ((prospect.key_figures ?? {}) as { civilites?: CivilityCache }).civilites,
+  });
   // Deux modes (Cowork #16) : relance enrichie seulement si un fait sourcé distinctif porte sur le processus de l'intro.
   const choice = chooseRelanceMode(fiche, intro.subject, introBody);
   const ask = input.ask ?? relanceAsk(prospect.id);
   const written = choice.mode === "B"
-    ? await writeShortRelance(ask, { introSubject: intro.subject, introBody, generic, fiche, introFamily, introSentAt: intro.sent_at ?? null, now: input.now, lot: input.lot }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }))
+    ? await writeShortRelance(ask, { introSubject: intro.subject, introBody, generic, fiche, introFamily, introSentAt: intro.sent_at ?? null, now: input.now, lot: input.lot, greeting }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }))
     : await writeRelance(ask, {
     anchor: choice.anchor,
+    greeting,
     introFamily,
     lot: input.lot,
     introSubject: intro.subject,

@@ -18,11 +18,19 @@ import { withoutOptOut } from "./opt-out";
 /** Plafond STRICT : au-delà, le mail ne peut ni être validé ni partir. */
 export const MAX_BODY_WORDS = 110;
 
-/** Retire la signature posée par le code (tout ce qui suit sa dernière occurrence). */
+/**
+ * Retire la signature posée par le code (tout ce qui suit sa dernière occurrence).
+ * Un mail rédigé avant le lien tracé (`/pme?ref=signature`, 09/10/2026) porte
+ * l'ancienne signature : elle est reconnue aussi, sinon ses mots compteraient et
+ * un mail déjà validé pourrait passer le plafond.
+ */
 export function withoutSignature(body: string, signature?: string | null): string {
   if (!signature?.trim()) return body;
-  const index = body.lastIndexOf(signature.trim());
-  return index >= 0 ? body.slice(0, index) : body;
+  for (const candidate of [signature.trim(), signature.trim().replace(/\?ref=[\w-]+/g, "")]) {
+    const index = body.lastIndexOf(candidate);
+    if (index >= 0) return body.slice(0, index);
+  }
+  return body;
 }
 
 /** Mots bruts d'un texte déjà nettoyé. */

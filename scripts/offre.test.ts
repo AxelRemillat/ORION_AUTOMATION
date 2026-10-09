@@ -28,6 +28,7 @@ import { commitmentsOf, offerNumbers, stripSignature } from "../app/api/emails/g
 import { bodyParagraphs, opensOnSector, validateEmail, withoutSignature, wordCount } from "../lib/emails/validate";
 import { buildFacts } from "../lib/emails/derived-facts";
 import type { Prospect } from "../types";
+import { bodyWordCount, preflight } from "../lib/mail-preflight";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -364,9 +365,24 @@ console.log("\n15. Aligné sur le site refondu pour les PME");
       "À partir de 290 € | À partir de 1 200 € | À partir de 190 €/mois | À partir de 1 900 €",
   );
 
-  // Signature : la page prospects, lien court sans paramètres.
-  check("lien de signature → /pme", signatureFor(offer).includes(SIGNATURE_URL), signatureFor(offer));
-  check("sans paramètres UTM", SIGNATURE_URL === "https://axelremillat.com/pme" && !signatureFor(offer).includes("utm_"));
+  // Signature : la page prospects, tracée ?ref=signature (Cowork #18), sans UTM.
+  check("lien de signature → /pme?ref=signature", signatureFor(offer).includes(SIGNATURE_URL) && SIGNATURE_URL === "https://axelremillat.com/pme?ref=signature", signatureFor(offer));
+  check("sans paramètres UTM", !signatureFor(offer).includes("utm_"));
+  {
+    // Offre enregistrée avec l'ancien lien /pme nu : elle signe désormais avec le lien tracé.
+    const legacy = { ...offer, portfolio_url: "https://axelremillat.com/pme" };
+    check("offre enregistrée avec /pme nu → signature tracée", signatureFor(legacy).includes("axelremillat.com/pme?ref=signature"), signatureFor(legacy));
+    check("autre lien de portfolio : gardé tel quel", signatureFor({ ...offer, portfolio_url: "https://exemple.fr" }).includes("https://exemple.fr") && !signatureFor({ ...offer, portfolio_url: "https://exemple.fr" }).includes("ref="));
+    // Mail rédigé AVANT le changement : son ancienne signature ne compte pas dans les mots, il n'est pas réécrit.
+    const oldSignature = signatureFor(legacy).replace("?ref=signature", "");
+    const oldMail = `Bonjour,
+
+Un texte de trois phrases.
+
+${oldSignature}`;
+    check("mail déjà rédigé (ancienne signature) : même compte de mots avec la nouvelle", bodyWordCount(oldMail, signatureFor(offer)) === bodyWordCount(oldMail, oldSignature) && bodyWordCount(oldMail, oldSignature) === 6, String(bodyWordCount(oldMail, signatureFor(offer))));
+    check("mail déjà rédigé : signature reconnue, pas « absente » au contrôle avant envoi", !preflight({ subject: "Vos devis", body: `${oldMail.replace(oldSignature, `Si le sujet ne vous concerne pas, un simple « stop » en réponse et je ne vous relancerai pas.\n\n${oldSignature}`)}`, to: "jean.martin@exemple.fr", signature: signatureFor(offer), checkRecipient: false }).checks.some((c) => c.rule === "signature" && c.status === "error"));
+  }
 
   // Démo de 15 min : le lien Google Agenda du site (plus Cal.eu, plus /contact).
   check("démo 15 min → Google Agenda", offer.entry_url === CALENDAR_URL && CALENDAR_URL === "https://calendar.app.google/dwAR7ea7tgAehwv48");

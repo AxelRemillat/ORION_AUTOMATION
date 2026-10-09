@@ -485,9 +485,10 @@ export interface RelanceOutcome {
  */
 export async function writeRelance(
   ask: AskFn,
-  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null; lot?: RelanceLot; /** Mode A (Cowork #16) : le fait sourcé qui ancre la 1re phrase. */ anchor?: SourcedFact | null },
+  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null; lot?: RelanceLot; /** Mode A (Cowork #16) : le fait sourcé qui ancre la 1re phrase. */ anchor?: SourcedFact | null; /** Salutation imposée (relanceGreeting), sinon celle de l'intro. */ greeting?: string },
 ): Promise<RelanceOutcome | { error: string }> {
-  const intro = introParts(input.introSubject, input.introBody, input.introFamily);
+  const parts = introParts(input.introSubject, input.introBody, input.introFamily);
+  const intro = input.greeting ? { ...parts, greeting: input.greeting } : parts;
   const ctx: RelanceContext = { intro, generic: input.generic, seed: input.fiche.companyName, lot: input.lot };
   const subject = relanceSubject(intro);
   const anchor = input.anchor ? `\n\nÉLÉMENT À UTILISER pour "about" (fait sourcé de la fiche, sur le processus de l'intro) : ${input.anchor.text}${input.anchor.process_hint ? ` — processus : ${input.anchor.process_hint}` : ""}` : "";
