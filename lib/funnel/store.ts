@@ -75,8 +75,10 @@ export const REPLAY_PENDING = "repris : non examiné au run précédent, examin�
  * créé depuis `since` passe au run courant, avec un motif qui le fait examiner
  * avant les signaux frais — les PLUS RÉCENTS d'abord, au plus `limit` par run
  * (1 680 en attente le 09/10 : tout reprendre aurait occupé tout le filtre).
+ * 200 et non 600 (Cowork #48) : le 09/10, 605 repris → 1 fiche prête ; c'est le
+ * fond de panier, le stock vient des signaux frais.
  */
-export const REPLAY_LIMIT = 600;
+export const REPLAY_LIMIT = 200;
 
 export async function reopenPending(db: Db, userId: string, runId: string, since: string, limit = REPLAY_LIMIT): Promise<number> {
   const { data: rows, error: readError } = await db
