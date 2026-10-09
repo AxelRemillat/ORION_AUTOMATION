@@ -168,3 +168,28 @@ export function prefilterReason(input: PrefilterInput): string | null {
   if (budgetBelow(input.budgetText)) return "budget inférieur à 150 €";
   return null;
 }
+
+/**
+ * TITRE SEUL (plateformes #11) : une alerte e-mail Codeur ne donne que le titre.
+ * Le pré-filtre ci-dessus, pensé pour un titre ET un texte, laisse passer des titres
+ * clairement hors cible (« Videaste », « Gestion réseaux sociaux », « Site web »…) :
+ * ces règles, prudentes, ne s'appliquent qu'aux fiches à titre seul. Dans le doute,
+ * la fiche reste « À voir » (Axel colle l'annonce).
+ */
+const TITLE_ONLY_RULES: { reason: string; pattern: RegExp }[] = [
+  { reason: "titre : vidéo, montage ou photo", pattern: /(videaste|\bvideos?\b|monteur|montage|photograph|tournage)/ },
+  { reason: "titre : réseaux sociaux, community management ou marketing", pattern: /(reseaux sociaux|instagram|tiktok|facebook|linkedin|community|marketeur|\bmarketing\b|publicite|\bseo\b|referencement)/ },
+  { reason: "titre : site vitrine, e-commerce ou CMS", pattern: /(^(aide |recherche |creation (d'un |de )?)?site (web|internet|vitrine)\s*$|^(creer |un |mon |notre |nouveau )?(un )?site (web|internet|vitrine)\b|createurs? de sites?|creation de site|\be-?commerce\b|presta?s?hop|shopify|wordpress|\bwix\b|webflow)/ },
+  { reason: "titre : application mobile", pattern: /(developpeur mobile|^application mobile|\bios\b|android|flutter|swift|kotlin)/ },
+  { reason: "titre : data science", pattern: /(data scien|machine learning engineer|deep learning)/ },
+  { reason: "titre : télémarketing ou relance téléphonique humaine", pattern: /(relance telephonique|teleprospect|teleconseil|teleoperat|call center|phoning)/ },
+  { reason: "titre : service hors numérique (nettoyage, ménage…)", pattern: /(nettoyage|menage|jardinage|demenagement)/ },
+];
+
+/** Motif d'exclusion d'une fiche à titre seul (pré-filtre habituel, puis règles du titre), ou `null`. */
+export function titleOnlyReason(title: string, budgetText: string | null = null): string | null {
+  const base = prefilterReason({ title, description: "", categories: [], budgetText });
+  if (base) return base;
+  const text = plain(title).trim();
+  return TITLE_ONLY_RULES.find((rule) => rule.pattern.test(text))?.reason ?? null;
+}

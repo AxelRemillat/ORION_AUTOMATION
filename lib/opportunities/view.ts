@@ -20,6 +20,9 @@ type Row = Pick<Opportunity, "fit_score" | "status"> & Partial<Pick<Opportunity,
 
 export function bucketOf(row: Row): Bucket {
   if (row.filter_reason || row.status === "ignoree") return "ignorees";
+  // Titre seul (alerte Codeur, plateformes #11) : « À voir » tant que l'annonce n'est pas collée,
+  // même si une ancienne analyse sur le titre a laissé un score (il ne veut rien dire).
+  if (row.analysis_state === "titre_seul") return "a_voir";
   if (row.fit_score == null) return "a_voir";
   if (row.fit_score >= 8) return "alertes";
   return row.fit_score >= 5 ? "a_voir" : "ignorees";
