@@ -143,6 +143,44 @@ export interface RelanceContext {
   generic: boolean;
   /** Graine de la ligne de démo (nom de la société). */
   seed?: string;
+  /** Lot en cours (Cowork #15) : verbes de 2e phrase et questions déjà pris par les relances précédentes. */
+  lot?: RelanceLot;
+}
+
+/**
+ * LOT (Cowork #15) : dans une même série de relances, chaque relance prend un verbe de
+ * 2e phrase et une question différents des précédentes — sinon chaque règle anti-tic fait
+ * naître un nouveau moule. Contrôle simple, en code.
+ */
+export interface RelanceLot {
+  verbs: string[];
+  questions: string[];
+}
+
+export const newLot = (): RelanceLot => ({ verbs: [], questions: [] });
+
+const fold = (text: string) => text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+const MODALS = /^(pourr|devr|saur|voudr)/;
+
+/** Verbe de la 2e phrase (au conditionnel ; après « pourrait » / « devrait », l'infinitif qui suit), forme repliée. */
+export function outcomeVerb(sentence: string): string | null {
+  const words = fold(sentence).split(" ");
+  const index = words.findIndex((word) => /(rait|raient|rais|rions|riez)$/.test(word) && word.length > 4);
+  if (index < 0) return null;
+  const verb = words[index];
+  if (MODALS.test(verb) && words[index + 1]) return words[index + 1] === "etre" ? `${verb.replace(/(rait|raient|rais|rions|riez)$/, "")} etre` : words[index + 1];
+  return verb.replace(/(rait|raient|rais|rions|riez)$/, "");
+}
+
+/** Question repliée (pour comparer d'une relance à l'autre). */
+export const questionKey = (question: string) => fold(question);
+
+/** Enregistre une relance retenue dans le lot (après rédaction). */
+export function rememberInLot(lot: RelanceLot | undefined, parts: Pick<RelanceParts, "outcome" | "cta">): void {
+  if (!lot) return;
+  const verb = outcomeVerb(parts.outcome);
+  if (verb) lot.verbs.push(verb);
+  lot.questions.push(questionKey(parts.cta));
 }
 
 const clean = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -170,6 +208,9 @@ export const META = /(premier message|mon (pr[ée]c[ée]dent|dernier|premier) (m
 /** R10 : recrutement, offre d'emploi ; conditionnelle « Si … concerne … ». */
 export const RECRUITMENT = /(recrut|offre d['’]emploi|embauch|poste [àa] pourvoir|candidat|\bcdi\b|\bcdd\b|alternan)/i;
 export const IF_CONCERNS = /\bsi\b[^.?!]{0,100}\bconcern/i;
+/** Passif au conditionnel dans la 2e phrase (« pourrait être appliquée », « serait confirmée »). */
+export const PASSIVE = /\b(pourrai(?:t|ent)\s+[êe]tre|serai(?:t|ent))\s+[a-zàâçéèêëîïôûùüÿœ]+(?:é|ée|és|ées|is|ise|it|ite|ts|tes)(?=[\s.,;:!?]|$)/i;
+const sentencesOf = (text: string) => text.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
 /** Tics relevés par Cowork (#14) : 2e phrase passe-partout, question générique. */
 export const TICS = /(vos clients recevraient|vous prend[- ]?(il|elle|ils|elles)?[- ]?(-t-)?(il|elle)? du temps|prend(-t)?-(il|elle) du temps)/i;
 
@@ -198,12 +239,36 @@ export function relanceCodeChecks(subject: string, body: string, ctx: RelanceCon
   const demoSubject = prose.match(DEMO_AS_SUBJECT)?.[0];
   const meta = prose.match(META)?.[0];
   const tic = prose.match(TICS)?.[0];
+  // 2e phrase ACTIVE (Cowork #15) : « … pourrait être appliquée », « serait confirmée » = passif.
+  const passive = prose.match(PASSIVE)?.[0];
+  // Variété dans le lot : verbe de 2e phrase et question déjà pris par une relance précédente.
+  const outcome = sentencesOf(blocks[1] ?? "")[1] ?? "";
+  const verb = outcomeVerb(outcome);
+  const question = blocks[blocks.length - 1] ?? "";
+  const repeatedVerb = verb && ctx.lot?.verbs.includes(verb) ? verb : null;
+  const repeatedQuestion = ctx.lot?.questions.includes(questionKey(question)) ? question : null;
   return [
     { id: "R1", ok: r1, citation: r1 ? `${expectedSubject} · ${ctx.intro.greeting}` : `objet « ${subject} » (attendu « ${expectedSubject} ») · salutation « ${blocks[0] ?? ""} » (attendue « ${ctx.intro.greeting} »)` },
     { id: "R3", ok: linkOk, citation: r3Citation },
     { id: "R4", ok: r4, citation: ctx.generic ? (transfer ? "adresse générique : transfert demandé" : "adresse générique : phrase de transfert absente") : transfer ? "adresse nominative : phrase de transfert à retirer" : "adresse nominative : pas de transfert" },
     { id: "R6", ok: r6, citation: forbidden ? `formule interdite « ${forbidden} »` : `${words} mots (${RELANCE_WORDS.min} à ${RELANCE_WORDS.max})` },
-    { id: "R8", ok: !demoSubject && !meta && !tic, citation: demoSubject ? `la démo en sujet de phrase : « ${demoSubject} »` : meta ? `phrase méta : « ${meta} »` : tic ? `tic : « ${tic} » — nomme le résultat propre à leur cas, ou l'élément manquant précis` : "ni démo en sujet, ni phrase méta, ni tic" },
+    {
+      id: "R8",
+      ok: !demoSubject && !meta && !tic && !passive && !repeatedVerb && !repeatedQuestion,
+      citation: demoSubject
+        ? `la démo en sujet de phrase : « ${demoSubject} »`
+        : meta
+          ? `phrase méta : « ${meta} »`
+          : tic
+            ? `tic : « ${tic} » — nomme le résultat propre à leur cas, ou l'élément manquant précis`
+            : passive
+              ? `2e phrase passive (« ${passive} ») : mets-la à l'actif, avec eux ou leur client pour sujet`
+              : repeatedVerb
+                ? `verbe « ${repeatedVerb} » déjà pris dans ce lot : choisis-en un autre`
+                : repeatedQuestion
+                  ? `question déjà posée dans ce lot (« ${repeatedQuestion} ») : formule-la autrement`
+                  : "ni démo en sujet, ni méta, ni tic, ni passif, ni répétition dans le lot",
+    },
     { id: "R9", ok: r9, citation: r9 ? blocks[0] ?? "" : `« ${blocks[0]} » sans nom : « Bonjour, »` },
     { id: "R10", ok: !recruitment && !conditional, citation: recruitment ? `recrutement : « ${recruitment} »` : conditional ? `conditionnelle : « ${conditional.trim()} »` : "aucun" },
   ];
@@ -240,8 +305,8 @@ export function buildRelanceJudgePrompt(): string {
 La forme (objet, salutation, lien, longueur, phrase de transfert, formules interdites) est vérifiée par un programme : ne la juge pas.
 
 R2 — Nouveauté sur le MÊME sujet : la relance apporte UN élément absent de l'intro, tiré de la fiche, ET reste sur le même processus / la même douleur que l'intro (nouvel angle, pas nouveau sujet). NON si elle reformule l'intro, ou si elle change de sujet (intro sur les documents clients → relance sur les candidatures ; intro sur le rapprochement de factures → relance sur les demandes de pièces). Donne "citation_intro" (le processus de l'intro) et "citation_relance" (l'élément nouveau).
-R5 — Appel à l'action : différent de celui de l'intro ET plus léger — une question fermée (oui/non) liée au sujet, ou « dites-moi simplement si c'est un sujet chez vous ». NON s'il redemande un rendez-vous ou 15 minutes, ou s'il est passe-partout.
-R7 — Fidélité : tout ce que la relance affirme SUR L'ENTREPRISE (son activité, ses chiffres, ses clients, son organisation, son actualité) vient de la fiche ou de l'intro. NON au moindre fait, chiffre, client inventé, ou à une affirmation supposée sur eux (« sont essentiels pour vous », « de nouvelles personnes interviennent »). La phrase qui dit ce que la solution CHANGERAIT pour eux (au conditionnel : « votre client recevrait son devis plus vite ») est un résultat attendu, pas un fait sur l'entreprise : elle ne viole R7 que si elle y glisse un fait, un chiffre ou un client inventé.
+R5 — Appel à l'action : différent de celui de l'intro ET plus léger — une question fermée (oui/non), courte et naturelle, liée au cas : « Ça vous arrive souvent ? », « Est-ce que ce cas se présente chez vous ? », « Les références de ces enseignes vous posent-elles parfois problème ? ». NON s'il redemande un rendez-vous ou 15 minutes, ou s'il est lourd ou alambiqué.
+R7 — Fidélité : tout ce que la relance affirme SUR L'ENTREPRISE (son activité, ses chiffres, ses clients, son organisation, son actualité) vient de la fiche ou de l'intro. NON au moindre fait, chiffre, client inventé, ou à une affirmation supposée sur eux (« sont essentiels pour vous », « de nouvelles personnes interviennent »). La phrase qui dit ce que la solution CHANGERAIT pour eux (au conditionnel : « votre client recevrait son devis plus vite ») est un résultat attendu, pas un fait sur l'entreprise : elle ne viole R7 que si elle y glisse un fait, un chiffre ou un client inventé. Une SITUATION TYPIQUE du métier, formulée comme générale ou fréquente (« une demande arrive souvent sans sa prescription », « une seule dimension absente suffit à renvoyer la demande »), est permise : seul un fait SPÉCIFIQUE à cette entreprise (chiffre, client, organisation interne, outil, actualité) doit venir de la fiche ou de l'intro.
 R8 — Ton : la 1re phrase parle d'EUX (leur activité, leur client, leur situation), la 2e DÉCOULE de la 1re et nomme ce que ça CHANGERAIT pour eux dans ce cas précis (rendez-vous fixé, remise juste, devis complet). NON si la 2e phrase n'a pas de lien direct avec la 1re, si elle est passe-partout (« vos clients recevraient une réponse adaptée »), si une phrase décrit la mécanique de l'outil ou de la démo, si une phrase est alambiquée ou lourde (« Vous indiquez que l'on peut désormais… »), si un détail produit est trop pointu pour un premier échange, ou si une phrase parle de l'échange lui-même.
 
 Réponds UNIQUEMENT en JSON : {"R2":{"ok":true|false,"citation_intro":"…","citation_relance":"…"},"R5":{"ok":true|false,"citation":"…"},"R7":{"ok":true|false,"citation":"…"},"R8":{"ok":true|false,"citation":"…"}}`;
@@ -344,7 +409,14 @@ export function relanceReason(verdict: RelanceVerdict): string {
 
 // --- Rédacteur --------------------------------------------------------------------
 
-export function buildRelanceWriterPrompt(input: { generic: boolean; type: "relance_1" | "relance_2"; feedback: string | null }): string {
+/** Trois relances de référence (Cowork #15), modèles de ton du rédacteur. */
+export const RELANCE_MODELS = [
+  "Bonjour Monsieur Bernard,\n\nL'été, avec un accueil réduit, une demande d'imagerie arrive souvent sans sa prescription et il faut rappeler avant de fixer le créneau. Votre accueil pourrait réserver le rendez-vous dès réception quand tout est là, et réclamer la pièce manquante en un clic sinon.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=1\n\nEst-ce que ce cas se présente chez vous ?",
+  "Bonjour Monsieur Angonin,\n\nSur une vanne sur mesure, une seule dimension absente suffit à renvoyer la demande au client avant de chiffrer. Vous enverriez le devis du premier coup, ou la bonne question tout de suite.\n\nExemple testable : axelremillat.com/agent?v=3\n\nÇa vous arrive souvent ?",
+  "Bonjour,\n\nVos commandes arrivent aussi des grandes surfaces, avec leurs propres références. Chaque magasin recevrait sa confirmation avec la bonne référence, sans ressaisie de votre côté.\n\nÀ tester en une minute : axelremillat.com/automatisations?demo=email\n\nSi ce sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.\n\nLes références de ces enseignes vous posent-elles parfois problème ?",
+] as const;
+
+export function buildRelanceWriterPrompt(input: { generic: boolean; type: "relance_1" | "relance_2"; feedback: string | null; lot?: RelanceLot }): string {
   const last = input.type === "relance_2";
   return `Tu écris, pour Axel Remillat (freelance en IA et automatisation de tâches pour les PME), la ${last ? "DERNIÈRE relance (J+7)" : "relance (J+4)"} d'un mail de prospection resté sans réponse. Elle part dans le même fil que l'intro. Exigence d'Axel : 9 ou 10/10.
 
@@ -358,14 +430,15 @@ ${input.generic ? "\nSi le sujet est suivi par quelqu'un d'autre chez vous, merc
 <CTA>
 
 À ÉCRIRE :
-- "about" — UNE phrase sur EUX : leur activité, leur client ou leur situation, avec un élément de la fiche ABSENT de l'intro, mais sur le MÊME processus que l'intro (si l'intro parlait des devis, tu restes sur les devis ; si elle parlait des factures, sur les factures). Nouvel angle, jamais nouveau sujet. Simple et naturelle : pas de « Vous indiquez que… », pas de détail produit pointu.
-- "outcome" — UNE phrase, AU CONDITIONNEL, qui DÉCOULE de "about" : le résultat concret propre à CE cas (un rendez-vous fixé plus vite, la bonne remise appliquée, un devis complet du premier coup). Le sujet est eux, leur équipe ou l'objet concret (« le rendez-vous », « la remise », « le devis »), JAMAIS « la démo », « l'outil », « l'automatisation » ; JAMAIS « Vos clients recevraient… » ; aucun chiffre ni fait nouveau sur l'entreprise.
-- "cta" — plus léger que l'intro et différent d'elle : une question fermée (oui / non) qui NOMME l'élément manquant ou le blocage précis de leur cas (« Les prescriptions manquantes ralentissent-elles votre accueil l'été ? »), ou « Dites-moi simplement si c'est un sujet chez vous. » JAMAIS « … vous prend-il / elle du temps ? ».${last ? " Dernier message : tu peux le dire simplement, sans insister." : ""} Jamais un rendez-vous, jamais « 15 minutes », jamais une formule passe-partout.
+- "about" — UNE phrase sur EUX : la situation concrète de leur métier où le problème de l'intro se produit (qui, quand, ce qui manque, ce que ça oblige à faire), ancrée sur un élément de la fiche ABSENT de l'intro. MÊME processus que l'intro, nouvel angle. Une situation typique se dit comme générale (« souvent », « une seule … suffit à … ») ; n'invente jamais un fait propre à l'entreprise (son organisation, ses outils, ses chiffres). Simple, parlée, sans détail produit pointu.
+- "outcome" — UNE phrase ACTIVE, au conditionnel, qui DÉCOULE de "about" : le sujet est eux, leur équipe ou leur client (« vous enverriez… », « votre accueil pourrait réserver… », « chaque magasin recevrait… »), jamais un passif (« pourrait être appliquée »), jamais « la démo », « l'outil », « l'automatisation ». Elle nomme le résultat concret propre à ce cas.
+- "cta" — une question COURTE et naturelle, plus légère que l'intro (« Ça vous arrive souvent ? », « Est-ce que ce cas se présente chez vous ? », ou une question qui nomme l'élément précis).${last ? " Dernier message : tu peux le dire simplement, sans insister." : ""} Jamais un rendez-vous, jamais « 15 minutes ».${input.lot && (input.lot.verbs.length || input.lot.questions.length) ? `
+- VARIÉTÉ DANS CE LOT : ${input.lot.verbs.length ? `verbes de 2e phrase déjà pris, à NE PAS reprendre : ${input.lot.verbs.join(", ")}. ` : ""}${input.lot.questions.length ? `questions déjà posées, à NE PAS reprendre : ${input.lot.questions.map((question) => `« ${question} »`).join(", ")}.` : ""}` : ""}
 - Longueur : la relance complète fait ${RELANCE_WORDS.min} à ${RELANCE_WORDS.max} mots (ligne du lien${input.generic ? " et phrase de transfert" : ""} comprises) — ${input.generic ? '"about" 10 à 15 mots, "outcome" 8 à 12 mots, "cta" 5 à 9 mots' : '"about" 12 à 20 mots, "outcome" 10 à 16 mots, "cta" 6 à 10 mots'}.
 
-EXEMPLE DE TON noté 9/10 par Axel (autre cas — n'en reprends AUCUN mot) :
-« Pendant l'été, votre accueil en sous-effectif gère aussi les demandes de rendez-vous d'imagerie. Votre accueil pourrait fixer plus vite les rendez-vous dont la prescription est déjà jointe. » — question : « Les prescriptions manquantes ralentissent-elles votre accueil l'été ? »
-Concret, daté, une situation précise, une 2e phrase qui en découle, une question qui nomme ce qui manque.
+MODÈLES DE TON validés par Axel et Cowork (autres cas — imite le ton, la précision et la longueur, n'en recopie AUCUNE phrase) :
+${RELANCE_MODELS.map((model) => `---\n${model}`).join("\n")}
+---
 
 INTERDITS : toute mention de recrutement, d'offre d'emploi ou d'embauche ; toute conditionnelle « Si … concerne … » ; toute phrase sur l'échange lui-même (« mon premier message », « comme je vous l'écrivais ») ; « Je me permets », « Je reviens vers vous », « L'idée est », « Cela peut », « sans réponse de votre part », « N'hésitez pas » ; toute culpabilisation ; tout superlatif ; tout fait, chiffre, client ou conséquence absents de la fiche et de l'intro ; toute salutation, signature ou lien.${input.feedback ? `\n\nRÉÉCRITURE — la version précédente a échoué sur ces critères, corrige-les SANS toucher au reste :\n${input.feedback}` : ""}
 
@@ -391,6 +464,8 @@ export interface RelanceOutcome {
   ready: boolean;
   reason: string | null;
   attempts: number;
+  /** Morceaux rédigés (verbe et question entrent dans le lot). */
+  parts?: RelanceParts;
 }
 
 /**
@@ -399,10 +474,10 @@ export interface RelanceOutcome {
  */
 export async function writeRelance(
   ask: AskFn,
-  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null },
+  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null; lot?: RelanceLot },
 ): Promise<RelanceOutcome | { error: string }> {
   const intro = introParts(input.introSubject, input.introBody, input.introFamily);
-  const ctx: RelanceContext = { intro, generic: input.generic, seed: input.fiche.companyName };
+  const ctx: RelanceContext = { intro, generic: input.generic, seed: input.fiche.companyName, lot: input.lot };
   const subject = relanceSubject(intro);
   const user = `${ficheBlock(input.fiche)}\n\nINTRO ENVOYÉE (objet : ${intro.subject})\n${input.introBody.slice(0, 3000)}\n\nAppel à l'action de l'intro, à NE PAS reprendre : ${intro.cta ?? "—"}`;
   let feedback: string | null = null;
@@ -410,7 +485,7 @@ export async function writeRelance(
   let rounds = 0;
   for (let round = 0; round < 2; round += 1) {
     rounds = round + 1;
-    const raw = await ask("writer", buildRelanceWriterPrompt({ generic: input.generic, type: input.type, feedback }), user, round ? 0.4 : 0.6, `relance:redaction${round ? ":rewrite" : ""}`).catch(keepQuota);
+    const raw = await ask("writer", buildRelanceWriterPrompt({ generic: input.generic, type: input.type, feedback, lot: input.lot }), user, round ? 0.4 : 0.6, `relance:redaction${round ? ":rewrite" : ""}`).catch(keepQuota);
     const parts = parseRelanceParts(raw);
     if (!parts) {
       feedback = '- La réponse n\'était pas le JSON demandé : {"about":"…","outcome":"…","cta":"…"}.';
@@ -425,10 +500,14 @@ export async function writeRelance(
       ready: Boolean(verdict?.ready),
       reason: verdict ? (verdict.ready ? null : relanceReason(verdict)) : "Relecture automatique indisponible : à relire.",
       attempts: rounds,
+      parts,
     };
     if (!best || (verdict?.score ?? 0) > (best.verdict?.score ?? 0)) best = outcome;
     if (outcome.ready || !verdict) break;
     feedback = relanceFeedback(verdict);
   }
-  return best ? { ...best, attempts: rounds } : { error: "Relance inexploitable : le rédacteur n'a rendu aucun texte utilisable." };
+  if (!best) return { error: "Relance inexploitable : le rédacteur n'a rendu aucun texte utilisable." };
+  // La relance retenue prend sa place dans le lot : la suivante choisira un autre verbe, une autre question.
+  if (best.parts) rememberInLot(input.lot, best.parts);
+  return { ...best, attempts: rounds };
 }
