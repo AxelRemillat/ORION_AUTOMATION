@@ -111,7 +111,7 @@ export interface ComposedFollowUp {
  */
 export async function composeFollowUp(
   db: Db,
-  input: { userId: string; prospect: Prospect; type: FollowUpType; ask?: AskFn; /** Lot en cours : variété des verbes et des questions (Cowork #15). */ lot?: RelanceLot },
+  input: { userId: string; prospect: Prospect; type: FollowUpType; ask?: AskFn; /** Lot en cours : variété des verbes et des questions (Cowork #15). */ lot?: RelanceLot; /** Date de rédaction (« de la semaine dernière ») : maintenant par défaut. */ now?: Date },
 ): Promise<{ ok: true; draft: ComposedFollowUp } | { ok: false; error: string }> {
   const { prospect, type } = input;
   // Jamais de relance pour un prospect opposé, « ne plus contacter », perdu ou
@@ -146,7 +146,7 @@ export async function composeFollowUp(
   const choice = chooseRelanceMode(fiche, intro.subject, introBody);
   const ask = input.ask ?? relanceAsk(prospect.id);
   const written = choice.mode === "B"
-    ? await writeShortRelance(ask, { introSubject: intro.subject, introBody, generic, fiche, introFamily, introSentAt: intro.sent_at ?? null, lot: input.lot }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }))
+    ? await writeShortRelance(ask, { introSubject: intro.subject, introBody, generic, fiche, introFamily, introSentAt: intro.sent_at ?? null, now: input.now, lot: input.lot }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }))
     : await writeRelance(ask, {
     anchor: choice.anchor,
     introFamily,

@@ -8,6 +8,14 @@
  *   npm run relances:9 -- --appliquer    régénère EN PLACE les relances en attente
  *                                        ni validées, ni programmées, ni retouchées
  *   npm run relances:9 -- --appliquer --dry   (lecture seule : la liste visée)
+ *   … --appliquer --prospects=A,B   seulement ces fiches (séparateur « , » : cmd.exe
+ *                                        prend « | » pour un tuyau)
+ *   … --date=2026-10-12             date de rédaction simulée (« de la semaine dernière »)
+ *   … --plafond=0.17                plafond de dépense en € (défaut 0,55)
+ *
+ * Les 6 relances validées par Axel le 09/10 (GATINE, NORDISK, CASTE ING, THIBAULT
+ * BERGERON, CAREA SANITAIRE, FONDERIE DE LA BRUCHE) ne sont visées QUE nommées dans
+ * --prospects, et seulement une fois dévalidées (le filtre validated_at reste).
  *
  * Jamais : une relance validée, programmée, retouchée à la main ou écrite hors
  * application ; ESPACE 3000 (hors cible, Axel l'écarte). Rien n'est envoyé ni supprimé.
@@ -77,9 +85,16 @@ async function referenceAgreement(userId: string, started: string): Promise<void
   console.log(`\nAccord, grille complète : ${full}/${items.length} · lecture seule : ${llmOnly}/${items.length}`);
 }
 
-const BUDGET_EUR = 0.55;
-/** Hors cible (Axel l'écarte) ou déjà validées : jamais touchées, quoi qu'il arrive. */
-const NEVER = /^(espace 3000|gatine|nordisk|caste ing|thibault bergeron|carea sanitaire|fonderie de la bruche)/i;
+const BUDGET_EUR = Number(process.argv.find((arg) => arg.startsWith("--plafond="))?.slice(10) ?? "") || 0.55;
+/** Hors cible : jamais touchée, quoi qu'il arrive. */
+const NEVER = /^espace 3000/i;
+/** Validées par Axel le 09/10 : touchées seulement si nommées dans --prospects (et dévalidées). */
+const AXEL_VALIDATED = /^(gatine|nordisk|caste ing|thibault bergeron|carea sanitaire|fonderie de la bruche)/i;
+const listArg = (name: string) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3).split(/[|,]/).map((value) => value.trim()).filter(Boolean) ?? [];
+const NOW = (() => {
+  const value = process.argv.find((arg) => arg.startsWith("--date="))?.slice(7);
+  return value && !Number.isNaN(Date.parse(value)) ? new Date(`${value.slice(0, 10)}T08:00:00Z`) : undefined;
+})();
 const table = db as never as { from: (t: string) => any };
 type Draft = { id: string; prospect_id: string; type: "relance_1" | "relance_2"; subject: string | null; validated_at: string | null; scheduled_at: string | null; send_status: string | null; edited_by_hand: boolean | null; origin: string | null };
 
@@ -97,7 +112,9 @@ async function pendingRelances(userId: string): Promise<{ draft: Draft; prospect
   const out: { draft: Draft; prospect: Prospect }[] = [];
   for (const draft of drafts) {
     const { data: prospect } = await table.from("prospects").select("*").eq("id", draft.prospect_id).maybeSingle();
-    if (prospect && !NEVER.test((prospect as Prospect).company_name)) out.push({ draft, prospect: prospect as Prospect });
+    const name = (prospect as Prospect | null)?.company_name ?? "";
+    const named = listArg("prospects").some((wanted) => wanted.toLowerCase() === name.toLowerCase());
+    if (prospect && !NEVER.test(name) && (!AXEL_VALIDATED.test(name) || named)) out.push({ draft, prospect: prospect as Prospect });
   }
   return out;
 }
@@ -132,10 +149,17 @@ async function main() {
   }
   const dry = process.argv.includes("--dry");
   const pending = await pendingRelances(userId);
+  const named = listArg("prospects").map((name) => name.toLowerCase());
   // Un lot par exécution : chaque relance prend un verbe et une question différents des précédentes.
   const lot = relance.newLot();
 
   if (apply) {
+    if (named.length) {
+      // Seulement les fiches nommées ; une fiche nommée encore validée n'est pas dans `pending` : on le dit.
+      pending.splice(0, pending.length, ...pending.filter((item) => named.includes(item.prospect.company_name.toLowerCase())));
+      const missing = named.filter((name) => !pending.some((item) => item.prospect.company_name.toLowerCase() === name));
+      if (missing.length) console.log(`Ignorées (validées, programmées, retouchées, envoyées ou introuvables) : ${missing.join(", ")}`);
+    }
     console.log(`${pending.length} relance(s) en attente à régénérer : ${pending.map((item) => item.prospect.company_name).join(", ")}${dry ? " (lecture seule)" : ""}`);
     if (dry) return;
     let ready = 0;
@@ -145,7 +169,7 @@ async function main() {
         console.log("Plafond de dépense atteint : arrêt.");
         break;
       }
-      const composed = await composeFollowUp(table as never, { userId, prospect, type: draft.type, ask: liveAsk(prospect.id), lot });
+      const composed = await composeFollowUp(table as never, { userId, prospect, type: draft.type, ask: liveAsk(prospect.id), lot, now: NOW });
       if (!composed.ok) {
         console.log(`  ${prospect.company_name} : ${composed.error}`);
         continue;
@@ -155,7 +179,7 @@ async function main() {
       await table.from("messages").update({ subject, body, quality_score, quality_reason }).eq("id", draft.id).is("validated_at", null).eq("status", "draft");
       if (ok) ready += 1;
       else review += 1;
-      console.log(`  ${prospect.company_name} : ${ok ? "PRÊTE" : `À revoir — ${quality_reason}`}`);
+      console.log(`  ${prospect.company_name} (mode ${composed.draft.mode ?? "?"}) : ${ok ? "PRÊTE" : `À revoir — ${quality_reason}`}`);
     }
     console.log(`\nPrêtes : ${ready} · à revoir : ${review} · coût ${(await spentSince(userId, started)).toFixed(4)} €`);
     return;
@@ -167,10 +191,10 @@ async function main() {
   const candidates: Prospect[] = pending.map((item) => item.prospect).filter((prospect) => !known.has(prospect.company_name));
   if (candidates.length < 12) {
     const { data } = await table.from("prospects").select("*").eq("user_id", userId).eq("status", "contacte").limit(80);
-    for (const prospect of (data ?? []) as Prospect[]) if (!candidates.some((item) => item.id === prospect.id) && !NEVER.test(prospect.company_name) && !known.has(prospect.company_name)) candidates.push(prospect);
+    for (const prospect of (data ?? []) as Prospect[]) if (!candidates.some((item) => item.id === prospect.id) && !NEVER.test(prospect.company_name) && !AXEL_VALIDATED.test(prospect.company_name) && !known.has(prospect.company_name)) candidates.push(prospect);
   }
   // --prospects=A|B|… : rejouer ces fiches d'abord (même jeu que l'étalonnage précédent), puis compléter jusqu'à 8.
-  const wanted = process.argv.find((arg) => arg.startsWith("--prospects="))?.slice(12).split(/[|,]/).map((name) => name.trim()).filter(Boolean) ?? [];
+  const wanted = listArg("prospects");
   if (wanted.length) {
     const { data } = await table.from("prospects").select("*").eq("user_id", userId).in("company_name", wanted);
     const chosen = ((data ?? []) as Prospect[]).sort((a, b) => wanted.indexOf(a.company_name) - wanted.indexOf(b.company_name));
@@ -198,7 +222,7 @@ async function main() {
       lines.push("Plafond de dépense atteint : arrêt.");
       break;
     }
-    const composed = await composeFollowUp(table as never, { userId, prospect, type: "relance_1", ask: liveAsk(prospect.id), lot });
+    const composed = await composeFollowUp(table as never, { userId, prospect, type: "relance_1", ask: liveAsk(prospect.id), lot, now: NOW });
     if (!composed.ok) {
       console.log(`  ${prospect.company_name} : ${composed.error}`);
       continue;
