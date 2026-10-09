@@ -237,6 +237,30 @@ async function main() {
       check(`intitulé reconnu : ${title}`, painForJob(title) !== null);
     }
     check("hors back-office toujours écarté (développeur, chauffeur)", painForJob("Développeur web") === null && painForJob("Chauffeur poids lourd") === null);
+
+    // Cowork #46 : 15 codes de plus, les 24 d'avant conservés.
+    const added = ["M1701", "M1704", "D1415", "M1507", "M1509", "M1206", "M1204", "M1222", "M1223", "M1205", "K1908", "M1606", "D1429", "N1203", "H1403"];
+    check("15 codes ajoutés, 39 au total, sans doublon", added.every((code) => codes.includes(code)) && codes.length === 39 && new Set(codes).size === codes.length, String(codes.length));
+    check("les 24 codes d'avant conservés", ["M1607", "M1604", "M1432", "M1605", "D1401", "D1409", "D1432", "D1407", "M1203", "M1225", "M1213", "M1608", "M1611", "D1422", "M1101", "D1431", "N1303", "N1209", "H1108", "I1404", "N1210", "N1201", "M1501", "H1401"].every((code) => codes.includes(code)));
+    const expected: Record<string, string> = {
+      "Gestionnaire de paie H/F": "variables de paie et déclarations sociales",
+      "Responsable paie et administration du personnel": "variables de paie et déclarations sociales",
+      "Contrôleur de gestion industriel": "reporting et tableaux de bord",
+      "Assistant contrôle budgétaire": "reporting et tableaux de bord",
+      "Directeur administratif et financier (DAF)": "reporting financier et clôtures mensuelles",
+      "RAF - Responsable administratif et financier": "reporting financier et clôtures mensuelles",
+      "Responsable comptabilité": "factures fournisseurs et rapprochement bancaire",
+      "Responsable contentieux et recouvrement": "facturation clients et relances de paiement",
+      "Assistante import-export": "documents d'expédition et déclarations en douane",
+      "Déclarant en douane": "documents d'expédition et déclarations en douane",
+      "Opératrice de saisie": "saisie de données",
+      "Gestionnaire de flux de production": "planning",
+      "Responsable ADV": "saisie des commandes et des devis",
+      "Responsable service clients": "tri des demandes clients",
+      "Chargée de relation client": "tri des demandes clients",
+    };
+    for (const [title, pain] of Object.entries(expected)) check(`intitulé reconnu : ${title}`, painForJob(title) === pain, painForJob(title) ?? "null");
+    check("toujours écartés : vendeur, chauffeur", painForJob("Vendeur en magasin") === null && painForJob("Chauffeur livreur") === null);
   }
 
   console.log("\n9. France Travail paginé, repli annuaire nom + commune, grands groupes");
