@@ -2,32 +2,39 @@ import type { AskFn } from "@/lib/ai/chat";
 import { isOpenAIQuotaError } from "@/lib/ai/quota";
 
 /**
- * RELANCE « PRÊTE » (Cowork #12, demande d'Axel : 9 ou 10/10) — grille R1–R7,
+ * RELANCE « PRÊTE » — grille v2 (Cowork #12 puis #13 ; Axel veut 9 ou 10/10),
  * séparée de la check-list des mails d'intro (C1–C5, agent2).
  *
- *   Code : R1 fil (objet « Re: <objet exact> », salutation de l'intro),
- *          R3 preuve (même lien de démo, sur sa ligne),
+ *   Code : R1 fil (objet « Re: <objet exact> », salutation de l'intro — R9 appliquée),
+ *          R3 preuve (même lien de démo AVEC &v, et &f si l'intro l'avait, sur sa ligne),
  *          R4 destinataire (générique → phrase de transfert ; nominatif → aucune),
- *          R6 forme (40–70 mots hors signature et mention stop, formules interdites).
- *   LLM  : R2 nouveauté (un élément absent de l'intro, tiré de la fiche),
- *          R5 appel à l'action (différent de l'intro, plus léger),
- *          R7 fidélité (rien d'inventé) — un appel JSON rejoué 3 fois, majorité.
+ *          R6 forme (35–60 mots hors signature et mention stop, formules interdites),
+ *          R9 salutation (« Bonjour Madame, » sans nom → « Bonjour, »),
+ *          R10 interdits (recrutement, offre d'emploi ; conditionnelle « Si … concerne … »),
+ *          R8 (partie code) : « La démo repère… » en sujet de phrase, phrases méta.
+ *   LLM  : R2 nouveauté sur le MÊME processus que l'intro (nouvel angle, pas nouveau sujet),
+ *          R5 appel à l'action plus léger, R7 fidélité,
+ *          R8 ton (phrase 1 sur eux, phrase 2 sur ce que ça change pour eux)
+ *          — un appel JSON rejoué 3 fois, majorité.
  *
- * « Prête » = les 7 à OUI. La relance est ASSEMBLÉE par le code (salutation,
- * ligne de démo, phrase de transfert) : R1, R3 et R4 tiennent par construction ;
- * le modèle n'écrit que la nouveauté et l'appel à l'action.
+ * « Prête » = tous les critères à OUI. La relance est ASSEMBLÉE par le code
+ * (salutation, ligne de démo variée, phrase de transfert) ; le modèle n'écrit
+ * que les deux phrases sur eux et l'appel à l'action.
  */
 
-export type RelanceCriterionId = "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7";
+export type RelanceCriterionId = "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R8" | "R9" | "R10";
 
 export const RELANCE_CRITERIA: Record<RelanceCriterionId, string> = {
-  R1: "Fil : « Re: <objet exact de l'intro> », salutation identique à l'intro",
-  R2: "Nouveauté : un élément absent de l'intro, tiré de la fiche",
-  R3: "Preuve : le lien de démo de l'intro, sur une ligne",
+  R1: "Fil : « Re: <objet exact de l'intro> », salutation de l'intro",
+  R2: "Nouveauté : un angle nouveau sur le MÊME processus que l'intro, tiré de la fiche",
+  R3: "Preuve : le lien de démo de l'intro avec son &v (et &f), sur une ligne",
   R4: "Destinataire : transfert demandé seulement à une adresse générique",
   R5: "Appel à l'action différent de l'intro, plus léger",
-  R6: "Forme : 40 à 70 mots, aucune formule interdite",
+  R6: "Forme : 35 à 60 mots, aucune formule interdite",
   R7: "Fidélité : aucun fait, chiffre ou client inventé",
+  R8: "Ton : phrase 1 sur eux, phrase 2 sur ce que ça change pour eux, jamais la mécanique de la démo",
+  R9: "Salutation : jamais « Bonjour Madame, » ou « Bonjour Monsieur, » sans nom",
+  R10: "Interdits : recrutement, offre d'emploi, conditionnelle « Si … concerne »",
 };
 
 export interface RelanceCriterion {
@@ -43,14 +50,16 @@ export interface RelanceVerdict {
   score: number;
 }
 
-export const RELANCE_WORDS = { min: 40, max: 70 } as const;
+export const RELANCE_WORDS = { min: 35, max: 60 } as const;
 export const RELANCE_JUDGE_SAMPLES = 3;
+const LLM_IDS = ["R2", "R5", "R7", "R8"] as const;
+const ORDER: RelanceCriterionId[] = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10"];
 
 // --- L'intro envoyée --------------------------------------------------------------
 
 export interface IntroParts {
   subject: string;
-  /** Première ligne de l'intro (« Bonjour Monsieur Dupont, » ou « Bonjour, »). */
+  /** Salutation de la relance : celle de l'intro, « Bonjour, » si elle n'a pas de nom (R9). */
   greeting: string;
   /** Lien de démo de l'intro, tel quel (même démo, même &v / &f). */
   demoLink: string | null;
@@ -59,15 +68,32 @@ export interface IntroParts {
 }
 
 const DEMO_LINK = /(?:https?:\/\/)?(?:www\.)?axelremillat\.com\/[^\s)>\]]+/i;
+/** « Bonjour Madame, » / « Bonjour Monsieur, » sans nom (R9). */
+const NAMELESS_GREETING = /^bonjour\s+(madame|monsieur|mme|m\.)\s*,?\s*$/i;
 
-export function introParts(subject: string | null, body: string): IntroParts {
+/**
+ * Intro partie AVANT les familles (lien sans &v) : la famille enregistrée de l'intro
+ * (message_variants.family) donne le marqueur, ajouté au MÊME lien. Sans famille connue,
+ * le lien reste tel quel et R3 le signale (« À revoir »).
+ */
+export function withFamilyMark(link: string, family: string | null | undefined): string {
+  const digit = family?.match(/^F([1-5])$/)?.[1];
+  if (!digit || /[?&]v=[^&\s]+/i.test(link)) return link;
+  return `${link}${link.includes("?") ? "&" : "?"}v=${digit}`;
+}
+
+export function introParts(subject: string | null, body: string, family?: string | null): IntroParts {
   const lines = body.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim());
-  const greeting = lines.find((line) => line.length > 0) ?? "Bonjour,";
+  const first = lines.find((line) => line.length > 0) ?? "Bonjour,";
   const questions = body.replace(/\s+/g, " ").match(/[^.!?]*\?/g) ?? [];
+  const greeting = !/^bonjour\b/i.test(first) || NAMELESS_GREETING.test(first) ? "Bonjour," : first;
   return {
     subject: (subject ?? "").replace(/^\s*(re|tr|fwd?)\s*:\s*/i, "").trim(),
-    greeting: /^bonjour\b/i.test(greeting) ? greeting : "Bonjour,",
-    demoLink: body.match(DEMO_LINK)?.[0].replace(/[.,;]+$/, "") ?? null,
+    greeting,
+    demoLink: (() => {
+      const link = body.match(DEMO_LINK)?.[0].replace(/[.,;]+$/, "");
+      return link ? withFamilyMark(link, family) : null;
+    })(),
     cta: questions.length ? questions[questions.length - 1].trim() : null,
   };
 }
@@ -79,14 +105,25 @@ export const relanceSubject = (intro: Pick<IntroParts, "subject">) => `Re: ${int
 export const TRANSFER_SENTENCE = "Si le sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.";
 const TRANSFER = /(transf[ée]r|faire suivre|bonne personne|personne qui (suit|g[èe]re)|suivi par quelqu)/i;
 
-/** Ligne de démo (preuve rappelée, sur sa ligne). */
-export const demoLine = (link: string) => `La démo, pour mémoire : ${link}`;
+/** Lignes du lien de démo, variées d'une relance à l'autre (une seule par relance). */
+export const DEMO_LEADS = ["Pour vous faire une idée en une minute :", "Exemple testable :", "Un exemple concret, testable en une minute :", "À tester en une minute :"] as const;
+
+/** Ligne choisie de façon STABLE pour une fiche (même relance → même ligne). */
+export function demoLead(seed: string): string {
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return DEMO_LEADS[hash % DEMO_LEADS.length];
+}
+
+export const demoLine = (link: string, seed = "") => `${demoLead(seed)} ${link}`;
 
 // --- Assemblage -------------------------------------------------------------------
 
 export interface RelanceParts {
-  /** Une ou deux phrases : l'élément nouveau, tiré de la fiche, relié au besoin. */
-  novelty: string;
+  /** Phrase 1 : eux (leur activité, leur client, leur situation) — angle nouveau sur le processus de l'intro. */
+  about: string;
+  /** Phrase 2 : ce que ça change pour eux (résultat), jamais la mécanique de la démo. */
+  outcome: string;
   /** Appel à l'action léger, différent de l'intro. */
   cta: string;
 }
@@ -95,6 +132,8 @@ export interface RelanceContext {
   intro: IntroParts;
   /** Adresse du destinataire générique (info@, contact@…). */
   generic: boolean;
+  /** Graine de la ligne de démo (nom de la société). */
+  seed?: string;
 }
 
 const clean = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -103,8 +142,8 @@ const clean = (text: string) => text.replace(/\s+/g, " ").trim();
 export function assembleRelance(parts: RelanceParts, ctx: RelanceContext): string {
   return [
     ctx.intro.greeting,
-    clean(parts.novelty),
-    ctx.intro.demoLink ? demoLine(ctx.intro.demoLink) : null,
+    `${clean(parts.about)} ${clean(parts.outcome)}`,
+    ctx.intro.demoLink ? demoLine(ctx.intro.demoLink, ctx.seed ?? ctx.intro.subject) : null,
     ctx.generic ? TRANSFER_SENTENCE : null,
     clean(parts.cta),
   ]
@@ -112,66 +151,90 @@ export function assembleRelance(parts: RelanceParts, ctx: RelanceContext): strin
     .join("\n\n");
 }
 
-// --- Contrôles du code : R1, R3, R4, R6 ----------------------------------------------
+// --- Contrôles du code : R1, R3, R4, R6, R8 (partie code), R9, R10 -------------------
 
-export const FORBIDDEN = /(je me permets|l['’]id[ée]e est simple|l['’]id[ée]e est de|cela peut|sans r[ée]ponse de votre part|je reviens vers vous|je n['’]ai pas eu de (retour|r[ée]ponse)|vous n['’]avez pas (r[ée]pondu|eu le temps)|toujours sans nouvelles|faute de r[ée]ponse|n['’]h[ée]sitez pas|je relance|petite relance|d[ée]sol[ée] de|pardon de|vous avez d[uû])/i;
+export const FORBIDDEN = /(je me permets|l['’]id[ée]e est simple|l['’]id[ée]e est de|cela peut|sans r[ée]ponse de votre part|je reviens vers vous|je n['’]ai pas eu de (retour|r[ée]ponse)|vous n['’]avez pas (r[ée]pondu|eu le temps)|toujours sans nouvelles|faute de r[ée]ponse|n['’]h[ée]sitez pas|je relance|petite relance|d[ée]sol[ée] de|pardon de|vous avez d[uû]|la d[ée]mo,? pour m[ée]moire)/i;
 export const SUPERLATIVE = /(\bmeilleure?s?\b|\ble plus\b|\bla plus\b|\bles plus\b|incroyable|exceptionnel|r[ée]volutionnaire|\bparfait|\bid[ée]al|\bunique\b|[ée]norme|extraordinaire|formidable|imbattable|in[ée]gal[ée])/i;
+/** R8 (code) : la démo en sujet de phrase, phrases méta sur l'échange. */
+export const DEMO_AS_SUBJECT = /\b(la|cette|une|notre) d[ée]mo (rep[èe]re|montre|montrerait|pr[ée]pare|signale|trie|lit|aide|aiderait|permet|permettrait|identifie|d[ée]tecte|rep[èe]rerait|fait)\b/i;
+export const META = /(premier message|mon (pr[ée]c[ée]dent|dernier|premier) (message|mail|e-?mail|courriel)|cit[ée]e?s? dans mon|comme (je vous l['’]?(indiquais|[ée]crivais|disais)|indiqu[ée] pr[ée]c[ée]demment)|je vous (ai|avais) ([ée]crit|parl[ée]))/i;
+/** R10 : recrutement, offre d'emploi ; conditionnelle « Si … concerne … ». */
+export const RECRUITMENT = /(recrut|offre d['’]emploi|embauch|poste [àa] pourvoir|candidat|\bcdi\b|\bcdd\b|alternan)/i;
+export const IF_CONCERNS = /\bsi\b[^.?!]{0,100}\bconcern/i;
 
 const countWords = (text: string) => (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
+const queryParam = (link: string, name: string) => new RegExp(`[?&]${name}=[^&\\s]+`, "i").test(link);
 
 export function relanceCodeChecks(subject: string, body: string, ctx: RelanceContext): RelanceCriterion[] {
   const blocks = body.replace(/\r\n/g, "\n").split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
   const expectedSubject = relanceSubject(ctx.intro);
   const r1 = subject === expectedSubject && blocks[0] === ctx.intro.greeting;
-  const demoBlock = ctx.intro.demoLink ? blocks.find((block) => block.includes(ctx.intro.demoLink as string)) : undefined;
-  const r3 = !ctx.intro.demoLink || Boolean(demoBlock && !demoBlock.includes("\n") && body.split(ctx.intro.demoLink).length === 2);
+  // R3 : le même lien que l'intro, avec son &v (et &f si l'intro l'avait), sur sa propre ligne.
+  const link = ctx.intro.demoLink;
+  const demoBlock = link ? blocks.find((block) => block.includes(link)) : undefined;
+  const linkOk = Boolean(link && queryParam(link, "v") && demoBlock && !demoBlock.includes("\n") && body.split(link).length === 2);
+  const r3Citation = !link ? "pas de lien de démo dans l'intro" : !queryParam(link, "v") ? `lien de l'intro sans &v : ${link}` : linkOk ? link : `lien absent ou mêlé au texte : ${link}`;
   const transfer = TRANSFER.test(body);
   const r4 = ctx.generic ? transfer : !transfer;
-  // Le lien de démo ne compte pas comme des mots (« axelremillat », « com », « demo »…).
-  const words = countWords(blocks.slice(1).join(" ").replace(new RegExp(DEMO_LINK.source, "gi"), " "));
+  const prose = blocks.slice(1).join(" ").replace(new RegExp(DEMO_LINK.source, "gi"), " ");
+  const words = countWords(prose);
   const forbidden = body.match(FORBIDDEN)?.[0] ?? body.match(SUPERLATIVE)?.[0];
   const r6 = words >= RELANCE_WORDS.min && words <= RELANCE_WORDS.max && !forbidden;
+  const r9 = !NAMELESS_GREETING.test(blocks[0] ?? "");
+  const recruitment = prose.match(RECRUITMENT)?.[0];
+  const conditional = prose.match(IF_CONCERNS)?.[0];
+  const demoSubject = prose.match(DEMO_AS_SUBJECT)?.[0];
+  const meta = prose.match(META)?.[0];
   return [
     { id: "R1", ok: r1, citation: r1 ? `${expectedSubject} · ${ctx.intro.greeting}` : `objet « ${subject} » (attendu « ${expectedSubject} ») · salutation « ${blocks[0] ?? ""} » (attendue « ${ctx.intro.greeting} »)` },
-    { id: "R3", ok: r3, citation: ctx.intro.demoLink ? (r3 ? ctx.intro.demoLink : `lien de l'intro absent ou mêlé au texte : ${ctx.intro.demoLink}`) : "pas de démo dans l'intro" },
+    { id: "R3", ok: linkOk, citation: r3Citation },
     { id: "R4", ok: r4, citation: ctx.generic ? (transfer ? "adresse générique : transfert demandé" : "adresse générique : phrase de transfert absente") : transfer ? "adresse nominative : phrase de transfert à retirer" : "adresse nominative : pas de transfert" },
     { id: "R6", ok: r6, citation: forbidden ? `formule interdite « ${forbidden} »` : `${words} mots (${RELANCE_WORDS.min} à ${RELANCE_WORDS.max})` },
+    { id: "R8", ok: !demoSubject && !meta, citation: demoSubject ? `la démo en sujet de phrase : « ${demoSubject} »` : meta ? `phrase méta : « ${meta} »` : "ni démo en sujet, ni phrase méta" },
+    { id: "R9", ok: r9, citation: r9 ? blocks[0] ?? "" : `« ${blocks[0]} » sans nom : « Bonjour, »` },
+    { id: "R10", ok: !recruitment && !conditional, citation: recruitment ? `recrutement : « ${recruitment} »` : conditional ? `conditionnelle : « ${conditional.trim()} »` : "aucun" },
   ];
 }
 
-// --- Lecture du modèle : R2, R5, R7 (vote à 3) ----------------------------------------
+// --- Lecture du modèle : R2, R5, R7, R8 (vote à 3) ------------------------------------
 
 export interface RelanceFiche {
   companyName: string;
-  /** Faits sourcés (key_figures.facts) et signaux datés de la fiche. */
+  /** Faits sourcés (key_figures.facts) et signaux datés de la fiche — sans recrutement. */
   facts: readonly string[];
   signals: readonly string[];
   activity: string | null;
 }
 
+/** Faits et signaux de recrutement ou d'offre d'emploi : jamais donnés au rédacteur (R10). */
+export const withoutRecruitment = (items: readonly string[]) => items.filter((item) => !RECRUITMENT.test(item));
+
 export function ficheBlock(fiche: RelanceFiche): string {
+  const facts = withoutRecruitment(fiche.facts);
+  const signals = withoutRecruitment(fiche.signals);
   return [
     `Entreprise : ${fiche.companyName}`,
     fiche.activity ? `Activité : ${fiche.activity}` : null,
-    fiche.facts.length ? `Faits sourcés :\n${fiche.facts.map((fact) => `- ${fact}`).join("\n")}` : "Faits sourcés : aucun",
-    fiche.signals.length ? `Signaux :\n${fiche.signals.map((signal) => `- ${signal}`).join("\n")}` : "Signaux : aucun",
+    facts.length ? `Faits sourcés :\n${facts.map((fact) => `- ${fact}`).join("\n")}` : "Faits sourcés : aucun",
+    signals.length ? `Signaux :\n${signals.map((signal) => `- ${signal}`).join("\n")}` : "Signaux : aucun",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 export function buildRelanceJudgePrompt(): string {
-  return `Tu relis la RELANCE d'un mail de prospection (même fil que l'intro). Tu ne donnes pas de note : OUI (true) ou NON (false) par critère, avec des CITATIONS EXACTES.
-La forme (objet, salutation, lien, longueur, phrase de transfert) est vérifiée par un programme : ne la juge pas.
+  return `Tu relis la RELANCE d'un mail de prospection (même fil que l'intro), avec l'exigence d'Axel : 9 ou 10/10, sinon elle ne part pas. Tu ne donnes pas de note : OUI (true) ou NON (false) par critère, avec des CITATIONS EXACTES.
+La forme (objet, salutation, lien, longueur, phrase de transfert, formules interdites) est vérifiée par un programme : ne la juge pas.
 
-R2 — Nouveauté : la relance apporte UN élément ABSENT de l'intro, tiré de la fiche (fait sourcé, signal daté, situation concrète du métier). NON si elle reformule le pitch de l'intro ou redit la même chose autrement. Donne "citation_intro" (le passage de l'intro le plus proche) et "citation_relance" (l'élément nouveau).
-R5 — Appel à l'action : différent de celui de l'intro ET plus léger — une question fermée (oui/non) ou « dites-moi simplement si c'est un sujet chez vous ». NON s'il redemande un rendez-vous ou 15 minutes comme l'intro, ou s'il est plus engageant.
-R7 — Fidélité : tout ce que la relance affirme sur l'entreprise (activité, chiffres, clients, process, actualité) vient de la fiche ou de l'intro. NON au moindre fait, chiffre ou client inventé.
+R2 — Nouveauté sur le MÊME sujet : la relance apporte UN élément absent de l'intro, tiré de la fiche, ET reste sur le même processus / la même douleur que l'intro (nouvel angle, pas nouveau sujet). NON si elle reformule l'intro, ou si elle change de sujet (intro sur les documents clients → relance sur les candidatures ; intro sur le rapprochement de factures → relance sur les demandes de pièces). Donne "citation_intro" (le processus de l'intro) et "citation_relance" (l'élément nouveau).
+R5 — Appel à l'action : différent de celui de l'intro ET plus léger — une question fermée (oui/non) liée au sujet, ou « dites-moi simplement si c'est un sujet chez vous ». NON s'il redemande un rendez-vous ou 15 minutes, ou s'il est passe-partout.
+R7 — Fidélité : tout ce que la relance affirme SUR L'ENTREPRISE (son activité, ses chiffres, ses clients, son organisation, son actualité) vient de la fiche ou de l'intro. NON au moindre fait, chiffre, client inventé, ou à une affirmation supposée sur eux (« sont essentiels pour vous », « de nouvelles personnes interviennent »). La phrase qui dit ce que la solution CHANGERAIT pour eux (au conditionnel : « votre client recevrait son devis plus vite ») est un résultat attendu, pas un fait sur l'entreprise : elle ne viole R7 que si elle y glisse un fait, un chiffre ou un client inventé.
+R8 — Ton : la 1re phrase parle d'EUX (leur activité, leur client, leur situation), la 2e de ce que ça CHANGE pour eux (un résultat concret : délai, oubli évité, client qui attend moins). NON si une phrase décrit la mécanique de l'outil ou de la démo, si une phrase est alambiquée ou lourde (« Vous indiquez que l'on peut désormais… »), si un détail produit est trop pointu pour un premier échange, ou si une phrase parle de l'échange lui-même.
 
-Réponds UNIQUEMENT en JSON : {"R2":{"ok":true|false,"citation_intro":"…","citation_relance":"…"},"R5":{"ok":true|false,"citation":"…"},"R7":{"ok":true|false,"citation":"…"}}`;
+Réponds UNIQUEMENT en JSON : {"R2":{"ok":true|false,"citation_intro":"…","citation_relance":"…"},"R5":{"ok":true|false,"citation":"…"},"R7":{"ok":true|false,"citation":"…"},"R8":{"ok":true|false,"citation":"…"}}`;
 }
 
-type Sample = Partial<Record<"R2" | "R5" | "R7", { ok: boolean; citation: string }>>;
+type Sample = Partial<Record<(typeof LLM_IDS)[number], { ok: boolean; citation: string }>>;
 
 export function parseRelanceJudge(raw: string): Sample | null {
   let value: Record<string, { ok?: unknown; citation?: unknown; citation_intro?: unknown; citation_relance?: unknown }>;
@@ -182,7 +245,7 @@ export function parseRelanceJudge(raw: string): Sample | null {
   }
   if (!value || typeof value !== "object") return null;
   const sample: Sample = {};
-  for (const id of ["R2", "R5", "R7"] as const) {
+  for (const id of LLM_IDS) {
     const entry = value[id];
     if (!entry || typeof entry.ok !== "boolean") return null;
     const citation = id === "R2" ? `intro : « ${String(entry.citation_intro ?? "").trim()} » · relance : « ${String(entry.citation_relance ?? "").trim()} »` : String(entry.citation ?? "").trim();
@@ -195,7 +258,7 @@ export function parseRelanceJudge(raw: string): Sample | null {
 export function relanceMajority(samples: readonly (Sample | null)[]): RelanceCriterion[] | null {
   const read = samples.filter((sample): sample is Sample => Boolean(sample));
   if (!read.length) return null;
-  return (["R2", "R5", "R7"] as const).map((id) => {
+  return LLM_IDS.map((id) => {
     const votes = read.map((sample) => sample[id]!);
     const yes = votes.filter((vote) => vote.ok).length;
     const ok = yes > votes.length - yes;
@@ -203,10 +266,14 @@ export function relanceMajority(samples: readonly (Sample | null)[]): RelanceCri
   });
 }
 
-const ORDER: RelanceCriterionId[] = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"];
-
+/** R8 a une part de code (démo en sujet, méta) et une part de lecture : les deux doivent passer. */
 export function relanceVerdictOf(items: RelanceCriterion[]): RelanceVerdict {
-  const sorted = [...items].sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
+  const merged = new Map<RelanceCriterionId, RelanceCriterion>();
+  for (const item of items) {
+    const previous = merged.get(item.id);
+    merged.set(item.id, previous ? { id: item.id, ok: previous.ok && item.ok, citation: previous.ok ? item.citation : previous.citation } : item);
+  }
+  const sorted = [...merged.values()].sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
   const misses = sorted.filter((item) => !item.ok).length;
   return { items: sorted, ready: sorted.length === ORDER.length && misses === 0, score: Math.max(0, Math.round((10 - misses * 1.5) * 10) / 10) };
 }
@@ -217,22 +284,37 @@ const keepQuota = (error: unknown): string => {
   return "";
 };
 
-/** Grille complète : le code d'abord ; la lecture du modèle seulement si le code passe. `null` = relecture indisponible. */
+/**
+ * Grille complète : le code d'abord ; la lecture du modèle seulement si le code passe
+ * (sauf `alwaysRead`, pour mesurer l'accord du juge sur un jeu de référence).
+ * `null` = relecture indisponible.
+ */
 export async function judgeRelance(
   ask: AskFn,
   input: { subject: string; body: string; ctx: RelanceContext; introBody: string; fiche: RelanceFiche },
   operation = "relance:grille",
   samples = RELANCE_JUDGE_SAMPLES,
+  alwaysRead = false,
 ): Promise<RelanceVerdict | null> {
   const code = relanceCodeChecks(input.subject, input.body, input.ctx);
-  if (code.some((item) => !item.ok)) return relanceVerdictOf(code);
+  if (!alwaysRead && code.some((item) => !item.ok)) return relanceVerdictOf(code);
+  const semantic = await readRelance(ask, input, operation, samples);
+  if (!semantic) return null;
+  return relanceVerdictOf([...code, ...semantic]);
+}
+
+/** Lecture du modèle SEULE (R2, R5, R7, R8), vote à `samples` : `null` si aucune lecture lisible. */
+export async function readRelance(
+  ask: AskFn,
+  input: { body: string; introBody: string; fiche: RelanceFiche },
+  operation = "relance:grille",
+  samples = RELANCE_JUDGE_SAMPLES,
+): Promise<RelanceCriterion[] | null> {
   const user = `FICHE\n${ficheBlock(input.fiche)}\n\nINTRO ENVOYÉE\n${input.introBody.slice(0, 3000)}\n\nRELANCE\n${input.body}`;
   const raws = await Promise.all(
     Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildRelanceJudgePrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
   );
-  const semantic = relanceMajority(raws.map(parseRelanceJudge));
-  if (!semantic) return null;
-  return relanceVerdictOf([...code, ...semantic]);
+  return relanceMajority(raws.map(parseRelanceJudge));
 }
 
 export function relanceFeedback(verdict: RelanceVerdict): string {
@@ -251,34 +333,34 @@ export function relanceReason(verdict: RelanceVerdict): string {
 
 export function buildRelanceWriterPrompt(input: { generic: boolean; type: "relance_1" | "relance_2"; feedback: string | null }): string {
   const last = input.type === "relance_2";
-  return `Tu écris, pour Axel Remillat (freelance en IA et automatisation de tâches pour les PME), la ${last ? "DERNIÈRE relance (J+7)" : "relance (J+4)"} d'un mail de prospection resté sans réponse. Elle part dans le même fil que l'intro.
+  return `Tu écris, pour Axel Remillat (freelance en IA et automatisation de tâches pour les PME), la ${last ? "DERNIÈRE relance (J+7)" : "relance (J+4)"} d'un mail de prospection resté sans réponse. Elle part dans le même fil que l'intro. Exigence d'Axel : 9 ou 10/10.
 
-LE CODE ASSEMBLE LA RELANCE AINSI (tu n'écris QUE "novelty" et "cta") :
-<salutation de l'intro, à l'identique>
+LE CODE ASSEMBLE LA RELANCE AINSI (tu n'écris QUE "about", "outcome" et "cta") :
+<salutation de l'intro>
 
-<NOVELTY — 1 ou 2 phrases>
+<ABOUT> <OUTCOME>
 
-La démo, pour mémoire : <lien de l'intro>
+<ligne courte> <lien de démo de l'intro>
 ${input.generic ? "\nSi le sujet est suivi par quelqu'un d'autre chez vous, merci de lui transférer ce message.\n" : ""}
-<CTA — 1 phrase>
+<CTA>
 
 À ÉCRIRE :
-- "novelty" : UN élément NOUVEAU, ABSENT de l'intro, pris dans la fiche — un fait sourcé, un signal daté, ou une situation concrète de leur métier. Phrase 1 : cet élément, tel que la fiche le dit (commence par lui, pas par « La démo »). Phrase 2 : ce que la DÉMO fait de précis avec ce cas (« la démo repère… », « la démo prépare… »). Choisis l'élément le plus concret qui n'apparaît pas dans l'intro. Ne reformule JAMAIS le pitch de l'intro.
-- FIDÉLITÉ : n'affirme RIEN sur l'entreprise qui ne soit écrit dans la fiche ou l'intro — aucune conséquence supposée (« sont essentiels », « pourraient intervenir », « doivent sûrement »), aucun chiffre ni client ajouté. Le lien se dit sur la démo, jamais sur eux.
-- "cta" : plus léger que l'intro et différent d'elle — une question fermée (oui / non) LIÉE à l'élément nouveau, dans leurs mots (« Ces demandes de recalibrage arrivent-elles aussi par e-mail ? », « Les commandes export passent-elles par la même boîte ? »), ou à défaut « Dites-moi simplement si c'est un sujet chez vous. »${last ? " Comme c'est le dernier message, tu peux le dire simplement, sans insister." : ""} Jamais un nouveau rendez-vous, jamais « 15 minutes », jamais une formule passe-partout comme « Est-ce un sujet chez vous en ce moment ? ».
-- La relance complète (novelty + ligne de démo${input.generic ? " + phrase de transfert" : ""} + cta) fait ${RELANCE_WORDS.min} à ${RELANCE_WORDS.max} mots : "novelty" 25 à 40 mots, "cta" 6 à 14 mots.
+- "about" — UNE phrase sur EUX : leur activité, leur client ou leur situation, avec un élément de la fiche ABSENT de l'intro, mais sur le MÊME processus que l'intro (si l'intro parlait des devis, tu restes sur les devis ; si elle parlait des factures, sur les factures). Nouvel angle, jamais nouveau sujet. Simple et naturelle : pas de « Vous indiquez que… », pas de détail produit pointu.
+- "outcome" — UNE phrase, AU CONDITIONNEL, sur ce que ça CHANGERAIT pour eux : un résultat concret (« votre client recevrait son devis le jour même », « aucune cote ne serait oubliée »). Le sujet est eux ou leur client, JAMAIS « la démo », « l'outil » ou « l'automatisation » ; aucun chiffre ni fait nouveau sur l'entreprise dans cette phrase.
+- "cta" — plus léger que l'intro et différent d'elle : une question fermée (oui / non) liée à ce sujet, dans leurs mots, ou « Dites-moi simplement si c'est un sujet chez vous. »${last ? " Dernier message : tu peux le dire simplement, sans insister." : ""} Jamais un rendez-vous, jamais « 15 minutes », jamais une formule passe-partout.
+- Longueur : la relance complète fait ${RELANCE_WORDS.min} à ${RELANCE_WORDS.max} mots (ligne du lien${input.generic ? " et phrase de transfert" : ""} comprises) — ${input.generic ? '"about" 10 à 15 mots, "outcome" 8 à 12 mots, "cta" 5 à 9 mots' : '"about" 12 à 20 mots, "outcome" 10 à 16 mots, "cta" 6 à 10 mots'}.
 
-INTERDITS : « Je me permets », « Je reviens vers vous », « L'idée est simple / de », « Cela peut », « sans réponse de votre part », « N'hésitez pas », toute culpabilisation (« vous n'avez pas répondu », « toujours sans nouvelles »), tout superlatif (meilleur, idéal, unique, incroyable…), tout fait, chiffre ou client absent de la fiche et de l'intro, toute salutation, toute signature, tout lien.${input.feedback ? `\n\nRÉÉCRITURE — la version précédente a échoué sur ces critères, corrige-les SANS toucher au reste :\n${input.feedback}` : ""}
+INTERDITS : toute mention de recrutement, d'offre d'emploi ou d'embauche ; toute conditionnelle « Si … concerne … » ; toute phrase sur l'échange lui-même (« mon premier message », « comme je vous l'écrivais ») ; « Je me permets », « Je reviens vers vous », « L'idée est », « Cela peut », « sans réponse de votre part », « N'hésitez pas » ; toute culpabilisation ; tout superlatif ; tout fait, chiffre, client ou conséquence absents de la fiche et de l'intro ; toute salutation, signature ou lien.${input.feedback ? `\n\nRÉÉCRITURE — la version précédente a échoué sur ces critères, corrige-les SANS toucher au reste :\n${input.feedback}` : ""}
 
-Réponds UNIQUEMENT en JSON : {"novelty":"…","cta":"…"}`;
+Réponds UNIQUEMENT en JSON : {"about":"…","outcome":"…","cta":"…"}`;
 }
 
 export function parseRelanceParts(raw: string): RelanceParts | null {
   try {
-    const value = JSON.parse(raw) as { novelty?: unknown; cta?: unknown };
-    const novelty = typeof value.novelty === "string" ? value.novelty.trim() : "";
-    const cta = typeof value.cta === "string" ? value.cta.trim() : "";
-    return novelty && cta ? { novelty, cta } : null;
+    const value = JSON.parse(raw) as { about?: unknown; outcome?: unknown; cta?: unknown };
+    const text = (key: unknown) => (typeof key === "string" ? key.trim() : "");
+    const parts = { about: text(value.about), outcome: text(value.outcome), cta: text(value.cta) };
+    return parts.about && parts.outcome && parts.cta ? parts : null;
   } catch {
     return null;
   }
@@ -300,19 +382,21 @@ export interface RelanceOutcome {
  */
 export async function writeRelance(
   ask: AskFn,
-  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2" },
+  input: { introSubject: string | null; introBody: string; generic: boolean; fiche: RelanceFiche; type: "relance_1" | "relance_2"; introFamily?: string | null },
 ): Promise<RelanceOutcome | { error: string }> {
-  const intro = introParts(input.introSubject, input.introBody);
-  const ctx: RelanceContext = { intro, generic: input.generic };
+  const intro = introParts(input.introSubject, input.introBody, input.introFamily);
+  const ctx: RelanceContext = { intro, generic: input.generic, seed: input.fiche.companyName };
   const subject = relanceSubject(intro);
   const user = `${ficheBlock(input.fiche)}\n\nINTRO ENVOYÉE (objet : ${intro.subject})\n${input.introBody.slice(0, 3000)}\n\nAppel à l'action de l'intro, à NE PAS reprendre : ${intro.cta ?? "—"}`;
   let feedback: string | null = null;
   let best: RelanceOutcome | null = null;
+  let rounds = 0;
   for (let round = 0; round < 2; round += 1) {
+    rounds = round + 1;
     const raw = await ask("writer", buildRelanceWriterPrompt({ generic: input.generic, type: input.type, feedback }), user, round ? 0.4 : 0.6, `relance:redaction${round ? ":rewrite" : ""}`).catch(keepQuota);
     const parts = parseRelanceParts(raw);
     if (!parts) {
-      feedback = '- La réponse n\'était pas le JSON demandé : {"novelty":"…","cta":"…"}.';
+      feedback = '- La réponse n\'était pas le JSON demandé : {"about":"…","outcome":"…","cta":"…"}.';
       continue;
     }
     const body = assembleRelance(parts, ctx);
@@ -323,11 +407,11 @@ export async function writeRelance(
       verdict,
       ready: Boolean(verdict?.ready),
       reason: verdict ? (verdict.ready ? null : relanceReason(verdict)) : "Relecture automatique indisponible : à relire.",
-      attempts: round + 1,
+      attempts: rounds,
     };
     if (!best || (verdict?.score ?? 0) > (best.verdict?.score ?? 0)) best = outcome;
     if (outcome.ready || !verdict) break;
     feedback = relanceFeedback(verdict);
   }
-  return best ?? { error: "Relance inexploitable : le rédacteur n'a rendu aucun texte utilisable." };
+  return best ? { ...best, attempts: rounds } : { error: "Relance inexploitable : le rédacteur n'a rendu aucun texte utilisable." };
 }

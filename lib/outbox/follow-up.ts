@@ -109,11 +109,11 @@ export async function composeFollowUp(
   if (blocked) return { ok: false, error: followUpRefusal(blocked) };
   const { data: previous } = await db
     .from("messages")
-    .select("type, subject, body, sent_at, thread_id, gmail_message_id")
+    .select("id, type, subject, body, sent_at, thread_id, gmail_message_id")
     .eq("prospect_id", prospect.id)
     .eq("status", "sent")
     .order("sent_at", { ascending: true });
-  const sent = (previous ?? []) as { type: string; subject: string | null; body: string; thread_id: string | null; gmail_message_id: string | null }[];
+  const sent = (previous ?? []) as { id?: string; type: string; subject: string | null; body: string; thread_id: string | null; gmail_message_id: string | null }[];
   const intro = sent.find((message) => message.type === "intro");
   const last = sent[sent.length - 1];
   if (!intro) return { ok: false, error: "Aucune intro envoyée : pas de relance possible." };
@@ -122,7 +122,10 @@ export async function composeFollowUp(
   const signature = signatureFor(offer);
   // L'intro envoyée porte la mention d'opposition et la signature : la relance ne lit que son corps.
   const introBody = stripOptOut(intro.body.split(signature)[0]).trim();
+  // Famille de l'intro (message_variants) : elle donne le &v d'un lien d'intro antérieur aux familles.
+  const { data: variant } = intro.id ? await db.from("message_variants").select("family").eq("message_id", intro.id).maybeSingle() : { data: null };
   const written = await writeRelance(input.ask ?? relanceAsk(prospect.id), {
+    introFamily: (variant as { family?: string | null } | null)?.family ?? null,
     introSubject: intro.subject,
     introBody,
     generic: isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null }),

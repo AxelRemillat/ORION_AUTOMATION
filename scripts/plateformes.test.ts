@@ -573,6 +573,11 @@ async function main() {
     const aiRow = db.rows("opportunities").find((item) => item.id === ai.opportunity_ids[0]) as Record<string, unknown>;
     check("titre non écarté (« ERP ») → « À voir », mention « Titre seul », aucun appel au modèle", ai.verdict === "a_voir" && aiRow.analysis_state === "titre_seul" && bucketOf(aiRow as never) === "a_voir" && llm === 0, JSON.stringify(ai));
     // Règles propres aux titres seuls (cas réels du 08/10).
+    // « Ads » (Cowork #13) : la fiche « Recherche expert Google Ads / Microsoft Ads » était passée en « À voir ».
+    for (const title of ["Recherche expert Google Ads / Microsoft Ads (Bing) expérience", "Campagnes Meta Ads pour une boutique", "Gestion de campagnes SEA"]) {
+      check(`titre seul publicité en ligne : « ${title} » → écarté (marketing)`, /marketing/.test(titleOnlyReason(title) ?? ""), String(titleOnlyReason(title)));
+    }
+    check("« ads » ne touche pas un mot qui le contient (« Adresses », « uploads »)", titleOnlyReason("Automatiser la saisie des adresses de livraison") === null && titleOnlyReason("Gestion des uploads de documents clients") === null);
     for (const title of ["Videaste", "Gestion réseaux sociaux, vidéos et publicités", "Developper mon compte instagram", "Recherche data scientist", "Entreprise de nettoyage sur lyon", "Site web", "Créer un site web pour une activité de magnétiseur", "Site Prestahop 1.7.8.11 : mise à jour", "Recherche développeur mobile"]) {
       check(`titre seul hors cible : « ${title} » → écarté`, titleOnlyReason(title) !== null);
     }
