@@ -4,7 +4,8 @@
  * `npm run test:plafonds`
  */
 import { fetchPappers } from "../lib/enrichment/pappers";
-import { openAiGuarded } from "../lib/jobs/handlers/prepare";
+import { openAiGuarded, relancesStep } from "../lib/jobs/handlers/prepare";
+import { prepCost } from "../lib/usage/prep-cost";
 import { budgets } from "../lib/settings/costs";
 import { prepareAlert } from "../lib/today/auto-run";
 import {
@@ -94,6 +95,16 @@ async function main() {
     check("… avec le motif en avancement (affiché par « Lancer maintenant »)", /Plafond OpenAI/.test(stopped.progress?.step ?? ""), stopped.progress);
     const normal = await openAiGuarded(step as never, async () => openAiBudgetState(3, 15))(ctx);
     check("sous le plafond : l'étape tourne normalement", ran === 1 && !normal.done);
+    // Plafond OpenAI PAR JOB (Cowork #44) : 0,5 € par défaut, réglable.
+    const capped = await openAiGuarded(step as never, async () => openAiBudgetState(3, 15), async () => 0.52)(ctx);
+    check("plafond du job (0,5 € par défaut) atteint : arrêt propre, avertissement dans le bilan", ran === 1 && capped.done === true && /Plafond OpenAI du job atteint \(0\.52 € \/ 0\.50 €\)/.test(capped.progress?.step ?? ""), capped.progress);
+    const roomy = { ...(ctx as object), job: { id: "j", params: { openaiCapEur: 2 }, state: {}, result: {}, user_id: "u1", created_at: "" } } as never;
+    const under = await openAiGuarded(step as never, async () => openAiBudgetState(3, 15), async () => 0.52)(roomy);
+    check("plafond réglé à 2 € : l'étape tourne", ran === 2 && !under.done);
+    check("coût de préparation : la rédaction est exclue", Math.abs(prepCost([{ operation: "facts", cost: 0.1 }, { operation: "qualite:redaction", cost: 1 }, { operation: "strategie", cost: 0.5 }, { operation: "relance", cost: 0.02 }]) - 0.12) < 1e-9);
+    // « Sans brouillons » : aucune relance rédigée (07/10 : 14 relances dans un lot sans brouillons).
+    const noDraft = await relancesStep({ db: new FakeDb({}) as never, userId: "u1", job: { id: "j", params: { skipDrafts: true }, state: {}, result: {}, user_id: "u1", created_at: "" } } as never);
+    check("préparation sans brouillons : les relances ne sont pas rédigées", /non rédigées/.test(noDraft.progress?.step ?? ""), noDraft.progress);
     check("en-tête d'« Aujourd'hui » : motif de l'arrêt affiché", prepareAlert({ status: "done", error: null, at: "x", failedDrafts: 0, firstDraftError: null, stoppedReason: "Plafond OpenAI du mois atteint (15,00 € / 15,00 €)" })?.startsWith("Dernière préparation arrêtée") === true);
   }
 

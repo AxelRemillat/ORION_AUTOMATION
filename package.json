@@ -26,6 +26,7 @@
     "contacts:reclasse": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/reclassify-emails.js",
     "usage:jour": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/usage-today.js",
     "funnel:run": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/funnel-run.js",
+    "prep:cout": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/prep-cost.js",
     "facts:rattrapage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts-backfill.js",
     "facts:rescore": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/facts-rescore.js",
     "drafts:lot": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/drafts-batch.js",

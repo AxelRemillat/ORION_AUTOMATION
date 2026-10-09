@@ -8,6 +8,7 @@
  *   npm run prepare:lot -- --target 10 --linkup-cap 8 --segment agences (plafond Linkup du job, segment)
  *   npm run prepare:lot -- --target 30 --days 30 --france              (entonnoir élargi pour ce run)
  *   npm run prepare:lot -- --target 30 --ft-days 60                    (fenêtre France Travail de 60 jours)
+ *   npm run prepare:lot -- --target 15 --openai-cap-eur 0.4               (plafond OpenAI du job, 0,5 € par défaut)
  *   npm run prepare:lot -- --status <jobId>                      (avancement)
  *
  * Aucun envoi : au plus des brouillons non validés.
@@ -46,6 +47,8 @@ async function main() {
         ...(process.argv.includes("--france") ? { departements: [] } : {}),
         // Fenêtre France Travail du run (30 jours par défaut ; le lot de stock passe 60).
         ...(value("--ft-days") ? { ftDays: Math.max(1, Math.min(90, Number(value("--ft-days")) || 30)) } : {}),
+        // Plafond OpenAI du job en euros (préparation seule ; 0,5 € par défaut).
+        ...(value("--openai-cap-eur") ? { openaiCapEur: Math.max(0.05, Number(value("--openai-cap-eur")) || 0.5) } : {}),
       },
     },
     userId,
