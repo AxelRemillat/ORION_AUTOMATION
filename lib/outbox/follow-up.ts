@@ -11,7 +11,7 @@ import type { Db } from "@/lib/trash/scope";
 import { followUpBlock, followUpRefusal } from "./follow-up-policy";
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { replySinceLastSend } from "./relances";
-import { writeRelance, type RelanceFiche } from "./relance-quality";
+import { writeRelance, type RelanceFiche, type RelanceLot } from "./relance-quality";
 import type { MessageType, Prospect } from "@/types";
 
 /**
@@ -100,7 +100,7 @@ export interface ComposedFollowUp {
  */
 export async function composeFollowUp(
   db: Db,
-  input: { userId: string; prospect: Prospect; type: FollowUpType; ask?: AskFn },
+  input: { userId: string; prospect: Prospect; type: FollowUpType; ask?: AskFn; /** Lot en cours : variété des verbes et des questions (Cowork #15). */ lot?: RelanceLot },
 ): Promise<{ ok: true; draft: ComposedFollowUp } | { ok: false; error: string }> {
   const { prospect, type } = input;
   // Jamais de relance pour un prospect opposé, « ne plus contacter », perdu ou
@@ -130,6 +130,7 @@ export async function composeFollowUp(
   const { data: variant } = intro.id ? await db.from("message_variants").select("family").eq("message_id", intro.id).maybeSingle() : { data: null };
   const written = await writeRelance(input.ask ?? relanceAsk(prospect.id), {
     introFamily: (variant as { family?: string | null } | null)?.family ?? null,
+    lot: input.lot,
     introSubject: intro.subject,
     introBody,
     generic: isGenericAddress({ email: prospect.email, email_type: prospect.email_type ?? null }),
@@ -158,7 +159,7 @@ export async function composeFollowUp(
 
 export async function draftFollowUp(
   db: Db,
-  input: { userId: string; prospect: Prospect; type: FollowUpType; ask?: AskFn; /** @deprecated remplacé par `ask` */ complete?: unknown },
+  input: { userId: string; prospect: Prospect; type: FollowUpType; ask?: AskFn; lot?: RelanceLot; /** @deprecated remplacé par `ask` */ complete?: unknown },
 ): Promise<FollowUpResult> {
   const composed = await composeFollowUp(db, input);
   if (!composed.ok) return composed;

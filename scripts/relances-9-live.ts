@@ -114,6 +114,8 @@ async function main() {
   }
   const dry = process.argv.includes("--dry");
   const pending = await pendingRelances(userId);
+  // Un lot par exécution : chaque relance prend un verbe et une question différents des précédentes.
+  const lot = relance.newLot();
 
   if (apply) {
     console.log(`${pending.length} relance(s) en attente à régénérer : ${pending.map((item) => item.prospect.company_name).join(", ")}${dry ? " (lecture seule)" : ""}`);
@@ -125,7 +127,7 @@ async function main() {
         console.log("Plafond de dépense atteint : arrêt.");
         break;
       }
-      const composed = await composeFollowUp(table as never, { userId, prospect, type: draft.type, ask: liveAsk(prospect.id) });
+      const composed = await composeFollowUp(table as never, { userId, prospect, type: draft.type, ask: liveAsk(prospect.id), lot });
       if (!composed.ok) {
         console.log(`  ${prospect.company_name} : ${composed.error}`);
         continue;
@@ -178,7 +180,7 @@ async function main() {
       lines.push("Plafond de dépense atteint : arrêt.");
       break;
     }
-    const composed = await composeFollowUp(table as never, { userId, prospect, type: "relance_1", ask: liveAsk(prospect.id) });
+    const composed = await composeFollowUp(table as never, { userId, prospect, type: "relance_1", ask: liveAsk(prospect.id), lot });
     if (!composed.ok) {
       console.log(`  ${prospect.company_name} : ${composed.error}`);
       continue;

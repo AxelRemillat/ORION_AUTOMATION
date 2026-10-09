@@ -11,6 +11,7 @@ import { verifyFollowUpOppositions } from "@/lib/outbox/opposition-backfill";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
 import { ensureFacts } from "@/lib/enrichment/facts-server";
 import { draftFollowUp } from "@/lib/outbox/follow-up";
+import { newLot } from "@/lib/outbox/relance-quality";
 import { draftReply } from "@/lib/outbox/reply-generate";
 import { runCompletionStage } from "@/lib/today/complete";
 import { liveCompletionDeps } from "@/lib/today/complete-live";
@@ -202,11 +203,13 @@ export async function relancesStep(ctx: StepContext): Promise<StepOutcome> {
   const { groups } = await loadToday(ctx.db, ctx.userId);
   const missing = flatten(groups).filter((item) => item.kind === "relance" && item.status === "todo" && !item.messageId && item.prospectId && item.followUpType);
   let written = 0;
+  // Un lot par préparation : chaque relance prend un verbe et une question différents des précédentes (Cowork #15, agent4).
+  const lot = newLot();
   for (const item of missing) {
     if (Date.now() > end) break;
     const { data } = await ctx.db.from("prospects").select("*").eq("id", item.prospectId!).maybeSingle();
     if (!data) continue;
-    const outcome = await draftFollowUp(ctx.db, { userId: ctx.userId, prospect: data as Prospect, type: item.followUpType! }).catch(() => null);
+    const outcome = await draftFollowUp(ctx.db, { userId: ctx.userId, prospect: data as Prospect, type: item.followUpType!, lot }).catch(() => null);
     if (outcome?.ok) written += 1;
   }
   return { progress: progress(`${written} relance(s) rédigée(s), dans le même fil`, 98) };

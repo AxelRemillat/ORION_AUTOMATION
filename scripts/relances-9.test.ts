@@ -18,6 +18,11 @@ import {
   TRANSFER_SENTENCE,
   withoutRecruitment,
   withFamilyMark,
+  outcomeVerb,
+  newLot,
+  rememberInLot,
+  RELANCE_MODELS,
+  buildRelanceWriterPrompt,
   writeRelance,
   type RelanceContext,
   type RelanceFiche,
@@ -210,6 +215,28 @@ async function main() {
       check(`${item.company} (note ${item.note}) : refusée par le code (${failed.map((criterion) => criterion.id).join(", ") || "—"})`, failed.length > 0);
     }
     check("accord du code avec Cowork : au moins 7 sur 8", caught >= 7, `${caught}/8`);
+  }
+
+  console.log("\n7. Cowork #15 : 2e phrase active, modèles de ton, variété dans le lot");
+  {
+    check("passif « La bonne remise pourrait être appliquée » → R8 à NON", at("R8", assembleRelance({ ...PARTS, outcome: "La bonne remise pourrait être appliquée à chaque commande." }, nominative))?.ok === false);
+    check("passif « serait confirmée » → R8 à NON", at("R8", assembleRelance({ ...PARTS, outcome: "Chaque commande serait confirmée avec la bonne référence." }, nominative))?.ok === false);
+    check("actif « Vous enverriez le devis du premier coup » → R8 à OUI", at("R8", assembleRelance({ ...PARTS, outcome: "Vous enverriez le devis du premier coup, ou la bonne question tout de suite." }, nominative))?.ok === true);
+    check("verbe de 2e phrase : enver, reserver, recev", outcomeVerb("Vous enverriez le devis du premier coup.") === "enver" && outcomeVerb("Votre accueil pourrait réserver le rendez-vous dès réception.") === "reserver" && outcomeVerb("Chaque magasin recevrait sa confirmation.") === "recev");
+    check("les 3 modèles de Cowork sont dans la consigne du rédacteur", RELANCE_MODELS.length === 3 && RELANCE_MODELS.every((model) => buildRelanceWriterPrompt({ generic: false, type: "relance_1", feedback: null }).includes(model.split("\n\n")[1])));
+    const lot = newLot();
+    rememberInLot(lot, { outcome: "Vous enverriez le devis du premier coup.", cta: "Ça vous arrive souvent ?" });
+    const withLot: RelanceContext = { ...nominative, lot };
+    check("verbe déjà pris dans le lot → R8 à NON", relanceCodeChecks(subject, assembleRelance({ ...PARTS, outcome: "Vous enverriez la bonne cote dès la première réponse." }, withLot), withLot).find((item) => item.id === "R8")?.ok === false);
+    check("question déjà posée dans le lot → R8 à NON", relanceCodeChecks(subject, assembleRelance({ ...PARTS, cta: "Ça vous arrive souvent ?" }, withLot), withLot).find((item) => item.id === "R8")?.ok === false);
+    check("autre verbe, autre question → R8 à OUI", relanceCodeChecks(subject, assembleRelance({ ...PARTS, outcome: "Le brasseur recevrait son devis le jour même.", cta: "Est-ce que ce cas se présente chez vous ?" }, withLot), withLot).find((item) => item.id === "R8")?.ok === true);
+    check("le rédacteur reçoit les verbes et questions déjà pris", /enverr/.test(buildRelanceWriterPrompt({ generic: false, type: "relance_1", feedback: null, lot })) && /ca vous arrive souvent/.test(buildRelanceWriterPrompt({ generic: false, type: "relance_1", feedback: null, lot })));
+    // writeRelance alimente le lot : la 2e relance ne peut plus reprendre le verbe de la 1re.
+    const shared = newLot();
+    const ask: AskFn = async (role) => (role === "writer" ? JSON.stringify({ ...PARTS, outcome: "Le brasseur recevrait son devis complet le jour même, sans cote à redemander.", cta: "Ça vous arrive souvent ?" }) : YES);
+    const first = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1", lot: shared });
+    const second = await writeRelance(ask, { introSubject: INTRO_SUBJECT, introBody: INTRO_BODY, generic: false, fiche: FICHE, type: "relance_1", lot: shared });
+    check("1re relance du lot prête, puis la 2e (même verbe, même question) « À revoir » R8", "body" in first && first.ready && "body" in second && !second.ready && /R8/.test(second.reason ?? "") && shared.verbs[0] === "recev", { first: "body" in first ? first.ready : first, second: "body" in second ? second.reason : second, lot: shared });
   }
 
   console.log(failures === 0 ? "\nTous les tests relances 9/10 passent.\n" : `\n${failures} test(s) en echec.\n`);
