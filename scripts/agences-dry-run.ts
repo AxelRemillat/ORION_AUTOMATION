@@ -35,6 +35,7 @@ import { countedText } from "@/lib/mail-preflight/words";
 import { liveAsk } from "./quality-live";
 import { coverSite } from "@/lib/enrichment/site";
 import { searchCompanies } from "@/lib/enrichment/gouv";
+import { resolveZone } from "@/lib/enrichment/geo";
 import { fetchPappers } from "@/lib/enrichment/pappers";
 import { findEmailByName } from "@/lib/enrichment/hunter";
 import { withLinkupRun } from "@/lib/linkup/run-cap";
@@ -137,11 +138,21 @@ async function qualify(since: string): Promise<{ kept: Candidate[]; rejected: Ca
   const pool: CompanyBase[] = [];
   let total = 0;
 
+  /*
+   * `criteria.zone` n'est qu'un LIBELLÉ : le filtre géographique vient de
+   * `options.zone`, une zone résolue (gouv.ts, ligne 296). Sans ça, « zone 69 »
+   * s'affichait partout alors que le vivier était national — défaut trouvé le
+   * 09/10 en comparant trois zones qui rendaient la même liste.
+   */
+  const resolved = await resolveZone(ZONE);
+  if (!resolved.ok) throw new Error(`Zone ${ZONE} non résolue : ${resolved.error}`);
+
   for (const naf of NAF_ORDER) {
     if (pool.length >= SCAN) break;
     const search = await searchCompanies(
       { naf: [naf], tranches: [...AGENCES_EFFECTIF_CODES], zone: ZONE },
       25,
+      { zone: resolved.data },
     );
     if (!search.ok) {
       console.log(`  (${naf} : ${search.error})`);

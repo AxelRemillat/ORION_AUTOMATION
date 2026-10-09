@@ -49,6 +49,7 @@
     "eval:quality": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-quality.js",
     "regenerate:facts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/regenerate-facts.js",
     "regenerate:drafts": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/regenerate-drafts.js",
+    "opposition:agences": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/agences-opposition.js",
     "dry:agences": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/agences-dry-run.js",
     "eval:mails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-mails.js",
     "test:mails": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/mails-quality.test.js",
