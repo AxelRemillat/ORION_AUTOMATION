@@ -359,9 +359,14 @@ check(
   noFacts.failed.map((item) => item.id).join(", "),
 );
 
+/*
+ * Pas « tiennent », mais « laissent de la marge » : avec un total EGAL au
+ * plafond, le modele le depassait a chaque fois (3 brouillons sur 4 a 78 mots,
+ * mesure du 09/10). Quatre mots de jeu au minimum.
+ */
 check(
-  "les budgets par bloc de F5 tiennent dans le plafond de la famille",
-  F5_HOOK_WORDS + F5_PROPOSAL_WORDS + F5_FIXED_WORDS <= FAMILY_LIMITS.F5.max,
+  "les budgets par bloc de F5 laissent de la marge sous le plafond",
+  F5_HOOK_WORDS + F5_PROPOSAL_WORDS + F5_FIXED_WORDS + 4 <= FAMILY_LIMITS.F5.max,
   `${F5_HOOK_WORDS} + ${F5_PROPOSAL_WORDS} + ${F5_FIXED_WORDS} > ${FAMILY_LIMITS.F5.max}`,
 );
 
