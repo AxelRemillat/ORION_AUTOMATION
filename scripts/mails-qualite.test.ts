@@ -4,6 +4,9 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { F4_TRANSPOSE, F4_TYPE_CASE } from "../lib/emails/quality/rules";
+import { demoForSupplierSide } from "../lib/emails/quality/demo-links";
+import { LEGACY_F2_INTRO } from "../lib/emails/quality/families";
 import { failureKey } from "../lib/emails/quality/generate";
 import { COWORK_SET_2 } from "../lib/emails/quality/cowork-d-set";
 import { emailBlocker } from "../lib/jobs/handlers/email";
@@ -812,6 +815,30 @@ async function main() {
     check("C1 : test de substitution (10 concurrents) et fidélité du fait", /TEST DE SUBSTITUTION/.test(prompt) && /10 concurrents/.test(prompt) && /FIDÉLITÉ/.test(prompt) && /Qualimat/.test(prompt));
     check("C2 : élément manquant précis + conséquence ; « le client attend » refusé", /élément manquant précis/.test(prompt) && /le client attend votre réponse/.test(prompt));
     check("C4 : l'objet lu par la démo est celui du prospect", /COHÉRENCE : l'objet lu par la démo/.test(prompt));
+  }
+
+  console.log("\nCowork #40 : pile « À revoir », démo fournisseurs, ouverture F2");
+  {
+    // Motif n°1 (6 refus F4 sur 30) : phrases RÉELLES de la pile du 09/10.
+    const honest = (text: string) => F4_TYPE_CASE.test(text) && F4_TRANSPOSE.test(text);
+    check("EDRA : « Pour vos commandes fournisseurs, je signalerais… » → acceptée", honest("La démo lit une commande type reçue par e-mail et prépare une confirmation à valider. Pour vos commandes fournisseurs, je signalerais celles restées sans confirmation."));
+    check("LSO MEDICAL : « comme je peux le faire pour… » → acceptée", honest("La démo lit une demande client type et prépare une réponse à valider, comme je peux le faire pour signaler une étape manquante dans vos demandes d'assistance."));
+    check("ARE ELECTRONIQUE : « un principe que je pourrais adapter à vos… » → acceptée", honest("La démo lit une commande type reçue par e-mail et prépare un accusé de réception à valider, un principe que je pourrais adapter à vos relances fournisseurs."));
+    check("YOU ASSUR : « ; je signalerais aux courtiers… » sans « vos » → toujours refusée (pas de transposition à LEUR activité)", !honest("La démo lit une demande de devis type et produit un brouillon prêt à valider ; je signalerais aux courtiers les éléments manquants avant chiffrage."));
+    check("ARCOM : constat au présent, sans transposition → toujours refusée", !honest("La démo lit une demande type reçue par e-mail et prépare une réponse au client à valider ; je signale les précisions manquantes avant l'envoi."));
+    check("ARTOIS : sans « type » (démo présentée comme faite chez eux) → toujours refusée", !honest("Dans la démo, je lis une demande d'intervention et prépare une réponse au client à valider ; ce principe s'appliquerait à vos interventions."));
+
+    // C4 (CEMA, Cowork 7,5) : devis fournisseurs démontrés par la démo devis CLIENT.
+    const cema = { subject: "Dates fournisseurs", hook: "Pour vos moules d'injection multi-empreintes, une confirmation fournisseur sans date promise complique le suivi des projets pharmaceutiques.", proposal: "Je lis les devis fournisseurs, crée les commandes et signale les dates promises manquantes." };
+    check("CEMA : devis fournisseurs → la démo devis client (/agent) est remplacée (tri des e-mails)", demoForSupplierSide(`${cema.hook} ${cema.proposal}`, DEMO_LINKS.devis).key === "emails");
+    check("factures fournisseurs → démo factures", demoForSupplierSide("Je lis les factures et devis fournisseurs.", DEMO_LINKS.devis).key === "factures");
+    check("devis CLIENT → la démo devis reste", demoForSupplierSide("Je prépare les devis de vos clients à partir de leurs demandes.", DEMO_LINKS.devis).key === "devis");
+    const cemaRules = checkMail(cema, assembleFamily("F2", cema, { greeting: GREETING, demo: DEMO_LINKS.devis, cta: ctaFor("p-cema") }), { ...ruleContext, family: "F2", subjectArm: "metier", demo: "devis", prospectText: "moules d'injection multi-empreintes, projets pharmaceutiques, fournisseurs" });
+    check("règle : démo devis client + devis fournisseurs → « Démo incohérente »", cemaRules.failures.some((line) => /devis CLIENT/.test(line)), cemaRules.failures.join(" | "));
+
+    // F2 : ouverture en une phrase, plus courte que l'ancienne.
+    check("F2 : nouvelle ouverture en UNE phrase (présentation + raison), plus courte", (F2_INTRO.match(/[.!?](\s|$)/g) ?? []).length === 1 && countWords(F2_INTRO) < countWords(LEGACY_F2_INTRO) && /Axel Remillat/.test(F2_INTRO) && /je vous écris/.test(F2_INTRO));
+    check("F2 : l'ancienne ouverture reste reconnue (mails déjà écrits, pas de D6)", deterministicChecks(["Bonjour,", LEGACY_F2_INTRO, "Vos moules sont faits sur mesure. Une date manquante retarde le suivi.", "Je signale les dates manquantes.", "Une démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2", "Auriez-vous 15 minutes la semaine prochaine pour en parler ?"].join("\n\n"), { family: "F2", greeting: "Bonjour," }).find((item) => item.id === "D6")?.ok === true);
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);
