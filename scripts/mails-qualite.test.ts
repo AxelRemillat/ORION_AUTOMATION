@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { hasDistinctiveFacts } from "../lib/emails/quality/facts-gate";
 import { familyWithSuspension, isFamily, suspendedFamilies } from "../lib/emails/quality/families";
 import { F4_TRANSPOSE, F4_TYPE_CASE } from "../lib/emails/quality/rules";
 import { demoForSupplierSide } from "../lib/emails/quality/demo-links";
@@ -853,6 +854,13 @@ async function main() {
     check("réglage vide (MAIL_SUSPENDED_FAMILIES=) : F4 revient", ids.some((id) => familyWithSuspension(id, solid, { MAIL_SUSPENDED_FAMILIES: "" }) === "F4"));
     check("réglage lu : « F4, F2 » suspend les deux ; absent = F4", suspendedFamilies({ MAIL_SUSPENDED_FAMILIES: "F4, F2" }).size === 2 && suspendedFamilies({}).has("F4"));
     check("historique : F4 reste une famille connue (statistiques, brouillons existants)", isFamily("F4"));
+  }
+
+  console.log("\nCowork #42 : porte « signal daté » et faits vérifiés");
+  {
+    const fact = (distinctiveness: number) => ({ text: "Découpe laser sur plan client", source_url: "https://x.fr", page_kind: "produits", distinctiveness, process_hint: "devis" });
+    check("un fait de distinctivité ≥ 2 vaut une accroche (CEPM, ACCÈS VISION, COLAERT)", hasDistinctiveFacts({ facts: [fact(1), fact(2)] }) && hasDistinctiveFacts({ facts: [fact(3)] }));
+    check("faits tous < 2 ou absents : la porte « signal daté » s'applique comme avant", !hasDistinctiveFacts({ facts: [fact(1), fact(0)] }) && !hasDistinctiveFacts({}) && !hasDistinctiveFacts(null));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

@@ -44,7 +44,7 @@ import { recordDraftVariant } from "@/lib/emails/quality/variant";
 import { clichesOf } from "@/lib/emails/quality/rules";
 import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import { acquireAvecLock, closeAvec, type AvecLock, type LockDb } from "@/lib/emails/quality/avec-lock";
-import { factsGate, keyFactsOf } from "@/lib/emails/quality/facts-gate";
+import { factsGate, hasDistinctiveFacts, keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { addresseeHintOf, askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
@@ -538,7 +538,9 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   // alors la spécificité 1 ou 2 sur 5, à raison. Trois appels de modèle pour
   // un mail qu'on n'enverra pas : autant le dire.
   const readiness = hookReadiness(factsResult.facts);
-  if (!readiness.ready && !params.force) {
+  // Cowork #42 : un fait vérifié de distinctivité ≥ 2 (key_figures.facts, agent1) vaut un signal daté :
+  // CEPM, ACCÈS VISION, COLAERT (facts_score 2-3) étaient bloquées à tort.
+  if (!readiness.ready && !params.force && !hasDistinctiveFacts(prospect.key_figures as Record<string, unknown> | null)) {
     throw new JobError(readiness.reason, false, 409, { needsFeeding: true, canForce: true });
   }
 
@@ -923,7 +925,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
      * même »). Il reste utile comme base, mais il ne doit jamais partir tel
      * quel sans qu'on sache pourquoi il est faible.
      */
-    generic: !hookReadiness(facts).ready,
+    generic: !hookReadiness(facts).ready && !hasDistinctiveFacts(prospect.key_figures as Record<string, unknown> | null),
     reviewReasons: draft.needsReview && draft.reviewReason ? [draft.reviewReason] : [],
     needLead: describesNeed(`${leadText} ${brief.pain.task}`)
       ? {

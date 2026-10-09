@@ -52,4 +52,7 @@ export function factsGate(figures: Record<string, unknown> | null | undefined): 
   return { ok: true, facts };
 }
 
+/** Au moins un fait vérifié propre à l'entreprise et lié à un process (distinctivité ≥ 2) : il vaut une accroche (Cowork #42). */
+export const hasDistinctiveFacts = (figures: Record<string, unknown> | null | undefined) => (keyFactsOf(figures) ?? []).some((fact) => fact.distinctiveness >= FACTS_MIN_DISTINCTIVENESS);
+
 export const isFactsInsufficient = (reason: string | null | undefined) => Boolean(reason?.startsWith(FACTS_INSUFFICIENT));

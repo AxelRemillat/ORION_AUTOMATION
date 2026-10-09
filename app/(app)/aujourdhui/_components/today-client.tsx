@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { Modal } from "@/components/ui";
 import type { Capacity } from "@/lib/today/capacity";
+import type { YieldPlan } from "@/lib/today/yield";
 import type { TodayItem } from "@/lib/today/types";
 import { ScheduleSheet } from "./schedule-sheet";
 import { TodayDock } from "./today-dock";
@@ -36,6 +37,7 @@ export function TodayClient({
   blockedReason = null,
   dailyTarget,
   initialKey,
+  yieldPlan = null,
 }: {
   today: string;
   items: TodayItem[];
@@ -48,6 +50,8 @@ export function TodayClient({
   dailyTarget: number;
   /** `?item=` : élément ouvert d'emblée (lien depuis une fiche, une notification). */
   initialKey: string | null;
+  /** « Céder la place aux relances » (Cowork #42). */
+  yieldPlan?: YieldPlan | null;
 }) {
   const state = useTodayState(initial, initialKey);
   const { items, current } = state;
@@ -75,7 +79,7 @@ export function TodayClient({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <TodayHeader today={today} items={items} capacity={capacity} liveJobId={liveJobId} alert={alert} blockedReason={blockedReason} dailyTarget={dailyTarget} onFinished={onFinished} />
+      <TodayHeader today={today} items={items} capacity={capacity} liveJobId={liveJobId} alert={alert} blockedReason={blockedReason} dailyTarget={dailyTarget} onFinished={onFinished} yieldPlan={yieldPlan} />
       <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
         <TodayList items={items} selected={state.index} checked={state.checked} onSelect={(index) => (setDiscarding(false), state.setIndex(index))} onToggle={state.toggle} />
         {current && (

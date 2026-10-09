@@ -12,6 +12,8 @@
  *
  * Exécution : `npm run test:aujourdhui`.
  */
+import { applyYield, nextBusinessDay, planYield, relancesWaitingOf } from "../lib/today/yield";
+import { FakeDb } from "./fake-supabase";
 import { readFileSync } from "node:fs";
 import { flatten, groupToday, nextTodo, type RawTodayItem } from "../lib/today/group";
 import { completionLabel, isComplete, shouldRetryCompletion, tagsOf } from "../lib/today/tags";
@@ -258,7 +260,44 @@ let capacityChecks: Promise<void> = Promise.resolve();
 
 // `loadCapacity` lit une base (fausse ici) : le rapport attend sa verification
 // avant de conclure, sinon `process.exit` la couperait avant qu'elle ne compte.
-void capacityChecks.then(() => {
+// « Céder la place aux relances » (Cowork #42) — chiffres réels du vendredi 09/10/2026 :
+// plafond 25 (jour 10), 16 envoyés, 9 intros programmées, 14 relances validées sans créneau.
+const yieldChecks = (async () => {
+  console.log("\nCéder la place aux relances (Cowork #42, 09/10)");
+  const intros = Array.from({ length: 9 }, (_, index) => ({
+    messageId: `intro-${index + 1}`,
+    companyName: `Intro ${index + 1}`,
+    // 15:20, 15:24 … 15:52 Paris (13:20 UTC …)
+    scheduledAt: new Date(Date.UTC(2026, 9, 9, 13, 20 + index * 4)).toISOString(),
+  }));
+  const plan = planYield({ remaining: 0, day: "2026-10-09", relancesWaiting: 14, intros, taken: ["2026-10-12T07:00:00.000Z"] });
+  check("plafond engagé (16 + 9 = 25/25) et 14 relances validées → le bouton s'affiche", plan.show && plan.relancesWaiting === 14);
+  check("9 intros à décaler (autant qu'il y en a, ≤ 14 relances)", plan.moves.length === 9);
+  check("vendredi 09/10 → jour ouvré suivant : lundi 12/10", plan.nextDay === "2026-10-12" && nextBusinessDay("2026-10-09") === "2026-10-12");
+  check("en tête du lundi : dès 9 h, dans l'ordre d'origine, sans se superposer au 9 h déjà pris", plan.moves[0].to > "2026-10-12T07:00:00.000Z" && plan.moves.every((move, index) => index === 0 || move.to > plan.moves[index - 1].to) && plan.moves.every((move) => move.to.startsWith("2026-10-12")));
+  const few = planYield({ remaining: 0, day: "2026-10-09", relancesWaiting: 3, intros });
+  check("3 relances → les 3 intros les PLUS TARDIVES du jour seulement", few.moves.map((move) => move.messageId).sort().join(",") === "intro-7,intro-8,intro-9");
+  check("créneau encore libre → pas de bouton", !planYield({ remaining: 1, day: "2026-10-09", relancesWaiting: 14, intros }).show);
+  check("aucune relance validée → pas de bouton", !planYield({ remaining: 0, day: "2026-10-09", relancesWaiting: 0, intros }).show);
+  check("aucune intro programmée → pas de bouton", !planYield({ remaining: 0, day: "2026-10-09", relancesWaiting: 14, intros: [] }).show);
+  check("relances en attente = relances VALIDÉES (pas les brouillons, pas les programmées)", relancesWaitingOf([{ kind: "relance", status: "valide" }, { kind: "relance", status: "todo" }, { kind: "relance", status: "programme" }, { kind: "nouveau", status: "valide" }] as unknown as TodayItem[]) === 1);
+
+  // Écriture : seulement après confirmation, seulement scheduled_at, jamais un envoi en cours.
+  const db = new FakeDb({
+    messages: [
+      { id: "intro-9", user_id: "u", type: "intro", send_status: "scheduled", scheduled_at: intros[8].scheduledAt, subject: "Objet", body: "Texte inchangé" },
+      { id: "intro-8", user_id: "u", type: "intro", send_status: "sending", scheduled_at: intros[7].scheduledAt, subject: "Objet", body: "Texte" },
+      { id: "intro-7", user_id: "u", type: "intro", send_status: "scheduled", scheduled_at: intros[6].scheduledAt, subject: "Objet", body: "Texte" },
+    ],
+  });
+  const result = await applyYield(db as never, "u", few, ["intro-9", "intro-8"]);
+  const row = (id: string) => db.tables.messages.find((message) => message.id === id)!;
+  check("décalage : l'intro confirmée et encore programmée change de créneau (lundi), son texte ne bouge pas", String(row("intro-9").scheduled_at).startsWith("2026-10-12") && row("intro-9").body === "Texte inchangé" && row("intro-9").send_status === "scheduled");
+  check("décalage : une intro en cours d'envoi n'est jamais touchée", row("intro-8").scheduled_at === intros[7].scheduledAt && result.skipped === 1);
+  check("décalage : rien sans confirmation (intro-7 du plan, non confirmée, ne bouge pas)", row("intro-7").scheduled_at === intros[6].scheduledAt && result.moved === 1);
+})();
+
+void Promise.all([capacityChecks, yieldChecks]).then(() => {
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
   process.exit(failures === 0 ? 0 : 1);
 });
