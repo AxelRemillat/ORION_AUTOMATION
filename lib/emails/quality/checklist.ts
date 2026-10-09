@@ -258,12 +258,31 @@ export async function judgeChecklist(ask: AskFn, input: ChecklistInput, operatio
   const code = deterministicChecks(input.core, { family: input.family, greeting: input.greeting });
   if (code.some((item) => !item.ok)) return verdictOf(code);
   const user = `Famille : ${input.family}\nEntreprise : ${input.company}\nDestinataire : ${input.recipientRole?.trim() || "rôle inconnu"}\nFaits de la fiche :\n${input.facts || "- (aucun)"}\nTexte du site (extrait) :\n${(input.siteText ?? "").slice(0, 3000) || "(aucun)"}\n\nMAIL\nObjet : ${input.subject}\n\n${input.core}`;
-  const raws = await Promise.all(
-    Array.from({ length: Math.max(1, samples) }, (_, index) => ask("judge", buildChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota)),
-  );
-  const semantic = majority(raws.map(parseChecklistSample), semanticCriteria(input.family));
+  const read = (index: number) => ask("judge", buildChecklistPrompt(), user, 0, index ? `${operation}:lecture-${index + 1}` : operation).catch(keepQuota);
+  const total = Math.max(1, samples);
+  const first = Math.min(BASE_SAMPLES, total);
+  const parsed = (await Promise.all(Array.from({ length: first }, (_, index) => read(index)))).map(parseChecklistSample);
+  // Arrêt anticipé (Cowork #38) : si les BASE_SAMPLES premières lectures sont toutes lisibles et UNANIMES sur
+  // C1 et C5, les lectures suivantes ne peuvent plus renverser la majorité sur CHECKLIST_SAMPLES : verdict
+  // identique, 2 appels économisés.
+  if (total > first && !unanimousOnWide(parsed, first, semanticCriteria(input.family))) {
+    parsed.push(...(await Promise.all(Array.from({ length: total - first }, (_, index) => read(first + index)))).map(parseChecklistSample));
+  }
+  const semantic = majority(parsed, semanticCriteria(input.family));
   if (!semantic) return null;
   return verdictOf([...code, ...semantic]);
+}
+
+/** Les lectures de base suffisent : toutes lisibles, et unanimes sur chaque critère tranché sur toutes les lectures (C1, C5). */
+export function unanimousOnWide(samples: readonly (Sample | null)[], expected: number, ids: readonly CriterionId[]): boolean {
+  const read = samples.filter((sample): sample is Sample => Boolean(sample));
+  if (read.length < expected) return false;
+  return ids
+    .filter((id) => WIDE.has(id))
+    .every((id) => {
+      const votes = read.map((sample) => sample[id]?.ok);
+      return votes.every((vote) => vote !== undefined) && new Set(votes).size === 1;
+    });
 }
 
 /** Réécriture CIBLÉE : seuls les critères à NON, avec leur citation. */
