@@ -1,3 +1,4 @@
+import { concreteDafQuestion } from "./daf";
 import { isOpenAIQuotaError } from "@/lib/ai/quota";
 import type { AskFn } from "@/lib/ai/chat";
 import { ALLOWED_DEMO_URLS, DEMO_HOST } from "./demo-links";
@@ -247,6 +248,8 @@ export interface ChecklistInput {
   recipientRole?: string | null;
   /** Texte du site déjà extrait (profil métier, signaux) : C1 y cherche le fait, sur le sens. */
   siteText?: string | null;
+  /** Douleur DAF / RAF (Cowork #46) : une question F3 concrète du rapprochement passe C1 sans fait d'entreprise. */
+  daf?: boolean;
 }
 
 /**
@@ -270,6 +273,12 @@ export async function judgeChecklist(ask: AskFn, input: ChecklistInput, operatio
   }
   const semantic = majority(parsed, semanticCriteria(input.family));
   if (!semantic) return null;
+  // Cowork #46 : en F3 DAF, la question qui nomme l'objet concret du rapprochement EST le fait (règle F3 de #36).
+  const question = input.core.replace(/\r\n/g, "\n").split(/\n\s*\n/)[1] ?? "";
+  if (input.daf && input.family === "F3" && concreteDafQuestion(question)) {
+    const c1 = semantic.find((item) => item.id === "C1");
+    if (c1 && !c1.ok) Object.assign(c1, { ok: true, citation: `question DAF concrète (règle F3, #46) : « ${question} »` });
+  }
   return verdictOf([...code, ...semantic]);
 }
 

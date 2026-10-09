@@ -33,6 +33,16 @@ export function dafFailures(text: string): string[] {
   return ["Douleur DAF / RAF : le mail doit parler du rapprochement des factures fournisseurs avec les commandes et bons de livraison avant la clôture (écart de quantité ou de prix, facture sans bon de commande), pas d'un autre sujet."];
 }
 
+/**
+ * Question F3 DAF CONCRÈTE (Cowork #46, règle F3 de #36) : elle nomme un objet concret du rapprochement —
+ * factures (fournisseurs) ET bons de livraison ou commandes, ou un écart de quantité / de prix, ou la clôture.
+ * Elle passe C1 sans fait d'entreprise. « Vos process comptables » reste vague.
+ */
+export function concreteDafQuestion(question: string): boolean {
+  if (!/\?\s*$/.test(question.trim()) || !/factur/i.test(question)) return false;
+  return /(bons? de livraison|\bBL\b|commandes?|[ée]carts? de (quantit[ée]|prix)|cl[ôo]ture)/i.test(question);
+}
+
 /** « Entre X et Y, … » : ouverture devenue un tic (FRIAX, DERELEK, #43). */
 export const ENTRE_OPENING = /^\s*entre\s+[^,.;]{2,80}\s+et\s+/i;
 /** Combien de brouillons prêts récents sont regardés. */

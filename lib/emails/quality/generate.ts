@@ -218,7 +218,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     // La check-list n'est demandée que pour un mail qui passe le garde-fou :
     // inutile de payer pour ce que la règle a déjà tranché.
     const verdict = rules.ok
-      ? await judgeChecklist(input.ask, { subject: parts.subject, core, family, greeting: input.greeting, company: input.companyName, facts: checklistFacts, recipientRole: input.recipientRole, siteText: input.prospectText }, `qualite:checklist:${attempt}`)
+      ? await judgeChecklist(input.ask, { subject: parts.subject, core, family, greeting: input.greeting, company: input.companyName, facts: checklistFacts, recipientRole: input.recipientRole, siteText: input.prospectText, daf }, `qualite:checklist:${attempt}`)
       : null;
     const body = withOptOut(`${core}\n\n${input.signature}`, input.signature);
     history.push({ parts, body, rules, verdict, demo: chosen.path });
