@@ -9,6 +9,7 @@ import { ageLabel, BUCKET_LABELS, bucketOf, SIZE_BADGE, sizeFlag, staleLabel, un
 import { EMAIL_KIND_LABELS } from "@/lib/opportunities/email/parse";
 import { emailsOf, emailsToSort, suggestedPrice, type OpportunityEmail } from "@/lib/opportunities/email/view";
 import { TriagePanel } from "./triage-panel";
+import { TITLE_ONLY_NOTE } from "@/lib/opportunities/title-only";
 import { FollowUpBox } from "./follow-up-box";
 import { followUpDue } from "@/lib/opportunities/follow-up-due";
 
@@ -313,7 +314,7 @@ export function OpportunitiesClient({
                             {item.published_at ? ` · ${ageLabel(item.published_at)}` : ""}
                             {item.budget ? ` · ${item.budget}` : ""}
                             {item.filter_reason ? ` · filtre : ${item.filter_reason}` : ""}
-                            {item.analysis_state === "pending" ? " · analyse en cours" : item.analysis_state === "a_analyser" ? " · à analyser" : item.analysis_state === "non_analysee" ? " · non analysée" : ""}
+                            {item.analysis_state === "pending" ? " · analyse en cours" : item.analysis_state === "a_analyser" ? " · à analyser" : item.analysis_state === "non_analysee" ? " · non analysée" : item.analysis_state === "titre_seul" ? " · titre seul" : ""}
                           </p>
                         </div>
                         {sizeFlag(item) && (
@@ -321,7 +322,7 @@ export function OpportunitiesClient({
                             Trop gros seul
                           </span>
                         )}
-                        {item.fit_score != null && <Badge tone={scoreTone(item.fit_score)}>{item.fit_score}/10</Badge>}
+                        {item.fit_score != null && item.analysis_state !== "titre_seul" && <Badge tone={scoreTone(item.fit_score)}>{item.fit_score}/10</Badge>}
                         <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{STATUS_LABELS[item.status]}</span>
                       </button>
                     </li>
@@ -367,6 +368,12 @@ export function OpportunitiesClient({
                       Analyser quand même
                     </Button>
                   </p>
+                ) : selected.analysis_state === "titre_seul" ? (
+                  // Alerte Codeur à titre seul (plateformes #11) : pas de score, l'annonce collée lancera l'analyse.
+                  <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 text-[13px] text-text">
+                    <p>{TITLE_ONLY_NOTE}.</p>
+                    {selected.url && <div className="mt-2">{openAd(selected)}</div>}
+                  </div>
                 ) : selected.fit_score == null ? (
                   <div className="flex items-center gap-2 text-[13px] text-muted">
                     {selected.analysis_state === "pending" ? "Analyse en cours." : selected.analysis_state === "a_analyser" ? "Plafond d'analyses du jour atteint." : selected.analysis_state === "non_analysee" ? "Non analysée : crédit OpenAI épuisé." : "Analyse absente."}

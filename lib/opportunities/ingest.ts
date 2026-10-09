@@ -1,9 +1,10 @@
+import { TITLE_ONLY, TITLE_ONLY_NOTE } from "./title-only";
 import type { AskFn } from "@/lib/ai/chat";
 import { quotaHitSince } from "@/lib/ai/quota";
 import type { Notification } from "@/lib/notify/ntfy";
 import { coreSignals } from "./core-signal";
 import { analyzeOpportunity, type Analysis } from "./analyze";
-import { prefilterReason } from "./prefilter";
+import { prefilterReason, titleOnlyReason } from "./prefilter";
 import { generateProposal } from "./proposal";
 import { isPlatform, proposalLanguage, type Platform } from "./types";
 
@@ -75,7 +76,14 @@ export interface IngestBody {
   published_at: string | null;
   /** Origine : flux RSS Codeur (défaut) ou e-mail de plateforme (/ingest-email). */
   source?: "rss" | "email";
+  /**
+   * Annonce réduite à son TITRE (alerte e-mail Codeur, plateformes #11) : pré-filtre sur
+   * le titre seul, puis « À voir » SANS analyse — un score sur un titre ne veut rien dire.
+   */
+  titleOnly?: boolean;
 }
+
+export { TITLE_ONLY, TITLE_ONLY_NOTE };
 
 export type Verdict = "alerte" | "a_voir" | "ignore";
 
@@ -92,6 +100,8 @@ export interface IngestResponse {
   filtered?: true;
   /** Analyse impossible (crédit OpenAI épuisé) : « Non analysée ». */
   not_analyzed?: true;
+  /** Annonce réduite au titre : « À voir », sans analyse (plateformes #11). */
+  title_only?: true;
 }
 
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
@@ -324,11 +334,19 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   };
 
   // 2. Pré-filtre gratuit : gardée pour audit, aucun LLM.
-  const filtered = prefilterReason({ title: body.title, description: body.description, categories: body.categories, budgetText: body.budget_text });
+  // Titre seul : pré-filtre sur le titre, avec les règles propres aux titres (plateformes #11).
+  const filtered = body.titleOnly ? titleOnlyReason(body.title, body.budget_text) : prefilterReason({ title: body.title, description: body.description, categories: body.categories, budgetText: body.budget_text });
   if (filtered) {
     const id = await insert({ status: "ignoree", analysis_state: "filtre", filter_reason: filtered });
     if (!id) return ingestRace(deps, body, base);
     return { ...base, id, score: null, verdict: "ignore", reasons: [filtered], orion_url: orionUrl(deps.baseUrl, id), filtered: true };
+  }
+
+  // 2b. Titre seul : « À voir », aucun appel au modèle (le collage de l'annonce lancera l'analyse).
+  if (body.titleOnly) {
+    const id = await insert({ analysis_state: TITLE_ONLY });
+    if (!id) return ingestRace(deps, body, base);
+    return { ...base, id, score: null, verdict: "a_voir", reasons: [TITLE_ONLY_NOTE], orion_url: orionUrl(deps.baseUrl, id), title_only: true };
   }
 
   // 3. Plafond quotidien d'analyses LLM.
@@ -380,3 +398,11 @@ async function ingestRace(deps: IngestDeps, body: IngestBody, base: { title: str
   if (!row) throw new Error("opportunité non enregistrée");
   return { ...base, id: row.id, score: row.fit_score, verdict: verdictOf(row.fit_score), reasons: row.fit_reasons ?? [], orion_url: orionUrl(deps.baseUrl, row.id), duplicate: true };
 }
+
+/**
+ * Annonce complète collée sur une fiche « Titre seul » (plateformes #11) : l'analyse
+ * normale tourne ; l'alerte part au même seuil que la veille (score ≥ 8). Sur une autre
+ * fiche, « Régénérer » n'alerte jamais (Axel est déjà dans l'app).
+ */
+export const shouldAlertAfterPaste = (previousState: string | null | undefined, score: number | null | undefined): boolean =>
+  previousState === TITLE_ONLY && score != null && score >= ALERT_SCORE;

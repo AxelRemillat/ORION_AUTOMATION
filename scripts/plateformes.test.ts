@@ -11,7 +11,7 @@ import { firstSentence, upworkFailures, usdAmounts, usdRange, PLATFORM_RULES } f
 import { UPWORK_CHECKLIST } from "../lib/opportunities/checklist-en";
 import { parseInboundEmail, parsePlatformEmail, platformOfSender, htmlToText, withoutLinks, type InboundEmail } from "../lib/opportunities/email/parse";
 import { codeurProjectDescription, decideEmail, ingestPlatformEmail, planPlatformEmail, statusAfterEvent } from "../lib/opportunities/email/ingest-email";
-import { prefilterReason } from "../lib/opportunities/prefilter";
+import { prefilterReason, titleOnlyReason } from "../lib/opportunities/prefilter";
 import { EMAIL_STATUSES, needsProposal, opportunityFromEmail, parseTriageCreate, statusForKind } from "../lib/opportunities/email/triage";
 import { emailsToSort, suggestedPrice } from "../lib/opportunities/email/view";
 import { freelanceSources, platformActivity } from "../lib/opportunities/stats";
@@ -22,7 +22,7 @@ import type { AskFn } from "../lib/ai/chat";
 import type { Notification } from "../lib/notify/ntfy";
 import { FakeDb } from "./fake-supabase";
 import { CODEUR_EMAIL_FIXTURES, CODEUR_PROJECT_FIXTURES, EMAIL_FIXTURES } from "./fixtures/opportunity-emails";
-import { ingestOpportunity } from "../lib/opportunities/ingest";
+import { ingestOpportunity, shouldAlertAfterPaste, TITLE_ONLY_NOTE } from "../lib/opportunities/ingest";
 import { bucketOf, SIZE_BADGE, sizeFlag } from "../lib/opportunities/view";
 import { buildFollowUpPrompt, dueFollowUps, fallbackFollowUp, followUpDue, followUpFailures, generateFollowUp } from "../lib/opportunities/follow-up";
 
@@ -526,15 +526,17 @@ async function main() {
     const deps = { db: db as never, userId: "u1", ask, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-08T12:43:00Z"), notify: async (notification: Notification) => (alerts.push(notification), true) };
     const created = await ingestPlatformEmail(deps, realFormat);
     const row = db.rows("opportunities")[0] as Record<string, unknown>;
-    check("format réel → pas filtré, analysé, alerte (score 9)", created.verdict === "alerte" && !row.filter_reason && row.fit_score === 9 && created.alerted && alerts.length === 1, JSON.stringify({ created, reason: row?.filter_reason }));
-    check("le modèle n'a vu ni lien ni pied de page", seen.length === 1 && !/https?:|logo|diffusion/i.test(seen[0]), seen[0]);
+    // Plateformes #11 : l'alerte ne donne que le titre → « À voir » SANS analyse (un score sur un titre ne veut rien dire).
+    check("format réel → pas filtré, « Titre seul », « À voir », sans appel ni alerte", created.verdict === "a_voir" && created.status === "cree" && !row.filter_reason && row.analysis_state === "titre_seul" && row.fit_score == null && bucketOf(row as never) === "a_voir" && !created.alerted && alerts.length === 0 && seen.length === 0, JSON.stringify({ created, state: row?.analysis_state, reason: row?.filter_reason }));
+    check("… lien de l'annonce gardé, annonce = le titre", row.url === "https://www.codeur.com/projects/499001-application-ia-agentiques" && row.body === "Application ia agentiques" && row.description_truncated === true, JSON.stringify({ url: row.url, body: row.body }));
 
     // Analyse impossible (erreur API, budget, réponse illisible) : « Non analysée », jamais « Ignorée ».
     const down: AskFn = async () => {
       throw new Error("500 server error");
     };
     const dbDown = new FakeDb({ opportunities: [], opportunity_emails: [] });
-    const viaEmail = await ingestPlatformEmail({ ...deps, db: dbDown as never, ask: down }, { ...realFormat, message_id: "<down-1>", subject: "Nouveau projet : Automatiser nos devis", text: realFormat.text.replace(/499001-application-ia-agentiques/g, "499002-automatiser-nos-devis") });
+    // Alerte AVEC un extrait (l'analyse doit tourner) — elle échoue : « Non analysée ».
+    const viaEmail = await ingestPlatformEmail({ ...deps, db: dbDown as never, ask: down }, CODEUR_PROJECT_FIXTURES[1].email);
     const downRow = dbDown.rows("opportunities")[0] as Record<string, unknown>;
     check("chemin e-mail, erreur API → « Non analysée », jamais « Ignorée », pas d'alerte", downRow.analysis_state === "non_analysee" && downRow.status !== "ignoree" && viaEmail.verdict === "a_voir" && !viaEmail.alerted, JSON.stringify({ state: downRow.analysis_state, status: downRow.status, verdict: viaEmail.verdict }));
     const dbRss = new FakeDb({ opportunities: [] });
@@ -545,6 +547,49 @@ async function main() {
     const dbBad = new FakeDb({ opportunities: [] });
     await ingestOpportunity({ ...deps, db: dbBad as never, ask: unreadable, notify: undefined }, { platform: "codeur", external_id: "499004", url: null, title: "Agent IA de tri des e-mails", description: "Trier nos e-mails entrants avec un agent IA.", description_truncated: true, budget_text: null, categories: [], published_at: null });
     check("réponse illisible du modèle → « Non analysée » aussi", (dbBad.rows("opportunities")[0] as Record<string, unknown>).analysis_state === "non_analysee");
+  }
+
+  console.log("\n18. Alerte Codeur à titre seul : « À voir », sans analyse (plateformes #11)");
+  {
+    const alertFor = (id: string, title: string): InboundEmail => ({
+      message_id: `<titre-seul-${id}@compte.codeur.com>`,
+      from: "Codeur.com <notification@compte.codeur.com>",
+      subject: `Nouveau projet : ${title}`,
+      text: `Un projet dans vos compétences vient d’être publié. Codeur.com\n[https://www.codeur.com/system/images/files/original/logo-codeur-ico-90.png]\nhttps://www.codeur.com/projects/${id}-x\n\nNouveau projet publié\n\nProjet :  ${title}\n\nDéposer une offre\n\nVous recevez ce mail car vous êtes inscrit à notre liste de diffusion.`,
+      html: "",
+      received_at: "2026-10-09T09:00:00Z",
+    });
+    let llm = 0;
+    const ask: AskFn = async () => ((llm += 1), "");
+    const db = new FakeDb({ opportunities: [], opportunity_emails: [] });
+    const deps = { db: db as never, userId: "u1", ask, baseUrl: "https://orion.axelremillat.com", now: () => new Date("2026-10-09T09:01:00Z"), notify: async () => true };
+
+    const wordpress = await ingestPlatformEmail(deps, alertFor("499101", "Refonte de notre site WordPress"));
+    const wpRow = db.rows("opportunities").find((item) => item.id === wordpress.opportunity_ids[0]) as Record<string, unknown>;
+    check("titre clairement hors cible (WordPress) → pré-filtre sur le titre → « Ignorée »", wordpress.verdict === "ignore" && wpRow.status === "ignoree" && typeof wpRow.filter_reason === "string");
+    const mobile = await ingestPlatformEmail(deps, alertFor("499102", "Application iOS native en Swift"));
+    check("titre « application iOS native » → « Ignorée »", mobile.verdict === "ignore");
+    const ai = await ingestPlatformEmail(deps, alertFor("499103", "ERP"));
+    const aiRow = db.rows("opportunities").find((item) => item.id === ai.opportunity_ids[0]) as Record<string, unknown>;
+    check("titre non écarté (« ERP ») → « À voir », mention « Titre seul », aucun appel au modèle", ai.verdict === "a_voir" && aiRow.analysis_state === "titre_seul" && bucketOf(aiRow as never) === "a_voir" && llm === 0, JSON.stringify(ai));
+    // Règles propres aux titres seuls (cas réels du 08/10).
+    for (const title of ["Videaste", "Gestion réseaux sociaux, vidéos et publicités", "Developper mon compte instagram", "Recherche data scientist", "Entreprise de nettoyage sur lyon", "Site web", "Créer un site web pour une activité de magnétiseur", "Site Prestahop 1.7.8.11 : mise à jour", "Recherche développeur mobile"]) {
+      check(`titre seul hors cible : « ${title} » → écarté`, titleOnlyReason(title) !== null);
+    }
+    for (const title of ["Application ia agentiques", "ERP", "Besoin d'une plate-forme de gestion parc motorisé d'une ferme.", "CRM pour école de danse", "Site de réservation PMR", "Je souhaite développer une plateforme web et mobile de loisirs", "Développeur / spécialiste IA & automatisation commerciale"]) {
+      check(`titre seul dans la cible ou à voir : « ${title} » → gardé`, titleOnlyReason(title) === null, String(titleOnlyReason(title)));
+    }
+    check("mention exacte", TITLE_ONLY_NOTE ==="Titre seul : ouvrez l'annonce et collez le texte complet pour l'analyse");
+    const dry = await planPlatformEmail(deps, alertFor("499104", "Agent IA pour nos devis"));
+    check("dry_run : action « cree », sans alerte prévue", dry.action === "cree" && !dry.would_alert);
+
+    // Annonce complète collée : l'analyse normale tourne ; alerte si ≥ 8 (et seulement depuis « Titre seul »).
+    check("collage sur « Titre seul », score 8 → alerte", shouldAlertAfterPaste("titre_seul", 8));
+    check("collage sur « Titre seul », score 7 → pas d'alerte", !shouldAlertAfterPaste("titre_seul", 7));
+    check("« Régénérer » sur une fiche déjà analysée → jamais d'alerte", !shouldAlertAfterPaste("ok", 10) && !shouldAlertAfterPaste(null, 9));
+    // Une ancienne note sur titre seul ne range plus la fiche dans « Ignorées ».
+    check("ancienne note 4/10 sur titre seul → « À voir »", bucketOf({ fit_score: 4, status: "a_repondre", analysis_state: "titre_seul" }) === "a_voir" && bucketOf({ fit_score: 4, status: "a_repondre", analysis_state: "ok" }) === "ignorees");
+    check("…sauf si le statut est « Ignorée » ou si le filtre l'a écartée", bucketOf({ fit_score: 4, status: "ignoree", analysis_state: "titre_seul" }) === "ignorees" && bucketOf({ fit_score: null, status: "a_repondre", analysis_state: "titre_seul", filter_reason: "x" }) === "ignorees");
   }
 
   console.log(failures === 0 ? "\nTous les tests plateformes passent.\n" : `\n${failures} test(s) en echec.\n`);
