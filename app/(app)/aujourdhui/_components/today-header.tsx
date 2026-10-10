@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Search } from "lucide-react";
 import type { Capacity } from "@/lib/today/capacity";
 import type { TodayItem } from "@/lib/today/types";
 import { RunNowButton } from "./run-now-button";
@@ -39,6 +41,15 @@ export function TodayHeader({
   const treated = items.filter((item) => item.status !== "todo").length;
   const pct = items.length ? Math.round((treated / items.length) * 100) : 0;
   const date = new Date(`${today}T12:00:00Z`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  /*
+   * Le plafond porte sur le JOUR D ENVOI (capacity.day), qui n est pas la date
+   * du titre : un samedi, la programmation vise le lundi. On le dit, au lieu de
+   * laisser croire que le plafond du jour affiche est atteint.
+   */
+  const sendLabel =
+    capacity.day === today
+      ? "aujourd’hui"
+      : new Date(`${capacity.day}T12:00:00Z`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
   return (
     <header className="flex min-w-0 flex-col gap-3">
@@ -53,17 +64,22 @@ export function TodayHeader({
         <div className="flex flex-wrap items-center gap-2">
           <span
             className="rounded-full border border-line bg-surface px-2.5 py-1 font-data text-[11px] text-muted"
-            title={`${capacity.sentToday} envoyé(s), ${capacity.plannedToday} déjà programmé(s) sur le jour d'envoi, plafond ${capacity.dailyCap}`}
+            title={`${capacity.sentToday} envoyé(s), ${capacity.plannedToday} déjà programmé(s) pour le ${sendLabel}, plafond ${capacity.dailyCap}`}
           >
             envois {capacity.sentToday}
             {capacity.plannedToday > 0 && ` + ${capacity.plannedToday} prog.`}/{capacity.dailyCap}
           </span>
           {capacity.remaining === 0 && (
-            /* Sans cette phrase, « 16/25 » laissait croire à neuf places
-               libres : les créneaux restants étaient pris par des envois
-               programmés, et toute relance validée était reportée. */
+            /*
+             * Sans cette phrase, « 16/25 » laissait croire à des places libres :
+             * les créneaux restants étaient pris par des envois programmés.
+             *
+             * Et elle NOMME le jour : la capacité porte sur le prochain jour
+             * ouvré, pas sur la date affichée en titre. Un samedi, « plus aucun
+             * créneau aujourd'hui » parlait en réalité du lundi.
+             */
             <span className="rounded-full border border-warn/25 bg-warn/10 px-2.5 py-1 font-data text-[11px] text-warn-ink">
-              plafond engagé · plus aucun créneau aujourd&apos;hui
+              plafond engagé · plus aucun créneau {sendLabel}
             </span>
           )}
           {yieldPlan && <YieldButton plan={yieldPlan} onDone={onFinished} />}
@@ -73,6 +89,19 @@ export function TodayHeader({
             </span>
           )}
           <RunNowButton liveJobId={liveJobId} dailyTarget={dailyTarget} onFinished={onFinished} blockedReason={blockedReason} />
+          {/*
+            La recherche manuelle n'a plus d'onglet : elle s'ouvre ici, à côté
+            de « Lancer maintenant », parce qu'elle sert au même moment et au
+            même but — trouver des prospects — mais une fois sur dix.
+          */}
+          <Link
+            href="/recherche"
+            title="Signaux, critères, scan, ajout manuel, favoris"
+            className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-text"
+          >
+            <Search className="h-3.5 w-3.5" aria-hidden />
+            Recherche avancée
+          </Link>
         </div>
       </div>
       {alert && (

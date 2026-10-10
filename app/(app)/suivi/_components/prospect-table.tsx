@@ -5,10 +5,20 @@ import { Badge, Table, TBody, TD, TH, THead, TR, TableEmpty } from "@/components
 import { formatDate, formatEur } from "@/lib/utils";
 import { TrashButton } from "@/components/trash/trash-button";
 import { STAGE_TONE_VARS, stageOf } from "../_lib/stages";
+import { ShowMore, useShowMore } from "./show-more";
 import type { ProspectRow } from "../_lib/rows";
 
-/** Vue tableau du pipeline : dense, balayable, une ligne par prospect. */
+/**
+ * Vue tableau du pipeline : dense, balayable, une ligne par prospect.
+ *
+ * Vingt-cinq lignes d'abord, les plus récentes en haut, puis « Afficher plus ».
+ * La recherche et le filtre d'étape s'appliquent en amont (pipeline-board) :
+ * une fiche trouvée apparaît même si elle était au-delà des vingt-cinq.
+ */
 export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
+  const sorted = [...rows].sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""));
+  const { visible, rest, more } = useShowMore(sorted.length, 25);
+
   return (
     <Table>
       <THead>
@@ -24,10 +34,10 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
         </TR>
       </THead>
       <TBody>
-        {rows.length === 0 && (
+        {sorted.length === 0 && (
           <TableEmpty colSpan={6}>Aucun prospect ne correspond à ce filtre.</TableEmpty>
         )}
-        {rows.map((row) => {
+        {sorted.slice(0, visible).map((row) => {
           const stage = stageOf(row.status);
           const tone = STAGE_TONE_VARS[stage.tone];
           return (
@@ -81,6 +91,13 @@ export function ProspectTable({ rows }: { rows: ProspectRow[] }) {
             </TR>
           );
         })}
+        {rest > 0 && (
+          <TR>
+            <TD colSpan={6}>
+              <ShowMore rest={rest} onMore={more} />
+            </TD>
+          </TR>
+        )}
       </TBody>
     </Table>
   );

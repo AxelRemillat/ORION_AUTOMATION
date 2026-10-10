@@ -7,13 +7,22 @@ import { AlarmClock, Check } from "lucide-react";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, useToast } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import { setReminderDone } from "../actions";
+import { ShowMore, useShowMore } from "./show-more";
 import type { DueReminderRow } from "../_lib/rows";
 
-/** Bandeau « à relancer aujourd'hui », en tête du Suivi. */
+/**
+ * Bandeau « à relancer aujourd'hui », en tête du Suivi.
+ *
+ * Les cinq échéances les plus ANCIENNES d'abord — ce sont celles qui coûtent
+ * le plus à laisser filer — puis le reste à la demande. Le badge du titre
+ * garde le TOTAL : on pagine l'affichage, pas le compte.
+ */
 export function DueReminders({ reminders }: { reminders: DueReminderRow[] }) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const toast = useToast();
+  const sorted = [...reminders].sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  const { visible, rest, more } = useShowMore(sorted.length, 5);
 
   if (reminders.length === 0) return null;
 
@@ -43,7 +52,7 @@ export function DueReminders({ reminders }: { reminders: DueReminderRow[] }) {
       </CardHeader>
 
       <CardContent className="relative space-y-2">
-        {reminders.map((reminder) => (
+        {sorted.slice(0, visible).map((reminder) => (
           <div
             key={reminder.id}
             className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-2 px-3 py-2"
@@ -71,6 +80,7 @@ export function DueReminders({ reminders }: { reminders: DueReminderRow[] }) {
             </div>
           </div>
         ))}
+        <ShowMore rest={rest} onMore={more} label="Afficher les autres" />
       </CardContent>
     </Card>
   );

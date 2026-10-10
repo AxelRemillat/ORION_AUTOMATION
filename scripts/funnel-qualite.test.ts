@@ -325,6 +325,28 @@ const verdict = (s: HarvestedSignal, i: Identity) => filterSignal(s, i, { now: N
       /groupe étranger/.test(offTargetReason({ key_figures: { parent_foreign: true, headcount: 150, naf_code: "46.73A" }, size_range: null }) ?? ""),
     );
 
+    /*
+     * ESPACE 3000 (Cowork #15) : categorie INSEE ETI a son propre SIREN.
+     * `subsidiaryOf` ne voit que les filiales et les meres, donc la fiche
+     * passait a travers et arrivait dans « A relancer aujourd hui » avec son
+     * bouton « Relancer ». L entonnoir l ecarte pour les signaux neufs ; il
+     * faut la meme regle pour les fiches deja ouvertes.
+     */
+    check(
+      "fiche existante de categorie ETI : « hors cible » (ESPACE 3000)",
+      /catégorie INSEE ETI/.test(offTargetReason({ company_name: "ESPACE 3000", key_figures: { company_category: "ETI" }, size_range: null }) ?? ""),
+      String(offTargetReason({ company_name: "ESPACE 3000", key_figures: { company_category: "ETI" }, size_range: null })),
+    );
+    check(
+      "categorie GE aussi, et la casse ne compte pas",
+      /catégorie INSEE GE/.test(offTargetReason({ key_figures: { company_category: "ge" }, size_range: null }) ?? ""),
+    );
+    check(
+      "une PME garde sa place",
+      offTargetReason({ company_name: "PEAUCEROS", key_figures: { company_category: "PME", headcount: 40, naf_code: "25.62B" }, size_range: null }) === null,
+      String(offTargetReason({ company_name: "PEAUCEROS", key_figures: { company_category: "PME", headcount: 40, naf_code: "25.62B" }, size_range: null })),
+    );
+
     check("BODACC : établissement avant capital avant nomination", bodaccRank("Création d'établissement") < bodaccRank("Modification du capital") && bodaccRank("Modification du capital") < bodaccRank("Jean DUPONT devient président"));
 
     const now = "2026-09-30T10:00:00Z";

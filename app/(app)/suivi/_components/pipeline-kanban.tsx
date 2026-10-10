@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { ProspectStatus } from "@/types";
 import { STAGES, STAGE_TONE_VARS, stageOf, statusForDrop, type Stage } from "../_lib/stages";
-import { KanbanCard } from "./kanban-card";
+import { ColumnCards } from "./column-cards";
 import type { ProspectRow } from "../_lib/rows";
 
 /**
@@ -38,7 +38,14 @@ export function PipelineKanban({
     <div className="scrollbar-thin flex gap-3 overflow-x-auto pb-3">
       {STAGES.map((stage, stageIndex) => {
         const tone = STAGE_TONE_VARS[stage.tone];
-        const columnRows = rows.filter((row) => row.stageKey === stage.key);
+        /*
+         * La plus récente activité en haut : c'est l'ordre dans lequel on
+         * reprend un dossier. Une fiche sans activité passe après, à sa date
+         * de création près (lastActivity vaut alors created_at).
+         */
+        const columnRows = rows
+          .filter((row) => row.stageKey === stage.key)
+          .sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""));
         const isOver = overStage === stage.key && dragId !== null;
 
         return (
@@ -75,27 +82,19 @@ export function PipelineKanban({
                 background: isOver ? tone.soft : "var(--surface-2)",
               }}
             >
-              {columnRows.map((row) => (
-                <KanbanCard
-                  key={row.id}
-                  row={row}
-                  dragging={dragId === row.id}
-                  canMoveLeft={stageIndex > 0}
-                  canMoveRight={stageIndex < STAGES.length - 1}
-                  onDragStart={() => setDragId(row.id)}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setOverStage(null);
-                  }}
-                  onMove={(direction) => shift(row, direction)}
-                />
-              ))}
-
-              {columnRows.length === 0 && (
-                <p className="px-1 py-6 text-center text-[12px] text-faint">
-                  {isOver ? "Déposer ici" : "Vide"}
-                </p>
-              )}
+              <ColumnCards
+                rows={columnRows}
+                stageIndex={stageIndex}
+                stageCount={STAGES.length}
+                dragId={dragId}
+                isOver={isOver}
+                onDragStart={(row) => setDragId(row.id)}
+                onDragEnd={() => {
+                  setDragId(null);
+                  setOverStage(null);
+                }}
+                onShift={shift}
+              />
             </div>
           </section>
         );
