@@ -2,7 +2,8 @@ import { PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { Opportunity } from "@/lib/opportunities/types";
-import type { OpportunityEmail } from "@/lib/opportunities/email/view";
+import { emailsToSort, type OpportunityEmail } from "@/lib/opportunities/email/view";
+import { initialTab } from "@/lib/opportunities/tabs";
 import { OpportunitiesClient } from "./_components/opportunities-client";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export const metadata = { title: "Opportunités · ORION" };
  * Analyse et proposition par l'IA, suivi. Aucun envoi, aucune candidature,
  * aucune connexion aux plateformes, aucun scraping.
  */
-export default async function OpportunitesPage({ searchParams }: { searchParams?: { id?: string; filtre?: string } }) {
+export default async function OpportunitesPage({ searchParams }: { searchParams?: { id?: string; filtre?: string; p?: string } }) {
   await requireUser();
   const db = createClient() as unknown as { from: (table: string) => any };
   const [{ data }, emails] = await Promise.all([
@@ -29,17 +30,21 @@ export default async function OpportunitesPage({ searchParams }: { searchParams?
       .catch(() => [] as OpportunityEmail[]),
   ]);
   const opportunities = (data ?? []) as Opportunity[];
+  const filter = searchParams?.filtre === "relances" || searchParams?.filtre === "a_trier" ? searchParams.filtre : null;
+  // Onglet : ?p=codeur|upwork|comeup, ou celui de la fiche visée par ?id= (notification), Codeur par défaut.
+  const tab = initialTab({ p: searchParams?.p, id: searchParams?.id, filter, items: opportunities, toSort: emailsToSort(emails as OpportunityEmail[]) });
   return (
     <>
       <PageHeader
         title="Opportunités"
-        description="Codeur, Upwork, Malt, ComeUp : analyse d'adéquation et proposition prête à copier. Rien n'est envoyé automatiquement."
+        description="Codeur, Upwork, ComeUp : analyse d'adéquation et proposition prête à copier. Rien n'est envoyé automatiquement."
       />
       <OpportunitiesClient
         initial={opportunities}
         emails={emails as OpportunityEmail[]}
         focusId={searchParams?.id ?? null}
-        initialFilter={searchParams?.filtre === "relances" || searchParams?.filtre === "a_trier" ? searchParams.filtre : null}
+        initialTab={tab}
+        initialFilter={filter}
       />
     </>
   );
