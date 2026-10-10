@@ -4,6 +4,7 @@ import { loadPortfolio } from "@/lib/trash/portfolio";
 import { requireUser } from "@/lib/auth";
 import { offWeekend } from "@/lib/outbox/paris-time";
 import { followUpBlock } from "@/lib/outbox/follow-up-policy";
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { formatEur } from "@/lib/utils";
 import type { Prospect } from "@/types";
 import { DueReminders } from "./_components/due-reminders";
@@ -57,7 +58,16 @@ export default async function SuiviPage() {
   // contacter », perdu ou qui a répondu.
   const due: DueReminderRow[] = reminders
     .map((reminder) => ({ reminder, dueAt: offWeekend(new Date(reminder.due_at)).toISOString() }))
-    .filter(({ reminder, dueAt }) => dueAt <= limit && byId.has(reminder.prospect_id) && !followUpBlock(byId.get(reminder.prospect_id) ?? null))
+    /*
+     * Hors cible EN PLUS du blocage de relance : une ETI ou une filiale de
+     * groupe ne doit pas apparaitre ici avec un bouton « Relancer ». ESPACE
+     * 3000, categorie INSEE ETI, y figurait — `followUpBlock` ne regarde que
+     * l opposition et le statut, pas la cible (Cowork #15).
+     */
+    .filter(({ reminder, dueAt }) => {
+      const prospect = byId.get(reminder.prospect_id) ?? null;
+      return dueAt <= limit && prospect !== null && !followUpBlock(prospect) && !offTargetReason(prospect);
+    })
     .map(({ reminder, dueAt }) => {
       const prospect = byId.get(reminder.prospect_id) as Prospect;
       return {

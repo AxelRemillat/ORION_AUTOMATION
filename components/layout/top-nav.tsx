@@ -115,7 +115,14 @@ function Tab({
   badge?: number;
 }) {
   const { href, label, icon: Icon, hint } = item;
-  const active = pathname === href || pathname.startsWith(`${href}/`);
+  /*
+   * La recherche manuelle n a plus d onglet : quand on y est, c est Aujourd hui
+   * qui reste allume. On ne quitte pas le travail du jour, on l approfondit.
+   */
+  const active =
+    pathname === href ||
+    pathname.startsWith(`${href}/`) ||
+    (home && pathname.startsWith("/recherche"));
 
   return (
     <Link

@@ -14,6 +14,7 @@ import { competitorReason } from "@/lib/segments";
  *
  * Les quatre motifs, dans l'ordre où on les lit :
  *   - opposition à l'usage commercial des données (registre, via Pappers) ;
+ *   - catégorie INSEE ETI ou GE : 250 salariés ou plus ;
  *   - aucun salarié déclaré ;
  *   - capitaux propres sous la moitié du capital ;
  *   - commerce de détail ou service aux particuliers de moins de 20 salariés.
@@ -55,6 +56,17 @@ export function offTargetReason(
    */
   const group = subsidiaryOf(figures, prospect.company_name);
   if (group) return `filiale de groupe (${group}) : la décision se prend au siège`;
+  /*
+   * GRAND GROUPE PAR SA PROPRE CATÉGORIE INSEE. `subsidiaryOf` ne voit que les
+   * FILIALES et les sociétés mères ; une entreprise classée ETI ou GE à son
+   * propre SIREN passait à travers. L'entonnoir l'écarte pour les signaux
+   * neufs (largeGroupReason), les fiches déjà ouvertes ne l'étaient pas :
+   * ESPACE 3000, catégorie ETI, arrivait dans « À relancer aujourd'hui ».
+   */
+  const category = typeof figures.company_category === "string" ? figures.company_category.trim().toUpperCase() : null;
+  if (category === "ETI" || category === "GE") {
+    return `groupe de 250 salariés ou plus (catégorie INSEE ${category})`;
+  }
   const num = (value: unknown) => (typeof value === "number" ? value : null);
 
   const facts: DigFacts = {
