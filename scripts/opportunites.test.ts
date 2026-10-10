@@ -17,6 +17,8 @@ import { freshScore, ingestOpportunity, parseIngestBody, statusAfterAnalysis, ve
 import { prefilterReason } from "../lib/opportunities/prefilter";
 import { longestDelayDays, requestedItems } from "../lib/opportunities/requests";
 import { ageLabel, bucketOf, staleLabel, unseenAlerts } from "../lib/opportunities/view";
+import { bucketFilters, emailsOfTab, formPlatform, initialTab, isBadgeAlert, itemsOfTab, tabBadges, tabHref, tabOf, visibleTabs } from "../lib/opportunities/tabs";
+import type { Opportunity, Platform } from "../lib/opportunities/types";
 
 /**
  * Check-list des propositions (Cowork #32) : réponse du modèle scénarisée à
@@ -525,6 +527,43 @@ async function main() {
     const sageRules = checkProposal(sageParts, sageText.core, { language: "fr", budget: sageParts.budget, platform: "codeur", requested: requestedItems(sageParts.ad), ad: sageParts.ad }, sageText.text);
     check("Codeur : plus de 150 mots mais < 1 000 caractères → pas refusée pour les mots", !sageRules.failures.some((line) => /mots : la proposition/.test(line)), sageRules.failures.join(" | "));
     check("prompt du modèle figé (aucune donnée variable)", buildProposalChecklistPrompt() === buildProposalChecklistPrompt() && buildProposalChecklistPrompt().includes(AXEL_SENT[2].text));
+  }
+
+  console.log("\nOnglets par plateforme (Cowork #19)");
+  {
+    const row = (id: string, platform: Platform, extra: Partial<Opportunity> = {}) =>
+      ({ id, platform, fit_score: null, status: "a_repondre", seen_at: null, sent_at: null, replied_at: null, followed_up_at: null, filter_reason: null, analysis_state: null, ...extra }) as Opportunity;
+    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    const items = [
+      row("c1", "codeur", { fit_score: 9 }),
+      row("c2", "codeur", { fit_score: 9, seen_at: daysAgo(0) }),
+      row("u1", "upwork", { fit_score: 8 }),
+      row("u2", "upwork", { fit_score: 9, status: "ignoree" }),
+      row("k1", "comeup", { status: "envoyee", sent_at: daysAgo(4) }),
+    ];
+    check("Codeur par défaut", initialTab({ items }) === "codeur");
+    check("?p=upwork → Upwork, ?p=comeup → ComeUp", initialTab({ p: "upwork", items }) === "upwork" && initialTab({ p: "comeup", items }) === "comeup");
+    check("?p= inconnu → Codeur", initialTab({ p: "malt", items }) === "codeur");
+    check("?id= d'une fiche Upwork (notification) → onglet Upwork, même avec ?p=codeur", initialTab({ id: "u1", p: "codeur", items }) === "upwork");
+    check("?id= d'une fiche Malt → onglet « Autres »", initialTab({ id: "m1", items: [...items, row("m1", "malt")] }) === "autres");
+    check("?id= inconnu → ?p= ou Codeur", initialTab({ id: "zz", p: "comeup", items }) === "comeup");
+    check("?filtre=relances sans ?p= → premier onglet avec une relance due (ComeUp, 3 j)", initialTab({ filter: "relances", items }) === "comeup");
+    check("?filtre=a_trier sans ?p= → premier onglet avec un e-mail à trier", initialTab({ filter: "a_trier", items, toSort: [{ platform: "upwork" }] }) === "upwork");
+
+    check("« Autres » absent sans fiche Malt ni Autre", visibleTabs(items).join(",") === "codeur,upwork,comeup");
+    check("« Autres » présent dès une fiche Malt", visibleTabs([...items, row("m1", "malt")]).join(",") === "codeur,upwork,comeup,autres");
+    check("?p=autres sans fiche → Codeur (l'onglet n'existe pas)", initialTab({ p: "autres", items }) === "codeur");
+    check("une fiche « autre » va dans « Autres »", tabOf("autre") === "autres" && itemsOfTab([...items, row("a1", "autre")], "autres").length === 1);
+
+    const badges = tabBadges(items);
+    check("badge par onglet = règle de la barre (≥ 8, non vue, pas ignorée)", badges.codeur === 1 && badges.upwork === 1 && badges.comeup === 0 && badges.autres === 0, JSON.stringify(badges));
+    check("somme des badges = badge de la barre", Object.values(badges).reduce((a, b) => a + b, 0) === items.filter(isBadgeAlert).length);
+
+    check("formulaire pré-réglé sur l'onglet (Codeur, Upwork, ComeUp ; Autres → Malt)", formPlatform("codeur") === "codeur" && formPlatform("upwork") === "upwork" && formPlatform("comeup") === "comeup" && formPlatform("autres") === "malt");
+    check("Codeur garde « Ignorées » même vide ; Upwork sans « Ignorées » si vide", bucketFilters("codeur", []).includes("ignorees") && !bucketFilters("upwork", itemsOfTab(items, "upwork").filter((item) => item.status !== "ignoree")).includes("ignorees") && bucketFilters("upwork", itemsOfTab(items, "upwork")).includes("ignorees"));
+    const mails = [{ platform: "upwork" as Platform }, { platform: "comeup" as Platform }, { platform: "malt" as Platform }, { platform: null }];
+    check("e-mails à trier : Upwork et ComeUp les leurs, Codeur tous les autres (rien ne disparaît)", emailsOfTab(mails, "upwork").length === 1 && emailsOfTab(mails, "comeup").length === 1 && emailsOfTab(mails, "codeur").length === 2);
+    check("lien d'onglet", tabHref("upwork") === "/opportunites?p=upwork");
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);
