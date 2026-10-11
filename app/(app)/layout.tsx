@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { trashCount } from "@/lib/trash/scope";
 import { UndoHost } from "@/components/trash/undo-host";
+import { laneOf, LAUNCH_FRESH_DAYS } from "@/lib/opportunities/lane";
 
 /**
  * Layout des routes protégées.
@@ -14,7 +15,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   // Compteur de la corbeille (prospects + mails), affiché dans le menu du compte.
   const supabase = createClient();
-  const [prospects, mails, received, alerts] = await Promise.all([
+  const db = supabase as unknown as { from: (table: string) => any };
+  const [prospects, mails, received, alerts, launches] = await Promise.all([
     trashCount(supabase),
     supabase.from("messages").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
     supabase.from("inbound_messages").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
@@ -26,12 +28,26 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .is("seen_at", null)
       .neq("status", "ignoree")
       .then((result: { count: number | null }) => result, () => ({ count: 0 })),
+    // Missions de lancement Codeur non vues (11/10/2026) : alertes quel que soit le score, calculées sur le texte.
+    db
+      .from("opportunities")
+      .select("platform, title, body, budget, categories, published_at, created_at, fit_score")
+      .eq("platform", "codeur")
+      .is("seen_at", null)
+      .is("filter_reason", null)
+      .neq("status", "ignoree")
+      .gte("created_at", new Date(Date.now() - LAUNCH_FRESH_DAYS * 86_400_000).toISOString())
+      .limit(300)
+      .then(
+        (result: { data: { fit_score: number | null }[] | null }) => (result.data ?? []).filter((row) => (row.fit_score ?? 0) < 8 && laneOf(row as never) === "lancement").length,
+        () => 0,
+      ),
   ]);
   const count = (prospects.count ?? 0) + (mails.count ?? 0) + (received.count ?? 0);
 
   return (
     <ToastProvider>
-      <AppShell email={user.email ?? "compte"} trashCount={count} alertCount={alerts.count ?? 0}>
+      <AppShell email={user.email ?? "compte"} trashCount={count} alertCount={(alerts.count ?? 0) + launches}>
         {children}
       </AppShell>
       <UndoHost />

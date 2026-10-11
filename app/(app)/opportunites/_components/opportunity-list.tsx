@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { PLATFORM_LABELS, STATUS_LABELS, type Opportunity } from "@/lib/opportunities/types";
 import { ageLabel, BUCKET_LABELS, SIZE_BADGE, sizeFlag } from "@/lib/opportunities/view";
 import type { Filter } from "@/lib/opportunities/tabs";
+import { LaneBadges } from "./lane-badges";
 
 export const scoreTone = (score: number | null) => (score == null ? "neutral" : score >= 8 ? "success" : score >= 5 ? "warning" : "danger");
 
@@ -39,6 +40,7 @@ export function OpportunityList({ shown, filter, selectedId, onSelect }: { shown
                       {(item.analysis_state && STATE_LABELS[item.analysis_state]) || ""}
                     </p>
                   </div>
+                  <LaneBadges item={item} />
                   {sizeFlag(item) && (
                     <span title={`${SIZE_BADGE} : ${sizeFlag(item)}`} className="shrink-0 rounded-full border border-warn/45 bg-warn/15 px-2 py-0.5 text-[11px] text-warn-ink">
                       Trop gros seul

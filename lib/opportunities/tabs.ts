@@ -1,6 +1,6 @@
 import type { Opportunity, Platform } from "./types";
 import type { OpportunityEmail } from "./email/view";
-import { bucketOf, type Bucket } from "./view";
+import { bucketOf, rowLane, type Bucket } from "./view";
 import { followUpDue } from "./follow-up-due";
 
 /**
@@ -26,9 +26,12 @@ export function visibleTabs(items: readonly Pick<Opportunity, "platform">[]): Pl
   return items.some((item) => tabOf(item.platform) === "autres") ? [...PLATFORM_TABS, "autres"] : [...PLATFORM_TABS];
 }
 
-/** Même règle que le badge de la barre (app/(app)/layout.tsx) : score ≥ 8, non vue, pas « Ignorée ». */
-export const isBadgeAlert = (row: Pick<Opportunity, "fit_score" | "status" | "seen_at">): boolean =>
-  row.fit_score != null && row.fit_score >= 8 && !row.seen_at && row.status !== "ignoree";
+/**
+ * Même règle que le badge de la barre (app/(app)/layout.tsx) : non vue, pas « Ignorée »,
+ * score ≥ 8 — ou mission de lancement Codeur (11/10/2026), sans motif de filtre.
+ */
+export const isBadgeAlert = (row: Pick<Opportunity, "fit_score" | "status" | "seen_at"> & Partial<Opportunity>): boolean =>
+  !row.seen_at && row.status !== "ignoree" && ((row.fit_score != null && row.fit_score >= 8) || (!row.filter_reason && rowLane(row as Parameters<typeof rowLane>[0]) === "lancement"));
 
 /** Alertes non vues par onglet. */
 export function tabBadges(items: readonly Row[]): Record<PlatformTab, number> {

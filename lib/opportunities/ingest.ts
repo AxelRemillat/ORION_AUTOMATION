@@ -6,6 +6,7 @@ import { coreSignals } from "./core-signal";
 import { analyzeOpportunity, type Analysis } from "./analyze";
 import { prefilterReason, titleOnlyReason } from "./prefilter";
 import { generateProposal } from "./proposal";
+import { CMS_NOTE, generateLaunchProposal, laneOf, type Lane } from "./launch";
 import { isPlatform, proposalLanguage, type Platform } from "./types";
 
 /**
@@ -17,6 +18,11 @@ import { isPlatform, proposalLanguage, type Platform } from "./types";
  *   plafond quotidien d'analyses atteint → « À analyser », sans LLM
  *   sinon analyse d'adéquation (0–10, 3 raisons, démo) sous échéance ;
  *   proposition seulement si score ≥ 7, en arrière-plan (l'alerte part vite).
+ *
+ * MISSION DE LANCEMENT (Codeur, 11/10/2026) : développement web sans CMS imposé,
+ * budget ≤ 1 000 € ou non indiqué → verdict « alerte » quel que soit le score (même
+ * sans analyse), proposition de lancement à prix fixe. CMS IMPOSÉ → « À voir », jamais
+ * d'alerte, jamais « Ignorée » par l'analyse.
  *
  * CRÉDIT OPENAI ÉPUISÉ (Cowork #35) : l'offre est enregistrée « Non analysée »
  * (jamais « Ignorée ») ; un signal fort du cœur de cible (IA, automatisation,
@@ -102,6 +108,21 @@ export interface IngestResponse {
   not_analyzed?: true;
   /** Annonce réduite au titre : « À voir », sans analyse (plateformes #11). */
   title_only?: true;
+  /** Catégorie Codeur (11/10/2026) : « lancement » (alerte) ou « cms_impose » (à voir). */
+  lane?: Lane;
+}
+
+/** Raison affichée en tête (notification, fiche) pour une catégorie Codeur. */
+export const LANE_REASONS: Record<Lane, string> = {
+  lancement: "Mission de lancement : développement web, petit budget — répondre parmi les premiers",
+  cms_impose: CMS_NOTE,
+};
+
+/** Verdict d'une fiche selon sa catégorie : lancement → alerte ; CMS imposé → à voir ; sinon le score. */
+export function laneVerdict(lane: Lane | null, score: number | null): Verdict {
+  if (lane === "lancement") return "alerte";
+  if (lane === "cms_impose") return "a_voir";
+  return verdictOf(score);
 }
 
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
@@ -162,7 +183,7 @@ const analysisBody = (body: IngestBody) => [body.description, body.categories.le
 const orionUrl = (baseUrl: string, id: string) => `${baseUrl.replace(/\/$/, "")}/opportunites?id=${encodeURIComponent(id)}`;
 
 /** Analyse puis écriture ; renvoie l'analyse (ou null si indisponible). */
-async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promise<Analysis | null> {
+async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody, lane: Lane | null = null): Promise<Analysis | null> {
   const started = Date.now();
   const analysis = await analyzeOpportunity(deps.ask, { title: body.title, body: analysisBody(body), budget: body.budget_text, platform: body.platform });
   const clock = (deps.now ?? (() => new Date()))();
@@ -190,7 +211,8 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody): Promi
     .eq("id", id);
   // Sous 5 : rangée avec les ignorées (Axel peut toujours la rouvrir) — seulement si elle est encore
   // « À répondre » : une commande ou un message reçu par e-mail a déjà fait avancer son statut.
-  const status = analysis ? statusAfterAnalysis("a_repondre", analysis.score) : null;
+  // Mission de lancement et CMS imposé : jamais « Ignorée » par l'analyse (11/10/2026).
+  const status = analysis && !lane ? statusAfterAnalysis("a_repondre", analysis.score) : null;
   if (status) await deps.db.from("opportunities").update({ status, updated_at: now }).eq("id", id).eq("status", "a_repondre");
   if (!analysis && quotaHitSince(started)) await alertWithoutAnalysis(deps, id, body);
   return analysis;
@@ -248,20 +270,25 @@ export async function catchUpUnanalyzed(deps: IngestDeps): Promise<number> {
   return done;
 }
 
-/** Proposition (score ≥ 7) : brouillon sur extrait, une réécriture au plus (coût ≤ ~0,01 €). */
-async function proposeRow(deps: IngestDeps, id: string, body: IngestBody, analysis: Analysis): Promise<void> {
-  const proposal = await generateProposal({
-    ask: deps.ask,
-    platform: body.platform,
-    language: proposalLanguage(body.platform, analysis.language),
-    title: body.title,
-    body: analysisBody(body),
-    budget: body.budget_text,
-    need: analysis.need,
-    demo: analysis.demo,
-    kind: analysis.kind,
-    maxRewrites: 1,
-  });
+/** Proposition (score ≥ 7, ou mission de lancement) : brouillon sur extrait, une réécriture au plus (coût ≤ ~0,01 €). */
+async function proposeRow(deps: IngestDeps, id: string, body: IngestBody, analysis: Analysis | null, lane: Lane | null = null): Promise<void> {
+  const launch = lane === "lancement";
+  const proposal = launch
+    ? await generateLaunchProposal({ ask: deps.ask, title: body.title, body: analysisBody(body) || body.title, budget: body.budget_text, need: analysis?.need ?? null })
+    : analysis
+      ? await generateProposal({
+          ask: deps.ask,
+          platform: body.platform,
+          language: proposalLanguage(body.platform, analysis.language),
+          title: body.title,
+          body: analysisBody(body),
+          budget: body.budget_text,
+          need: analysis.need,
+          demo: analysis.demo,
+          kind: analysis.kind,
+          maxRewrites: 1,
+        })
+      : { error: "aucune analyse" };
   if ("error" in proposal) return;
   await deps.db
     .from("opportunities")
@@ -285,8 +312,9 @@ async function proposeRow(deps: IngestDeps, id: string, body: IngestBody, analys
  * alerte ici : l'appelant décide (même seuil que la veille, verdict « alerte »).
  */
 export async function reanalyzeOpportunity(deps: IngestDeps, id: string, body: IngestBody): Promise<Analysis | null> {
-  const analysis = await analyzeRow(deps, id, body);
-  if (analysis && analysis.score >= PROPOSAL_SCORE) await proposeRow(deps, id, body, analysis).catch(() => undefined);
+  const lane = laneOf({ platform: body.platform, title: body.title, description: body.description, categories: body.categories, budget: body.budget_text, published_at: body.published_at }, (deps.now ?? (() => new Date()))());
+  const analysis = await analyzeRow(deps, id, body, lane);
+  if (lane === "lancement" || (analysis && analysis.score >= PROPOSAL_SCORE)) await proposeRow(deps, id, body, analysis, lane).catch(() => undefined);
   return analysis;
 }
 
@@ -342,11 +370,16 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
     return { ...base, id, score: null, verdict: "ignore", reasons: [filtered], orion_url: orionUrl(deps.baseUrl, id), filtered: true };
   }
 
-  // 2b. Titre seul : « À voir », aucun appel au modèle (le collage de l'annonce lancera l'analyse).
+  // Catégorie Codeur (11/10/2026) : mission de lancement (alerte) ou CMS imposé (à voir).
+  const lane = laneOf({ platform: body.platform, title: body.title, description: body.titleOnly ? "" : body.description, categories: body.categories, budget: body.budget_text, published_at: body.published_at }, now);
+  const laneFields = lane ? { lane, reasons: [LANE_REASONS[lane]] } : null;
+
+  // 2b. Titre seul : « À voir », aucun appel au modèle (le collage de l'annonce lancera l'analyse) —
+  //     sauf mission de lancement : alerte tout de suite, pour répondre parmi les premiers.
   if (body.titleOnly) {
     const id = await insert({ analysis_state: TITLE_ONLY });
     if (!id) return ingestRace(deps, body, base);
-    return { ...base, id, score: null, verdict: "a_voir", reasons: [TITLE_ONLY_NOTE], orion_url: orionUrl(deps.baseUrl, id), title_only: true };
+    return { ...base, id, score: null, verdict: laneVerdict(lane, null), reasons: lane ? [LANE_REASONS[lane], TITLE_ONLY_NOTE] : [TITLE_ONLY_NOTE], orion_url: orionUrl(deps.baseUrl, id), title_only: true, ...(lane ? { lane } : {}) };
   }
 
   // 3. Plafond quotidien d'analyses LLM.
@@ -355,14 +388,14 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   if ((today ?? []).length >= (deps.llmCap ?? DEFAULT_DAILY_LLM_CAP)) {
     const id = await insert({ analysis_state: "a_analyser" });
     if (!id) return ingestRace(deps, body, base);
-    return { ...base, id, score: null, verdict: "a_voir", reasons: ["plafond quotidien d'analyses atteint : à analyser"], orion_url: orionUrl(deps.baseUrl, id) };
+    return { ...base, id, score: null, verdict: laneVerdict(lane, null), reasons: [...(laneFields?.reasons ?? []), "plafond quotidien d'analyses atteint : à analyser"], orion_url: orionUrl(deps.baseUrl, id), ...(lane ? { lane } : {}) };
   }
 
   // 4. Analyse sous échéance ; la proposition suit en arrière-plan.
   const id = await insert({ analysis_state: "pending" });
   if (!id) return ingestRace(deps, body, base);
-  const analysisWork = analyzeRow(deps, id, body);
-  const finish = (analysis: Analysis | null) => (analysis && analysis.score >= PROPOSAL_SCORE ? proposeRow(deps, id, body, analysis) : Promise.resolve());
+  const analysisWork = analyzeRow(deps, id, body, lane);
+  const finish = (analysis: Analysis | null) => (lane === "lancement" || (analysis && analysis.score >= PROPOSAL_SCORE) ? proposeRow(deps, id, body, analysis, lane) : Promise.resolve());
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), deps.deadlineMs ?? INGEST_DEADLINE_MS);
@@ -372,7 +405,8 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   if (first === "timeout") {
     // Trop lent pour la réponse : on finit en arrière-plan, sans alerte push pour cet item.
     deps.background?.(analysisWork.then(finish));
-    return { ...base, id, score: null, verdict: "a_voir", reasons: [], orion_url: orionUrl(deps.baseUrl, id), pending: true };
+    // Mission de lancement : l'alerte ne dépend pas de l'analyse, elle part tout de suite.
+    return { ...base, id, score: null, verdict: laneVerdict(lane, null), reasons: laneFields?.reasons ?? [], orion_url: orionUrl(deps.baseUrl, id), pending: true, ...(lane ? { lane } : {}) };
   }
   const analysis = first;
   const proposalWork = finish(analysis);
@@ -384,10 +418,11 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
     ...base,
     id,
     score: analysis?.score ?? null,
-    verdict: verdictOf(analysis?.score ?? null),
-    reasons: analysis?.reasons ?? ["analyse indisponible : à analyser"],
+    verdict: laneVerdict(lane, analysis?.score ?? null),
+    reasons: [...(laneFields?.reasons ?? []), ...(analysis?.reasons ?? ["analyse indisponible : à analyser"])],
     ...(analysis ? {} : { not_analyzed: true as const }),
     orion_url: orionUrl(deps.baseUrl, id),
+    ...(lane ? { lane } : {}),
   };
 }
 

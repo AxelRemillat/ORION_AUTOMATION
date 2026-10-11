@@ -61,10 +61,11 @@ export function OpportunitiesClient({
     for (const item of tabItems) result[bucketOf(item)] += 1;
     return result;
   }, [tabItems]);
-  const shown = useMemo(
-    () => tabItems.filter((item) => filter === "toutes" || (filter === "relances" ? followUpDue(item) : bucketOf(item) === filter)),
-    [tabItems, filter],
-  );
+  const shown = useMemo(() => {
+    const rows = tabItems.filter((item) => filter === "toutes" || (filter === "relances" ? followUpDue(item) : bucketOf(item) === filter));
+    // Alertes : la plus récente en haut, pour répondre parmi les premiers (11/10/2026).
+    return filter === "alertes" ? [...rows].sort((a, b) => (b.published_at ?? b.created_at ?? "").localeCompare(a.published_at ?? a.created_at ?? "")) : rows;
+  }, [tabItems, filter]);
   const dueCount = useMemo(() => tabItems.filter((item) => followUpDue(item)).length, [tabItems]);
   const selected = tabItems.find((item) => item.id === selectedId) ?? null;
   const selectedEmails = useMemo(() => (selected ? emailsOf(emails, selected.id) : []), [emails, selected]);

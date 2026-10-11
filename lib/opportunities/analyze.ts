@@ -24,13 +24,16 @@ export const WE_DO = [
   "applications web, SaaS, MVP, CRM ou outils internes sur mesure",
   "front-end React / Next.js, back-end Node.js / API REST",
   "bases de données Supabase, PostgreSQL, Firebase ; dashboards",
+  // Développement web (décision d'Axel, 11/10/2026 — premières missions et premiers avis) :
+  "sites vitrines, landing pages, sites d'affiliation, blogs, refontes de site, avec leur base SEO technique",
 ] as const;
 
 export const WE_AVOID = [
-  "applications mobiles natives (iOS / Android, Swift, Kotlin)",
-  "sites vitrines WordPress / Wix / Shopify / Webflow, e-commerce PrestaShop / Magento / WooCommerce",
+  "applications mobiles natives seules (iOS / Android, Swift, Kotlin)",
+  "e-commerce lourd (Magento, catalogue de plus de 100 produits)",
   "PHP / Laravel / Symfony / Windev / .NET / Java",
-  "jeux vidéo, 3D, design, SEO, vidéo",
+  "SEO, rédaction, publicité (Ads) ou community management SANS création de site",
+  "jeux vidéo, graphisme, design, vidéo, 3D",
   "data science lourde (modèles, recherche)",
 ] as const;
 
@@ -72,6 +75,7 @@ Trois raisons courtes, factuelles, tirées de l'annonce (jamais inventées).
 Besoin reformulé : une ou deux phrases, en français, ce que le client veut obtenir concrètement.
 Type : "automatisation" (IA, automatisation, intégration entre outils existants) ou "fullstack" (application web, SaaS, MVP, CRM ou outil interne à développer).
 React Native / Flutter : 6 au plus (à voir).
+DÉVELOPPEMENT WEB (site vitrine, landing page, site d'affiliation, blog, refonte, application web, MVP) : DANS le périmètre — ne l'écarte pas. Le « SEO de base » d'un projet de site (titres, balisage, plan du site, Search Console) en fait partie. Un petit budget (« Moins de 500 € ») NE BAISSE PAS le score de ces missions : ce sont des missions de lancement. Un CMS imposé (WordPress, Wix, Shopify, Webflow…) : 5 à 7, c'est à Axel de juger.
 Démo la plus pertinente, une clé parmi :
 ${demos}
 Langue de l'annonce : "fr" ou "en".

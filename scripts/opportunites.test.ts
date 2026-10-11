@@ -14,7 +14,10 @@ import { countWords } from "../lib/emails/quality/template";
 import type { AskFn } from "../lib/ai/chat";
 import { FakeDb } from "./fake-supabase";
 import { freshScore, ingestOpportunity, parseIngestBody, statusAfterAnalysis, verdictOf, type IngestBody } from "../lib/opportunities/ingest";
-import { prefilterReason } from "../lib/opportunities/prefilter";
+import { classifyAd, isWebDev, prefilterReason, titleOnlyReason } from "../lib/opportunities/prefilter";
+import { CMS_NOTE, isUrgent, LAUNCH_DELAY, laneOf, launchBudget, launchKind, launchPrice, offersCount } from "../lib/opportunities/lane";
+import { generateLaunchProposal, launchChecks } from "../lib/opportunities/launch";
+import { LAUNCH_REFERENCES } from "../lib/opportunities/calibration";
 import { longestDelayDays, requestedItems } from "../lib/opportunities/requests";
 import { ageLabel, bucketOf, staleLabel, unseenAlerts } from "../lib/opportunities/view";
 import { bucketFilters, emailsOfTab, formPlatform, initialTab, isBadgeAlert, itemsOfTab, tabBadges, tabHref, tabOf, visibleTabs } from "../lib/opportunities/tabs";
@@ -173,8 +176,9 @@ async function main() {
     check("app RH React / Supabase → dans le périmètre", passes("Application web RH en React et Supabase", "Gestion des congés et des entretiens annuels, back-office et tableau de bord", ["Développement web", "Application web"]) === null);
     check("CRM sur mesure Next.js → dans le périmètre", passes("CRM sur mesure en Next.js", "Outil interne pour suivre nos clients et nos devis, base PostgreSQL", ["Développement web"]) === null);
     check("app iOS native → filtrée", /native/.test(passes("Application iOS native en Swift", "Application iPhone de suivi de chantier", ["Application mobile"]) ?? ""));
-    check("site WordPress → filtré", /CMS/.test(passes("Refonte de notre site WordPress", "Site vitrine de 8 pages avec blog", ["Site internet"]) ?? ""));
-    check("site e-commerce Shopify → filtré", /CMS/.test(passes("Boutique Shopify", "Création d'une boutique en ligne Shopify", ["E-commerce"]) ?? ""));
+    // 11/10/2026 : CMS imposé → plus jamais « Ignorée », « À voir » avec la mention (classifyAd).
+    check("site WordPress → plus filtré : CMS imposé", passes("Refonte de notre site WordPress", "Site vitrine de 8 pages avec blog", ["Site internet"]) === null && classifyAd({ title: "Refonte de notre site WordPress", description: "Site vitrine de 8 pages avec blog", categories: ["Site internet"], budgetText: null }).cms);
+    check("site e-commerce Shopify → plus filtré : CMS imposé", passes("Boutique Shopify", "Création d'une boutique en ligne Shopify", ["E-commerce"]) === null);
     check("Laravel / PHP → filtré", /PHP/.test(passes("Développeur Laravel", "Maintenance d'une application Laravel / PHP 8", ["Développement web"]) ?? ""));
     check("Java → filtré, JavaScript non", /Java/.test(passes("Développeur Java Spring Boot", "API Java", []) ?? "") && passes("Développeur JavaScript Node.js", "API REST Node.js et PostgreSQL", []) === null);
     check("jeu vidéo → filtré", /jeu/.test(passes("Jeu vidéo Unity", "Développement d'un jeu mobile sous Unity", []) ?? ""));
@@ -379,7 +383,7 @@ async function main() {
     check("formation en présentiel à Lyon → filtre", /formation/.test(prefilterReason({ title: "Formation ChatGPT", description: "Formation en présentiel dans nos locaux à Lyon pour 10 salariés", categories: [], budgetText: null }) ?? ""));
     check("formation en visio → passe", prefilterReason({ title: "Formation ChatGPT", description: "Formation en visio pour 10 salariés", categories: [], budgetText: null }) === null);
     check("catégorie « Site internet » mais automatisation Shopify → n8n demandée : passe", prefilterReason({ title: "Synchroniser les commandes Shopify avec notre ERP via n8n", description: "Automatisation des commandes", categories: ["Site internet", "E-commerce"], budgetText: null }) === null);
-    check("création de site WordPress → filtre", /site/.test(prefilterReason({ title: "Création d'un site WordPress vitrine", description: "Site de 5 pages", categories: ["Site internet"], budgetText: null }) ?? ""));
+    check("création de site WordPress → plus filtrée (CMS imposé : à voir)", prefilterReason({ title: "Création d'un site WordPress vitrine", description: "Site de 5 pages", categories: ["Site internet"], budgetText: null }) === null);
     check("télémarketing → filtre", /telemarketing|téléphonique/.test(prefilterReason({ title: "Prospection téléphonique B2B", description: "Appels sortants pour prendre des rendez-vous", categories: [], budgetText: null }) ?? ""));
 
     // Plafond quotidien : au-delà, « À analyser » sans LLM.
@@ -467,7 +471,7 @@ async function main() {
       published_at: "2026-10-06T13:29:41.000Z",
     };
     check("OuiGlass : le pré-filtre ne l'écarte plus (intranet, agents IA)", prefilterReason({ title: OUIGLASS.title, description: OUIGLASS.description, categories: OUIGLASS.categories, budgetText: OUIGLASS.budget_text }) === null);
-    check("site vitrine sans aucun signal métier : toujours filtré", prefilterReason({ title: "Refonte de site", description: "Refonte de notre site vitrine de 6 pages", categories: ["Migration ou refonte de site"], budgetText: null }) !== null);
+    check("site vitrine sans aucun signal métier : accepté (développement web, 11/10/2026)", prefilterReason({ title: "Refonte de site", description: "Refonte de notre site vitrine de 6 pages", categories: ["Migration ou refonte de site"], budgetText: null }) === null);
     const ouiDb = new FakeDb({ opportunities: [] });
     const ouiAsk: AskFn = async (_role, system) =>
       /Tu es le CLIENT/.test(system)
@@ -564,6 +568,78 @@ async function main() {
     const mails = [{ platform: "upwork" as Platform }, { platform: "comeup" as Platform }, { platform: "malt" as Platform }, { platform: null }];
     check("e-mails à trier : Upwork et ComeUp les leurs, Codeur tous les autres (rien ne disparaît)", emailsOfTab(mails, "upwork").length === 1 && emailsOfTab(mails, "comeup").length === 1 && emailsOfTab(mails, "codeur").length === 2);
     check("lien d'onglet", tabHref("upwork") === "/opportunites?p=upwork");
+  }
+
+  console.log("\nMissions de lancement Codeur (Cowork #20, 11/10/2026)");
+  {
+    const ad = (title: string, description = "", budgetText: string | null = null, categories: string[] = []) => ({ title, description, categories, budgetText });
+    // Les 3 cas réels (alertes e-mail à titre seul, budget non indiqué).
+    for (const title of ["Creation site web + base SEO", "Site d'affiliation", "Application éducative en français pour lycéens et étudiants"]) {
+      check(`cas réel « ${title} » : accepté (titre seul et annonce), développement web`, titleOnlyReason(title) === null && prefilterReason(ad(title)) === null && classifyAd(ad(title)).webDev, String(titleOnlyReason(title)));
+      check(`cas réel « ${title} » : mission de lancement`, laneOf({ platform: "codeur", title, body: title, budget: null }, new Date()) === "lancement");
+    }
+    check("« Campagne Google Ads pour site WordPress » : reste ignorée (Ads sans création de site)", /Ads/.test(prefilterReason(ad("Campagne Google Ads pour site WordPress", "Gérer nos annonces Google Ads pour notre site WordPress", "Moins de 500 €")) ?? "") && titleOnlyReason("Campagne Google Ads pour site WordPress") !== null);
+    const cms = ad("Création d'un site vitrine WordPress", "Site de 5 pages sous WordPress avec Elementor", "Moins de 500 €", ["Site internet"]);
+    check("CMS imposé : plus ignoré, « À voir », pas de lancement", prefilterReason(cms) === null && classifyAd(cms).cms && laneOf({ platform: "codeur", title: cms.title, body: cms.description, budget: cms.budgetText, categories: cms.categories }) === "cms_impose");
+    check("CMS imposé : bucket « À voir » même avec un score de 9, jamais d'alerte", bucketOf({ platform: "codeur", title: cms.title, body: cms.description, budget: cms.budgetText, fit_score: 9, status: "a_repondre" } as never) === "a_voir");
+    check("« Prestahop » (faute de frappe) reconnu comme CMS", classifyAd(ad("Site Prestahop 1.7.8.11 : mise à jour")).cms);
+    check("toujours ignorés : app mobile native, graphisme, vidéo, Magento, catalogue > 100 produits, data science lourde", [
+      ad("Application iOS native en Swift", "App iPhone de réservation"),
+      ad("Création de logo", "Logo et charte graphique"),
+      ad("Montage vidéo YouTube", "Montage de vidéos YouTube"),
+      ad("Boutique Magento 2", "Refonte de notre boutique Magento"),
+      ad("Création d'une boutique en ligne", "Catalogue de 350 produits à intégrer"),
+      ad("Modèle de machine learning", "Entraînement d'un modèle prédictif sur nos ventes"),
+    ].every((item) => prefilterReason(item) !== null));
+    check("SEO ou rédaction SANS site : ignorés ; site + SEO de base : accepté", prefilterReason(ad("Rédaction d'articles SEO", "10 articles de blog optimisés")) !== null && prefilterReason(ad("Besoin d'aide sur la partie SEO de mon site", "Mon site existe, il faut le référencer")) !== null && prefilterReason(ad("Création site vitrine + SEO", "Site de 5 pages avec référencement de base")) === null);
+    check("paramétrage Zoho, « beta testeur » : pas du développement web", !isWebDev("Intégration et paramétrage avancé de Zoho CRM") && !isWebDev("Besoin d'un beta testeur pour mon site"));
+    check("campagne Meta avec la catégorie « Landing page » : pas du développement web", !isWebDev("Création et gestion d'une campagne Meta", ["Publicité", "Landing page"]));
+
+    check("budget de lancement : ≤ 1 000 € ou non indiqué", launchBudget("Moins de 500 €") && launchBudget("500 € à 1 000 €") && launchBudget(null) && !launchBudget("1 000 € à 10 000 €") && !launchBudget("10 000 € et plus"));
+    check("prix de lancement : 300 € sous 500 €, sinon 400 €", launchPrice("Moins de 500 €") === 300 && launchPrice("300 €") === 300 && launchPrice("500 € à 1 000 €") === 400 && launchPrice(null) === 400);
+    check("délai : 7 jours pour un site, 3 semaines pour une application", launchKind("Site d'affiliation") === "site" && launchKind("Application éducative") === "app" && LAUNCH_DELAY.site.days === 7 && LAUNCH_DELAY.app.days === 21);
+    check("annonce de plus de 7 jours : plus une mission de lancement", laneOf({ platform: "codeur", title: "Site vitrine", body: "Site vitrine", budget: null, published_at: "2026-09-20T10:00:00Z" }, new Date("2026-10-11T10:00:00Z")) === null);
+    check("Upwork : jamais de mission de lancement (Codeur seulement)", laneOf({ platform: "upwork", title: "Landing page", body: "Landing page", budget: null }) === null);
+
+    const launchRow = { id: "l1", platform: "codeur", title: "Site d'affiliation", body: "Site d'affiliation", budget: "Moins de 500 €", fit_score: 4, status: "a_repondre", seen_at: null, filter_reason: null, published_at: new Date().toISOString() } as never;
+    check("lancement : ALERTE même avec un score de 4", bucketOf(launchRow) === "alertes");
+    check("lancement non vu : compte dans le badge ; vu : non", isBadgeAlert(launchRow) && !isBadgeAlert({ ...(launchRow as object), seen_at: new Date().toISOString() } as never));
+    check("« Urgent » : publiée il y a moins de 2 h", isUrgent(new Date(Date.now() - 30 * 60_000).toISOString()) && !isUrgent(new Date(Date.now() - 3 * 3_600_000).toISOString()));
+    check("offres déjà déposées : lues si le texte les donne, sinon rien", offersCount("Projet publié · 12 offres déposées") === 12 && offersCount("Nombre d'offres : 3") === 3 && offersCount("Site vitrine 5 pages") === null);
+
+    // Propositions de référence (validées par Axel) : elles passent la check-list de lancement.
+    for (const item of LAUNCH_REFERENCES) {
+      const failures = launchChecks(item.text, { price: item.price, kind: item.kind, budget: item.budget, exceeds: item.exceeds });
+      check(`référence « ${item.title} » (${item.price} €) : check-list OK, ${item.text.length} caractères`, failures.length === 0, failures.join(" | "));
+    }
+    const ref = LAUNCH_REFERENCES[0];
+    const frame = { price: ref.price, kind: ref.kind, budget: ref.budget };
+    check("check-list : une URL est refusée", launchChecks(ref.text.replace("Pour cadrer", "Voir axelremillat.com. Pour cadrer"), frame).some((line) => /URL/.test(line)));
+    check("check-list : sans « avis honnête », refusée", launchChecks(ref.text.replace("en échange d'un avis honnête à la fin de la mission", "sans engagement"), frame).length > 0);
+    check("check-list : deux questions, refusée", launchChecks(ref.text.replace("Mise en ligne", "Un logo ? Mise en ligne"), frame).some((line) => /question/.test(line)));
+    check("check-list : cahier des charges dépassé sans phase 2, refusée", launchChecks(LAUNCH_REFERENCES[2].text.replace(/Le forum à points[^\n]*\n\n/, ""), { ...LAUNCH_REFERENCES[2], exceeds: true }).some((line) => /phase 2/.test(line)));
+
+    // Rédaction : le code pose le prix, le délai, l'avis et la signature.
+    const parts = { reading: "Vous voulez un site d'affiliation clé en main sur votre niche, à enrichir ensuite vous-même.", proof: "", items: ["Un site rapide : accueil, catégories, modèle d'article.", "Un espace d'édition simple pour vos liens.", "La base SEO : titres, plan du site, Search Console."], exceeds: false, phase2: "", question: "Quelle niche visez-vous ?" };
+    let writes = 0;
+    const launchAsk: AskFn = async () => ((writes += 1), JSON.stringify(parts));
+    const out = await generateLaunchProposal({ ask: launchAsk, title: "Site d'affiliation", body: "Site d'affiliation", budget: "Moins de 500 €" });
+    check("proposition de lancement : 300 €, 7 jours, avis honnête, signature, prête en un essai", "text" in out && !out.needsReview && out.amountEur === 300 && out.delayDays === 7 && /tarif de lancement de 300 € à prix fixe, livré en 7 jours, en échange d'un avis honnête/.test(out.text) && out.text.endsWith("\n\nAxel Remillat") && writes === 1, JSON.stringify(out));
+
+    // Ingestion : alerte quel que soit le score ; CMS imposé jamais en alerte ni ignoré.
+    const lowAsk: AskFn = async (role, system) =>
+      /Tu analyses une annonce/.test(system) ? JSON.stringify({ score: 3, reasons: ["site", "petit budget", "simple"], need: "Un site d'affiliation.", demo: "general", language: "fr", kind: "fullstack" }) : role === "writer" ? JSON.stringify(parts) : "";
+    const ldb = new FakeDb({ opportunities: [] });
+    const ldeps = { db: ldb as never, userId: "u1", ask: lowAsk, baseUrl: "https://orion.axelremillat.com", now: () => new Date() };
+    const base = { platform: "codeur", url: "https://www.codeur.com/projects/1", description_truncated: false, categories: [], published_at: new Date().toISOString() };
+    const launch = await ingestOpportunity(ldeps, (parseIngestBody({ ...base, external_id: "l-1", title: "Site d'affiliation", description: "Création d'un site d'affiliation clé en main.", budget_text: "Moins de 500 €" }) as { ok: true; value: IngestBody }).value);
+    const launchStored = ldb.rows("opportunities").find((row) => row.id === launch.id) as Record<string, unknown>;
+    check("ingestion lancement : verdict « alerte » avec un score de 3, pas « Ignorée », proposition 300 €", launch.verdict === "alerte" && launch.lane === "lancement" && launchStored.status !== "ignoree" && launchStored.suggested_amount_eur === 300 && /avis honnête/.test(String(launchStored.proposal)), JSON.stringify({ launch, status: launchStored.status }));
+    const cmsIn = await ingestOpportunity(ldeps, (parseIngestBody({ ...base, external_id: "l-2", title: "Site vitrine WordPress", description: "Site de 5 pages sous WordPress.", budget_text: "Moins de 500 €" }) as { ok: true; value: IngestBody }).value);
+    const cmsStored = ldb.rows("opportunities").find((row) => row.id === cmsIn.id) as Record<string, unknown>;
+    check("ingestion CMS imposé : « À voir », mention, jamais ignorée (score 3)", cmsIn.verdict === "a_voir" && cmsIn.lane === "cms_impose" && cmsIn.reasons[0] === CMS_NOTE && cmsStored.status !== "ignoree", JSON.stringify(cmsIn));
+    const ads = await ingestOpportunity(ldeps, (parseIngestBody({ ...base, external_id: "l-3", title: "Campagne Google Ads pour site WordPress", description: "Gérer nos campagnes Google Ads.", budget_text: "Moins de 500 €" }) as { ok: true; value: IngestBody }).value);
+    check("ingestion « Campagne Google Ads pour site WordPress » : ignorée", ads.verdict === "ignore" && ads.filtered === true);
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);
