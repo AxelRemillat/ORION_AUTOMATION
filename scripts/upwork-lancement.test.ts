@@ -9,6 +9,8 @@
  * extrait en dessous — et marquée comme telle.
  */
 import { recommendedJobs } from "../lib/opportunities/email/parse";
+import { decideEmail, statusAfterEvent } from "../lib/opportunities/email/ingest-email";
+import { parsePlatformEmail } from "../lib/opportunities/email/parse";
 import {
   readUpworkBudget,
   upworkIgnoreReason,
@@ -180,6 +182,67 @@ console.log("\n6. Sujets reconnus");
   check("agent IA", upworkTopics({ title: "Build an AI agent for lead qualification" }).includes("agent IA"));
   check("chatbot et RAG", upworkTopics({ title: "RAG chatbot over our docs" }).includes("chatbot"));
   check("un logo n'est pas du métier", upworkTopics({ title: "Logo design for a bakery" }).length === 0);
+}
+
+console.log("\n7. Invitations, messages, offres et contrats");
+{
+  /*
+   * Le rattachement se fait par l IDENTIFIANT d offre, jamais par le titre :
+   * deux clients peuvent publier « n8n automation needed » le meme jour.
+   */
+  const parsed = (over: Record<string, unknown> = {}) =>
+    ({ platform: "upwork", kind: "invitation", title: "n8n workflow", url: "https://www.upwork.com/jobs/~021899001122334455", externalId: "~021899001122334455", clientName: null, budget: "$400", amountEur: null, body: "", jobs: [], ...over }) as never;
+
+  const known = { id: "fiche-1", status: "envoyee" as const, external_id: "~021899001122334455" };
+
+  const invitation = decideEmail(parsed(), known);
+  check("invitation sur une fiche connue : rattachee", invitation.action === "rattache", invitation.action);
+  check("et elle alerte", "alert" in invitation && invitation.alert === true);
+
+  const message = decideEmail(parsed({ kind: "message" }), known);
+  check("message sur une fiche connue : rattache et statut Reponse", message.action === "rattache" && "status" in message && message.status === "reponse", JSON.stringify(message));
+
+  // Upwork : un message sans fiche connue est la reponse a une proposition
+  // envoyee hors ORION. On cree la fiche en « Reponse » plutot que de la perdre.
+  const inconnu = decideEmail(parsed({ kind: "message" }), null);
+  check("message Upwork inconnu : fiche creee en Reponse", inconnu.action === "cree" && "status" in inconnu && inconnu.status === "reponse", JSON.stringify(inconnu));
+
+  const offre = decideEmail(parsed({ kind: "offre" }), known);
+  check("offre recue : statut Conversation", offre.action === "rattache" && "status" in offre && offre.status === "entretien", JSON.stringify(offre));
+
+  const gagnee = decideEmail(parsed({ kind: "gagnee" }), { ...known, status: "entretien" });
+  check("« Contract started » sur une fiche connue : Gagnee", gagnee.action === "rattache" && "status" in gagnee && gagnee.status === "gagnee", JSON.stringify(gagnee));
+  check("le statut est marque comme change", "statusChanged" in gagnee && gagnee.statusChanged === true);
+
+  // Sans fiche, rien a faire avancer : on ne fabrique pas une mission gagnee
+  // dont on n a jamais vu l offre.
+  const orpheline = decideEmail(parsed({ kind: "gagnee" }), null);
+  check("« Contract started » sans fiche : a trier, motif explicite", orpheline.action === "a_trier" && "reason" in orpheline && orpheline.reason.includes("rien") === false && orpheline.reason.length > 0, JSON.stringify(orpheline));
+
+  check("un contrat fait toujours avancer vers Gagnee", statusAfterEvent("envoyee", "gagnee") === "gagnee");
+  check("une fiche deja gagnee ne rebouge pas", statusAfterEvent("gagnee", "gagnee") === null);
+  check("une cloture apres un contrat ne le perd pas", statusAfterEvent("gagnee", "perdue") === null);
+}
+
+console.log("\n8. Sujets Upwork reels");
+{
+  const email = (subject: string) =>
+    parsePlatformEmail({
+      message_id: "m1",
+      from: '"Upwork" <donotreply@upwork.com>',
+      subject,
+      text: "https://www.upwork.com/jobs/~021899001122334455",
+      html: "",
+      received_at: "2026-10-12T09:00:00.000Z",
+    } as never);
+
+  check("« Contract started » est un contrat", email("Your contract with Acme Corp has started").kind === "gagnee", email("Your contract with Acme Corp has started").kind);
+  check("« sent you a message » est un message", email("John sent you a message").kind === "message", email("John sent you a message").kind);
+  check("« invited you to apply » est une invitation", email("You've been invited to apply to a job").kind === "invitation", email("You've been invited to apply to a job").kind);
+  check("« sent you an offer » est une offre", email("Acme sent you an offer").kind === "offre", email("Acme sent you an offer").kind);
+  check("« new jobs matching your profile » est une recommandation", email("5 new jobs matching your profile").kind === "recommandation", email("5 new jobs matching your profile").kind);
+  check("« proposal was declined » est une perte", email("Your proposal was declined").kind === "perdue", email("Your proposal was declined").kind);
+  check("l identifiant d offre est lu dans le lien", email("John sent you a message").externalId === "~021899001122334455", String(email("John sent you a message").externalId));
 }
 
 console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
