@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 import type { Capacity } from "@/lib/today/capacity";
+import { platformCounts, type PlatformTask } from "@/lib/today/platform";
 import type { TodayItem } from "@/lib/today/types";
 import { RunNowButton } from "./run-now-button";
 import { YieldButton } from "./yield-button";
@@ -16,6 +17,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count >
 export function TodayHeader({
   today,
   items,
+  platformTasks = [],
   capacity,
   liveJobId,
   alert = null,
@@ -25,6 +27,8 @@ export function TodayHeader({
   yieldPlan = null,
 }: {
   today: string;
+  /** Conversations de plateforme : comptees avec le reste du travail du jour. */
+  platformTasks?: PlatformTask[];
   items: TodayItem[];
   capacity: Capacity;
   liveJobId: string | null;
@@ -46,6 +50,7 @@ export function TodayHeader({
    * du titre : un samedi, la programmation vise le lundi. On le dit, au lieu de
    * laisser croire que le plafond du jour affiche est atteint.
    */
+  const platform = platformCounts(platformTasks);
   const sendLabel =
     capacity.day === today
       ? "aujourd’hui"
@@ -57,7 +62,12 @@ export function TodayHeader({
         <div>
           <h1 className="text-[26px] font-semibold capitalize tracking-tight text-text">{date}</h1>
           <p className="text-[13px] text-muted">
-            Préparé : {plural(count("reponse"), "réponse", "réponses")}, {plural(count("relance"), "relance", "relances")},{" "}
+            {/*
+              Les conversations de plateforme comptent avec le reste : ce sont
+              des reponses et des relances du jour, meme si rien ne part d ORION.
+            */}
+            Préparé : {plural(count("reponse") + platform.messages, "réponse", "réponses")},{" "}
+            {plural(count("relance") + platform.relances, "relance", "relances")},{" "}
             {plural(count("nouveau"), "nouveau", "nouveaux")}, {count("a_completer")} à compléter
           </p>
         </div>

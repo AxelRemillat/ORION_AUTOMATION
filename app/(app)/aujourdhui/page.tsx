@@ -7,6 +7,7 @@ import { flatten } from "@/lib/today/group";
 import { openAiBudget } from "@/lib/usage/budgets-server";
 import { loadToday } from "@/lib/today/load";
 import { loadYieldPlan } from "@/lib/today/yield";
+import { loadPlatformTasks } from "@/lib/today/platform-load";
 import { TodayClient } from "./_components/today-client";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,12 @@ export default async function AujourdhuiPage({ searchParams }: { searchParams: {
     lastPrepareHealth(db, user.id).catch(() => null),
     openAiBudget({ db: db as never }).catch(() => null),
   ]);
+  /*
+   * Conversations de plateforme : messages reçus et relances dues. Lecture à
+   * part, tolérante à l'échec — une table d'opportunités muette ne doit pas
+   * priver Axel de sa file du matin.
+   */
+  const platformTasks = await loadPlatformTasks(db, user.id).catch(() => []);
   const items = flatten(data.groups);
   // « Céder la place aux relances » : calculé seulement quand le plafond est engagé (lecture seule).
   const yieldPlan = await loadYieldPlan(db, user.id, capacity, items).catch(() => null);
@@ -35,6 +42,7 @@ export default async function AujourdhuiPage({ searchParams }: { searchParams: {
     <TodayClient
       today={data.today}
       items={items}
+      platformTasks={platformTasks}
       yieldPlan={yieldPlan}
       capacity={capacity}
       liveJobId={liveJobId}
