@@ -16,6 +16,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Compteur de la corbeille (prospects + mails), affiché dans le menu du compte.
   const supabase = createClient();
   const db = supabase as unknown as { from: (table: string) => any };
+  // Fraîcheur (Cowork #21) : une annonce de plus de 7 jours sans réponse d'Axel ne compte plus, une « Fermée » non plus.
+  const freshSince = new Date(Date.now() - LAUNCH_FRESH_DAYS * 86_400_000).toISOString();
   const [prospects, mails, received, alerts, launches] = await Promise.all([
     trashCount(supabase),
     supabase.from("messages").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
@@ -26,7 +28,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .select("id", { count: "exact", head: true })
       .gte("fit_score", 8)
       .is("seen_at", null)
-      .neq("status", "ignoree")
+      .not("status", "in", "(ignoree,fermee)")
+      .or(`status.neq.a_repondre,published_at.gte.${freshSince},and(published_at.is.null,created_at.gte.${freshSince})`)
       .then((result: { count: number | null }) => result, () => ({ count: 0 })),
     // Missions de lancement Codeur non vues (11/10/2026) : alertes quel que soit le score, calculées sur le texte.
     db
@@ -36,7 +39,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .is("seen_at", null)
       .is("filter_reason", null)
       .neq("status", "ignoree")
-      .gte("created_at", new Date(Date.now() - LAUNCH_FRESH_DAYS * 86_400_000).toISOString())
+      .neq("status", "fermee")
+      .gte("created_at", freshSince)
       .limit(300)
       .then(
         (result: { data: { fit_score: number | null }[] | null }) => (result.data ?? []).filter((row) => (row.fit_score ?? 0) < 8 && laneOf(row as never) === "lancement").length,

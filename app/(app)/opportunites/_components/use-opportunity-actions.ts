@@ -4,6 +4,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { useToast } from "@/components/ui";
 import type { Opportunity, Platform } from "@/lib/opportunities/types";
 import type { PlatformTab } from "@/lib/opportunities/tabs";
+import { PROPOSAL_FAILED } from "@/lib/opportunities/proposal-state";
 
 export type NewOpportunity = { platform: Platform; url: string; title: string; body: string; budget: string; deadline: string };
 
@@ -70,9 +71,15 @@ export function useOpportunityActions(setItems: Dispatch<SetStateAction<Opportun
     setBusy(`regen:${id}`);
     try {
       const response = await fetch(`/api/opportunites/${id}/regenerer`, { method: "POST" });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) toast.error(result.error ?? "Analyse indisponible.");
-      else reload(id);
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        // Échec affiché sur le bouton (« Échec — réessayer »), jamais un « en cours » sans fin (Cowork #21).
+        merge(id, { proposal_reason: `${PROPOSAL_FAILED} : ${result.error ?? "analyse indisponible"}` });
+        toast.error(result.error ?? "Analyse indisponible.");
+      } else reload(id);
+    } catch {
+      merge(id, { proposal_reason: `${PROPOSAL_FAILED} : réseau indisponible` });
+      toast.error("Réseau indisponible : réessayez.");
     } finally {
       setBusy(null);
     }

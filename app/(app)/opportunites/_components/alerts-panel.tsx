@@ -1,9 +1,10 @@
-import { Bell, Copy } from "lucide-react";
+import { Bell, EyeOff } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
 import { PLATFORM_LABELS, type Opportunity } from "@/lib/opportunities/types";
 import { ageLabel } from "@/lib/opportunities/view";
 import { OpenAdLink } from "./open-ad-link";
 import { LaneBadges } from "./lane-badges";
+import { ProposalButton } from "./proposal-button";
 import type { OpportunityActions } from "./use-opportunity-actions";
 
 /** « Nouvelles alertes » de l'onglet : score ≥ 8 ou mission de lancement, non vues, avec ouverture et copie directes. */
@@ -16,7 +17,7 @@ export function AlertsPanel({ alerts, actions, onSelect }: { alerts: Opportunity
       </h2>
       <ul className="space-y-2">
         {alerts.map((item) => (
-          <li key={item.id} className="rounded-lg border border-line-soft bg-surface p-3">
+          <li key={item.id} className="pf-card pf-tag rounded-lg border border-line-soft bg-surface p-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelect(item.id)}>
                 <p className="text-[13px] font-medium text-text">{item.title}</p>
@@ -37,8 +38,10 @@ export function AlertsPanel({ alerts, actions, onSelect }: { alerts: Opportunity
             </ul>
             <div className="mt-2 flex flex-wrap gap-2">
               <OpenAdLink item={item} onOpen={actions.markSeen} />
-              <Button size="sm" disabled={!item.proposal} onClick={() => actions.copy(item)}>
-                <Copy className="h-3.5 w-3.5" aria-hidden /> {item.proposal ? "Copier la proposition" : "Proposition en cours…"}
+              <ProposalButton item={item} actions={actions} />
+              {/* « Vu » (Cowork #21) : la carte quitte « Nouvelles alertes » tout de suite, et pour de bon. */}
+              <Button size="sm" variant="ghost" className="ml-auto" aria-label="Marquer comme vue" title="Marquer comme vue" onClick={() => actions.markSeen(item)}>
+                <EyeOff className="h-3.5 w-3.5" aria-hidden /> Vu
               </Button>
             </div>
           </li>

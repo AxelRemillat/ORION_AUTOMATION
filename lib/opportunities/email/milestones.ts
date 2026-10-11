@@ -7,13 +7,14 @@ import type { EmailKind } from "./parse";
  */
 
 /** Rang d'avancement : un statut n'avance que vers la droite (« Perdue » à part). */
-const RANK: Record<OpportunityStatus, number> = { a_repondre: 0, ignoree: 0, envoyee: 1, reponse: 2, entretien: 3, gagnee: 4, perdue: -1 };
+const RANK: Record<OpportunityStatus, number> = { a_repondre: 0, ignoree: 0, envoyee: 1, reponse: 2, entretien: 3, gagnee: 4, perdue: -1, fermee: -1 };
 
 /**
  * Statut après un événement, ou `null` s'il ne bouge pas :
  *   message → « Réponse » (le client a répondu), puis « Conversation » au suivant ;
  *   offre → « Conversation » au moins ; mission confirmée → « Gagnée » ;
- *   clôture → « Perdue », sauf une mission déjà gagnée.
+ *   clôture → « Perdue », sauf une mission déjà gagnée ; « Fermée » si Axel n'avait pas
+ *   postulé (projet fermé, attribué ou annulé avant toute proposition, Cowork #21).
  */
 export function statusAfterEvent(current: OpportunityStatus, kind: EmailKind): OpportunityStatus | null {
   const target: OpportunityStatus | null =
@@ -23,9 +24,12 @@ export function statusAfterEvent(current: OpportunityStatus, kind: EmailKind): O
     : kind === "perdue" ? "perdue"
     : null;
   if (!target || target === current) return null;
-  if (target === "perdue") return current === "gagnee" || current === "perdue" ? null : "perdue";
-  // Une affaire perdue qui reprend (nouveau message, offre) revient dans le suivi.
-  if (current === "perdue") return target;
+  if (target === "perdue") {
+    if (current === "gagnee" || current === "perdue" || current === "fermee") return null;
+    return current === "a_repondre" || current === "ignoree" ? "fermee" : "perdue";
+  }
+  // Une affaire perdue ou fermée qui reprend (nouveau message, offre) revient dans le suivi.
+  if (current === "perdue" || current === "fermee") return target;
   return RANK[target] > RANK[current] ? target : null;
 }
 

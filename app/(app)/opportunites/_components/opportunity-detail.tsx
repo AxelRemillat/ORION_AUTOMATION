@@ -1,4 +1,4 @@
-import { Copy, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button, Card, CardContent } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { PLATFORM_LABELS, type Opportunity } from "@/lib/opportunities/types";
@@ -13,16 +13,17 @@ import { rowLane } from "@/lib/opportunities/view";
 import { ProposalSection } from "./proposal-section";
 import { DetailFields } from "./detail-fields";
 import { FollowUpBox } from "./follow-up-box";
+import { ProposalButton } from "./proposal-button";
 import type { OpportunityActions } from "./use-opportunity-actions";
 
 const PENDING_LABELS: Record<string, string> = { pending: "Analyse en cours.", a_analyser: "Plafond d'analyses du jour atteint.", non_analysee: "Non analysée : crédit OpenAI épuisé." };
 
 /** Fiche d'une opportunité. Ouverte depuis la notification (`focused`), elle passe AVANT la liste sur mobile. */
 export function OpportunityDetail({ selected, focused, emails, actions }: { selected: Opportunity; focused: boolean; emails: OpportunityEmail[]; actions: OpportunityActions }) {
-  const { busy, regenerate, markSeen, copy } = actions;
+  const { busy, regenerate, markSeen } = actions;
   const analyzeBusy = busy === `regen:${selected.id}`;
   return (
-    <Card className={cn(focused && "order-first lg:order-none")}>
+    <Card className={cn("pf-card pf-tag", focused && "order-first lg:order-none")}>
       <CardContent className="space-y-4 p-4">
         <div>
           <p className="text-[12px] text-faint">
@@ -45,11 +46,7 @@ export function OpportunityDetail({ selected, focused, emails, actions }: { sele
           )}
           <div className="mt-2 flex flex-wrap gap-2">
             {selected.url && <OpenAdLink item={selected} onOpen={markSeen} />}
-            {selected.proposal && (
-              <Button size="sm" onClick={() => copy(selected)}>
-                <Copy className="h-3.5 w-3.5" aria-hidden /> Copier la proposition
-              </Button>
-            )}
+            <ProposalButton item={selected} actions={actions} />
           </div>
         </div>
 
