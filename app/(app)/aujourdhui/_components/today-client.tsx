@@ -8,6 +8,8 @@ import type { TodayItem } from "@/lib/today/types";
 import { ScheduleSheet } from "./schedule-sheet";
 import { TodayDock } from "./today-dock";
 import { TodayHeader } from "./today-header";
+import { PlatformInbox } from "./platform-inbox";
+import type { PlatformTask } from "@/lib/today/platform";
 import { TodayList } from "./today-list";
 import { EDITOR_ID, TodayPane } from "./today-pane";
 import { useTodayKeys } from "./use-today-keys";
@@ -31,6 +33,7 @@ const SHORTCUTS: [string, string][] = [
 export function TodayClient({
   today,
   items: initial,
+  platformTasks,
   capacity,
   liveJobId,
   alert = null,
@@ -41,6 +44,8 @@ export function TodayClient({
 }: {
   today: string;
   items: TodayItem[];
+  /** Conversations de plateforme : messages recus et relances dues (#17). */
+  platformTasks: PlatformTask[];
   capacity: Capacity;
   liveJobId: string | null;
   /** Échec de la dernière préparation (job ou brouillons), à afficher en tête. */
@@ -79,8 +84,9 @@ export function TodayClient({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <TodayHeader today={today} items={items} capacity={capacity} liveJobId={liveJobId} alert={alert} blockedReason={blockedReason} dailyTarget={dailyTarget} onFinished={onFinished} yieldPlan={yieldPlan} />
+      <TodayHeader today={today} items={items} platformTasks={platformTasks} capacity={capacity} liveJobId={liveJobId} alert={alert} blockedReason={blockedReason} dailyTarget={dailyTarget} onFinished={onFinished} yieldPlan={yieldPlan} />
       <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
+        <PlatformInbox tasks={platformTasks} />
         <TodayList items={items} selected={state.index} checked={state.checked} onSelect={(index) => (setDiscarding(false), state.setIndex(index))} onToggle={state.toggle} />
         {current && (
           <TodayPane
