@@ -360,7 +360,20 @@ export function recommendedJobs(email: Pick<InboundEmail, "text" | "html">, body
     const id = line.match(UPWORK_JOB_ID)?.[0].toLowerCase();
     if (!id) return;
     const previous = lines.slice(0, index).reverse().find((candidate) => candidate.trim() && !/https?:\/\//.test(candidate));
-    const following = lines.slice(index + 1, index + 6).filter((candidate) => candidate.trim() && !/https?:\/\//.test(candidate));
+    /*
+     * L'extrait S'ARRÊTE à la ligne vide : les offres d'une alerte sont
+     * séparées par une ligne blanche, et une fenêtre fixe de cinq lignes
+     * avalait le TITRE de l'offre suivante. Un extrait qui déborde pollue le
+     * pré-filtre, le score et les règles — « Scrape LinkedIn » recopié dans
+     * l'offre d'au-dessus la faisait refuser pour scraping.
+     */
+    const window: string[] = [];
+    for (const candidate of lines.slice(index + 1, index + 6)) {
+      if (!candidate.trim()) break;
+      if (/https?:\/\//.test(candidate)) continue;
+      window.push(candidate);
+    }
+    const following = window;
     const existing = jobs.get(id);
     const snippet = following.join(" ").slice(0, 400);
     if (existing) {

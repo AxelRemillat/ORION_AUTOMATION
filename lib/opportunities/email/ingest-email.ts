@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Notification } from "@/lib/notify/ntfy";
 import { ingestOpportunity, type IngestBody, type IngestDeps, type IngestResponse, type Verdict } from "../ingest";
+import { upworkIgnoreReason, upworkLaunchVerdict } from "../upwork-launch";
 import { PLATFORM_LABELS, type OpportunityStatus, type Platform } from "../types";
 
 export { milestones, statusAfterEvent };
@@ -315,6 +316,7 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   // 3. Recommandations : une opportunité par annonce, analysées comme la veille, sans alerte.
   if (decision.action === "recommandations") {
     const ids: string[] = [];
+    let launched = false;
     for (const job of parsed.jobs) {
       const result = await ingestOpportunity(ingestDeps, {
         platform,
@@ -329,9 +331,41 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
         source: "email",
       });
       ids.push(result.id);
+
+      /*
+       * LANCEMENT UPWORK (#18). Axel vient d'ouvrir son compte : une offre dans
+       * son métier, petite ou horaire, publiée dans les 24 h, mérite qu'on le
+       * prévienne — les autres attendent dans « À voir ». Et ce qu'on ne fera
+       * jamais (scraping contre les CGU, contenu adulte, test non rémunéré,
+       * moins de 30 $) est marqué « ignorée » avec son motif, pour qu'on sache
+       * POURQUOI plutôt que de le retrouver en bas de liste.
+       *
+       * Cette règle s'ajoute au pré-filtre et au score, elle ne les remplace
+       * pas : une offre peut être une offre de lancement ET mal notée.
+       */
+      if (platform !== "upwork") continue;
+      const verdict = upworkLaunchVerdict(
+        { title: job.title, description: job.snippet, budgetText: job.budget, publishedAt: email.received_at },
+        new Date(base.received_at),
+      );
+      if (verdict.alert) {
+        launched = true;
+        const sent = await sendAlert(
+          deps,
+          alertFor(platform, "demande", parsed, orionUrl(deps.baseUrl, result.id), `${verdict.reason}.`, job.title),
+        );
+        if (!sent) launched = false;
+        continue;
+      }
+      // Refus ferme : on le dit SUR la fiche, sans la supprimer, pour qu on
+      // sache pourquoi au lieu de la chercher en bas de liste.
+      const refusal = upworkIgnoreReason({ title: job.title, description: job.snippet, budgetText: job.budget });
+      if (refusal) {
+        await db.from("opportunities").update({ status: "ignoree", filter_reason: refusal }).eq("id", result.id);
+      }
     }
-    await finish({ status: ids.length ? "cree" : "a_trier", opportunity_id: ids[0] ?? null });
-    return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: ids.length ? "cree" : "a_trier", opportunity_ids: ids, alerted: false, orion_url: ids[0] ? orionUrl(deps.baseUrl, ids[0]) : null };
+    await finish({ status: ids.length ? "cree" : "a_trier", opportunity_id: ids[0] ?? null, alerted: launched });
+    return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: ids.length ? "cree" : "a_trier", opportunity_ids: ids, alerted: launched, orion_url: ids[0] ? orionUrl(deps.baseUrl, ids[0]) : null };
   }
 
   // 4. Suivi d'une opportunité existante (message, offre, mission confirmée, clôture… et invitation déjà connue).
