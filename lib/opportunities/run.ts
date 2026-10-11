@@ -5,6 +5,7 @@ import { analyzeOpportunity } from "./analyze";
 import { generateProposal } from "./proposal";
 import { proposalLanguage, type Opportunity } from "./types";
 import { freshScore, statusAfterAnalysis } from "./ingest";
+import { generateLaunchProposal, laneOf } from "./launch";
 
 /**
  * Analyse + proposition d'une opportunité, puis écriture sur la ligne.
@@ -43,7 +44,9 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
   }
   // Annonce ancienne : jamais d'alerte (6 au plus). Une fiche « Ignorée » re-notée à 5 ou plus revient « À répondre ».
   analysis.score = freshScore(analysis.score, opportunity.published_at);
-  const status = statusAfterAnalysis(opportunity.status, analysis.score);
+  // Mission de lancement / CMS imposé (11/10/2026) : jamais « Ignorée » par l'analyse ; une fiche ignorée revient « À répondre ».
+  const lane = laneOf(opportunity);
+  const status = lane ? (opportunity.status === "ignoree" ? "a_repondre" : null) : statusAfterAnalysis(opportunity.status, analysis.score);
   await db
     .from("opportunities")
     .update({
@@ -60,17 +63,21 @@ export async function analyzeAndPropose(db: Db, userId: string, id: string, ask:
     })
     .eq("id", id);
 
-  const proposal = await generateProposal({
-    ask,
-    platform: opportunity.platform,
-    language: proposalLanguage(opportunity.platform, analysis.language),
-    title: opportunity.title,
-    body: opportunity.body,
-    budget: opportunity.budget,
-    need: analysis.need,
-    demo: analysis.demo,
-    kind: analysis.kind,
-  });
+  // Mission de lancement : prix fixe de lancement contre un avis honnête (lib/opportunities/launch.ts).
+  const proposal =
+    lane === "lancement"
+      ? await generateLaunchProposal({ ask, title: opportunity.title, body: opportunity.body, budget: opportunity.budget, need: analysis.need })
+      : await generateProposal({
+          ask,
+          platform: opportunity.platform,
+          language: proposalLanguage(opportunity.platform, analysis.language),
+          title: opportunity.title,
+          body: opportunity.body,
+          budget: opportunity.budget,
+          need: analysis.need,
+          demo: analysis.demo,
+          kind: analysis.kind,
+        });
   if ("error" in proposal) return { ok: false, error: proposal.error };
   await db
     .from("opportunities")

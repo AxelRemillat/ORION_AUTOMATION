@@ -451,7 +451,9 @@ async function main() {
     const llmBefore = llm.length;
     const filtered = await ingestPlatformEmail(deps, offTarget.email);
     const filteredRow = db.rows("opportunities").find((item) => item.id === filtered.opportunity_ids[0]) as Record<string, unknown>;
-    check("inconnu hors cible (WordPress) : même pré-filtre → « Ignorée », sans appel, sans alerte", filtered.status === "cree" && filtered.verdict === "ignore" && filteredRow.status === "ignoree" && typeof filteredRow.filter_reason === "string" && llm.length === llmBefore && alerts.length === 1, JSON.stringify({ filtered, reason: filteredRow?.filter_reason }));
+    void llmBefore;
+    // 11/10/2026 : un CMS imposé n'est plus « Ignorée » : « À voir », jamais d'alerte.
+    check("inconnu sur CMS (WordPress) : même pré-filtre → « À voir » (CMS imposé), sans alerte", filtered.status === "cree" && filtered.verdict === "a_voir" && filteredRow.status !== "ignoree" && !filteredRow.filter_reason && alerts.length === 1, JSON.stringify({ filtered, reason: filteredRow?.filter_reason }));
     const replay = await ingestPlatformEmail(deps, relevant.email);
     check("e-mail rejoué : doublon par message_id, rien refait", replay.duplicate === true && db.rows("opportunities").length === 3 && alerts.length === 1);
     const noId = parsePlatformEmail({ ...relevant.email, message_id: "<x>", text: "Nouveau projet sans lien." });
@@ -527,7 +529,9 @@ async function main() {
     const created = await ingestPlatformEmail(deps, realFormat);
     const row = db.rows("opportunities")[0] as Record<string, unknown>;
     // Plateformes #11 : l'alerte ne donne que le titre → « À voir » SANS analyse (un score sur un titre ne veut rien dire).
-    check("format réel → pas filtré, « Titre seul », « À voir », sans appel ni alerte", created.verdict === "a_voir" && created.status === "cree" && !row.filter_reason && row.analysis_state === "titre_seul" && row.fit_score == null && bucketOf(row as never) === "a_voir" && !created.alerted && alerts.length === 0 && seen.length === 0, JSON.stringify({ created, state: row?.analysis_state, reason: row?.filter_reason }));
+    // 11/10/2026 : « Application ia agentiques » est une mission de lancement (application web, budget non indiqué) →
+    // alerte tout de suite, toujours SANS analyse (titre seul).
+    check("format réel → pas filtré, « Titre seul », mission de lancement : alerte, sans appel au modèle", created.verdict === "alerte" && created.status === "cree" && !row.filter_reason && row.analysis_state === "titre_seul" && row.fit_score == null && bucketOf(row as never) === "alertes" && created.alerted && alerts.length === 1 && seen.length === 0, JSON.stringify({ created, state: row?.analysis_state, reason: row?.filter_reason }));
     check("… lien de l'annonce gardé, annonce = le titre", row.url === "https://www.codeur.com/projects/499001-application-ia-agentiques" && row.body === "Application ia agentiques" && row.description_truncated === true, JSON.stringify({ url: row.url, body: row.body }));
 
     // Analyse impossible (erreur API, budget, réponse illisible) : « Non analysée », jamais « Ignorée ».
@@ -566,7 +570,7 @@ async function main() {
 
     const wordpress = await ingestPlatformEmail(deps, alertFor("499101", "Refonte de notre site WordPress"));
     const wpRow = db.rows("opportunities").find((item) => item.id === wordpress.opportunity_ids[0]) as Record<string, unknown>;
-    check("titre clairement hors cible (WordPress) → pré-filtre sur le titre → « Ignorée »", wordpress.verdict === "ignore" && wpRow.status === "ignoree" && typeof wpRow.filter_reason === "string");
+    check("titre WordPress → plus « Ignorée » : CMS imposé, « À voir », sans alerte (11/10/2026)", wordpress.verdict === "a_voir" && wpRow.status !== "ignoree" && !wpRow.filter_reason);
     const mobile = await ingestPlatformEmail(deps, alertFor("499102", "Application iOS native en Swift"));
     check("titre « application iOS native » → « Ignorée »", mobile.verdict === "ignore");
     const ai = await ingestPlatformEmail(deps, alertFor("499103", "ERP"));
@@ -575,10 +579,10 @@ async function main() {
     // Règles propres aux titres seuls (cas réels du 08/10).
     // « Ads » (Cowork #13) : la fiche « Recherche expert Google Ads / Microsoft Ads » était passée en « À voir ».
     for (const title of ["Recherche expert Google Ads / Microsoft Ads (Bing) expérience", "Campagnes Meta Ads pour une boutique", "Gestion de campagnes SEA"]) {
-      check(`titre seul publicité en ligne : « ${title} » → écarté (marketing)`, /marketing/.test(titleOnlyReason(title) ?? ""), String(titleOnlyReason(title)));
+      check(`titre seul publicité en ligne : « ${title} » → écarté (marketing / publicité)`, /(marketing|publicité)/.test(titleOnlyReason(title) ?? ""), String(titleOnlyReason(title)));
     }
     check("« ads » ne touche pas un mot qui le contient (« Adresses », « uploads »)", titleOnlyReason("Automatiser la saisie des adresses de livraison") === null && titleOnlyReason("Gestion des uploads de documents clients") === null);
-    for (const title of ["Videaste", "Gestion réseaux sociaux, vidéos et publicités", "Developper mon compte instagram", "Recherche data scientist", "Entreprise de nettoyage sur lyon", "Site web", "Créer un site web pour une activité de magnétiseur", "Site Prestahop 1.7.8.11 : mise à jour", "Recherche développeur mobile"]) {
+    for (const title of ["Videaste", "Gestion réseaux sociaux, vidéos et publicités", "Developper mon compte instagram", "Recherche data scientist", "Entreprise de nettoyage sur lyon", "Recherche développeur mobile"]) {
       check(`titre seul hors cible : « ${title} » → écarté`, titleOnlyReason(title) !== null);
     }
     for (const title of ["Application ia agentiques", "ERP", "Besoin d'une plate-forme de gestion parc motorisé d'une ferme.", "CRM pour école de danse", "Site de réservation PMR", "Je souhaite développer une plateforme web et mobile de loisirs", "Développeur / spécialiste IA & automatisation commerciale"]) {

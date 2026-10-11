@@ -351,3 +351,96 @@ export const PROPOSAL_NEGATIVES: ProposalReference[] = [
     why: "Reformulation vague (ni HubSpot, ni volume, ni formats), étapes non concrètes, aucune question de cadrage utile.",
   }),
 ];
+
+/** Proposition de MISSION DE LANCEMENT (Codeur, 11/10/2026) : texte complet, signature comprise. */
+export interface LaunchReference {
+  title: string;
+  externalId: string;
+  /** Budget SUPPOSÉ d'après le prix retenu : l'alerte e-mail Codeur réelle n'en donnait pas. */
+  budget: string;
+  ad: string;
+  price: 300 | 400;
+  kind: "site" | "app";
+  exceeds: boolean;
+  text: string;
+}
+
+/**
+ * PROPOSITIONS DE RÉFÉRENCE des missions de lancement — écrites par Cowork, VALIDÉES
+ * PAR AXEL (11/10/2026). Cas positifs : elles passent la check-list de lancement
+ * (lib/opportunities/launch.ts) et servent d'exemples au rédacteur.
+ */
+export const LAUNCH_REFERENCES: LaunchReference[] = [
+  {
+    title: "Creation site web + base SEO",
+    externalId: "491062",
+    budget: "500 € à 1 000 €",
+    ad: "Création d'un site internet pour présenter mon activité, avec une base SEO pour être trouvé sur Google.",
+    price: 400,
+    kind: "site",
+    exceeds: false,
+    text: `Bonjour,
+
+Vous voulez un site internet qui se trouve sur Google dès sa mise en ligne. Je m'en occupe de bout en bout.
+
+Ce que je propose :
+1. Un site vitrine responsive (jusqu'à 5 pages), rapide et facile à faire évoluer.
+2. La base SEO technique : titres et descriptions par page, balisage des contenus, plan du site, vitesse de chargement optimisée, inscription à Google Search Console.
+3. Mise en ligne sur votre nom de domaine et 30 minutes de prise en main.
+
+Je démarre sur Codeur : je vous propose un tarif de lancement de 400 € à prix fixe, livré en 7 jours, en échange d'un avis honnête à la fin de la mission.
+
+Pour cadrer : quelle est votre activité, et avez-vous déjà les textes, le logo et un nom de domaine ?
+
+Axel Remillat`,
+  },
+  {
+    title: "Site d'affiliation",
+    externalId: "491048",
+    budget: "Moins de 500 €",
+    ad: "Création d'un site d'affiliation clé en main sur une niche, à enrichir ensuite soi-même.",
+    price: 300,
+    kind: "site",
+    exceeds: false,
+    text: `Bonjour,
+
+Vous voulez tester une niche avec un site d'affiliation clé en main, puis l'enrichir vous-même. C'est exactement ce que je construirais.
+
+Ce que je propose :
+1. Un site rapide et bien référencé : page d'accueil, pages catégories, modèle d'article et de comparatif avec vos liens affiliés.
+2. Un espace d'édition simple pour ajouter vos articles et vos liens sans toucher au code.
+3. La base SEO (titres, descriptions, plan du site, Search Console) pour que vos pages soient indexées dès le départ.
+
+Je démarre sur Codeur : tarif de lancement de 300 € à prix fixe, livré en 7 jours, en échange d'un avis honnête à la fin.
+
+Pour cadrer : quelle niche visez-vous, et avec quels programmes d'affiliation (Amazon, Awin, autre) ?
+
+Axel Remillat`,
+  },
+  {
+    title: "Application éducative en français pour lycéens et étudiants",
+    externalId: "491078",
+    budget: "500 € à 1 000 €",
+    ad: "Cursus Plus : application éducative en français pour lycéens et étudiants — comptes élève et tuteur, bibliothèque par niveau, quiz, forum à points, abonnement Stripe.",
+    price: 400,
+    kind: "app",
+    exceeds: true,
+    text: `Bonjour,
+
+Cursus Plus me parle directement : je développe RISE, une startup EdTech pour les étudiants (visible dans mon portfolio Codeur).
+
+Votre cahier des charges complet dépasse 500 €. Je vous propose donc de démarrer par une première version solide, que vous pourrez montrer à vos premiers élèves :
+1. Comptes élève et tuteur.
+2. Bibliothèque classée par niveau, matière et chapitre (vidéos et exercices corrigés).
+3. Quiz avec suivi de progression.
+
+Le forum à points et l'abonnement Stripe viendront en phase 2, chiffrés à part une fois la base validée.
+
+Application web responsive, entièrement en français.
+Tarif de lancement : 400 € à prix fixe pour cette première version, livrée en 3 semaines, en échange d'un avis honnête sur Codeur.
+
+Avez-vous déjà des contenus (vidéos, exercices) prêts à intégrer ?
+
+Axel Remillat`,
+  },
+];

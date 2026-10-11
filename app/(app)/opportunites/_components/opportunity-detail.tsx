@@ -7,6 +7,9 @@ import { TITLE_ONLY_NOTE } from "@/lib/opportunities/title-only";
 import { followUpDue } from "@/lib/opportunities/follow-up-due";
 import type { OpportunityEmail } from "@/lib/opportunities/email/view";
 import { OpenAdLink } from "./open-ad-link";
+import { LaneBadges } from "./lane-badges";
+import { CMS_NOTE } from "@/lib/opportunities/lane";
+import { rowLane } from "@/lib/opportunities/view";
 import { ProposalSection } from "./proposal-section";
 import { DetailFields } from "./detail-fields";
 import { FollowUpBox } from "./follow-up-box";
@@ -30,6 +33,10 @@ export function OpportunityDetail({ selected, focused, emails, actions }: { sele
             {selected.source === "email" ? " · reçue par e-mail" : ""}
           </p>
           <h2 className="font-display text-lg text-text">{selected.title}</h2>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <LaneBadges item={selected} />
+          </div>
+          {!selected.filter_reason && rowLane(selected) === "cms_impose" && <p className="mt-1 text-[12px] text-warn-ink">{CMS_NOTE}.</p>}
           {staleLabel(selected.published_at) && <p className="mt-1 text-[12px] text-warn-ink">{staleLabel(selected.published_at)}</p>}
           {sizeFlag(selected) && (
             <p className="mt-1.5 inline-flex rounded-full border border-warn/45 bg-warn/15 px-2.5 py-0.5 text-[12px] text-warn-ink">

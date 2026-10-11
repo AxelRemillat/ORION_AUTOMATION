@@ -51,6 +51,7 @@
     "relances:9": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/relances-9-live.js",
     "titre-seul:codeur": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/titre-seul-codeur.js",
     "rattrapage:codeur": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rattrapage-codeur-email.js",
+    "rattrapage:lancement": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rattrapage-lancement.js",
     "eval:relances": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-relances.js",
     "eval:upwork": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-upwork.js",
     "eval:proposals": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/eval-proposals.js",

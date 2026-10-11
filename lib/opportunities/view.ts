@@ -1,4 +1,5 @@
 import type { Opportunity } from "./types";
+import { laneOf } from "./lane";
 
 /**
  * Classement de la page Opportunités (code pur) :
@@ -16,10 +17,18 @@ export const BUCKET_LABELS: Record<Bucket | "toutes", string> = {
   toutes: "Toutes",
 };
 
-type Row = Pick<Opportunity, "fit_score" | "status"> & Partial<Pick<Opportunity, "filter_reason" | "analysis_state" | "seen_at" | "published_at" | "created_at">>;
+type Row = Pick<Opportunity, "fit_score" | "status"> &
+  Partial<Pick<Opportunity, "filter_reason" | "analysis_state" | "seen_at" | "published_at" | "created_at" | "platform" | "title" | "body" | "budget" | "categories">>;
+
+/** Catégorie Codeur d'une ligne (11/10/2026), si elle porte de quoi la calculer. */
+export const rowLane = (row: Row) => (row.platform && row.title ? laneOf({ platform: row.platform, title: row.title, body: row.body ?? null, categories: row.categories ?? [], budget: row.budget ?? null, published_at: row.published_at ?? null, created_at: row.created_at ?? null }) : null);
 
 export function bucketOf(row: Row): Bucket {
   if (row.filter_reason || row.status === "ignoree") return "ignorees";
+  // Mission de lancement : alerte quel que soit le score ; CMS imposé : à voir (11/10/2026).
+  const lane = rowLane(row);
+  if (lane === "lancement") return "alertes";
+  if (lane === "cms_impose") return "a_voir";
   // Titre seul (alerte Codeur, plateformes #11) : « À voir » tant que l'annonce n'est pas collée,
   // même si une ancienne analyse sur le titre a laissé un score (il ne veut rien dire).
   if (row.analysis_state === "titre_seul") return "a_voir";

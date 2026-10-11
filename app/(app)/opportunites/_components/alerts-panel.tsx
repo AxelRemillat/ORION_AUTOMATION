@@ -3,9 +3,10 @@ import { Badge, Button } from "@/components/ui";
 import { PLATFORM_LABELS, type Opportunity } from "@/lib/opportunities/types";
 import { ageLabel } from "@/lib/opportunities/view";
 import { OpenAdLink } from "./open-ad-link";
+import { LaneBadges } from "./lane-badges";
 import type { OpportunityActions } from "./use-opportunity-actions";
 
-/** « Nouvelles alertes » de l'onglet : score ≥ 8 non vues, avec ouverture et copie directes. */
+/** « Nouvelles alertes » de l'onglet : score ≥ 8 ou mission de lancement, non vues, avec ouverture et copie directes. */
 export function AlertsPanel({ alerts, actions, onSelect }: { alerts: Opportunity[]; actions: OpportunityActions; onSelect: (id: string) => void }) {
   if (!alerts.length) return null;
   return (
@@ -24,7 +25,10 @@ export function AlertsPanel({ alerts, actions, onSelect }: { alerts: Opportunity
                   {item.budget ? ` · ${item.budget}` : ""}
                 </p>
               </button>
-              <Badge tone="success">{item.fit_score}/10</Badge>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <LaneBadges item={item} />
+                {item.fit_score != null && <Badge tone={item.fit_score >= 8 ? "success" : "neutral"}>{item.fit_score}/10</Badge>}
+              </div>
             </div>
             <ul className="mt-1.5 list-disc pl-5 text-[12px] text-muted">
               {(item.fit_reasons ?? []).map((reason) => (
