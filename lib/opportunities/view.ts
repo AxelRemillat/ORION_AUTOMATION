@@ -37,11 +37,41 @@ export function bucketOf(row: Row): Bucket {
   return row.fit_score >= 5 ? "a_voir" : "ignorees";
 }
 
-/** Alertes non vues (score ≥ 8), des plus récentes aux plus anciennes. */
-export function unseenAlerts<T extends Row>(rows: readonly T[]): T[] {
+/** Au-delà de 7 jours, trop tard pour postuler (Cowork #21). */
+export const FRESH_DAYS = 7;
+
+/**
+ * Hors des alertes et de « À voir » (Cowork #21) : projet « Fermée », ou annonce publiée
+ * il y a plus de 7 jours à laquelle Axel n'a pas répondu. Elle reste dans « Toutes ».
+ * Filtre d'affichage seulement : rien n'est supprimé.
+ */
+export function isOutdated(row: Row, now = new Date()): boolean {
+  if (row.status === "fermee") return true;
+  if (row.status !== "a_repondre" && row.status !== "ignoree") return false;
+  const at = row.published_at ?? row.created_at;
+  return Boolean(at) && !Number.isNaN(Date.parse(at as string)) && now.getTime() - Date.parse(at as string) > FRESH_DAYS * 86_400_000;
+}
+
+/** Fraîches d'abord : la plus récente en haut. */
+export const byFreshness = <T extends Row>(a: T, b: T) => (b.published_at ?? b.created_at ?? "").localeCompare(a.published_at ?? a.created_at ?? "");
+
+/** Alertes non vues (score ≥ 8 ou mission de lancement), fraîches, des plus récentes aux plus anciennes. */
+export function unseenAlerts<T extends Row>(rows: readonly T[], now = new Date()): T[] {
   return rows
-    .filter((row) => bucketOf(row) === "alertes" && !row.seen_at)
-    .sort((a, b) => (b.published_at ?? b.created_at ?? "").localeCompare(a.published_at ?? a.created_at ?? ""));
+    .filter((row) => bucketOf(row) === "alertes" && !row.seen_at && !isOutdated(row, now))
+    .sort(byFreshness);
+}
+
+/** Alertes déjà vues (« Alertes vues », repliées sous la liste), fraîches, plus récentes en haut. */
+export function seenAlerts<T extends Row>(rows: readonly T[], now = new Date()): T[] {
+  return rows.filter((row) => bucketOf(row) === "alertes" && Boolean(row.seen_at) && !isOutdated(row, now)).sort(byFreshness);
+}
+
+/** Lignes d'un filtre : « Alertes » et « À voir » sans les annonces fermées ou trop anciennes ; alertes par fraîcheur. */
+export function rowsOfBucket<T extends Row>(rows: readonly T[], bucket: Bucket | "toutes", now = new Date()): T[] {
+  if (bucket === "toutes") return [...rows];
+  const kept = rows.filter((row) => bucketOf(row) === bucket && (bucket === "ignorees" || !isOutdated(row, now)));
+  return bucket === "alertes" ? kept.sort(byFreshness) : kept;
 }
 
 /** Annonce de plus de 7 jours (publication sur la plateforme) : « Ancienne annonce (14 j) … », sinon `null`. */

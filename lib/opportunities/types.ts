@@ -16,7 +16,8 @@ export const PLATFORM_LABELS: Record<Platform, string> = {
   autre: "Autre",
 };
 
-export const OPPORTUNITY_STATUSES = ["a_repondre", "envoyee", "reponse", "entretien", "gagnee", "perdue", "ignoree"] as const;
+// « fermee » (Cowork #21) : projet fermé, attribué ou annulé AVANT qu'Axel ait postulé (sinon « perdue »).
+export const OPPORTUNITY_STATUSES = ["a_repondre", "envoyee", "reponse", "entretien", "gagnee", "perdue", "fermee", "ignoree"] as const;
 export type OpportunityStatus = (typeof OPPORTUNITY_STATUSES)[number];
 
 export const STATUS_LABELS: Record<OpportunityStatus, string> = {
@@ -27,7 +28,20 @@ export const STATUS_LABELS: Record<OpportunityStatus, string> = {
   entretien: "Conversation",
   gagnee: "Gagnée",
   perdue: "Perdue",
+  fermee: "Fermée",
   ignoree: "Ignorée",
+};
+
+/** Upwork (« le hub mondial », Cowork #21) : libellés courts en anglais. */
+export const STATUS_LABELS_EN: Record<OpportunityStatus, string> = {
+  a_repondre: "New",
+  envoyee: "Sent",
+  reponse: "Reply",
+  entretien: "Talk",
+  gagnee: "Won",
+  perdue: "Lost",
+  fermee: "Closed",
+  ignoree: "Skipped",
 };
 
 /** Le client a répondu : à partir de « Réponse » (une perdue après réponse garde `replied_at`). */

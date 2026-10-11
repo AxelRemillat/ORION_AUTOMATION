@@ -6,6 +6,7 @@ import { Check, ExternalLink, MessageSquare, RotateCcw } from "lucide-react";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, useToast } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import type { PlatformTask } from "@/lib/today/platform";
+import { platformTheme } from "@/lib/opportunities/platform-style";
 
 /**
  * Conversations de plateforme, en tête de la file (Cowork #17).
@@ -67,7 +68,8 @@ export function PlatformInbox({ tasks }: { tasks: PlatformTask[] }) {
         {tasks.map((task) => (
           <article key={`${task.kind}:${task.opportunityId}`} className="rounded-lg border border-line bg-surface-2 p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="info">{task.platformLabel}</Badge>
+              {/* Couleurs de la plateforme, les mêmes que /opportunites (tokens --pf-*, Cowork #21). */}
+              <span className={`${platformTheme(task.platform)} pf-chip rounded-full px-2 py-0.5 text-[11px] font-medium`}>{task.platformLabel}</span>
               <Badge tone={task.kind === "message" ? "accent" : "warning"}>
                 {task.kind === "message" ? "Message reçu" : `Relance due · ${task.days} j`}
               </Badge>

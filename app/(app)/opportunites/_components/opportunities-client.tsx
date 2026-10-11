@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { ClipboardPaste } from "lucide-react";
 import { Button } from "@/components/ui";
 import type { Opportunity } from "@/lib/opportunities/types";
-import { bucketOf, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
+import { bucketOf, rowsOfBucket, seenAlerts, unseenAlerts, type Bucket } from "@/lib/opportunities/view";
+import { PLATFORM_IDENTITIES } from "@/lib/opportunities/platform-style";
 import { emailsOf, emailsToSort, type OpportunityEmail } from "@/lib/opportunities/email/view";
 import { followUpDue } from "@/lib/opportunities/follow-up-due";
 import { bucketFilters, emailsOfTab, formPlatform, itemsOfTab, tabBadges, tabHref, visibleTabs, type Filter, type PlatformTab } from "@/lib/opportunities/tabs";
@@ -17,6 +18,8 @@ import { OpportunityDetail } from "./opportunity-detail";
 import { PasteInline, PasteModal } from "./paste-form";
 import { TabEmptyState } from "./tab-empty-state";
 import { TriagePanel } from "./triage-panel";
+import { PlatformBanner } from "./platform-banner";
+import { SeenAlerts } from "./seen-alerts";
 
 /** Fiche ouverte par défaut : la première du filtre affiché, sinon la première de l'onglet. */
 const firstOf = (items: Opportunity[], filter: Filter) =>
@@ -56,16 +59,13 @@ export function OpportunitiesClient({
   const tabItems = useMemo(() => itemsOfTab(items, tab), [items, tab]);
   const toSort = useMemo(() => emailsOfTab(emailsToSort(emails), tab), [emails, tab]);
   const alerts = useMemo(() => unseenAlerts(tabItems), [tabItems]);
+  const seen = useMemo(() => seenAlerts(tabItems), [tabItems]);
+  // Fermées et annonces de plus de 7 jours : hors « Alertes » et « À voir », seulement dans « Toutes » (Cowork #21).
   const counts = useMemo(() => {
-    const result: Record<Bucket | "toutes", number> = { alertes: 0, a_voir: 0, ignorees: 0, toutes: tabItems.length };
-    for (const item of tabItems) result[bucketOf(item)] += 1;
-    return result;
+    const keys: (Bucket | "toutes")[] = ["alertes", "a_voir", "ignorees", "toutes"];
+    return Object.fromEntries(keys.map((key) => [key, rowsOfBucket(tabItems, key).length])) as Record<Bucket | "toutes", number>;
   }, [tabItems]);
-  const shown = useMemo(() => {
-    const rows = tabItems.filter((item) => filter === "toutes" || (filter === "relances" ? followUpDue(item) : bucketOf(item) === filter));
-    // Alertes : la plus récente en haut, pour répondre parmi les premiers (11/10/2026).
-    return filter === "alertes" ? [...rows].sort((a, b) => (b.published_at ?? b.created_at ?? "").localeCompare(a.published_at ?? a.created_at ?? "")) : rows;
-  }, [tabItems, filter]);
+  const shown = useMemo(() => (filter === "relances" ? tabItems.filter((item) => followUpDue(item)) : filter === "a_trier" ? [] : rowsOfBucket(tabItems, filter)), [tabItems, filter]);
   const dueCount = useMemo(() => tabItems.filter((item) => followUpDue(item)).length, [tabItems]);
   const selected = tabItems.find((item) => item.id === selectedId) ?? null;
   const selectedEmails = useMemo(() => (selected ? emailsOf(emails, selected.id) : []), [emails, selected]);
@@ -82,7 +82,7 @@ export function OpportunitiesClient({
   const pasteProps = { platform: formPlatform(tab), busy: actions.busy === "create", onSubmit: actions.create, onCancel: () => setPasting(false) };
 
   return (
-    <>
+    <div className={PLATFORM_IDENTITIES[tab].theme}>
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <PlatformTabs tabs={tabs} active={tab} badges={badges} onSelect={selectTab} />
         <Button className="mb-4" onClick={() => setPasting(true)}>
@@ -90,6 +90,7 @@ export function OpportunitiesClient({
         </Button>
       </div>
 
+      <PlatformBanner tab={tab} />
       {tab === "upwork" && pasting && <PasteInline key="upwork" {...pasteProps} />}
       <AlertsPanel alerts={alerts} actions={actions} onSelect={setSelectedId} />
 
@@ -108,12 +109,15 @@ export function OpportunitiesClient({
         <TabEmptyState tab={tab} onPaste={() => setPasting(true)} />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <OpportunityList shown={shown} filter={filter} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+          <div className="min-w-0 space-y-3">
+            <OpportunityList shown={shown} filter={filter} tab={tab} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+            <SeenAlerts alerts={seen} onSelect={setSelectedId} />
+          </div>
           {selected && <OpportunityDetail key={selected.id} selected={selected} focused={focused === selected.id} emails={selectedEmails} actions={actions} />}
         </div>
       )}
 
       {tab !== "upwork" && <PasteModal key={tab} open={pasting} title={pasteLabel} {...pasteProps} />}
-    </>
+    </div>
   );
 }

@@ -2,7 +2,7 @@ import { RefreshCw, Send } from "lucide-react";
 import { Button, Label, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { PLATFORM_LABELS, type Opportunity } from "@/lib/opportunities/types";
-import { suggestedPrice } from "@/lib/opportunities/email/view";
+import { priceLabel } from "@/lib/opportunities/platform-style";
 import type { OpportunityActions } from "./use-opportunity-actions";
 
 /** Proposition : note du relecteur, texte modifiable, prix et délai à saisir, « Marquer envoyée ». */
@@ -47,7 +47,7 @@ export function ProposalSection({ selected, actions }: { selected: Opportunity; 
       {(selected.suggested_amount_eur != null || selected.suggested_delay_days != null) && (
         <p className="mt-1.5 text-[13px] text-text">
           À saisir sur {PLATFORM_LABELS[selected.platform]} :{" "}
-          <span className="font-data">{suggestedPrice(selected.suggested_amount_eur, selected.suggested_currency ?? (selected.platform === "upwork" ? "USD" : "EUR"), selected.suggested_hourly)}</span> ·{" "}
+          <span className="pf-ink font-data">{priceLabel(selected.suggested_amount_eur, selected.suggested_currency ?? (selected.platform === "upwork" ? "USD" : "EUR"), selected.suggested_hourly)}</span> ·{" "}
           <span className="font-data">{selected.suggested_delay_days != null ? `${selected.suggested_delay_days} jours` : "—"}</span>
         </p>
       )}
@@ -57,7 +57,7 @@ export function ProposalSection({ selected, actions }: { selected: Opportunity; 
           variant="secondary"
           disabled={selected.status !== "a_repondre"}
           loading={busy === `patch:${selected.id}`}
-          onClick={() => patch(selected.id, { status: "envoyee" }, "Marquée envoyée.")}
+          onClick={() => patch(selected.id, { status: "envoyee", seen: true }, "Marquée envoyée.")}
         >
           <Send className="h-3.5 w-3.5" aria-hidden /> Marquer envoyée
         </Button>

@@ -18,6 +18,12 @@ import { classifyAd, isWebDev, prefilterReason, titleOnlyReason } from "../lib/o
 import { CMS_NOTE, isUrgent, LAUNCH_DELAY, laneOf, launchBudget, launchKind, launchPrice, offersCount } from "../lib/opportunities/lane";
 import { generateLaunchProposal, launchChecks } from "../lib/opportunities/launch";
 import { LAUNCH_REFERENCES } from "../lib/opportunities/calibration";
+import { isOutdated, rowsOfBucket, seenAlerts } from "../lib/opportunities/view";
+import { PROPOSAL_BUTTON_LABELS, PROPOSAL_FAILED, proposalButtonState } from "../lib/opportunities/proposal-state";
+import { clockLabel, comeupKind, platformTheme, priceLabel, statusLabel } from "../lib/opportunities/platform-style";
+import { STATUS_LABELS, STATUS_LABELS_EN } from "../lib/opportunities/types";
+import { statusAfterEvent } from "../lib/opportunities/email/milestones";
+import { analyzeAndPropose } from "../lib/opportunities/run";
 import { longestDelayDays, requestedItems } from "../lib/opportunities/requests";
 import { ageLabel, bucketOf, staleLabel, unseenAlerts } from "../lib/opportunities/view";
 import { bucketFilters, emailsOfTab, formPlatform, initialTab, isBadgeAlert, itemsOfTab, tabBadges, tabHref, tabOf, visibleTabs } from "../lib/opportunities/tabs";
@@ -561,7 +567,7 @@ async function main() {
 
     const badges = tabBadges(items);
     check("badge par onglet = règle de la barre (≥ 8, non vue, pas ignorée)", badges.codeur === 1 && badges.upwork === 1 && badges.comeup === 0 && badges.autres === 0, JSON.stringify(badges));
-    check("somme des badges = badge de la barre", Object.values(badges).reduce((a, b) => a + b, 0) === items.filter(isBadgeAlert).length);
+    check("somme des badges = badge de la barre", Object.values(badges).reduce((a, b) => a + b, 0) === items.filter((item) => isBadgeAlert(item)).length);
 
     check("formulaire pré-réglé sur l'onglet (Codeur, Upwork, ComeUp ; Autres → Malt)", formPlatform("codeur") === "codeur" && formPlatform("upwork") === "upwork" && formPlatform("comeup") === "comeup" && formPlatform("autres") === "malt");
     check("Codeur garde « Ignorées » même vide ; Upwork sans « Ignorées » si vide", bucketFilters("codeur", []).includes("ignorees") && !bucketFilters("upwork", itemsOfTab(items, "upwork").filter((item) => item.status !== "ignoree")).includes("ignorees") && bucketFilters("upwork", itemsOfTab(items, "upwork")).includes("ignorees"));
@@ -640,6 +646,68 @@ async function main() {
     check("ingestion CMS imposé : « À voir », mention, jamais ignorée (score 3)", cmsIn.verdict === "a_voir" && cmsIn.lane === "cms_impose" && cmsIn.reasons[0] === CMS_NOTE && cmsStored.status !== "ignoree", JSON.stringify(cmsIn));
     const ads = await ingestOpportunity(ldeps, (parseIngestBody({ ...base, external_id: "l-3", title: "Campagne Google Ads pour site WordPress", description: "Gérer nos campagnes Google Ads.", budget_text: "Moins de 500 €" }) as { ok: true; value: IngestBody }).value);
     check("ingestion « Campagne Google Ads pour site WordPress » : ignorée", ads.verdict === "ignore" && ads.filtered === true);
+  }
+
+  console.log("\nAlertes plus nettes et identités (Cowork #21)");
+  {
+    const now = new Date("2026-10-12T08:00:00Z");
+    const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString();
+    const alert = (id: string, extra: Partial<Opportunity> = {}) =>
+      ({ id, platform: "codeur", title: "Agent IA de tri des devis", body: "Agent IA de tri des devis", budget: "1 000 € à 10 000 €", fit_score: 9, status: "a_repondre", seen_at: null, filter_reason: null, analysis_state: "ok", published_at: hoursAgo(3), created_at: hoursAgo(3), ...extra }) as Opportunity;
+
+    // « Vu » : seen_at posé par le PATCH, la carte quitte « Nouvelles alertes » et va dans « Alertes vues ».
+    const built = buildOpportunityPatch({ seen: true }, { status: "a_repondre", sent_at: null, replied_at: null }, now);
+    check("« Vu » : le PATCH pose seen_at (persistant après rechargement)", built.ok && built.patch.seen_at === now.toISOString());
+    const seenRow = alert("a2", { seen_at: now.toISOString() });
+    check("vue : hors « Nouvelles alertes », dans « Alertes vues » et dans « Toutes »", unseenAlerts([alert("a1"), seenRow], now).map((row) => row.id).join() === "a1" && seenAlerts([alert("a1"), seenRow], now).map((row) => row.id).join() === "a2" && rowsOfBucket([seenRow], "toutes", now).length === 1);
+    check("badge : seulement les non vues", isBadgeAlert(alert("a1"), now) && !isBadgeAlert(seenRow, now));
+    const sent = buildOpportunityPatch({ status: "envoyee", seen: true }, { status: "a_repondre", sent_at: null, replied_at: null }, now);
+    check("« Marquer envoyée » marque aussi comme vue", sent.ok && sent.patch.status === "envoyee" && sent.patch.seen_at === now.toISOString());
+
+    // Fraîcheur : plus de 7 jours → hors alertes et « À voir », seulement dans « Toutes ».
+    const old = alert("o1", { published_at: hoursAgo(24 * 8), created_at: hoursAgo(24 * 8) });
+    check("annonce de 8 jours : « trop tard », hors alertes, badge et « À voir »", isOutdated(old, now) && unseenAlerts([old], now).length === 0 && !isBadgeAlert(old, now) && rowsOfBucket([old], "alertes", now).length === 0);
+    check("annonce de 8 jours : toujours dans « Toutes » (rien supprimé)", rowsOfBucket([old], "toutes", now).length === 1);
+    check("annonce ancienne où Axel a postulé : pas « trop tard » (son suivi continue)", !isOutdated({ ...old, status: "envoyee" }, now));
+    const aVoir = alert("v1", { fit_score: 6, published_at: hoursAgo(24 * 9), created_at: hoursAgo(24 * 9) });
+    check("« À voir » de 9 jours : masquée de « À voir »", rowsOfBucket([aVoir], "a_voir", now).length === 0);
+
+    // Fermée : projet fermé / attribué / annulé avant toute proposition.
+    check("clôture d'un projet auquel Axel n'a pas répondu → « Fermée » ; après envoi → « Perdue »", statusAfterEvent("a_repondre", "perdue") === "fermee" && statusAfterEvent("envoyee", "perdue") === "perdue" && statusAfterEvent("fermee", "perdue") === null);
+    const closed = alert("f1", { status: "fermee" });
+    check("« Fermée » : hors alertes, badge et « À voir », gardée dans « Toutes »", isOutdated(closed, now) && unseenAlerts([closed], now).length === 0 && !isBadgeAlert(closed, now) && rowsOfBucket([closed], "toutes", now).length === 1);
+    check("statut « Fermée » : libellé FR et EN", STATUS_LABELS.fermee === "Fermée" && STATUS_LABELS_EN.fermee === "Closed");
+
+    // Tri : la plus récente en haut.
+    check("alertes : la plus récente en haut", rowsOfBucket([alert("x1", { published_at: hoursAgo(20) }), alert("x2", { published_at: hoursAgo(1) })], "alertes", now)[0].id === "x2");
+
+    // Bouton de proposition : jamais « en cours » sans rédaction réelle.
+    check("bouton : proposition prête → « Copier »", proposalButtonState({ proposal: "Bonjour" }) === "copier");
+    check("bouton : aucune rédaction lancée (rattrapage, titre seul) → « Rédiger », pas « en cours »", proposalButtonState({ proposal: null, analysis_state: "titre_seul" }, false, now) === "rediger" && proposalButtonState({ proposal: null, analysis_state: null }, false, now) === "rediger");
+    check("bouton : clic en cours → « en cours »", proposalButtonState({ proposal: null }, true, now) === "en_cours");
+    check("bouton : analyse « pending » récente → « en cours » ; vieille de 30 min → « Échec — réessayer »", proposalButtonState({ proposal: null, analysis_state: "pending", updated_at: hoursAgo(0.05) }, false, now) === "en_cours" && proposalButtonState({ proposal: null, analysis_state: "pending", updated_at: hoursAgo(0.5) }, false, now) === "echec");
+    check("bouton : rédaction ratée ou crédit épuisé → « Échec — réessayer »", proposalButtonState({ proposal: null, proposal_reason: `${PROPOSAL_FAILED} : quota` }) === "echec" && proposalButtonState({ proposal: null, analysis_state: "non_analysee" }) === "echec" && PROPOSAL_BUTTON_LABELS.echec === "Échec — réessayer");
+
+    // Rédaction réelle : un échec est écrit sur la fiche ; une mission de lancement à titre seul est rédigée sans analyse.
+    const failDb = new FakeDb({ opportunities: [{ ...alert("r1"), title: "Agent IA devis", body: "Automatiser la préparation de nos devis à partir des e-mails.", platform: "codeur" }] });
+    const failing = await analyzeAndPropose(failDb as never, "u1", "r1", async () => {
+      throw new Error("429 quota");
+    });
+    const failRow = failDb.rows("opportunities")[0] as Record<string, unknown>;
+    check("rédaction impossible : « Échec » écrit sur la fiche (le bouton le dit)", !failing.ok && String(failRow.proposal_reason).startsWith(PROPOSAL_FAILED), JSON.stringify(failRow.proposal_reason));
+    const parts = { reading: "Vous voulez une application de commandes qui met en relation clients et vendeurs.", proof: "", items: ["Comptes client et vendeur.", "Catalogue et passage de commande.", "Suivi des commandes."], exceeds: false, phase2: "", question: "Combien de vendeurs au départ ?" };
+    const operations: string[] = [];
+    const titleDb = new FakeDb({ opportunities: [{ ...alert("t1"), title: "Application pour les commandes", body: "Application pour les commandes", budget: "Moins de 500 €", fit_score: null, analysis_state: "titre_seul", published_at: new Date().toISOString(), created_at: new Date().toISOString() }] });
+    const titled = await analyzeAndPropose(titleDb as never, "u1", "t1", async (_role, _system, _user, _temperature, operation) => (operations.push(operation), JSON.stringify(parts)));
+    const titleRow = titleDb.rows("opportunities")[0] as Record<string, unknown>;
+    check("lancement à titre seul : proposition rédigée SANS analyse, « titre seul » gardé, 300 €", titled.ok && !operations.some((op) => op.includes("analyse")) && titleRow.analysis_state === "titre_seul" && titleRow.suggested_amount_eur === 300 && /avis honnête/.test(String(titleRow.proposal)), JSON.stringify({ titled, operations }));
+
+    // Identités : montants, statuts anglais, horloge.
+    check("Codeur : 1 200 € à espaces fines", priceLabel(1200, "EUR") === "1 200 €" && priceLabel(400, "EUR") === "400 €");
+    check("Upwork : $ et statuts courts en anglais", priceLabel(900, "USD") === "$900" && statusLabel("a_repondre", "upwork") === "New" && statusLabel("envoyee", "upwork") === "Sent" && statusLabel("envoyee", "codeur") === "Envoyée");
+    check("horloge : New York 6 h plus tôt que Paris en octobre", clockLabel("America/New_York", now) === "04:00" && clockLabel("Europe/Paris", now) === "10:00", `${clockLabel("America/New_York", now)} / ${clockLabel("Europe/Paris", now)}`);
+    check("thèmes : une classe par plateforme, badges d'Aujourd'hui compris", platformTheme("codeur") === "pf-codeur" && platformTheme("upwork") === "pf-upwork" && platformTheme("comeup") === "pf-comeup" && platformTheme("malt") === "pf-autres");
+    check("ComeUp : commande ou demande", comeupKind("gagnee") === "Commande" && comeupKind("a_repondre") === "Demande");
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);

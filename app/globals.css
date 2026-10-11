@@ -467,3 +467,120 @@
   /* Le sweep de survol ne part qu'au survol du parent. */
   .group:hover .vs-sweep { animation: vs-sweep 600ms ease-out; }
 }
+
+/* ------------------------------------------------------------------------
+   IDENTITÉS PAR PLATEFORME (Cowork #21) — /opportunites et badges d'Aujourd'hui.
+   Une teinte d'accent (remplissages, bordures), une encre (texte, AA sur
+   surface et sur le fond) et un fond de section, par plateforme ; déclinées
+   en sombre. Aucune image : motifs en dégradés CSS. Pas de logo de marque.
+   ------------------------------------------------------------------------ */
+:root {
+  --pf-codeur: #1d5bb8;
+  --pf-codeur-ink: #174a96;
+  --pf-codeur-bg: #eef3fb;
+  --pf-upwork: #13870a;
+  --pf-upwork-ink: #0e6e07;
+  --pf-upwork-bg: #edf7ea;
+  --pf-comeup: #e8613c;
+  --pf-comeup-ink: #ad3e1b;
+  --pf-comeup-bg: #fdf0ea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pf-codeur: #5b8fe6;
+    --pf-codeur-ink: #9cc0f7;
+    --pf-codeur-bg: #13213a;
+    --pf-upwork: #4cc43f;
+    --pf-upwork-ink: #8fdf85;
+    --pf-upwork-bg: #13261a;
+    --pf-comeup: #f07a55;
+    --pf-comeup-ink: #f6b09a;
+    --pf-comeup-bg: #2d1b14;
+  }
+}
+
+:root[data-theme="dark"] {
+  --pf-codeur: #5b8fe6;
+  --pf-codeur-ink: #9cc0f7;
+  --pf-codeur-bg: #13213a;
+  --pf-upwork: #4cc43f;
+  --pf-upwork-ink: #8fdf85;
+  --pf-upwork-bg: #13261a;
+  --pf-comeup: #f07a55;
+  --pf-comeup-ink: #f6b09a;
+  --pf-comeup-bg: #2d1b14;
+}
+
+@layer components {
+  .pf-codeur {
+    --pf-accent: var(--pf-codeur);
+    --pf-ink: var(--pf-codeur-ink);
+    --pf-bg: var(--pf-codeur-bg);
+  }
+  .pf-upwork {
+    --pf-accent: var(--pf-upwork);
+    --pf-ink: var(--pf-upwork-ink);
+    --pf-bg: var(--pf-upwork-bg);
+  }
+  .pf-comeup {
+    --pf-accent: var(--pf-comeup);
+    --pf-ink: var(--pf-comeup-ink);
+    --pf-bg: var(--pf-comeup-bg);
+  }
+  .pf-autres {
+    --pf-accent: var(--primary);
+    --pf-ink: rgb(var(--rgb-primary-ink));
+    --pf-bg: var(--surface-2);
+  }
+
+  /* Bandeau d'en-tête de section ; Codeur : papier millimétré très léger. */
+  .pf-banner {
+    background-color: var(--pf-bg);
+    border: 1px solid color-mix(in srgb, var(--pf-accent) 28%, transparent);
+    border-radius: 0.75rem;
+  }
+  .pf-codeur .pf-banner {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--pf-accent) 10%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--pf-accent) 10%, transparent) 1px, transparent 1px);
+    background-size: 12px 12px;
+  }
+  /* ComeUp : coin coupé et œillet, façon étiquette de prix. */
+  .pf-comeup .pf-tag {
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  }
+  .pf-comeup .pf-tag::after {
+    content: "";
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    border: 1.5px solid var(--pf-accent);
+  }
+}
+
+/* Utilitaires : après les classes Tailwind (`border`, `text-*`), pour l'emporter sur elles. */
+@layer utilities {
+  .pf-ink {
+    color: var(--pf-ink);
+  }
+  .pf-chip {
+    color: var(--pf-ink);
+    background-color: var(--pf-bg);
+    border: 1px solid color-mix(in srgb, var(--pf-accent) 35%, transparent);
+  }
+  /* Bordure gauche des cartes et des lignes de la liste. */
+  .pf-card {
+    border-left: 3px solid var(--pf-accent);
+  }
+  /* Onglet actif : soulignement et légère teinte. */
+  .pf-tab-active {
+    border-color: var(--pf-accent);
+    color: var(--pf-ink);
+    background-image: linear-gradient(to top, color-mix(in srgb, var(--pf-accent) 12%, transparent), transparent 70%);
+  }
+}
