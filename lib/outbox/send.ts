@@ -9,6 +9,7 @@ import { buildDeliverability, DELIVERABILITY_COLUMNS, type SentRow } from "./del
 import { offWeekend } from "./paris-time";
 import { RELANCE_TYPES, replySinceLastSend } from "./relances";
 import { followUpBlock, followUpRefusal, oppositionVerified } from "./follow-up-policy";
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { segmentOf } from "@/lib/segments";
 import { allowanceLabel, segmentAllowance } from "@/lib/segments/quota";
 import { sentTodayForSegment } from "@/lib/segments/sent-today";
@@ -81,6 +82,25 @@ export type OutboxMessage = Pick<
 
 const fail = (kind: SendFailureKind, error: string, status: number): SendResult => ({ ok: false, kind, error, status });
 
+/**
+ * GARDE AU MOMENT DE L'ENVOI (Cowork #48, ESPACE 3000, 12/10/2026) : une relance rédigée le 09/10, avant que la
+ * catégorie INSEE ETI ne rende la fiche hors cible (#153), est partie le 12/10 — le hors cible n'était lu qu'à la
+ * RÉDACTION. Tout mail de prospection (intro ou relance, jamais une réponse) est relu au départ : opposé, « ne plus
+ * contacter », perdu, a répondu (statut), hors cible (offTargetReason). Code pur : le motif, ou `null`.
+ */
+export function sendTimeBlock(
+  prospect: Parameters<typeof followUpBlock>[0] & Parameters<typeof offTargetReason>[0],
+  type: MessageType,
+): string | null {
+  if (type === "reponse") return null;
+  const blocked = followUpBlock(prospect);
+  if (blocked) return blocked;
+  const offTarget = offTargetReason(prospect);
+  return offTarget ? `hors cible : ${offTarget}` : null;
+}
+
+export const sendTimeRefusal = (reason: string) => `Envoi annulé au départ : ${reason}.`;
+
 /** Règles communes : `null` si l'envoi est permis, sinon le refus à afficher. */
 export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown, now: Date): Promise<SendResult | null> {
   if (!isEmail(to)) return fail("invalid", "Destinataire invalide.", 400);
@@ -95,7 +115,7 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
 
   const { data: prospect } = await db
     .from("prospects")
-    .select("id, status, deleted_at, do_not_contact, email, key_figures, website")
+    .select("id, status, deleted_at, do_not_contact, email, key_figures, website, company_name, size_range, business_profile")
     .eq("id", message.prospect_id)
     .eq("user_id", message.user_id)
     .maybeSingle();
@@ -131,6 +151,11 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
   if (message.type !== "reponse" && !oppositionVerified(row.key_figures)) {
     return fail("blocked", "Opposition à la prospection non vérifiée : vérification au registre (INPI) nécessaire avant tout envoi.", 409);
   }
+
+  // Garde au départ (Cowork #48) : perdu, a répondu, hors cible — relue sur la fiche D'AUJOURD'HUI, pas celle
+  // du jour où le mail a été rédigé ou programmé.
+  const atSend = sendTimeBlock(row as Parameters<typeof sendTimeBlock>[0], message.type);
+  if (atSend) return fail("blocked", sendTimeRefusal(atSend), 409);
 
   // Une relance ne part jamais vers un prospect opposé, « ne plus contacter »,
   // perdu, ou qui a répondu (lib/outbox/follow-up-policy.ts).
@@ -182,6 +207,9 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
 
 type ProspectForPreflight = {
   status?: string | null;
+  company_name?: string | null;
+  size_range?: string | null;
+  business_profile?: unknown;
   deleted_at?: string | null;
   do_not_contact?: boolean;
   email?: string | null;

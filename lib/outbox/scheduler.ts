@@ -211,7 +211,9 @@ export async function runDueSends(db: Db, deps: SendDeps & { limit?: number; not
       lastSent.set(owner, now.getTime());
       continue;
     }
-    if (result.kind === "preflight") {
+    // Refus d'une RÈGLE (409 : ne plus contacter, opposé, perdu, hors cible… — Cowork #48) : comme le contrôle
+    // avant envoi, « Bloqué » avec le motif, jamais « Échec » ni nouvel essai. Le plafond du jour (429) n'en est pas.
+    if (result.kind === "preflight" || (result.kind === "blocked" && result.status === 409)) {
       // Contrôle avant envoi refusé : rien n'est parti, rien ne sera retenté.
       // Base pas encore migrée (`blocked` refusé par la contrainte) : `failed`, même motif.
       const written = await settle(db, message.id, { send_status: "blocked", send_error: result.error });
