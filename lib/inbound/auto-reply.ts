@@ -30,7 +30,7 @@ export interface MailLike {
 
 export const AUTO_REPLY_LABEL: Record<AutoReplyKind, string> = {
   antispam: "Validation anti-spam",
-  absence: "Réponse auto",
+  absence: "Absence",
 };
 
 const ANTISPAM_SENDER = /mailinblack|@(?:[a-z0-9-]+\.)*(?:spamarrest|boxbe|sendio|altospam)\.[a-z]+$/i;
@@ -43,8 +43,21 @@ const ANTISPAM_TEXT = [
   /(?:votre|ce) (?:message|e-?mail|courriel) (?:est |a été )?(?:en attente|bloqué|retenu)[^.\n]{0,60}(?:validation|d[ée]livr|authentifi)/i,
 ];
 
+/**
+ * Absences françaises SANS en-tête Auto-Submitted (Cowork #49, LSO MEDICAL, 12/10 : « Je serai indisponible du 12 au
+ * 16 octobre inclus et prendrai connaissance de votre message à mon retour, le lundi 19 octobre. En cas d'urgence,
+ * vous pouvez contacter… » classé « Réponse »).
+ */
+const ABSENCE_FR_2026 = [
+  String.raw`je serai (?:absente?|indisponible|en cong[ée]s?|en d[ée]placement|en vacances|hors du bureau)`,
+  String.raw`(?:je )?prendrai connaissance de (?:votre|vos) (?:message|mail|e-?mail|courriel)s?`,
+  String.raw`en cas d['’]urgence,? (?:vous pouvez|merci de|veuillez|n['’]h[ée]sitez pas [àa]) (?:contacter|joindre|vous adresser|appeler|[ée]crire)`,
+  String.raw`(?:je serai |je suis )?de retour (?:le|au bureau|lundi|mardi|mercredi|jeudi|vendredi)`,
+  String.raw`i will be (?:unavailable|out of (?:the )?office|away)`,
+].join("|");
+
 const ABSENCE_SUBJECT = /r[ée]ponse automatique|message automatique|automatic reply|auto(?:matic)?[- ]?reply|autoreply|out of (?:the )?office|absen(?:t|te|ce) du bureau|message d['’]absence|^\s*(?:re\s*:\s*)?absen(?:t|te|ce)\b/i;
-const ABSENCE_BODY = /je suis (?:actuellement )?(?:absente?|en cong[ée]s?|en d[ée]placement|en vacances|en arr[êe]t)|i am (?:currently )?(?:out of (?:the )?office|away|on (?:annual )?leave)|r[ée]ponse automatique|message automatique|out of (?:the )?office/i;
+const ABSENCE_BODY = new RegExp(`${String.raw`je suis (?:actuellement )?(?:absente?|indisponible|en cong[ée]s?|en d[ée]placement|en vacances|en arr[êe]t)|i am (?:currently )?(?:out of (?:the )?office|away|on (?:annual )?leave)|r[ée]ponse automatique|message automatique|out of (?:the )?office`}|${ABSENCE_FR_2026}`, "i");
 /** Un message d'absence le dit d'entrée : au-delà, c'est une vraie réponse qui en parle. */
 const ABSENCE_LEAD = 300;
 
@@ -112,9 +125,11 @@ const MONTHS: Record<string, number> = {
   janvier: 1, fevrier: 2, février: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7,
   aout: 8, août: 8, septembre: 9, octobre: 10, novembre: 11, decembre: 12, décembre: 12,
 };
-const RETURN_CUE = String.raw`(?:de retour|retour (?:pr[ée]vu )?le|reprise|jusqu['’]au|absente? jusqu['’]au|back on|until)`;
+const RETURN_CUE = String.raw`(?:de retour|retour (?:pr[ée]vu )?le|[àa] mon retour|reprise|jusqu['’]au|absente? jusqu['’]au|back on|until)`;
 const NUMERIC_DATE = new RegExp(`${RETURN_CUE}[^\\d\\n]{0,25}(\\d{1,2})[/.](\\d{1,2})(?:[/.](\\d{2,4}))?`, "i");
 const TEXT_DATE = new RegExp(`${RETURN_CUE}[^\\n]{0,25}?(\\d{1,2})(?:er)?\\s+(${Object.keys(MONTHS).join("|")})(?:\\s+(\\d{4}))?`, "i");
+/** « indisponible du 12 au 16 octobre (inclus) » : sans date de retour explicite, le retour est le lendemain du dernier jour. */
+const RANGE_DATE = new RegExp(`(?:absente?|indisponible|en cong[ée]s?|en vacances|en d[ée]placement)[^\\n]{0,20}?\\bdu\\s+\\d{1,2}(?:er)?(?:\\s+(?:${Object.keys(MONTHS).join("|")}))?\\s+au\\s+(\\d{1,2})(?:er)?\\s+(${Object.keys(MONTHS).join("|")})(?:\\s+(\\d{4}))?`, "i");
 
 /**
  * Date de retour d'un message d'absence (« de retour le 12/10 », « absent
@@ -125,10 +140,13 @@ export function absenceReturnDate(message: MailLike & { received_at: string }): 
   const text = `${message.subject ?? ""}\n${message.body ?? ""}`;
   const numeric = NUMERIC_DATE.exec(text);
   const textual = numeric ? null : TEXT_DATE.exec(text);
-  const day = Number((numeric ?? textual)?.[1]);
-  const month = numeric ? Number(numeric[2]) : textual ? MONTHS[textual[2].toLowerCase()] : NaN;
-  const rawYear = (numeric ?? textual)?.[3];
-  if (!day || !month || day > 31 || month > 12) return null;
+  // Une date de retour EXPLICITE prime ; à défaut, la fin d'une période d'absence + 1 jour (Cowork #49).
+  const range = numeric || textual ? null : RANGE_DATE.exec(text);
+  const found = numeric ?? textual ?? range;
+  const day = Number(found?.[1]) + (range ? 1 : 0);
+  const month = numeric ? Number(numeric[2]) : (textual ?? range) ? MONTHS[(textual ?? range)![2].toLowerCase()] : NaN;
+  const rawYear = found?.[3];
+  if (!day || !month || Number(found?.[1]) > 31 || month > 12) return null;
   const received = new Date(message.received_at);
   let year = rawYear ? Number(rawYear.length === 2 ? `20${rawYear}` : rawYear) : received.getUTCFullYear();
   let at = Date.UTC(year, month - 1, day);
@@ -136,6 +154,7 @@ export function absenceReturnDate(message: MailLike & { received_at: string }): 
   // Une date passée ou à plus de 4 mois n'est pas une date de retour exploitable.
   if (at < received.getTime() - 86_400_000 || at > received.getTime() + 120 * 86_400_000) return null;
   const date = new Date(at);
-  if (date.getUTCDate() !== day) return null;
+  // « au 31 octobre » + 1 jour passe au mois suivant : seul ce cas est permis.
+  if (date.getUTCDate() !== day && !(range && date.getUTCDate() === 1)) return null;
   return date.toISOString().slice(0, 10);
 }

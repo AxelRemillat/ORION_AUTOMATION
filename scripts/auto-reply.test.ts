@@ -5,7 +5,7 @@
  * `npm run test:reponses-auto`
  */
 import { absenceReturnDate, antispamLink, autoReplyKind, isProspectReply } from "../lib/inbound/auto-reply";
-import { findAntispamProspect, followUpAfter, setAntispamValidated, shiftFollowUpsAfterReturn } from "../lib/inbound/auto-reply-server";
+import { findAntispamProspect, followUpAfter, reclassifyAbsence, setAntispamValidated, shiftFollowUpsAfterReturn } from "../lib/inbound/auto-reply-server";
 import { replySinceLastSend } from "../lib/outbox/relances";
 import { buildVolumes } from "../lib/settings/volumes";
 import { outcomeOf } from "../lib/variants/stats";
@@ -130,6 +130,74 @@ async function main() {
     check("après « Validé » : toujours dans Reçus, validé (plus de bandeau)", after.length === 1 && after[0].validated && after[0].autoKind === "antispam");
     const refused = await setAntispamValidated(db, { userId: "u1", inboundId: "in-real", validated: true });
     check("mail inconnu ou non anti-spam : refus", !refused.ok);
+  }
+
+  console.log("\n8. Absence française sans en-tête (Cowork #49, cas réel du 12/10 anonymisé)");
+  {
+    // Absence réelle reçue le 12/10, une minute après l'intro : noms, adresse et société retirés.
+    const ABSENT = {
+      id: "in-absent",
+      from_email: "dirigeant@exemple-medical.fr",
+      subject: "Re: Demandes d'assistance",
+      body: "Bonjour,\n\nJe serai indisponible du 12 au 16 octobre inclus et prendrai connaissance de votre message à mon retour, le lundi 19 octobre.\n\nEn cas d'urgence, vous pouvez contacter ma collègue à l'adresse habituelle.\n\nMerci de votre compréhension.\n\nCordialement,\n\nLe président\n\n---\n\nHello,\n\nI will be unavailable from October 12 to 16, inclusive, and will review your message upon my return on Monday, October 19.",
+      received_at: "2026-10-12T08:16:13Z",
+    };
+    check("« Je serai indisponible du … au … » sans Auto-Submitted → absence", autoReplyKind(ABSENT) === "absence");
+    check("… pas une réponse du prospect (hors taux de réponse)", !isProspectReply(ABSENT));
+    check("date de retour « à mon retour, le lundi 19 octobre » → 2026-10-19", absenceReturnDate(ABSENT) === "2026-10-19", absenceReturnDate(ABSENT));
+    check("relance suivante : mardi 20/10, 9 h à Paris", followUpAfter("2026-10-19")?.toISOString() === "2026-10-20T07:00:00.000Z");
+    const plain = (body: string) => autoReplyKind({ from_email: "a@b.fr", subject: "Re: Votre proposition", body });
+    check("« Je serai absente du 12 au 16 octobre » → absence", plain("Bonjour,\nJe serai absente du 12 au 16 octobre.") === "absence");
+    check("« je prendrai connaissance de votre message à mon retour » → absence", plain("Bonjour, je prendrai connaissance de votre message à mon retour.") === "absence");
+    check("« En cas d'urgence, vous pouvez contacter … » → absence", plain("Bonjour,\nEn cas d'urgence, vous pouvez contacter le standard.") === "absence");
+    check("« De retour le 19/10 » → absence", plain("De retour le 19/10.") === "absence");
+    check("vraie réponse qui cite une date : pas une absence", plain("Bonjour, intéressé. Appelez-moi mardi 14 à 10 h, je serai au bureau.") === null);
+    const range = (body: string) => absenceReturnDate({ from_email: "a@b.fr", subject: "Re: x", body, received_at: "2026-10-12T08:00:00Z" });
+    check("période seule « du 12 au 16 octobre inclus » → retour le 17", range("Je serai indisponible du 12 au 16 octobre inclus.") === "2026-10-17");
+    check("période en fin de mois « du 20 au 31 octobre » → retour le 1er novembre", range("Je suis en congés du 20 au 31 octobre.") === "2026-11-01");
+    check("date explicite prioritaire sur la période", range("Absente du 12 au 16 octobre, de retour le 20 octobre.") === "2026-10-20");
+
+    // Reclassement de l'existant : la fiche était passée « Répondu », le rappel soldé.
+    const fake = new FakeDb({
+      prospects: [{ id: "p-abs", user_id: "u1", company_name: "EXEMPLE MEDICAL", status: "repondu", deleted_at: null }],
+      messages: [{ id: "intro", user_id: "u1", prospect_id: "p-abs", type: "intro", status: "sent", send_status: "sent", sent_at: "2026-10-12T08:15:00Z", deleted_at: null }],
+      inbound_messages: [{ ...ABSENT, user_id: "u1", prospect_id: "p-abs", category: "reponse", handled: false, deleted_at: null }],
+      reminders: [{ id: "rem", user_id: "u1", prospect_id: "p-abs", done: true, due_at: "2026-10-16T08:15:00Z", created_at: "2026-10-12T08:15:05Z" }],
+      prospect_events: [],
+    } as Record<string, Record<string, unknown>[]>);
+    const db = fake as unknown as Db;
+    const dry = await reclassifyAbsence(db, { userId: "u1", inboundId: "in-absent", apply: false });
+    check("lecture seule : dit ce qui serait fait, n'écrit rien", dry?.statusRestored === "contacte" && dry.followUpAt === "2026-10-20T07:00:00.000Z" && fake.rows("prospects")[0].status === "repondu" && fake.rows("reminders")[0].done === true, dry);
+    const done = await reclassifyAbsence(db, { userId: "u1", inboundId: "in-absent", apply: true, now: new Date("2026-10-12T12:00:00Z") });
+    check("fiche « Répondu » → « Contacté » (statut du dernier envoi)", fake.rows("prospects")[0].status === "contacte", done);
+    check("catégorie n8n « reponse » → « autre » (badge « Absence » par la détection)", fake.rows("inbound_messages")[0].category === "autre" && done?.categoryFrom === "reponse");
+    check("rappel rouvert et reporté au mardi 20/10 9 h (lendemain du retour)", fake.rows("reminders")[0].done === false && fake.rows("reminders")[0].due_at === "2026-10-20T07:00:00.000Z", fake.rows("reminders")[0]);
+    check("rien supprimé, rien d'envoyé ni de programmé", fake.rows("messages").length === 1 && fake.rows("inbound_messages").length === 1 && fake.rows("reminders").length === 1);
+
+    // Absence sans date de retour lisible : le rappel est rouvert à sa date d'origine.
+    const undated = new FakeDb({
+      prospects: [{ id: "p2", user_id: "u1", status: "repondu", deleted_at: null }],
+      messages: [{ id: "i2", user_id: "u1", prospect_id: "p2", type: "intro", status: "sent", send_status: "sent", sent_at: "2026-10-12T08:15:00Z", deleted_at: null }],
+      inbound_messages: [{ id: "in2", user_id: "u1", prospect_id: "p2", from_email: "a@b.fr", subject: "Re: x", body: "Bonjour,\nJe serai absent cette semaine. En cas d'urgence, vous pouvez contacter le standard.", category: "question", received_at: "2026-10-12T09:00:00Z", deleted_at: null }],
+      reminders: [{ id: "rem2", user_id: "u1", prospect_id: "p2", done: true, due_at: "2026-10-16T08:15:00Z", created_at: "2026-10-12T08:15:05Z" }],
+      prospect_events: [],
+    } as Record<string, Record<string, unknown>[]>);
+    await reclassifyAbsence(undated as unknown as Db, { userId: "u1", inboundId: "in2", apply: true });
+    check("absence sans date : rappel rouvert à sa date d'origine (les relances continuent)", undated.rows("reminders")[0].done === false && undated.rows("reminders")[0].due_at === "2026-10-16T08:15:00Z", undated.rows("reminders")[0]);
+
+    // Une VRAIE réponse après l'envoi : on ne touche à rien.
+    const real = new FakeDb({
+      prospects: [{ id: "p3", user_id: "u1", status: "repondu", deleted_at: null }],
+      messages: [{ id: "i3", user_id: "u1", prospect_id: "p3", type: "intro", status: "sent", send_status: "sent", sent_at: "2026-10-12T08:15:00Z", deleted_at: null }],
+      inbound_messages: [
+        { id: "in3", user_id: "u1", prospect_id: "p3", from_email: "a@b.fr", subject: "Re: x", body: "Je serai absent du 12 au 16 octobre.", category: "reponse", received_at: "2026-10-12T09:00:00Z", deleted_at: null },
+        { id: "in4", user_id: "u1", prospect_id: "p3", from_email: "a@b.fr", subject: "Re: x", body: "Finalement oui, appelons-nous.", category: "reponse", received_at: "2026-10-12T10:00:00Z", deleted_at: null },
+      ],
+      reminders: [],
+      prospect_events: [],
+    } as Record<string, Record<string, unknown>[]>);
+    await reclassifyAbsence(real as unknown as Db, { userId: "u1", inboundId: "in3", apply: true });
+    check("vraie réponse ensuite : la fiche reste « Répondu », aucun rappel", real.rows("prospects")[0].status === "repondu" && real.rows("reminders").length === 0);
   }
 
   console.log(failures === 0 ? "\nTous les tests des réponses automatiques passent.\n" : `\n${failures} test(s) en échec.\n`);
