@@ -5,6 +5,7 @@ import { useToast } from "@/components/ui";
 import type { Opportunity, Platform } from "@/lib/opportunities/types";
 import type { PlatformTab } from "@/lib/opportunities/tabs";
 import { PROPOSAL_FAILED } from "@/lib/opportunities/proposal-state";
+import { optimisticPatch } from "@/lib/opportunities/optimistic";
 
 export type NewOpportunity = { platform: Platform; url: string; title: string; body: string; budget: string; deadline: string };
 
@@ -43,18 +44,31 @@ export function useOpportunityActions(setItems: Dispatch<SetStateAction<Opportun
 
   const merge = (id: string, patch: Partial<Opportunity>) => setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
 
+  /**
+   * Mise à jour OPTIMISTE (Cowork #23) : l'écran change tout de suite ; un refus du serveur
+   * remet les valeurs d'avant et le dit. La réponse du serveur (jalons datés…) complète ensuite.
+   */
   async function patch(id: string, body: Record<string, unknown>, success: string | null): Promise<boolean> {
+    let before: Opportunity | undefined;
+    setItems((current) => {
+      before = current.find((item) => item.id === id);
+      return current.map((item) => (item.id === id ? { ...item, ...optimisticPatch(body) } : item));
+    });
     setBusy(`patch:${id}`);
+    const rollback = (message: string) => {
+      if (before) merge(id, before);
+      toast.error(message);
+      return false;
+    };
     try {
       const response = await fetch(`/api/opportunites/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const result = (await response.json()) as { patch?: Partial<Opportunity>; error?: string };
-      if (!response.ok || !result.patch) {
-        toast.error(result.error ?? "Non enregistré.");
-        return false;
-      }
+      const result = (await response.json().catch(() => ({}))) as { patch?: Partial<Opportunity>; error?: string };
+      if (!response.ok || !result.patch) return rollback(result.error ?? "Non enregistré : valeur d'avant remise.");
       merge(id, result.patch);
       if (success) toast.success(success);
       return true;
+    } catch {
+      return rollback("Réseau indisponible : valeur d'avant remise.");
     } finally {
       setBusy(null);
     }

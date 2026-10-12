@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ClipboardPaste } from "lucide-react";
 import { Button } from "@/components/ui";
 import type { Opportunity } from "@/lib/opportunities/types";
@@ -46,6 +46,9 @@ export function OpportunitiesClient({
 }) {
   const [items, setItems] = useState(initial);
   const [emails, setEmails] = useState(initialEmails);
+  // Rafraîchissement automatique (Cowork #23) : les nouvelles données du serveur remplacent la liste.
+  useEffect(() => setItems(initial), [initial]);
+  useEffect(() => setEmails(initialEmails), [initialEmails]);
   const [tab, setTab] = useState<PlatformTab>(initialTab);
   const focused = focusId && initial.some((item) => item.id === focusId) ? focusId : null;
   const [filter, setFilter] = useState<Filter>(initialFilter ?? (focused ? "toutes" : "alertes"));
