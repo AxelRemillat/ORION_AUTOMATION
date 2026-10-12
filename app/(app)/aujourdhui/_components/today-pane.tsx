@@ -84,9 +84,10 @@ export function TodayPane({
           <Button size="sm" variant="ghost" onClick={() => document.getElementById(EDITOR_ID)?.focus()} disabled={!item.messageId || locked} aria-keyshortcuts="E">
             <PenLine className="h-3.5 w-3.5" aria-hidden /> Modifier <kbd className="font-data text-[10px] text-faint">E</kbd>
           </Button>
-          {item.status === "valide" ? (
+          {item.status === "valide" || item.status === "programme" ? (
+            // Retirer la validation d'un mail programmé le déprogramme et libère sa place (Cowork #50).
             <Button size="sm" variant="secondary" onClick={() => onValidate(false)}>
-              <Check className="h-3.5 w-3.5" aria-hidden /> Validé · retirer
+              <Check className="h-3.5 w-3.5" aria-hidden /> {item.status === "programme" ? "Programmé" : "Validé"} · retirer
             </Button>
           ) : (
             <Button size="sm" variant="secondary" onClick={() => onValidate(true)} disabled={blocked} aria-keyshortcuts="V">
