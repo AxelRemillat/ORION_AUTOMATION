@@ -16,17 +16,6 @@ import { loadVariantStats } from "@/lib/variants/load";
 
 export const metadata = { title: "Pipeline · ORION" };
 
-/** Famille (message_variants.family) de chaque intro ; colonne absente ou lecture en échec : aucune. */
-async function introFamilies(supabase: ReturnType<typeof createClient>, ids: string[]): Promise<Map<string, string>> {
-  const families = new Map<string, string>();
-  for (let index = 0; index < ids.length; index += 150) {
-    const { data, error } = await supabase.from("message_variants").select("message_id, family").in("message_id", ids.slice(index, index + 150)).not("family", "is", null);
-    if (error) return families;
-    for (const row of (data ?? []) as { message_id: string; family: string | null }[]) if (row.family) families.set(row.message_id, row.family);
-  }
-  return families;
-}
-
 /** Fin de journée : une relance due aujourd'hui doit apparaître dès le matin. */
 function endOfToday() {
   const date = new Date();
@@ -36,19 +25,19 @@ function endOfToday() {
 
 /** Pipeline Kanban + relances du jour. Toutes les données passent par la RLS. */
 export default async function SuiviPage() {
-  await requireUser();
   const supabase = createClient();
 
-  // Corbeille exclue : ses relances sont suspendues tant qu'elle y reste.
-  const { prospects, messages, reminders, deals } = await loadPortfolio(
-    supabase,
-    ["messages", "reminders", "deals"],
-    { orderBy: "updated_at", openRemindersOnly: true },
-  );
-
-  // Expérience n° 2 : famille de chaque intro (badge) et taux par famille (tableau).
-  const families = await introFamilies(supabase, messages.filter((message) => message.type === "intro").map((message) => message.id));
-  const { stats } = await loadVariantStats(supabase);
+  // Tout EN PARALLÈLE (Cowork #23) — la page enchaînait quatre lectures l'une après l'autre.
+  // Corbeille exclue : ses relances sont suspendues tant qu'elle y reste. La RLS protège les données ;
+  // l'utilisateur (mis en cache par requête) n'est attendu que pour le garde-fou de connexion.
+  const [, portfolio, variants] = await Promise.all([
+    requireUser(),
+    loadPortfolio(supabase, ["messages", "reminders", "deals"], { orderBy: "updated_at", openRemindersOnly: true }),
+    // Expérience n° 2 : famille de chaque intro (badge) et taux par famille (tableau), en une lecture.
+    loadVariantStats(supabase),
+  ]);
+  const { prospects, messages, reminders, deals } = portfolio;
+  const { stats, families } = variants;
   const rows = buildRows(prospects, messages, reminders, deals, families);
   const byId = new Map(prospects.map((prospect) => [prospect.id, prospect]));
   const limit = endOfToday();

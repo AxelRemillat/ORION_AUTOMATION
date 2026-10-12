@@ -16,9 +16,10 @@ export const metadata = { title: "Opportunités · ORION" };
  * aucune connexion aux plateformes, aucun scraping.
  */
 export default async function OpportunitesPage({ searchParams }: { searchParams?: { id?: string; filtre?: string; p?: string } }) {
-  await requireUser();
   const db = createClient() as unknown as { from: (table: string) => any };
-  const [{ data }, emails] = await Promise.all([
+  // Garde-fou de connexion EN PARALLÈLE des lectures (la RLS protège les données, Cowork #23).
+  const [, { data }, emails] = await Promise.all([
+    requireUser(),
     db.from("opportunities").select("*").order("created_at", { ascending: false }).limit(500),
     // E-mails des plateformes : suivi des fiches et « à trier ». Table absente (migration pas encore passée) : rien.
     db

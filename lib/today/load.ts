@@ -162,10 +162,12 @@ export const UNASSIGNED_FAMILY = "non attribué";
 
 async function draftFamilies(db: Db, ids: readonly string[]): Promise<Map<string, string>> {
   const families = new Map<string, string>();
-  for (let index = 0; index < ids.length; index += 150) {
-    const { data, error } = await db.from("message_variants").select("message_id, family").in("message_id", ids.slice(index, index + 150)).not("family", "is", null);
+  // Lots de 150 identifiants lus EN PARALLÈLE (Cowork #23), plus l'un après l'autre.
+  const chunks = Array.from({ length: Math.ceil(ids.length / 150) }, (_, index) => ids.slice(index * 150, index * 150 + 150));
+  const results = await Promise.all(chunks.map((chunk) => db.from("message_variants").select("message_id, family").in("message_id", chunk).not("family", "is", null)));
+  for (const { data, error } of results as { data: { message_id: string; family: string | null }[] | null; error: unknown }[]) {
     if (error) return families;
-    for (const row of (data ?? []) as { message_id: string; family: string | null }[]) if (row.family) families.set(row.message_id, row.family);
+    for (const row of data ?? []) if (row.family) families.set(row.message_id, row.family);
   }
   return families;
 }
