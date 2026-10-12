@@ -8,6 +8,7 @@ import { loadVariantStats } from "@/lib/variants/load";
 import { platformStats } from "@/lib/opportunities/stats";
 import type { Opportunity } from "@/lib/opportunities/types";
 import { OpportunitiesCard } from "./opportunities-card";
+import { readAll } from "@/lib/supabase/read-all";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Données · Réglages · ORION" };
@@ -20,10 +21,8 @@ export default async function DonneesPage() {
     loadVolumes(db, user.id),
     loadVariantStats(db),
     // Table absente (avant migration) : aucune ligne, la carte reste vide.
-    (db as unknown as { from: (table: string) => any })
-      .from("opportunities")
-      .select("platform, status, sent_at, replied_at, amount_eur")
-      .then((result: { data: Opportunity[] | null }) => result.data ?? [], () => []),
+    // Toutes les fiches (Cowork #24) : les totaux par plateforme s'arrêtaient à 1 000.
+    readAll<Opportunity>(() => (db as unknown as { from: (table: string) => any }).from("opportunities").select("platform, status, sent_at, replied_at, amount_eur").order("id")).catch(() => [] as Opportunity[]),
   ]);
   return (
     <>

@@ -3,6 +3,7 @@ import { recordProspectEvent } from "@/lib/history/record";
 import type { Db } from "@/lib/trash/scope";
 import type { Prospect, ProspectStatus } from "@/types";
 import { oppositionVerified } from "./follow-up-policy";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * Vérification d'opposition des prospects DÉJÀ CONTACTÉS dont une relance est
@@ -22,12 +23,8 @@ export async function verifyFollowUpOppositions(
   userId: string,
   input: { verify: (siren: string) => Promise<OppositionCheck>; limit: number; deadline: number; now?: Date },
 ): Promise<{ checked: number; opposed: number; failed: number }> {
-  const { data } = await db
-    .from("prospects")
-    .select("*")
-    .eq("user_id", userId)
-    .in("status", FOLLOW_UP_STATUSES)
-    .is("deleted_at", null);
+  // Toute la file (Cowork #24) : au-delà de 1 000 prospects, les suivants n'étaient jamais vérifiés.
+  const { data } = await readAllResult(() => db.from("prospects").select("*").eq("user_id", userId).in("status", FOLLOW_UP_STATUSES).is("deleted_at", null).order("id"));
   const pending = ((data ?? []) as Prospect[]).filter(
     (prospect) => !prospect.do_not_contact && prospect.siren && !oppositionVerified(prospect.key_figures as Record<string, unknown>),
   );

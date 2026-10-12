@@ -3,6 +3,7 @@ import { utcToParis } from "@/lib/outbox/paris-time";
 import type { Db } from "@/lib/trash/scope";
 import { businessDays, sendDay, type DayRoom } from "./plan";
 import { parisToUtc } from "@/lib/outbox/paris-time";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * Ce que la programmation groupée peut encore placer sur le jour d'envoi :
@@ -35,7 +36,8 @@ export const PLAN_HORIZON_DAYS = 5;
 
 export async function loadCapacity(db: Db, userId: string, now = new Date()): Promise<Capacity> {
   const [sentRes, plannedRes] = await Promise.all([
-    db.from("messages").select(DELIVERABILITY_COLUMNS).eq("user_id", userId).eq("status", "sent"),
+    // Tous les envois, page par page (Cowork #24) : le plafond du jour en dépend.
+    readAllResult(() => db.from("messages").select(DELIVERABILITY_COLUMNS).eq("user_id", userId).eq("status", "sent").order("id")),
     db.from("messages").select("scheduled_at").eq("user_id", userId).in("send_status", ["scheduled", "sending"]).is("deleted_at", null),
   ]);
   const deliverability = buildDeliverability((sentRes.data ?? []) as unknown as SentRow[], now);

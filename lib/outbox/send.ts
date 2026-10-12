@@ -13,6 +13,7 @@ import { offTargetReason } from "@/lib/funnel/off-target";
 import { segmentOf } from "@/lib/segments";
 import { allowanceLabel, segmentAllowance } from "@/lib/segments/quota";
 import { sentTodayForSegment } from "@/lib/segments/sent-today";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * LE chemin d'envoi d'un mail — manuel (/api/emails/send) comme programmé
@@ -169,11 +170,8 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
   const check = await preflightFor(db, message, to, row);
   if (!check.ok) return fail("preflight", blockReason(check), 422);
 
-  const { data: sent } = await db
-    .from("messages")
-    .select(DELIVERABILITY_COLUMNS)
-    .eq("user_id", message.user_id)
-    .eq("status", "sent");
+  // Tous les envois (Cowork #24) : tronqués à 1 000, le plafond du jour et le jour de chauffe se trompaient.
+  const { data: sent } = await readAllResult(() => db.from("messages").select(DELIVERABILITY_COLUMNS).eq("user_id", message.user_id).eq("status", "sent").order("id"));
   const cap = buildDeliverability((sent ?? []) as unknown as SentRow[], now);
   if (cap.remaining <= 0) {
     return fail(

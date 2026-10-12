@@ -1,7 +1,7 @@
 import { autoReplyKind, isProspectReply } from "@/lib/inbound/auto-reply";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toCard } from "@/lib/funnel/view";
-import { readAll } from "@/lib/supabase/read-all";
+import { readAll, readAllResult } from "@/lib/supabase/read-all";
 import { followUpBlock } from "@/lib/outbox/follow-up-policy";
 import { signatureFor } from "@/lib/offer/model";
 import { loadOffer } from "@/lib/offer/read";
@@ -55,13 +55,14 @@ export async function loadToday(db: Db, userId: string, now = new Date()): Promi
       db.from("messages").select("*").eq("user_id", userId).is("deleted_at", null).order("created_at", { ascending: false }).order("id"),
     ).then((data) => ({ data })),
     db.from("signal_candidates").select("*").eq("user_id", userId).eq("statut", "creusé").not("prospect_id", "is", null).limit(500),
-    db.from("inbound_messages").select("*").eq("user_id", userId).eq("handled", false).is("deleted_at", null),
-    db.from("reminders").select("prospect_id, due_at").eq("user_id", userId).eq("done", false),
-    db.from("prospect_discards").select("*").eq("user_id", userId).is("undone_at", null),
+    // Pages complètes (Cowork #24) : tronquées à 1 000, des écartés réapparaissaient et des relances manquaient.
+    readAllResult(() => db.from("inbound_messages").select("*").eq("user_id", userId).eq("handled", false).is("deleted_at", null).order("id")),
+    readAllResult(() => db.from("reminders").select("prospect_id, due_at").eq("user_id", userId).eq("done", false).order("id")),
+    readAllResult(() => db.from("prospect_discards").select("*").eq("user_id", userId).is("undone_at", null).order("id")),
     db.from("jobs").select("type, status, target").eq("user_id", userId).in("status", ["queued", "running"]),
     loadOffer(db, userId),
     // Toutes les réponses reçues (traitées ou non) : une relance ne part jamais vers qui a répondu.
-    db.from("inbound_messages").select("prospect_id, received_at, from_email, subject, body").eq("user_id", userId).is("deleted_at", null).not("prospect_id", "is", null),
+    readAllResult(() => db.from("inbound_messages").select("prospect_id, received_at, from_email, subject, body").eq("user_id", userId).is("deleted_at", null).not("prospect_id", "is", null).order("id")),
   ]);
 
   const prospects = new Map(((prospectsRes.data ?? []) as Prospect[]).map((row) => [row.id, row]));

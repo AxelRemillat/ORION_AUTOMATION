@@ -229,7 +229,7 @@ let capacityChecks: Promise<void> = Promise.resolve();
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
       const self = () => chain as never;
-      for (const key of ["select", "eq", "in", "is"]) chain[key] = self;
+      for (const key of ["select", "eq", "in", "is", "order", "range"]) chain[key] = self;
       // `messages` est lue deux fois : les envois, puis les programmations.
       chain.select = (columns: string) => {
         chain.__planned = columns.includes("scheduled_at");
