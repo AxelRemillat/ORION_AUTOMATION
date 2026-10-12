@@ -1,6 +1,7 @@
 import type { Db } from "@/lib/trash/scope";
 import { utcToParis } from "@/lib/outbox/paris-time";
 import { isSegmentKey, type SegmentKey } from "./index";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * Envois du JOUR pour un segment, en heure de Paris.
@@ -21,12 +22,8 @@ export async function sentTodayForSegment(
 ): Promise<number> {
   const today = utcToParis(now).date;
 
-  const { data: messages } = await db
-    .from("messages")
-    .select("prospect_id, sent_at")
-    .eq("user_id", userId)
-    .eq("status", "sent")
-    .not("sent_at", "is", null);
+  // Toutes les pages (Cowork #24) : au-delà de 1 000 envois, le quota du segment était sous-compté.
+  const { data: messages } = await readAllResult(() => db.from("messages").select("prospect_id, sent_at").eq("user_id", userId).eq("status", "sent").not("sent_at", "is", null).order("id"));
 
   const rows = (messages ?? []) as { prospect_id: string | null; sent_at: string | null }[];
   const ids = [

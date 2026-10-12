@@ -1,5 +1,6 @@
 import type { Deal, InboundMessage, Message, Prospect, Reminder } from "@/types";
 import { activeProspects, scopeToActive, type Db } from "./scope";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * Chargement commun des écrans Cockpit, Suivi, Prospection et Stats :
@@ -31,19 +32,24 @@ export async function loadPortfolio(
   const want = (part: PortfolioPart) => parts.includes(part);
   const empty = Promise.resolve({ data: [] as unknown[], error: null });
 
-  let prospects = activeProspects(db);
-  if (options.orderBy) prospects = prospects.order(options.orderBy, { ascending: false });
-
-  let reminders = db.from("reminders").select("*");
-  if (options.openRemindersOnly) reminders = reminders.eq("done", false).order("due_at");
+  // TOUTES les lignes, page par page (Cowork #24) : un `select` sans pagination s'arrêtait
+  // sans prévenir à 1 000 lignes. Tri final sur `id` pour des pages stables.
+  const prospects = () => {
+    const query = activeProspects(db);
+    return (options.orderBy ? query.order(options.orderBy, { ascending: false }) : query).order("id");
+  };
+  const reminders = () => {
+    const query = db.from("reminders").select("*");
+    return (options.openRemindersOnly ? query.eq("done", false).order("due_at") : query).order("id");
+  };
 
   const [prospectResult, messages, deals, reminderResult, inbound] = await Promise.all([
-    prospects,
+    readAllResult(prospects),
     // Un mail à la corbeille disparaît avec la même portée qu'un prospect.
-    want("messages") ? db.from("messages").select("*").is("deleted_at", null) : empty,
-    want("deals") ? db.from("deals").select("*") : empty,
-    want("reminders") ? reminders : empty,
-    want("inbound") ? db.from("inbound_messages").select("*").is("deleted_at", null) : empty,
+    want("messages") ? readAllResult(() => db.from("messages").select("*").is("deleted_at", null).order("id")) : empty,
+    want("deals") ? readAllResult(() => db.from("deals").select("*").order("id")) : empty,
+    want("reminders") ? readAllResult(reminders) : empty,
+    want("inbound") ? readAllResult(() => db.from("inbound_messages").select("*").is("deleted_at", null).order("id")) : empty,
   ]);
 
   const alive = (prospectResult.data ?? []) as Prospect[];

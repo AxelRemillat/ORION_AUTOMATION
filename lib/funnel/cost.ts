@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
 import type { FunnelCost } from "./types";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * Coût d'un run : tout ce que `api_usage` a journalisé pour l'utilisateur
@@ -13,11 +14,8 @@ export async function runCost(
   userId: string,
   since: string,
 ): Promise<FunnelCost> {
-  const { data } = await db
-    .from("api_usage")
-    .select("service, units, cost")
-    .eq("user_id", userId)
-    .gte("created_at", since);
+  // Toutes les lignes (Cowork #24) : un gros passage dépasse 1 000 appels, le coût était sous-estimé.
+  const { data } = await readAllResult<{ service: string; units: number | null; cost: number | null }>(() => db.from("api_usage").select("service, units, cost").eq("user_id", userId).gte("created_at", since).order("id"));
 
   const cost: FunnelCost = { eur: 0, tokens: 0, pappers: 0, hunter: 0, linkup: 0 };
   for (const row of data ?? []) {
