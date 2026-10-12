@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/layout/app-shell";
+import { AutoRefresh } from "@/components/layout/auto-refresh";
 import { ToastProvider } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <ToastProvider>
       <AppShell email={user.email ?? "compte"} badges={badges}>
         {children}
+        <AutoRefresh />
       </AppShell>
       <UndoHost />
     </ToastProvider>
