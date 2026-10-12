@@ -1,6 +1,7 @@
 import type { OppositionCheck } from "@/lib/enrichment/opposition";
 import type { Db } from "@/lib/trash/scope";
 import type { Prospect } from "@/types";
+import { readAllResult } from "@/lib/supabase/read-all";
 
 /**
  * OPPOSITION À LA PROSPECTION des fiches de « Aujourd'hui ».
@@ -32,12 +33,8 @@ export async function verifyQueueOppositions(
   userId: string,
   input: { verify: (siren: string) => Promise<OppositionCheck>; limit: number; deadline: number; now?: Date },
 ): Promise<{ checked: number; opposed: number; failed: number }> {
-  const { data } = await db
-    .from("prospects")
-    .select("*")
-    .eq("user_id", userId)
-    .in("status", ["nouveau", "a_contacter"])
-    .is("deleted_at", null);
+  // Toute la file (Cowork #24) : au-delà de 1 000 prospects, les suivants n'étaient jamais vérifiés.
+  const { data } = await readAllResult(() => db.from("prospects").select("*").eq("user_id", userId).in("status", ["nouveau", "a_contacter"]).is("deleted_at", null).order("id"));
   const pending = ((data ?? []) as Prospect[]).filter(
     (prospect) => !prospect.do_not_contact && prospect.siren && !oppositionKnown(prospect.key_figures),
   );

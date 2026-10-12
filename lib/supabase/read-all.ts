@@ -27,3 +27,19 @@ export async function readAll<T>(
   }
   return rows;
 }
+
+/**
+ * `readAll` sous la forme d'une réponse Supabase (`{ data, error }`), pour remplacer une
+ * lecture `select` SANS pagination — tronquée sans prévenir à 1 000 lignes par PostgREST —
+ * sans réécrire son appelant (Cowork #24). La requête doit être TRIÉE sur une clé unique.
+ */
+export async function readAllResult<T = Record<string, unknown>>(
+  build: Parameters<typeof readAll>[0],
+  options: { pageSize?: number; maxRows?: number } = {},
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  try {
+    return { data: await readAll<T>(build, options), error: null };
+  } catch (error) {
+    return { data: [], error: { message: error instanceof Error ? error.message : String(error) } };
+  }
+}
