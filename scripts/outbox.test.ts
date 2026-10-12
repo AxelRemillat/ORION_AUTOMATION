@@ -7,7 +7,7 @@
 import { FakeDb } from "./fake-supabase";
 import type { Db } from "../lib/trash/scope";
 import { loadPortfolio } from "../lib/trash/portfolio";
-import { sendNow } from "../lib/outbox/send";
+import { sendNow, sendTimeBlock } from "../lib/outbox/send";
 import { cancelSchedule, runDueSends, scheduleMessage, STUCK_SENDING_MIN } from "../lib/outbox/scheduler";
 import {
   deleteMessageForever,
@@ -208,7 +208,7 @@ async function main() {
     const web = n8n();
     await runDueSends(db, { ...web.deps, now: at(11) });
     const row = msg(fake, "m1");
-    check("do_not_contact : échec lisible, rien envoyé", web.calls.length === 0 && row.send_status === "failed" && String(row.send_error).includes("ne plus contacter"), row.send_error);
+    check("do_not_contact : « Bloqué » avec le motif, rien envoyé (Cowork #48)", web.calls.length === 0 && row.send_status === "blocked" && String(row.send_error).includes("ne plus contacter"), row.send_error);
     const blocked = await scheduleMessage(db, { userId: "u1", messageId: "m2", to: "b@beta.fr", at: at(20) }, at(0));
     check("un autre prospect reste programmable", blocked.ok);
     const refusedNow = await scheduleMessage(db, { userId: "u1", messageId: "m1", to: "a@acme.fr", at: at(30) }, at(12));
@@ -220,7 +220,7 @@ async function main() {
     (fake.rows("prospects").find((row) => row.id === "acme") as Record<string, unknown>).deleted_at = at(5).toISOString();
     const web = n8n();
     await runDueSends(db, { ...web.deps, now: at(11) });
-    check("prospect à la corbeille : échec, rien envoyé", web.calls.length === 0 && msg(fake, "m1").send_status === "failed");
+    check("prospect à la corbeille : « Bloqué », rien envoyé (Cowork #48)", web.calls.length === 0 && msg(fake, "m1").send_status === "blocked");
   }
   {
     // Premier envoi il y a moins de 3 jours : plafond de 10 par jour.
@@ -372,6 +372,56 @@ async function main() {
       globalThis.Date = RealDate;
       Date.now = realNow;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log("\nGarde au moment de l'envoi (Cowork #48, ESPACE 3000)");
+  {
+    const scheduled = (id: string, prospectId: string, over: Record<string, unknown> = {}) =>
+      draft(id, prospectId, { send_status: "scheduled", scheduled_at: at(10).toISOString(), scheduled_to: `contact@${prospectId}.fr`, ...over });
+    const sentIntro = (id: string, prospectId: string) => draft(id, prospectId, { status: "sent", send_status: "sent", sent_at: at(-5 * 24 * 60).toISOString() });
+    const { fake, db } = seed({
+      prospects: [
+        prospect("espace", { status: "contacte", key_figures: { pappers_read: true, company_category: "ETI" } }),
+        prospect("lost", { status: "perdu" }),
+        prospect("dnc", { status: "contacte", do_not_contact: true }),
+        prospect("ok", { status: "contacte" }),
+      ],
+      messages: [
+        sentIntro("e-intro", "espace"),
+        scheduled("e-r1", "espace", { type: "relance_1" }),
+        scheduled("l-intro", "lost"),
+        sentIntro("d-intro", "dnc"),
+        scheduled("d-r1", "dnc", { type: "relance_1" }),
+      ],
+    });
+    const web = n8n();
+    const report = await runDueSends(db, { ...web.deps, now: at(11) });
+    const espace = msg(fake, "e-r1");
+    check("relance programmée AVANT que la fiche ne devienne hors cible (ETI) : rien ne part", web.calls.every((call) => call.message_id !== "e-r1"), web.calls);
+    check("… le message passe en « Bloqué » avec le motif hors cible", espace.send_status === "blocked" && /hors cible.*ETI/.test(String(espace.send_error)), espace);
+    check("… et reste un brouillon (jamais envoyé)", espace.status === "draft" && !espace.sent_at);
+    check("intro programmée vers un prospect perdu : « Bloqué », motif perdu", msg(fake, "l-intro").send_status === "blocked" && /perdu/.test(String(msg(fake, "l-intro").send_error)), msg(fake, "l-intro"));
+    check("« ne plus contacter » au départ : « Bloqué » (plus « Échec » ni notification)", msg(fake, "d-r1").send_status === "blocked" && /ne plus contacter/.test(String(msg(fake, "d-r1").send_error)), msg(fake, "d-r1"));
+    check("aucun appel n8n pour les trois, compte rendu du tick : 3 bloqués", web.calls.length === 0 && report.blocked === 3 && report.failed === 0, report);
+
+    const manual = await sendNow(db, { userId: "u1", messageId: "e-r1", prospectId: "espace", to: "contact@espace.fr" }, { ...web.deps, now: at(12) });
+    check("envoi MANUEL de la même relance : refusé, rien ne part", !manual.ok && manual.status === 409 && /hors cible/.test(manual.error) && web.calls.length === 0, manual);
+
+    check("motif pur : réponse à un mail reçu jamais bloquée (même hors cible)", sendTimeBlock({ status: "repondu", size_range: null, key_figures: { company_category: "ETI" } }, "reponse") === null);
+    check("motif pur : a répondu (statut)", sendTimeBlock({ status: "repondu", size_range: null, key_figures: { pappers_read: true } }, "relance_1") === "a répondu");
+    check("motif pur : hors cible GE", /catégorie INSEE GE/.test(sendTimeBlock({ status: "contacte", size_range: null, key_figures: { pappers_read: true, company_category: "GE" } }, "relance_2") ?? ""));
+    check("motif pur : fiche saine → envoi permis", sendTimeBlock({ status: "contacte", size_range: null, key_figures: { pappers_read: true } }, "relance_1") === null);
+  }
+  {
+    // Témoin : une relance vers une fiche saine part toujours.
+    const { fake, db } = seed({
+      prospects: [prospect("ok", { status: "contacte" })],
+      messages: [draft("o-intro", "ok", { status: "sent", send_status: "sent", sent_at: at(-5 * 24 * 60).toISOString() }), draft("o-r1", "ok", { type: "relance_1", send_status: "scheduled", scheduled_at: at(10).toISOString(), scheduled_to: "contact@ok.fr" })],
+    });
+    const web = n8n();
+    await runDueSends(db, { ...web.deps, now: at(11) });
+    check("témoin : relance vers une fiche saine envoyée", web.calls.length === 1 && msg(fake, "o-r1").status === "sent", msg(fake, "o-r1"));
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en échec.\n`);
