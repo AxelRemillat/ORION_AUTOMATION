@@ -143,7 +143,11 @@ async function main() {
       id: `u${String(index).padStart(5, "0")}`, user_id: "u1", service: index % 2 ? "openai" : "linkup", operation: "x", units: 10, cost: 0.01,
       created_at: new Date(Date.UTC(2026, 9, 1 + (index % 3), 9, 0, index % 60)).toISOString(),
     }));
-    const db = new FakeDb({ api_usage: rows, free_api_calls: [] });
+    /*
+     * Vues `*_daily` absentes (mode strict, comme PostgREST avant la migration)
+     * : c'est bien la lecture ligne à ligne, page par page, qu'on vérifie ici.
+     */
+    const db = new FakeDb({ api_usage: rows, free_api_calls: [] }, { strictTables: true });
     const all = await readAll(() => (db as never as { from: (t: string) => any }).from("api_usage").select("*").order("id"));
     check("lecture page par page : les 2 500 lignes, sans doublon", all.length === 2_500 && new Set(all.map((row: any) => row.id)).size === 2_500, all.length);
     for (const key of ["HUNTER_API_KEY", "PAPPERS_API_KEY"]) delete process.env[key];

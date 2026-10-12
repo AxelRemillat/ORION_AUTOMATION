@@ -4,10 +4,11 @@
  * l'environnement, aucun appel réseau, aucun crédit. `npm run test:pilotage`
  */
 import { fetchInpiOpposition, resetInpiToken } from "../lib/enrichment/inpi";
-import { buildConsumption, consumptionSince, PROVIDERS, type UsageRow } from "../lib/usage/consumption";
+import { buildConsumption, consumptionSince, PROVIDERS, type UsageRow, toDailyRows } from "../lib/usage/consumption";
 import { buildCreditTiles, cachedExact, CREDITS_CACHE_MS, hunterCycleStart, hunterNextReset, withinMs } from "../lib/usage/credits";
 import { loadPilotage } from "../lib/usage/pilotage";
 import { FakeDb } from "./fake-supabase";
+import { resetDailyViewMemo, sumDaily } from "../lib/usage/usage-daily";
 
 for (const key of ["HUNTER_API_KEY", "PAPPERS_API_KEY", "OPENAI_MONTHLY_BUDGET_EUR", "ORION_SCRIPT_USER_ID"]) delete process.env[key];
 
@@ -108,18 +109,57 @@ async function main() {
 
   console.log("\n5. Chargement serveur (agrégats) et journalisation INPI");
   {
-    const db = new FakeDb({
-      api_usage: usage.map((row, index) => ({ id: `u${index}`, user_id: "u1", operation: "x", ...row })),
-      free_api_calls: free.map((row, index) => ({ id: `f${index}`, user_id: "u1", operation: "companies", ...row })),
-    });
+    /*
+     * `strictTables` : les vues `*_daily` n'existent PAS dans cette base de
+     * test, et PostgREST rendrait une erreur. On vérifie ici le repli ligne à
+     * ligne ; le chemin agrégé est vérifié juste après, avec les mêmes chiffres.
+     */
+    const db = new FakeDb(
+      {
+        api_usage: usage.map((row, index) => ({ id: `u${index}`, user_id: "u1", operation: "x", ...row })),
+        free_api_calls: free.map((row, index) => ({ id: `f${index}`, user_id: "u1", operation: "companies", ...row })),
+      },
+      { strictTables: true },
+    );
     const started = Date.now();
     const pilotage = await loadPilotage(db, NOW);
     check("agrégats calculés côté serveur (sans clé : estimations, aucun réseau)", pilotage.consumption.window.calls.gratuit === 2 && pilotage.credits.every((t) => t.key === "openai" || t.quality === "estime"), pilotage.credits.map((t) => t.quality));
     check("Hunter : seulement les recherches depuis le 2 (1, pas 2)", pilotage.credits[0].used === 1, pilotage.credits[0]);
     check("Pappers : consommation du mois", pilotage.credits[1].used === 1);
     check("chargement rapide (< 1 s sur fixtures)", Date.now() - started < 1_000, Date.now() - started);
-    const noTable = await loadPilotage(new FakeDb({ api_usage: [] }), NOW);
+    const noTable = await loadPilotage(new FakeDb({ api_usage: [] }, { strictTables: true }), NOW);
     check("table des gratuits absente (avant migration) : rien ne casse", noTable.consumption.empty);
+
+    /*
+     * Chemin RAPIDE (Cowork #22) : la base agrège, l'app ne relit plus
+     * 12 000 lignes. Les journées fournies ici sont celles que produit
+     * `toDailyRows` — c'est-à-dire, au `group by` près, ce que rend la vue
+     * `api_usage_daily` (migration 20261012153000).
+     */
+    // Le module retient 60 s l'absence d'une vue (pour ne pas la redemander à
+    // chaque affichage) : on l'oublie, sinon ce cas repartirait sur le repli.
+    resetDailyViewMemo();
+    const daily = toDailyRows(usage, free);
+    const aggregated = await loadPilotage(
+      new FakeDb(
+        {
+          api_usage_daily: daily.filter((row) => row.service !== "gratuit").map((row) => ({ user_id: "u1", ...row })),
+          free_api_calls_daily: daily.filter((row) => row.service === "gratuit").map((row) => ({ user_id: "u1", ...row })),
+        },
+        { strictTables: true },
+      ),
+      NOW,
+    );
+    check(
+      "vues agrégées : exactement les mêmes chiffres que la lecture ligne à ligne",
+      JSON.stringify(aggregated.consumption) === JSON.stringify(pilotage.consumption),
+      { agrege: aggregated.consumption.window, lignes: pilotage.consumption.window },
+    );
+    check(
+      "et les mêmes compteurs de crédits (unités, pas nombre d'appels)",
+      JSON.stringify(aggregated.credits.map((tile) => tile.used)) === JSON.stringify(pilotage.credits.map((tile) => tile.used)),
+      { agrege: aggregated.credits.map((tile) => tile.used), lignes: pilotage.credits.map((tile) => tile.used) },
+    );
 
     resetInpiToken();
     process.env.INPI_USERNAME = "test@example.com";
@@ -131,6 +171,31 @@ async function main() {
         : new Response(JSON.stringify({ formality: { diffusionCommerciale: true } }), { status: 200 })) as unknown as typeof fetch;
     await fetchInpiOpposition("520644386", fakeFetch, 0, async (entry) => void recorded.push(`${entry.service}:${entry.operation}`));
     check("appel INPI réel → une ligne « inpi » journalisée", recorded.length === 1 && recorded[0] === "inpi:companies", recorded);
+  }
+
+  console.log("\n6. Compteurs de plafond : la base somme, et reste exacte");
+  {
+    resetDailyViewMemo();
+    const db = new FakeDb(
+      {
+        api_usage_daily: [
+          { user_id: "u1", day: "2026-10-01", service: "openai", calls: 10, eur: 1.5, units: 1000 },
+          { user_id: "u1", day: "2026-10-02", service: "openai", calls: 5, eur: 0.75, units: 500 },
+          { user_id: "u1", day: "2026-10-02", service: "pappers", calls: 3, eur: 0, units: 3 },
+          // Septembre : hors borne, ne doit jamais entrer dans la somme du mois.
+          { user_id: "u1", day: "2026-09-30", service: "openai", calls: 99, eur: 99, units: 99 },
+        ],
+      },
+      { strictTables: true },
+    );
+    const spent = await sumDaily(db, "openai", "2026-10-01", "eur");
+    check("dépense OpenAI du mois : 1,50 + 0,75 (septembre exclu)", spent === 2.25, spent);
+    check("unités Pappers du jour", (await sumDaily(db, "pappers", "2026-10-02", "units")) === 3);
+    check("borne incluse : le jour même compte", (await sumDaily(db, "openai", "2026-10-02", "eur")) === 0.75);
+
+    resetDailyViewMemo();
+    const absente = await sumDaily(new FakeDb({ api_usage: [] }, { strictTables: true }), "openai", "2026-10-01", "eur");
+    check("vue absente : `null`, l'appelant relit ligne à ligne (jamais 0 par défaut)", absente === null, absente);
   }
 
   console.log(failures === 0 ? "\nTous les tests du Pilotage passent.\n" : `\n${failures} test(s) en échec.\n`);

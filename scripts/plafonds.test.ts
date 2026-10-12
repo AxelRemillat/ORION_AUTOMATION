@@ -21,6 +21,7 @@ import {
 } from "../lib/usage/budgets";
 import { openAiBudget, pappersAllowance } from "../lib/usage/budgets-server";
 import { FakeDb } from "./fake-supabase";
+import { resetDailyViewMemo } from "../lib/usage/usage-daily";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -41,14 +42,19 @@ async function main() {
     check("39/40 : permis ; 40/40 : refusé, motif lisible", pappersGate(39, 40).allowed && !pappersGate(40, 40).allowed && /40\/40/.test((pappersGate(40, 40) as { reason: string }).reason));
     check("minuit Paris (UTC+2 en octobre)", parisDayStart(NOW).toISOString() === "2026-10-02T22:00:00.000Z");
 
-    const db = new FakeDb({
-      api_usage: [
-        ...Array.from({ length: 39 }, (_, i) => ({ id: `t${i}`, service: "pappers", units: 1, cost: 0, created_at: "2026-10-03T06:00:00Z" })),
-        { id: "minuit", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T22:30:00Z" }, // 00 h 30 Paris : aujourd'hui
-        { id: "hier", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T21:30:00Z" }, // 23 h 30 Paris la veille
-        { id: "h", service: "hunter", units: 5, cost: 0, created_at: "2026-10-03T06:00:00Z" },
-      ],
-    });
+    // Vue `api_usage_daily` absente (mode strict) : on vérifie ici le repli ligne à ligne.
+    const db = new FakeDb(
+      {
+        api_usage: [
+          ...Array.from({ length: 39 }, (_, i) => ({ id: `t${i}`, service: "pappers", units: 1, cost: 0, created_at: "2026-10-03T06:00:00Z" })),
+          { id: "minuit", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T22:30:00Z" }, // 00 h 30 Paris : aujourd'hui
+          { id: "hier", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T21:30:00Z" }, // 23 h 30 Paris la veille
+          { id: "h", service: "hunter", units: 5, cost: 0, created_at: "2026-10-03T06:00:00Z" },
+        ],
+      },
+      { strictTables: true },
+    );
+    resetDailyViewMemo();
     const gate = await pappersAllowance({ db: db as never, now: NOW, env: {} });
     check("compteur réel : 40 crédits aujourd'hui (la veille et Hunter exclus) → refusé", !gate.allowed && gate.used === 40, gate);
 
@@ -75,15 +81,45 @@ async function main() {
     const cap = openAiBudgetState(15.2, 15);
     check("100 % : plafond, préparation arrêtée", cap.level === "plafond" && /arrêtée/.test(cap.message ?? ""), cap);
     check("mois de Paris : 1er octobre 00 h", parisMonthStart(NOW).toISOString() === "2026-09-30T22:00:00.000Z");
-    const db = new FakeDb({
-      api_usage: [
-        { id: "o1", service: "openai", units: 1, cost: 10, created_at: "2026-10-01T08:00:00Z" },
-        { id: "o2", service: "openai", units: 1, cost: 5.5, created_at: "2026-10-02T08:00:00Z" },
-        { id: "sept", service: "openai", units: 1, cost: 99, created_at: "2026-09-30T21:00:00Z" }, // 23 h Paris le 30/09
-      ],
-    });
+    const db = new FakeDb(
+      {
+        api_usage: [
+          { id: "o1", service: "openai", units: 1, cost: 10, created_at: "2026-10-01T08:00:00Z" },
+          { id: "o2", service: "openai", units: 1, cost: 5.5, created_at: "2026-10-02T08:00:00Z" },
+          { id: "sept", service: "openai", units: 1, cost: 99, created_at: "2026-09-30T21:00:00Z" }, // 23 h Paris le 30/09
+        ],
+      },
+      { strictTables: true },
+    );
+    resetDailyViewMemo();
     const state = await openAiBudget({ db: db as never, now: NOW, env: {} });
     check("dépense du mois lue en base : 15,50 € → plafond", state.level === "plafond" && state.spent === 15.5, state);
+
+    /*
+     * Même décision quand la base agrège (Cowork #22). Le plafond décide d'une
+     * dépense : une vue qui agrège à la lecture reste EXACTE, mais il faut le
+     * prouver, et prouver aussi que septembre n'entre pas dans le mois.
+     */
+    resetDailyViewMemo();
+    const aggregated = await openAiBudget({
+      db: new FakeDb(
+        {
+          api_usage_daily: [
+            { user_id: "u1", day: "2026-10-01", service: "openai", calls: 1, eur: 10, units: 1 },
+            { user_id: "u1", day: "2026-10-02", service: "openai", calls: 1, eur: 5.5, units: 1 },
+            { user_id: "u1", day: "2026-09-30", service: "openai", calls: 1, eur: 99, units: 1 },
+          ],
+        },
+        { strictTables: true },
+      ) as never,
+      now: NOW,
+      env: {},
+    });
+    check(
+      "vue agrégée : la même dépense, la même décision",
+      aggregated.spent === state.spent && aggregated.level === state.level,
+      { vue: aggregated, lignes: state },
+    );
   }
 
   console.log("\n3. Préparation : arrêt propre à 100 %");

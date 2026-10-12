@@ -32,6 +32,23 @@ export interface FreeRow {
   created_at: string;
 }
 
+/**
+ * Une journée déjà agrégée par la base (vues `api_usage_daily` /
+ * `free_api_calls_daily`) : `day` est une date de Paris, `calls` le nombre
+ * d'appels, `eur` leur coût, `units` les unités (tokens pour OpenAI).
+ *
+ * C'est la MÊME information que les lignes brutes, comptée par Postgres au
+ * lieu de l'être en JavaScript après 14 aller-retours (mesure du 12/10/2026 :
+ * 12 076 lignes sur 30 jours).
+ */
+export interface DailyRow {
+  day: string;
+  service: string;
+  calls: number | string | null;
+  eur?: number | string | null;
+  units?: number | string | null;
+}
+
 type PerProvider = Record<Provider, number>;
 
 export interface DayBar {
@@ -86,7 +103,44 @@ export function consumptionSince(now: Date, days = 30): string {
   return `${shiftDay(first, -1)}T00:00:00Z`;
 }
 
+/**
+ * Regroupe des lignes brutes par jour de Paris et par service — le format que
+ * la base rend déjà par les vues. Utilisé par le chemin de repli.
+ */
+export function toDailyRows(usage: readonly UsageRow[], free: readonly FreeRow[]): DailyRow[] {
+  const byKey = new Map<string, DailyRow & { calls: number; eur: number; units: number }>();
+  const push = (createdAt: string, service: string, eur: number, units: number) => {
+    const day = utcToParis(new Date(createdAt)).date;
+    const key = `${day}|${service}`;
+    const current = byKey.get(key) ?? { day, service, calls: 0, eur: 0, units: 0 };
+    current.calls += 1;
+    current.eur += eur;
+    current.units += units;
+    byKey.set(key, current);
+  };
+  for (const row of usage) push(row.created_at, row.service, num(row.cost), num(row.units));
+  // Un appel gratuit n'a pas de coût, et ses unités ne sont pas des tokens.
+  for (const row of free) push(row.created_at, "gratuit", 0, 0);
+  return [...byKey.values()];
+}
+
+/** Même agrégat, à partir des lignes brutes (chemin de repli). */
 export function buildConsumption(usage: readonly UsageRow[], free: readonly FreeRow[], now = new Date(), days = 30): Consumption {
+  return buildConsumptionFromDaily(toDailyRows(usage, free), now, days);
+}
+
+/** Somme des unités d'un service depuis un jour donné (inclus), sur des journées agrégées. */
+export function sumDailyUnits(rows: readonly DailyRow[], service: string, fromDay: string): number {
+  return rows
+    .filter((row) => row.service === service && row.day >= fromDay)
+    .reduce((total, row) => total + num(row.units), 0);
+}
+
+/**
+ * Le CŒUR : des journées (une par jour et par service) deviennent les barres du
+ * graphe, les totaux de la fenêtre et ceux du mois en cours.
+ */
+export function buildConsumptionFromDaily(rows: readonly DailyRow[], now = new Date(), days = 30): Consumption {
   const today = utcToParis(now).date;
   const dayKeys = Array.from({ length: days }, (_, index) => shiftDay(today, index - (days - 1)));
   const byDay = new Map<string, DayBar>(dayKeys.map((day) => [day, { day, calls: zero(), eur: zero(), tokens: 0 }]));
@@ -94,25 +148,25 @@ export function buildConsumption(usage: readonly UsageRow[], free: readonly Free
   const monthKey = today.slice(0, 7);
   const monthByProvider = zero();
 
-  const add = (createdAt: string, provider: Provider, eur: number, tokens: number) => {
-    const day = utcToParis(new Date(createdAt)).date;
+  const add = (day: string, provider: Provider, calls: number, eur: number, tokens: number) => {
     const bar = byDay.get(day);
     if (bar) {
-      bar.calls[provider] += 1;
+      bar.calls[provider] += calls;
       bar.eur[provider] += eur;
       bar.tokens += tokens;
-      window.calls[provider] += 1;
+      window.calls[provider] += calls;
       window.eur[provider] += eur;
       window.tokens += tokens;
     }
+    // Le mois en cours compte même les jours sortis de la fenêtre affichée.
     if (day.slice(0, 7) === monthKey) monthByProvider[provider] += eur;
   };
 
-  for (const row of usage) {
+  for (const row of rows) {
     const provider = providerOf(row.service);
-    add(row.created_at, provider, num(row.cost), provider === "openai" ? num(row.units) : 0);
+    // Les tokens ne sont comptés que pour OpenAI : ailleurs, `units` est un nombre d'appels.
+    add(row.day, provider, num(row.calls), num(row.eur), provider === "openai" ? num(row.units) : 0);
   }
-  for (const row of free) add(row.created_at, "gratuit", 0, 0);
 
   const daysElapsed = Number(today.slice(8, 10));
   const [year, month] = [Number(today.slice(0, 4)), Number(today.slice(5, 7))];

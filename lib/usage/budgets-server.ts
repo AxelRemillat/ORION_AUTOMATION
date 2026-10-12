@@ -1,5 +1,7 @@
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { readAll } from "@/lib/supabase/read-all";
+import { utcToParis } from "@/lib/outbox/paris-time";
+import { sumDaily } from "./usage-daily";
 import {
   openAiBudgetState,
   openAiMonthlyCap,
@@ -12,8 +14,13 @@ import {
 } from "./budgets";
 
 /**
- * Compteurs réels des plafonds, lus dans `api_usage` (page par page : au-delà
- * de 1 000 lignes, PostgREST tronque en silence). SERVEUR UNIQUEMENT.
+ * Compteurs réels des plafonds. SERVEUR UNIQUEMENT.
+ *
+ * Ces compteurs décident d'un appel payant : ils doivent rester EXACTS, jamais
+ * mis en cache. La somme est donc demandée à la base (vue `api_usage_daily`,
+ * qui agrège à la lecture — un appel journalisé à l'instant y figure déjà), et
+ * à défaut relue ligne à ligne, page par page : au-delà de 1 000 lignes,
+ * PostgREST tronque en silence.
  */
 
 type Reader = { from: (table: string) => any };
@@ -22,6 +29,13 @@ type Reader = { from: (table: string) => any };
 const defaultDb = (): Reader => (process.env.ORION_SCRIPT_USER_ID ? createAdminClient() : createClient()) as unknown as Reader;
 
 async function sumSince(db: Reader, service: string, since: Date, column: "units" | "cost"): Promise<number> {
+  /*
+   * Les bornes des plafonds sont des minuits de Paris, donc des frontières de
+   * journée : la vue agrégée par jour donne la même somme, en une requête.
+   */
+  const aggregated = await sumDaily(db, service, utcToParis(since).date, column === "cost" ? "eur" : "units");
+  if (aggregated !== null) return aggregated;
+
   const rows = await readAll<Record<string, unknown>>(() =>
     db.from("api_usage").select(`id, ${column}`).eq("service", service).gte("created_at", since.toISOString()).order("id"),
   );
