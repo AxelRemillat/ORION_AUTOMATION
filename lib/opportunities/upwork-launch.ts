@@ -105,7 +105,9 @@ function readAmounts(raw: string): number[] {
 export function readUpworkBudget(text: string | null | undefined): UpworkBudget {
   const raw = (text ?? "").trim();
   if (!raw) return { kind: "inconnu", usd: null };
-  const hourly = /\b(hourly|\/\s?hr|per hour|an hour|\/heure)\b/i.test(raw);
+  // « $25.00-$45.00 /hr » : `\b` avant « / » exige un caractère de mot juste avant ; l'espace faisait
+  // lire l'offre comme un prix FIXE de 45 $ (Cowork #22). Chaque forme porte donc sa propre frontière.
+  const hourly = /(\bhourly\b|\/\s?hr\b|\bper hour\b|\ban hour\b|\/\s?heure\b)/i.test(raw);
   const amounts = readAmounts(raw);
   if (hourly) return { kind: "hourly", usd: amounts.length ? Math.min(...amounts) : null };
   if (!amounts.length) return { kind: "inconnu", usd: null };

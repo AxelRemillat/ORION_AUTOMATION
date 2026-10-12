@@ -5,6 +5,7 @@ import { opportunityDemoUrl } from "./analyze";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "./calibration";
 import { judgeProposalChecklist, proposalChecklistFeedback, proposalChecklistReason, type ProposalChecklist } from "./proposal-checklist";
 import type { Language, Platform } from "./types";
+import { upworkLaunchPrice, type LaunchPrice } from "./upwork-launch";
 import { PLATFORM_RULES, UPWORK_FIXED_CAP_USD, UPWORK_HOURLY_USD, UPWORK_HOURLY_CAP_USD, UPWORK_MAX_CHARS, UPWORK_SHORTEN_ABOVE, UPWORK_SHORTEN_TARGET, UPWORK_WORDS, upworkFailures, upworkPricingGuide, usdAmounts } from "./platforms";
 import {
   DELAY_CAP_DAYS,
@@ -360,6 +361,20 @@ export function checkProposal(
 
 // --- Rédacteur -----------------------------------------------------------------
 
+/**
+ * PRIX DE LANCEMENT UPWORK (Cowork #22, règle d'agent3 #157) : fixe = 17,5 % sous le
+ * budget affiché, arrondi à 5 $, plancher 100 $ ; horaire = 25 $/h. Budget illisible :
+ * `null`, le rédacteur garde le positionnement habituel.
+ */
+export function upworkBid(platform: Platform, budget: string | null | undefined): Exclude<LaunchPrice, { kind: "inconnu" }> | null {
+  if (platform !== "upwork") return null;
+  const price = upworkLaunchPrice(budget);
+  return price.kind === "inconnu" ? null : price;
+}
+
+/** Phrase de prix attendue dans "framing" (« Fixed price: $330. » ou « Rate: $25/hr. »). */
+export const upworkBidPhrase = (bid: Exclude<LaunchPrice, { kind: "inconnu" }>) => (bid.kind === "hourly" ? `Rate: $${bid.usd}/hr.` : `Fixed price: $${bid.usd}.`);
+
 export function buildProposalPrompt(input: Omit<ProposalInput, "ask" | "signature">, feedback: string | null): string {
   const fr = input.language === "fr";
   const budget = input.budget?.trim();
@@ -388,7 +403,7 @@ ${upwork ? `- UPWORK — LA 1re PHRASE EST L'APERÇU : le client ne voit qu'elle
 - "steps" : TROIS étapes concrètes et courtes (12 à 22 mots chacune) : ce qui sera fait, dans l'ordre, avec leurs outils.
 - "framing" : ${upwork ? `UN prix en DOLLARS — un montant fixe (« Fixed price: $900. ») OU un taux horaire si l'annonce est à l'heure (« Rate: $${UPWORK_HOURLY_USD}/hr. ») — et UN délai en jours (« Delivery: 10 days. »), TOUJOURS, même sans budget affiché (l'enchère Upwork l'exige). Jamais de fourchette. ` : ""}${isNoContactPlatform(input.platform) && input.language === "fr" ? "forme « Prix : <montant> € (<ce qui est inclus>). Délai : <N> jours. »" + (requested.includes("couts_mensuels") ? " puis « Mensuel : hébergement ~15 €, API IA ~10-30 € selon le volume, maintenance en option 90 €. » (montants à adapter) ;" : " ;") + " " : ""}${upwork ? (budget ? `Cohérent avec le budget affiché (${budget}).` : "Budget non affiché : un prix de lancement crédible.") : budget ? `un prix UNIQUE (jamais de fourchette) et un délai, cohérents avec le budget annoncé (${budget}) et le positionnement ci-dessous.` : "AUCUN PRIX (le budget n'est pas donné) : une question de cadrage (volume, outils, délai) pour pouvoir chiffrer, plus un délai indicatif."}
 - "question" : UNE question pour qualifier le besoin (ce qui conditionne la solution), qui finit par « ? ».
-- PRIX ET DÉLAI — ${upwork ? upworkPricingGuide(kind) : pricingGuide(kind)} Le prix et le délai écrits dans "framing" sont EXACTEMENT "amount_eur" et "delay_days" (même montant, même nombre de jours).${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
+- PRIX ET DÉLAI — ${upwork ? (upworkBid(input.platform, input.budget) ? `LAUNCH PRICE, IMPOSED (first Upwork reviews): write exactly « ${upworkBidPhrase(upworkBid(input.platform, input.budget)!)} » in "framing", "amount_eur" = ${upworkBid(input.platform, input.budget)!.usd}${upworkBid(input.platform, input.budget)!.kind === "hourly" ? ', "hourly": true' : ""}.` : upworkPricingGuide(kind)) : pricingGuide(kind)} Le prix et le délai écrits dans "framing" sont EXACTEMENT "amount_eur" et "delay_days" (même montant, même nombre de jours).${kind === "fullstack" ? " C'est une application web : la réalisation de référence est ORION (Next.js, Supabase, OpenAI)." : ""}
 ${requested.length ? `- L'ANNONCE DEMANDE EXPLICITEMENT, DANS CET ORDRE : ${requested.map((item) => REQUESTED_LABELS[item]).join(", ")}. Réponds à CHACUN, dans cet ordre (l'approche = les trois étapes ; prix${requested.includes("couts_mensuels") ? ", coûts mensuels" : ""} et délai dans "framing"${requested.includes("references") ? ` ; les références dans "references"` : ""}).${requested.includes("prix") ? " Le prix est demandé : donne-le même sans budget annoncé." : ""}` : ""}
 ${requested.includes("couts_mensuels") ? `- ${MONTHLY_GUIDE}` : ""}
 ${requested.includes("references") ? `- "references" : HONNÊTETÉ OBLIGATOIRE. Si tu n'as pas de projet sur l'outil cité, dis-le (« Pas encore de projet Sage 100 à vous montrer »), puis cite la démo du portfolio et ORION, l'application d'automatisation mail + IA que j'utilise au quotidien. Jamais de client ni de projet inventé.` : ""}
@@ -651,6 +666,9 @@ export async function generateProposal(input: ProposalInput & { maxRewrites?: nu
       feedback = 'La réponse n\'était pas le JSON demandé : {"reading","steps":[3],"framing","question"}.';
       continue;
     }
+    // Upwork : le montant à saisir EST le prix de lancement (le texte doit le citer, les règles le vérifient).
+    const bid = upworkBid(input.platform, input.budget);
+    if (bid) Object.assign(written, { amountEur: bid.usd, hourly: bid.kind === "hourly" });
     const assemble = (draft: ProposalParts) => assembleProposal(draft, { language: input.language, demo: input.demo, platform: input.platform, context: `${input.need} ${input.body}`, kind: input.kind });
     const parts = shortenLimits(input.platform) ? await shortenIfLong(input, written, assemble) : written;
     const { core, text } = assemble(parts);

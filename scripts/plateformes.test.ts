@@ -119,7 +119,8 @@ async function main() {
       if (role === "writer") return JSON.stringify({ reading: item.reading, steps: item.steps, framing: "Rate: $40/hr, about 30 hours. Delivery: 21 days.", question: item.question, amount_eur: 40, delay_days: 21, hourly: true });
       return JSON.stringify({ P1: { ok: true, citation: "a" }, P3: { ok: true, citation: "b" }, P4: { ok: true, citation: "c" }, P6: { ok: true, citation: "d" } });
     };
-    const outcome = await generateProposal({ ask, platform: "upwork", language: "en", title: item.title, body: item.ad, budget: item.budget, need: "Support chatbot", demo: item.demo });
+    // Budget non indiqué : aucun prix de lancement imposé (Cowork #22), l'enchère du rédacteur est gardée.
+    const outcome = await generateProposal({ ask, platform: "upwork", language: "en", title: item.title, body: item.ad, budget: null, need: "Support chatbot", demo: item.demo });
     check("proposition Upwork prête, enchère horaire $40/hr", "text" in outcome && !outcome.needsReview && outcome.currency === "USD" && outcome.hourly && outcome.amountEur === 40, JSON.stringify(outcome));
     check("le rédacteur reçoit la consigne d'accroche et de prix en dollars", systems.some((system) => /LA 1re PHRASE EST L'APERÇU/.test(system) && /DOLLARS/.test(system)));
     check("la lecture du modèle reçoit la check-list anglaise", systems.some((system) => /You are the CLIENT who posted this job on Upwork/.test(system)));
