@@ -38,6 +38,17 @@ export async function saveDraft(db: Db, userId: string, edit: DraftEdit, validat
   const { data: current } = await db.from("messages").select("subject, body").eq("id", edit.messageId).eq("user_id", userId).maybeSingle();
   const stored = current as { subject: string | null; body: string } | null;
   const changed = Boolean(stored) && (stored!.body.trim() !== body.trim() || (stored!.subject ?? "") !== (edit.subject.trim() || ""));
+  // Retirer la validation d'un mail PROGRAMMÉ le déprogramme : sa place du jour se libère (Cowork #50).
+  // Un mail en cours d'envoi (`sending`) ne se rattrape pas.
+  if (validate === false) {
+    await db
+      .from("messages")
+      .update({ send_status: "draft", scheduled_at: null, scheduled_to: null, send_error: null, send_attempts: 0 })
+      .eq("id", edit.messageId)
+      .eq("user_id", userId)
+      .eq("status", "draft")
+      .eq("send_status", "scheduled");
+  }
   const { data, error } = await db
     .from("messages")
     .update({
@@ -119,23 +130,30 @@ export async function scheduleBatch(
   db: Db,
   userId: string,
   requests: readonly ScheduleRequest[],
-  remaining: number,
+  /** Place restante : un nombre (jour d'envoi seul) ou, par jour ouvré, AAAA-MM-JJ → places (Cowork #50). */
+  remaining: number | Readonly<Record<string, number>>,
   now = new Date(),
 ): Promise<CoreResult<{ scheduled: number; refused: { key: string; error: string }[] }>> {
   const items = new Map(flatten((await loadToday(db, userId, now)).groups).map((item) => [item.key, item]));
   const refused: { key: string; error: string }[] = [];
   let scheduled = 0;
+  const perDay = new Map<string, number>();
   for (const request of requests) {
     const item = items.get(request.key);
     const at = new Date(request.at);
-    const { time } = utcToParis(at);
+    const { time, date, weekday } = utcToParis(at);
+    const room = typeof remaining === "number" ? remaining - scheduled : (remaining[date] ?? 0) - (perDay.get(date) ?? 0);
     if (!item || item.status !== "valide" || !item.messageId) refused.push({ key: request.key, error: "Non validé." });
     else if (!item.contact.email) refused.push({ key: request.key, error: "Destinataire manquant." });
     else if (!Number.isFinite(at.getTime()) || time < PLAN_OPEN || time > PLAN_CLOSE) refused.push({ key: request.key, error: "Hors de la fenêtre 9 h – 17 h." });
-    else if (scheduled >= remaining) refused.push({ key: request.key, error: "Plafond du jour atteint." });
+    else if (weekday === 0 || weekday === 6) refused.push({ key: request.key, error: "Pas d'envoi le week-end." });
+    else if (room <= 0) refused.push({ key: request.key, error: typeof remaining === "number" ? "Plafond du jour atteint." : `Plafond du ${date} atteint.` });
     else {
       const result = await scheduleMessage(db, { userId, messageId: item.messageId, to: item.contact.email, at }, now);
-      if (result.ok) scheduled += 1;
+      if (result.ok) {
+        scheduled += 1;
+        perDay.set(date, (perDay.get(date) ?? 0) + 1);
+      }
       else refused.push({ key: request.key, error: result.error });
     }
   }

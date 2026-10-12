@@ -15,7 +15,7 @@ import { autoRunDue, startDueAutoRuns } from "../lib/today/auto-run";
 import { runCompletionStage } from "../lib/today/complete";
 import { loadToday } from "../lib/today/load";
 import { flatten } from "../lib/today/group";
-import { discard, scheduleBatch, undoDiscard } from "../lib/today/actions-core";
+import { discard, saveDraft, scheduleBatch, undoDiscard } from "../lib/today/actions-core";
 import { needsIntroDraft } from "../lib/jobs/handlers/prepare";
 import { cleanPrefs, DEFAULT_PREFS } from "../lib/funnel/settings";
 import type { Db } from "../lib/trash/scope";
@@ -124,6 +124,33 @@ async function main() {
     check("hors 9 h – 17 h : refusé", refused.some((entry) => entry.startsWith("prospect:a:Hors de la fenêtre")));
     check("plafond atteint : refusé", refused.some((entry) => entry.startsWith("prospect:c:Plafond")));
     check("rien n'est programmé", db.rows("messages").every((row) => row.send_status === "draft"));
+  }
+
+  console.log("\n13 bis. Plusieurs jours : plafond de CHAQUE jour revérifié, déprogrammer libère la place (Cowork #50)");
+  {
+    const db = new FakeDb({
+      prospects: [prospect("a"), prospect("c"), prospect("s")],
+      signal_candidates: [candidate("ca", "a"), candidate("cc", "c"), candidate("cs", "s")],
+      messages: [
+        draft("ma", "a", { validated_at: "2026-10-05T07:00:00Z" }),
+        draft("mc", "c", { validated_at: "2026-10-05T07:00:00Z" }),
+        draft("ms", "s", { validated_at: "2026-10-05T07:00:00Z", send_status: "scheduled", scheduled_at: "2026-10-06T07:00:00Z", scheduled_to: "contact@s.fr" }),
+      ],
+    });
+    const result = await scheduleBatch(db as unknown as Db, USER, [
+      { key: "prospect:a", at: "2026-10-06T08:00:00.000Z" }, // mardi 10 h : plafond de mardi atteint
+      { key: "prospect:c", at: "2026-10-10T08:00:00.000Z" }, // samedi
+    ], { "2026-10-05": 0, "2026-10-06": 0 }, NOW);
+    const refused = result.ok ? result.refused.map((entry) => `${entry.key}:${entry.error}`) : [];
+    check("mardi plein : refusé avec le jour", refused.some((entry) => entry === "prospect:a:Plafond du 2026-10-06 atteint."), refused.join(" | "));
+    check("samedi : refusé (week-end)", refused.some((entry) => entry === "prospect:c:Pas d'envoi le week-end."), refused.join(" | "));
+    const roomy = await scheduleBatch(db as unknown as Db, USER, [{ key: "prospect:a", at: "2026-10-07T08:00:00.000Z" }], { "2026-10-07": 1 }, NOW);
+    const why = roomy.ok ? roomy.refused.map((entry) => entry.error).join(" | ") : "";
+    check("mercredi avec une place : pas de refus pour plafond ni fenêtre", roomy.ok && !/Plafond|week-end|fenêtre/.test(why), why);
+
+    const undone = await saveDraft(db as unknown as Db, USER, { messageId: "ms", subject: "Objet", core: "Texte.", optOut: false, signature: null }, false);
+    const ms = db.rows("messages").find((row) => row.id === "ms")!;
+    check("retirer la validation d'un mail programmé : déprogrammé, sa place se libère", undone.ok && ms.send_status === "draft" && ms.scheduled_at === null && ms.validated_at === null, JSON.stringify({ undone, ms }));
   }
 
   console.log("\n14. Écarter puis Annuler : rien n'est effacé");
