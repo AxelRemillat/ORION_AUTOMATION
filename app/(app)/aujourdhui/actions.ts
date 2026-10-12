@@ -68,7 +68,9 @@ export async function scheduleToday(requests: ScheduleRequest[]) {
   const ctx = await session();
   if (!ctx) return SESSION;
   const capacity = await loadCapacity(ctx.db, ctx.userId);
-  return done(await scheduleBatch(ctx.db, ctx.userId, requests, capacity.remaining));
+  // Plusieurs jours (Cowork #50) : chaque jour ouvré de l'horizon garde son propre plafond.
+  const rooms = Object.fromEntries(capacity.days.map((room) => [room.day, Math.max(0, room.cap - room.used)]));
+  return done(await scheduleBatch(ctx.db, ctx.userId, requests, rooms));
 }
 
 /**

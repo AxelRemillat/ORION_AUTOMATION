@@ -17,7 +17,7 @@ import { FakeDb } from "./fake-supabase";
 import { readFileSync } from "node:fs";
 import { flatten, groupToday, nextTodo, type RawTodayItem } from "../lib/today/group";
 import { completionLabel, isComplete, shouldRetryCompletion, tagsOf } from "../lib/today/tags";
-import { planSchedule, sendDay } from "../lib/today/plan";
+import { businessDays, planDays, planSchedule, sendDay } from "../lib/today/plan";
 import { loadCapacity } from "../lib/today/capacity";
 import { joinBody, splitBody } from "../lib/today/body";
 import { OPT_OUT_SENTENCE } from "../lib/mail-preflight/opt-out";
@@ -296,6 +296,44 @@ const yieldChecks = (async () => {
   check("décalage : une intro en cours d'envoi n'est jamais touchée", row("intro-8").scheduled_at === intros[7].scheduledAt && result.skipped === 1);
   check("décalage : rien sans confirmation (intro-7 du plan, non confirmée, ne bouge pas)", row("intro-7").scheduled_at === intros[6].scheduledAt && result.moved === 1);
 })();
+
+// Programmation sur plusieurs jours (Cowork #50) — lundi 12/10/2026, 13 h 53 : plafond du jour engagé, 12 validés.
+{
+  console.log("\nProgrammer sur plusieurs jours (Cowork #50)");
+  const steady = () => 0;
+  const validated = Array.from({ length: 12 }, (_, index) => item({ key: `n${index + 1}`, status: "valide" }));
+  const monday = new Date("2026-10-12T11:53:00Z"); // 13 h 53 Paris
+  check("jours ouvrés depuis lundi : lun., mar., mer.", businessDays(monday, 3).join(",") === "2026-10-12,2026-10-13,2026-10-14", businessDays(monday, 3).join(","));
+  check("depuis vendredi : le week-end est sauté (ven., lun., mar.)", businessDays(new Date("2026-10-16T15:00:00Z"), 3).join(",") === "2026-10-16,2026-10-19,2026-10-20");
+  check("un samedi : lundi d'abord", businessDays(new Date("2026-10-17T09:00:00Z"), 1)[0] === "2026-10-19");
+
+  // Plafonds différents : lundi plein (25/25), mardi 15 dont 10 déjà engagés, mercredi 40 libre.
+  const days = [
+    { day: "2026-10-12", cap: 25, used: 25 },
+    { day: "2026-10-13", cap: 15, used: 10 },
+    { day: "2026-10-14", cap: 40, used: 0 },
+  ];
+  const tuesdayRelance = new Date("2026-10-13T07:00:00Z"); // relance J+4 déjà programmée mardi 9 h
+  const plan = planDays({ items: validated, days, taken: [tuesdayRelance], now: monday, random: steady });
+  const perDay = plan.days.map((room) => room.planned).join(",");
+  check("lundi plein → 0 ; mardi : 5 places (15 − 10) ; mercredi : le reste (7)", perDay === "0,5,7", perDay);
+  check("les 12 mails validés sont tous placés, rien de reporté", plan.planned.length === 12 && plan.postponed.length === 0);
+  const tuesday = plan.planned.filter((entry) => entry.day === "2026-10-13");
+  check("mardi : jamais à moins de 2 min de la relance déjà programmée à 9 h", tuesday.every((entry) => Math.abs(entry.at.getTime() - tuesdayRelance.getTime()) >= 120_000), tuesday.map((entry) => entry.at.toISOString()).join(","));
+  const wednesday = plan.planned.filter((entry) => entry.day === "2026-10-14");
+  check("mercredi : premier envoi à 9 h (Paris)", wednesday[0]?.at.toISOString() === "2026-10-14T07:00:00.000Z", wednesday[0]?.at.toISOString());
+  check("chaque envoi reste dans 9 h – 17 h de son jour", plan.planned.every((entry) => { const hour = Number(entry.at.toLocaleTimeString("fr-FR", { hour: "2-digit", timeZone: "Europe/Paris" }).slice(0, 2)); return hour >= 9 && hour < 17; }));
+
+  const todayOnly = planDays({ items: validated, days: days.slice(0, 1), now: monday, random: steady });
+  check("horizon « aujourd'hui seulement », jour plein : 0 programmé, 12 restent validés", todayOnly.planned.length === 0 && todayOnly.postponed.length === 12);
+  const roomToday = planDays({ items: validated, days: [{ day: "2026-10-12", cap: 25, used: 20 }, days[2]], now: monday, random: steady });
+  check("place restante aujourd'hui : utilisée d'abord (5), dès maintenant + 3 min", roomToday.days[0].planned === 5 && roomToday.planned[0].at.getTime() >= monday.getTime() + 3 * 60_000);
+  const evening = planDays({ items: validated, days: [{ day: "2026-10-12", cap: 25, used: 0 }, days[2]], now: new Date("2026-10-12T15:30:00Z"), random: steady });
+  check("passé 17 h : aujourd'hui 0 malgré la place, tout part le jour ouvré suivant", evening.days[0].planned === 0 && evening.days[1].planned === 12);
+  const friday = businessDays(new Date("2026-10-16T16:00:00Z"), 3).map((day) => ({ day, cap: 4, used: 0 }));
+  const weekend = planDays({ items: validated, days: friday, now: new Date("2026-10-16T16:00:00Z"), random: steady });
+  check("vendredi 18 h : rien le samedi ni le dimanche (lundi 4, mardi 4, 4 reportés)", weekend.planned.every((entry) => ["2026-10-19", "2026-10-20"].includes(entry.day)) && weekend.planned.length === 8 && weekend.postponed.length === 4);
+}
 
 void Promise.all([capacityChecks, yieldChecks]).then(() => {
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);
