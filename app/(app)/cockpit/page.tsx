@@ -60,7 +60,13 @@ export default async function CockpitPage({
   // Aperçu de la boîte mail : les plus récents ; « Tout voir » → /cockpit/mails.
   const mailbox = buildMailbox({ prospects, messages, inbound });
   const recentSent = mailbox.sent.slice(0, 10);
-  const unread = mailbox.counts.nonLus;
+  /*
+   * « N réponses à traiter » parle du TRAVAIL qui reste, pas de ce qui n'a pas
+   * été ouvert : un mail lu mais sans réponse reste à traiter. C'est donc
+   * `handled` (soldé) qu'on compte ici, et `read_at` qui pilote le badge
+   * « non lus » de la barre (lib/badges/counts).
+   */
+  const toHandle = inbound.filter((message) => !message.deleted_at && !message.handled).length;
   // Mails en échec parce que la connexion Gmail de n8n a expiré : bandeau rouge.
   const gmailFailures = messages.filter(
     (message) => message.send_status === "failed" && !message.deleted_at && isGmailAuthError(message.send_error),
@@ -69,8 +75,8 @@ export default async function CockpitPage({
   // (Axel ne regarde pas Gmail, la boîte ORION est son seul point de contrôle).
   const antispamPending = mailbox.received.filter((entry) => entry.autoKind === "antispam" && !entry.validated).length;
   const date = DATE_FORMAT.format(new Date());
-  const subtitle = unread
-    ? `${unread} réponse${unread > 1 ? "s" : ""} à traiter. Commencez par là.`
+  const subtitle = toHandle
+    ? `${toHandle} réponse${toHandle > 1 ? "s" : ""} à traiter. Commencez par là.`
     : prospects.length
     ? `${prospects.length} prospect${prospects.length > 1 ? "s" : ""} en portefeuille. La file du jour est dans « Aujourd'hui ».`
     : "Votre portefeuille est vide : l'écran se remplira dès vos premiers prospects.";

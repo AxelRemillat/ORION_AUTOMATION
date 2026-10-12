@@ -209,7 +209,12 @@ export async function setAntispamValidated(
 
   const { error } = await db.from("prospects").update(update as never).eq("id", prospect.id).eq("user_id", input.userId);
   if (error) return { ok: false, error: error.message };
-  await db.from("inbound_messages").update({ handled: input.validated }).eq("id", inbound.id).eq("user_id", input.userId);
+  // Validé = soldé ET lu ; dévalidé, on ne redéclare pas le mail non lu.
+  await db
+    .from("inbound_messages")
+    .update({ handled: input.validated, ...(input.validated ? { read_at: now } : {}) })
+    .eq("id", inbound.id)
+    .eq("user_id", input.userId);
 
   await recordProspectEvent(db, {
     prospectId: prospect.id,

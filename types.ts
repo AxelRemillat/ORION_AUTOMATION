@@ -435,6 +435,11 @@ export type InboundMessage = {
   received_at: string;
   /** Vrai dès qu'une réponse est partie depuis le Cockpit. */
   handled: boolean;
+  /**
+   * Lu par Axel dans la boîte mail (migration 20261012140500). AFFICHAGE SEUL :
+   * un mail lu reste à traiter dans « Aujourd'hui » tant que `handled` est faux.
+   */
+  read_at?: string | null;
   created_at: string;
   /** Corbeille (migration 20260927131230) : masqué partout, purgé à J+14. */
   deleted_at?: string | null;

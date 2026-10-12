@@ -11,6 +11,7 @@ import { SentPane } from "../_components/mailbox/sent-pane";
 import { ScheduledPane } from "../_components/mailbox/scheduled-pane";
 import { Pagination } from "../_components/mailbox/pagination";
 import { buildMailbox, threadsFor } from "../_lib/mailbox-data";
+import { InboxReadProvider } from "../_components/mailbox/read-state";
 
 export const metadata = { title: "Boîte mail — ORION" };
 export const dynamic = "force-dynamic";
@@ -57,37 +58,40 @@ export default async function MailboxPage({ searchParams }: { searchParams: Para
       </Link>
       <PageHeader title="Boîte mail" description="Reçus, envoyés et programmés, avec le fil complet de chaque conversation." />
 
-      <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line-soft pr-4">
-          <MailboxTabBar active={tab} counts={mailbox.counts} hrefFor={(key) => `/cockpit/mails?onglet=${key}`} />
-          <form action="/cockpit/mails" className="relative mb-2 w-full sm:w-72">
-            <input type="hidden" name="onglet" value={tab} />
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" aria-hidden />
-            <Input
-              name="q"
-              defaultValue={query}
-              placeholder="Entreprise ou objet…"
-              aria-label="Rechercher par entreprise ou objet"
-              className="pl-9"
+      {/* « Lu / non lu » optimiste, partagé par les onglets et la liste. */}
+      <InboxReadProvider entries={received.items} initialUnread={mailbox.counts.nonLus}>
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line-soft pr-4">
+            <MailboxTabBar active={tab} counts={mailbox.counts} hrefFor={(key) => `/cockpit/mails?onglet=${key}`} />
+            <form action="/cockpit/mails" className="relative mb-2 w-full sm:w-72">
+              <input type="hidden" name="onglet" value={tab} />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" aria-hidden />
+              <Input
+                name="q"
+                defaultValue={query}
+                placeholder="Entreprise ou objet…"
+                aria-label="Rechercher par entreprise ou objet"
+                className="pl-9"
+              />
+            </form>
+          </div>
+
+          {tab === "recus" && <ReceivedPane key={`${query}-${received.page}`} entries={received.items} />}
+          {tab === "envoyes" && (
+            <SentPane
+              key={`${query}-${sent.page}`}
+              items={sent.items}
+              threads={threadsFor(sent.items, messages, inbound)}
+              initialId={searchParams.id}
             />
-          </form>
-        </div>
+          )}
+          {tab === "programmes" && <ScheduledPane items={scheduled} />}
 
-        {tab === "recus" && <ReceivedPane key={`${query}-${received.page}`} entries={received.items} />}
-        {tab === "envoyes" && (
-          <SentPane
-            key={`${query}-${sent.page}`}
-            items={sent.items}
-            threads={threadsFor(sent.items, messages, inbound)}
-            initialId={searchParams.id}
-          />
-        )}
-        {tab === "programmes" && <ScheduledPane items={scheduled} />}
-
-        {pagination && pagination.pages > 1 && (
-          <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} hrefFor={(next) => href({ page: next })} />
-        )}
-      </Card>
+          {pagination && pagination.pages > 1 && (
+            <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} hrefFor={(next) => href({ page: next })} />
+          )}
+        </Card>
+      </InboxReadProvider>
     </>
   );
 }

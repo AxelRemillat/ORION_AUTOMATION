@@ -33,7 +33,7 @@ export const AUTO_REPLY_LABEL: Record<AutoReplyKind, string> = {
   absence: "Absence",
 };
 
-const ANTISPAM_SENDER = /mailinblack|@(?:[a-z0-9-]+\.)*(?:spamarrest|boxbe|sendio|altospam)\.[a-z]+$/i;
+const ANTISPAM_SENDER = /mailinblack|@(?:[a-z0-9-]+\.)*(?:spamarrest|boxbe|sendio|altospam|humail|vadesecure)\.[a-z]+$/i;
 const ANTISPAM_TEXT = [
   /un (?:seul |simple )?clic pour d[ée]livrer/i,
   /cliqu(?:ez|er) (?:ici |sur (?:ce|le) lien )?pour (?:d[ée]livrer|valider (?:votre|ce) (?:message|e-?mail|courriel))/i,
@@ -41,6 +41,10 @@ const ANTISPAM_TEXT = [
   /sender verification|challenge[- ]response|verify (?:that )?you are (?:a )?(?:human|real person)/i,
   /(?:prouver|confirmer) que vous (?:n['’][êe]tes pas un robot|[êe]tes (?:un )?humain)/i,
   /(?:votre|ce) (?:message|e-?mail|courriel) (?:est |a été )?(?:en attente|bloqué|retenu)[^.\n]{0,60}(?:validation|d[ée]livr|authentifi)/i,
+  // humail et les quarantaines (12/10/2026) : « en attente de libération ».
+  /en attente de lib[ée]ration/i,
+  /lib[ée]rer (?:ce|le|votre) (?:message|e-?mail|courriel)/i,
+  /(?:message|e-?mail|courriel)[^.\n]{0,40}(?:mis|plac[ée])e?s? en quarantaine/i,
 ];
 
 /**
@@ -84,26 +88,72 @@ function baseDomain(host: string): string {
 }
 
 /**
- * Lien de validation d'un challenge anti-spam : le premier lien https du corps
- * dont le domaine est CELUI DE L'EXPÉDITEUR anti-spam. Aucun autre lien n'est
- * proposé (un lien vers un autre domaine serait un risque, pas une validation).
+ * Domaines des services anti-spam connus : le lien de validation y vit parfois
+ * alors que le message part du domaine du client (quarantaine Altospam, Vade).
+ */
+const ANTISPAM_DOMAINS = ["mailinblack.com", "humail.fr", "humail.com", "altospam.com", "altospam.fr", "vadesecure.com", "vade.com", "spamarrest.com", "boxbe.com", "sendio.com"];
+
+/** Images, feuilles de style, pixels : jamais un lien d'action. */
+const NOT_A_LINK = /\.(?:png|jpe?g|gif|svg|webp|ico|bmp|css|js)(?:$|[?#])|\/logo|logo\.|\/img\/|\/images?\//i;
+/** Un lien à ne JAMAIS proposer : il ferait l'inverse de ce qu'on veut. */
+const HARMFUL = /unsubscribe|desabonn|se-desinscrire|optout|opt-out|blacklist|spam(?:-|_)?report|signaler/i;
+/** Le chemin d'un lien d'action, chez tous les éditeurs visés. */
+const ACTION_PATH = /invitation|validat|verif|confirm|release|liberer|liberation|delivr|deliver|unblock|authoriz|autoris|whitelist|approve|accept|debloqu/i;
+/** Le texte autour du lien, en français comme en anglais. */
+const ACTION_TEXT = /cliqu(?:ez|er)\s+(?:ici|sur)|un\s+(?:seul\s+)?clic|d[ée]livrer|lib[ée]rer|lib[ée]ration|valider|validation|confirmer|d[ée]bloquer|click\s+here|release|verify/i;
+/** Un vrai lien de validation porte un jeton. */
+const HAS_TOKEN = /[?&](?:token|t|id|key|hash|code|uid|k)=/i;
+
+const plainLower = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+/**
+ * Lien de validation d'un challenge anti-spam.
+ *
+ * 12/10/2026 : « prendre le premier lien https du domaine de l'expéditeur »
+ * ouvrait l'IMAGE DU LOGO d'un mail Mailinblack
+ * (app.mailinblack.com/…/unauthenticated/logo/…/logo.png), jamais l'invitation.
+ * On classe donc les candidats au lieu de prendre le premier :
+ *   - écartés : images et fichiers statiques, logos, et tout lien de
+ *     désabonnement ou de signalement (il ferait le contraire du but) ;
+ *   - retenus : les liens du domaine de l'expéditeur OU d'un éditeur anti-spam
+ *     connu (Mailinblack, humail, Altospam, Vade, Protect…) — un lien vers
+ *     n'importe quel autre domaine serait un risque, pas une validation ;
+ *   - préférés : chemin d'action (invitation, validate, release, libérer…),
+ *     texte d'action autour du lien (« Cliquez ici », « en attente de
+ *     libération »), présence d'un jeton.
+ * À égalité, le premier du corps gagne.
  */
 export function antispamLink(message: MailLike): string | null {
   if (autoReplyKind(message) !== "antispam") return null;
   const senderHost = (message.from_email ?? "").split("@")[1] ?? "";
-  if (!senderHost) return null;
-  const domain = baseDomain(senderHost);
-  for (const raw of (message.body ?? "").match(/https:\/\/[^\s<>"'()[\]]+/gi) ?? []) {
-    const candidate = raw.replace(/[.,;:!?]+$/, "");
+  const domain = senderHost ? baseDomain(senderHost) : null;
+  const body = message.body ?? "";
+  const allowed = [...(domain ? [domain] : []), ...ANTISPAM_DOMAINS];
+
+  let best: { url: string; score: number } | null = null;
+  for (const match of body.matchAll(/https:\/\/[^\s<>"'()[\]]+/gi)) {
+    const candidate = match[0].replace(/[.,;:!?]+$/, "");
+    let url: URL;
     try {
-      const url = new URL(candidate);
-      const host = url.hostname.toLowerCase();
-      if (url.protocol === "https:" && (host === domain || host.endsWith(`.${domain}`))) return url.toString();
+      url = new URL(candidate);
     } catch {
-      // lien illisible : ignoré
+      continue; // lien illisible : ignoré
     }
+    if (url.protocol !== "https:") continue;
+    const host = url.hostname.toLowerCase();
+    if (!allowed.some((name) => host === name || host.endsWith(`.${name}`))) continue;
+    if (NOT_A_LINK.test(candidate) || HARMFUL.test(candidate)) continue;
+
+    // Le texte qui entoure le lien : « Cliquez ici » posé avant (corps texte)
+    // comme après (ancre HTML).
+    const around = plainLower(body.slice(Math.max(0, match.index - 120), match.index + candidate.length + 120));
+    const score =
+      (ACTION_PATH.test(url.pathname) ? 3 : 0) +
+      (ACTION_TEXT.test(around) ? 2 : 0) +
+      (HAS_TOKEN.test(candidate) ? 1 : 0);
+    if (!best || score > best.score) best = { url: url.toString(), score };
   }
-  return null;
+  return best?.url ?? null;
 }
 
 /**

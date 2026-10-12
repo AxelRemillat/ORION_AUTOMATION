@@ -7,6 +7,7 @@
 import type { InboundMessage, Prospect } from "@/types";
 import type { InboxEntry } from "./types";
 import { antispamLink, autoReplyKind } from "@/lib/inbound/auto-reply";
+import { isUnread } from "@/lib/inbound/read-state";
 
 /** Extrait lisible du corps d'un email : une seule ligne, sans blancs parasites. */
 function excerptOf(body: string, max = 160): string {
@@ -45,7 +46,7 @@ export function inboxEntries(inbound: InboundMessage[], prospects: Prospect[], m
       body: message.body.slice(0, MAX_BODY),
       category: message.category,
       receivedAt: message.received_at,
-      unread: !message.handled,
+      unread: isUnread(message),
       doNotContact: Boolean(message.prospect_id && blocked.has(message.prospect_id)),
       autoKind: autoReplyKind(message),
       validationLink: antispamLink(message),

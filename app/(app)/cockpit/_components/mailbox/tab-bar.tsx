@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { MAILBOX_TABS, type MailboxCounts, type MailboxTab } from "@/lib/outbox/mailbox";
+import { UnreadChip } from "./unread-chip";
 
 const countOf = (counts: MailboxCounts, tab: MailboxTab) =>
   tab === "recus" ? counts.recus : tab === "envoyes" ? counts.envoyes : counts.programmes;
@@ -32,11 +33,7 @@ export function MailboxTabBar({
           <>
             {label}
             <span className="font-data text-[12px] text-faint">{countOf(counts, key)}</span>
-            {key === "recus" && counts.nonLus > 0 && (
-              <span className="font-data rounded-full border border-warn/30 bg-warn/15 px-1.5 text-[11px] font-semibold text-warn-ink">
-                {counts.nonLus} non lu{counts.nonLus > 1 ? "s" : ""}
-              </span>
-            )}
+            {key === "recus" && <UnreadChip fallback={counts.nonLus} />}
           </>
         );
         return hrefFor ? (
