@@ -9,6 +9,7 @@ import { setDoNotContact } from "./do-not-contact";
 import { confirmOppositionManually } from "./opposition-check";
 import { prepareResend, resendNow } from "./resend";
 import { setAntispamValidated } from "@/lib/inbound/auto-reply-server";
+import { setInboundRead } from "@/lib/inbound/read-server";
 import { draftIfReady } from "@/lib/today/auto-draft";
 import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
@@ -156,4 +157,15 @@ export async function validateAntispam(inboundId: string, validated: boolean): P
   const id = await userId();
   if (!id) return SESSION_ERROR;
   return done(await setAntispamValidated(createClient(), { userId: id, inboundId, validated }));
+}
+
+/**
+ * « Marquer comme lu » / « Marquer non lu » d'un mail reçu, et marquage
+ * automatique après 2 s d'affichage. Affichage seul : le mail reste à traiter
+ * dans « Aujourd'hui » tant qu'aucune réponse n'est partie.
+ */
+export async function markInboundRead(inboundId: string, read: boolean): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  return done(await setInboundRead(createClient(), { userId: id, inboundId, read }));
 }

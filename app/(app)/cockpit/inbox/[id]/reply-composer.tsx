@@ -57,7 +57,11 @@ export function ReplyComposer({
   /** Clôt l'entrant sans répondre — utile pour un refus ou un message traité ailleurs. */
   async function markHandled() {
     setMarking(true);
-    const { error } = await createClient().from("inbound_messages").update({ handled: true }).eq("id", inboundId);
+    // Traité à la main : c'est aussi lu (le badge « non lus » ne doit pas le garder).
+    const { error } = await createClient()
+      .from("inbound_messages")
+      .update({ handled: true, read_at: new Date().toISOString() })
+      .eq("id", inboundId);
     if (error) {
       toast.error(error.message);
       return setMarking(false);

@@ -1,4 +1,5 @@
 import { MESSAGE_TYPE_LABELS } from "@/lib/constants";
+import { unreadBadgeCount } from "@/lib/inbound/read-state";
 import type { InboundMessage, Message, MessageType, Prospect, SendStatus } from "@/types";
 
 /**
@@ -120,17 +121,25 @@ export function scheduledItems(messages: Message[], prospects: Pick<Prospect, "i
 
 export interface MailboxCounts {
   recus: number;
-  /** Mails reçus pas encore traités. */
+  /**
+   * Mails reçus pas encore LUS qui demandent une action : ni absence, ni
+   * anti-spam déjà validé (lib/inbound/read-state). « Lu » n'est pas
+   * « soldé » : un mail lu reste à traiter dans « Aujourd'hui ».
+   */
   nonLus: number;
   envoyes: number;
   programmes: number;
 }
 
-export function mailboxCounts(inbound: InboundMessage[], messages: Message[], prospects: Pick<Prospect, "id" | "company_name" | "email">[]): MailboxCounts {
+export function mailboxCounts(
+  inbound: InboundMessage[],
+  messages: Message[],
+  prospects: (Pick<Prospect, "id" | "company_name" | "email"> & Partial<Pick<Prospect, "key_figures">>)[],
+): MailboxCounts {
   const received = inbound.filter((message) => !message.deleted_at);
   return {
     recus: received.length,
-    nonLus: received.filter((message) => !message.handled).length,
+    nonLus: unreadBadgeCount(received, prospects as Pick<Prospect, "id" | "key_figures">[]),
     envoyes: sentItems(messages, prospects).length,
     programmes: scheduledItems(messages, prospects).length,
   };

@@ -318,11 +318,12 @@ export async function deliver(db: Db, message: OutboxMessage, to: string, deps: 
     return fail("unrecorded", `Mail envoyé mais statut non enregistré : ${messageError.message}`, 500);
   }
 
-  // Une réponse partie solde le mail reçu auquel elle répond.
+  // Une réponse partie solde le mail reçu auquel elle répond — et il est lu :
+  // sans `read_at`, le badge « non lus » compterait un mail déjà traité.
   if (message.reply_to_inbound_id) {
     await db
       .from("inbound_messages")
-      .update({ handled: true })
+      .update({ handled: true, read_at: new Date().toISOString() })
       .eq("id", message.reply_to_inbound_id)
       .eq("user_id", message.user_id);
   }
