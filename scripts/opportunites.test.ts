@@ -6,7 +6,7 @@ import { buildProposalChecklistPrompt, judgeProposalChecklist, proposalChecklist
 import { PROPOSAL_CHECKLIST_SAMPLES } from "../lib/opportunities/proposal-checklist";
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
+import { upworkBid, upworkBidPhrase, assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
@@ -708,6 +708,31 @@ async function main() {
     check("horloge : New York 6 h plus tôt que Paris en octobre", clockLabel("America/New_York", now) === "04:00" && clockLabel("Europe/Paris", now) === "10:00", `${clockLabel("America/New_York", now)} / ${clockLabel("Europe/Paris", now)}`);
     check("thèmes : une classe par plateforme, badges d'Aujourd'hui compris", platformTheme("codeur") === "pf-codeur" && platformTheme("upwork") === "pf-upwork" && platformTheme("comeup") === "pf-comeup" && platformTheme("malt") === "pf-autres");
     check("ComeUp : commande ou demande", comeupKind("gagnee") === "Commande" && comeupKind("a_repondre") === "Demande");
+  }
+
+  console.log("\nPrix de lancement Upwork branché sur la proposition (Cowork #22)");
+  {
+    check("fixe : 17,5 % sous le budget, arrondi à 5 $", upworkBid("upwork", "$400 fixed")?.usd === 330 && upworkBid("upwork", "$1,000")?.usd === 825);
+    check("fixe : plancher 100 $", upworkBid("upwork", "$50 fixed")?.usd === 100);
+    check("horaire : 25 $/h", upworkBid("upwork", "$30.00-$45.00 /hr")?.kind === "hourly" && upworkBid("upwork", "$30.00-$45.00 /hr")?.usd === 25);
+    check("budget illisible ou autre plateforme : pas de prix imposé", upworkBid("upwork", null) === null && upworkBid("codeur", "$400 fixed") === null);
+    const refs = PROPOSAL_POSITIVES.filter((item) => item.title.startsWith("n8n automation") || item.title.startsWith("AI agent to qualify"));
+    check("calibrage : les 2 positifs Upwork citent exactement le prix de lancement", refs.length === 2 && refs.every((item) => item.amountEur === upworkBid("upwork", item.budget)?.usd && item.framing.includes(upworkBidPhrase(upworkBid("upwork", item.budget)!))));
+
+    // Rédaction : le prompt impose le prix, et le montant à saisir est celui de lancement même si le modèle en écrit un autre.
+    const ref = refs[0];
+    const prompts: string[] = [];
+    const bidAsk: AskFn = async (role, system) => {
+      if (role === "writer") {
+        prompts.push(system);
+        return JSON.stringify({ reading: ref.reading, steps: ref.steps, framing: ref.framing, question: ref.question, amount_eur: 900, delay_days: 7 });
+      }
+      return JSON.stringify({ score: 10, criteria: {}, reasons: [], fix: null, ...checklistKeys(10) });
+    };
+    const out = await generateProposal({ ask: bidAsk, platform: "upwork", language: "en", title: ref.title, body: ref.ad, budget: ref.budget, need: ref.reading, demo: ref.demo, kind: "automatisation", maxRewrites: 0 });
+    check("prompt Upwork : prix de lancement imposé (« Fixed price: $330. »)", prompts.some((prompt) => prompt.includes("Fixed price: $330.")), prompts[0]?.slice(0, 120));
+    check("montant à saisir sur Upwork = $330 (pas les $900 du modèle)", "text" in out && out.amountEur === 330 && out.currency === "USD" && !out.hourly, JSON.stringify(out));
+    check("affichage « À saisir sur Upwork » : $330 ; horaire : $25/hr", priceLabel(330, "USD") === "$330" && priceLabel(25, "USD", true) === "$25/hr");
   }
 
   console.log(failures === 0 ? "\nTous les tests opportunités passent.\n" : `\n${failures} test(s) en echec.\n`);

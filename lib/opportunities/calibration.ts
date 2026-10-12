@@ -24,6 +24,8 @@ export interface ProposalReference {
   references?: string;
   kind?: ProjectKind;
   amountEur?: number;
+  /** Upwork : enchère au taux horaire. */
+  hourly?: boolean;
   delayDays?: number;
   /** Texte assemblé (sans lien ni signature) pour les exemples des prompts. */
   text: string;
@@ -149,6 +151,49 @@ export const PROPOSAL_POSITIVES: ProposalReference[] = [
     amountEur: 550,
     delayDays: 7,
     question: "When two records conflict, which source should win: the most recent one or a specific system?",
+  }),
+  // Upwork, prix de LANCEMENT (Cowork #22) : budget $400 fixe → 17,5 % dessous, arrondi à 5 $ = $330.
+  compose({
+    platform: "upwork",
+    language: "en",
+    title: "n8n automation: Gmail orders to Google Sheets and Slack",
+    ad: "Small e-shop. Orders arrive by Gmail; we want an n8n automation that reads each order email, adds a row to our Google Sheet and posts a Slack message. Fixed price.",
+    budget: "$400 fixed",
+    demo: "emails",
+    kind: "automatisation",
+    amountEur: 330,
+    delayDays: 7,
+    reading:
+      "Every order email in Gmail can become a row in your Google Sheet and a Slack message, without anyone copying it by hand. I would build it in n8n, so you can open, read and adjust every step yourself.",
+    steps: [
+      "Read each new order email in Gmail and extract the customer, items, total and order number.",
+      "Add one clean row per order to your Google Sheet, skipping duplicates if an email arrives twice.",
+      "Post a short Slack message per order, then test it on your last 20 real orders before handover.",
+    ],
+    framing: "Fixed price: $330. Delivery: 7 days, including a short video walkthrough.",
+    question: "Do your order emails always come from the same shop platform, or from several senders?",
+  }),
+  // Upwork, offre à l'HEURE (Cowork #22) : $25/hr, le taux de lancement.
+  compose({
+    platform: "upwork",
+    language: "en",
+    title: "AI agent to qualify inbound leads from our website form",
+    ad: "B2B agency. Website form leads land in HubSpot; we want an AI agent that reads each lead, scores it, drafts a first reply and flags hot leads. Hourly, $30-$45/hr.",
+    budget: "$30.00-$45.00 /hr",
+    demo: "emails",
+    kind: "automatisation",
+    amountEur: 25,
+    hourly: true,
+    delayDays: 10,
+    reading:
+      "Your website leads can be scored and answered within minutes, with the hot ones flagged for your team first. An AI agent reads each new HubSpot lead, applies your criteria and drafts the first reply for you to approve.",
+    steps: [
+      "Write your scoring criteria with you and turn them into clear rules the agent applies to each lead.",
+      "Connect the agent to HubSpot so every new lead gets a score, a short summary and a draft reply.",
+      "Flag hot leads to your team, then review 30 real leads together and adjust the criteria.",
+    ],
+    framing: "Rate: $25/hr. Estimated 16 hours, delivered in 10 days.",
+    question: "Which three criteria make a lead hot for you today: budget, company size or timing?",
   }),
 ];
 
