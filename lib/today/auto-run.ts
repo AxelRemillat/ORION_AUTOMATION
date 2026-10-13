@@ -72,27 +72,34 @@ export function prepareAlert(health: PrepareHealth | null): string | null {
   return null;
 }
 
-export async function lastPrepareHealth(db: unknown, userId: string): Promise<PrepareHealth | null> {
+/** Fenêtre des brouillons ratés lus en même temps que la dernière préparation (Cowork #25). */
+const FAILED_DRAFTS_WINDOW_DAYS = 30;
+
+export async function lastPrepareHealth(db: unknown, userId: string, now = new Date()): Promise<PrepareHealth | null> {
   const loose = db as Loose;
-  const { data } = await loose
-    .from("jobs")
-    .select("status, error, created_at, finished_at, progress")
-    .eq("user_id", userId)
-    .eq("type", "search_signals")
-    .eq("params->>kind", "prepare")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Les deux lectures EN PARALLÈLE (elles s'enchaînaient) : les brouillons ratés des 30 derniers
+  // jours, filtrés ensuite sur la date de la dernière préparation.
+  const [{ data }, { data: drafts }] = await Promise.all([
+    loose
+      .from("jobs")
+      .select("status, error, created_at, finished_at, progress")
+      .eq("user_id", userId)
+      .eq("type", "search_signals")
+      .eq("params->>kind", "prepare")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    loose
+      .from("jobs")
+      .select("error, created_at")
+      .eq("user_id", userId)
+      .eq("type", "email_generate")
+      .eq("status", "failed")
+      .gte("created_at", new Date(now.getTime() - FAILED_DRAFTS_WINDOW_DAYS * 86_400_000).toISOString()),
+  ]);
   const job = data as { status: string; error: string | null; created_at: string; finished_at: string | null; progress?: { step?: string } | null } | null;
   if (!job) return null;
-  const { data: drafts } = await loose
-    .from("jobs")
-    .select("error")
-    .eq("user_id", userId)
-    .eq("type", "email_generate")
-    .eq("status", "failed")
-    .gte("created_at", job.created_at);
-  const failed = (drafts ?? []) as { error: string | null }[];
+  const failed = ((drafts ?? []) as { error: string | null; created_at: string }[]).filter((row) => row.created_at >= job.created_at);
   return {
     status: job.status,
     error: job.error,
