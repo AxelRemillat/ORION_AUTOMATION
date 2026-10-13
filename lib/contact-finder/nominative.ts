@@ -241,8 +241,8 @@ export async function findNominativeContact(input: NominativeInput, deps: Nomina
     const verdict = await deps.verify(candidate.email);
     const confidence = Math.max(candidate.confidence, verdict?.score ?? 0);
     outcome.steps.push(`email-verifier ${candidate.email} : ${verdict?.status ?? "sans réponse"} (${confidence})`);
-    // c) « valid », ou « accept_all » avec une confiance ≥ 90.
-    if (verdict && (verdict.status === "valid" || (verdict.status === "accept_all" && confidence >= MIN_ACCEPT_ALL_CONFIDENCE))) {
+    // c) « valid » avec une confiance ≥ 80 (Cowork #52 : score ≥ 80 ET vérifiée), ou « accept_all » ≥ 90.
+    if (verdict && ((verdict.status === "valid" && confidence >= MIN_SEARCH_CONFIDENCE) || (verdict.status === "accept_all" && confidence >= MIN_ACCEPT_ALL_CONFIDENCE))) {
       outcome.contact = { ...candidate, confidence, verifier: verdict.status };
       return true;
     }

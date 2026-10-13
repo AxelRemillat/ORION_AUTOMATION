@@ -18,6 +18,7 @@ import { followUpBlock } from "@/lib/outbox/follow-up-policy";
 import { ProspectSummary } from "../_components/prospect-summary";
 import { BusinessProfileCard } from "../_components/business-profile-card";
 import { ContactCard } from "@/components/prospect/contact-card";
+import { Relance2Proposal } from "@/components/prospect/relance2-proposal";
 import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
 import { defaultRecipient, foundAddresses } from "../_lib/contact";
@@ -187,6 +188,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
         <div className="flex flex-col gap-4">
           {/* Site et adresse, avec leur provenance : le bouton relance la recherche. */}
           <ContactCard prospect={typed} />
+          <Relance2Proposal figures={typed.key_figures} />
           <ProspectSummary prospect={typed} deals={deals} reminders={reminders} />
           <BusinessProfileCard prospect={typed} />
         </div>

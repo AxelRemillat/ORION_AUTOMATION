@@ -14,6 +14,7 @@ import { FakeDb } from "./fake-supabase";
 import { isRoleBox } from "../lib/contact-finder/role-boxes";
 import { classifyEmail, extractEmails } from "../lib/contact-finder/extract";
 import { checkSendRules } from "../lib/outbox/send";
+import { proposeRelance2Contact, relance2Ineligibility, type SentRow } from "../lib/contact-finder/relance2";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -287,6 +288,41 @@ async function main() {
     check("recherche nominative : une boîte de rôle n'est jamais retenue", picked.contact?.email === "jeanne.martin@acme.fr", picked.contact);
     const refused = await checkSendRules({} as Db, { id: "m", status: "draft", type: "intro" } as never, "rgpd-lgs@gerbesavoyarde.com", new Date());
     check("règles d'envoi : refus d'une boîte de rôle juridique", Boolean(refused && !refused.ok && /rôle juridique/.test(refused.error)), refused);
+  }
+
+  console.log("\n10. Hunter utile (Cowork #52) : exclusions, score ≥ 80, relance 2 vers une personne");
+  {
+    const base: UpgradeProspect = { id: "p", user_id: "u", company_name: "Acme", email: "contact@acme.fr", email_type: "generique", website: null, contact_found_by: "site", status: "contacte", key_figures: { opposition_checked: true } };
+    check("fiche perdue : aucun crédit", ineligibility({ ...base, status: "perdu" }) === "fiche perdue");
+    check("fiche gagnée : aucun crédit", ineligibility({ ...base, status: "gagne" }) === "fiche gagnée");
+    check("hors cible (groupe ETI) : aucun crédit", /^hors cible/.test(ineligibility({ ...base, key_figures: { opposition_checked: true, company_category: "ETI" } }) ?? "") || /^hors cible/.test(ineligibility({ ...base, size_range: "250-499" }) ?? ""), [ineligibility({ ...base, key_figures: { opposition_checked: true, company_category: "ETI" } }), ineligibility({ ...base, size_range: "250-499" })]);
+    check("fiche saine : éligible", ineligibility(base) === null);
+
+    const low = hunter({ people: [], finder: { email: "pierre.durand@acme.fr", score: 60 }, verdicts: { "pierre.durand@acme.fr": { status: "valid", score: 70 } } });
+    const lowOut = await findNominativeContact({ domain: "acme.fr", pain: "factures", headcount: 12, leader: LEADER }, low.deps);
+    check("« valid » mais confiance < 80 : refusée, la générique reste", lowOut.contact === null, lowOut.contact);
+    const high = hunter({ people: [], finder: { email: "pierre.durand@acme.fr", score: 91 } });
+    check("« valid » et confiance ≥ 80 : retenue", (await findNominativeContact({ domain: "acme.fr", pain: "factures", headcount: 12, leader: LEADER }, high.deps)).contact?.email === "pierre.durand@acme.fr");
+
+    const r1: SentRow[] = [
+      { type: "intro", status: "sent", sent_to: "contact@acme.fr" },
+      { type: "relance_1", status: "sent", sent_to: "contact@acme.fr" },
+    ];
+    const contacted: UpgradeProspect = { ...base, status: "relance_1" };
+    check("relance 2 : intro + relance 1 sur une générique, sans réponse → éligible", relance2Ineligibility(contacted, r1) === null, relance2Ineligibility(contacted, r1));
+    check("relance 2 : réponse reçue (statut « repondu ») → non", relance2Ineligibility({ ...contacted, status: "repondu" }, r1) !== null);
+    check("relance 2 : déjà partie → non", relance2Ineligibility(contacted, [...r1, { type: "relance_2", status: "sent", sent_to: "contact@acme.fr" }]) === "relance 2 déjà partie");
+    check("relance 2 : envoyé à une personne → non", relance2Ineligibility(contacted, [{ ...r1[0], sent_to: "jean.dupont@acme.fr" }, r1[1]]) === "envoyé à une personne");
+    check("relance 2 : « ne plus contacter » → non (aucun crédit)", relance2Ineligibility({ ...contacted, do_not_contact: true }, r1) !== null);
+
+    const db = new FakeDb({ prospects: [{ ...contacted, email_type: "generique" }], messages: [], prospect_events: [] });
+    const spy = hunter({ people: [], finder: { email: "pierre.durand@acme.fr", score: 93 } });
+    const proposed = await proposeRelance2Contact(db as unknown as Db, { ...contacted, key_figures: { opposition_checked: true, leader_person: "Pierre DURAND" } }, r1, spy.deps, { now: new Date("2026-10-13T15:00:00Z") });
+    const row = db.rows("prospects")[0] as { email: string; key_figures: { relance2_contact?: { email: string; instead_of: string } } };
+    check("proposition enregistrée dans la fiche (relance2_contact)", proposed.status === "proposed" && row.key_figures.relance2_contact?.email === "pierre.durand@acme.fr" && row.key_figures.relance2_contact.instead_of === "contact@acme.fr", row.key_figures);
+    check("… l'adresse principale ne change pas (rien n'est reprogrammé)", row.email === "contact@acme.fr");
+    check("… trace dans l'historique", db.rows("prospect_events").length === 1);
+    check("… plus de seconde proposition (aucun crédit)", relance2Ineligibility(row as unknown as UpgradeProspect, r1) === "contact déjà proposé");
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);

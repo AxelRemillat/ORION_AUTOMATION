@@ -1,3 +1,4 @@
+import { offTargetReason } from "@/lib/funnel/off-target";
 import { recordProspectEvent } from "@/lib/history/record";
 import type { Db } from "@/lib/trash/scope";
 import { domainOfEmail, toDomain } from "./domains";
@@ -35,6 +36,9 @@ export interface UpgradeProspect {
   contact_name?: string | null;
   do_not_contact?: boolean | null;
   deleted_at?: string | null;
+  /** Cowork #52 : une fiche perdue ou gagnée ne coûte plus un crédit. */
+  status?: string | null;
+  size_range?: string | null;
   pain_point?: string | null;
   brief?: { pain?: { task?: string | null } | null } | null;
   key_figures: Record<string, unknown> | null;
@@ -129,6 +133,7 @@ export function ineligibility(prospect: UpgradeProspect, now = new Date()): stri
   const figures = prospect.key_figures ?? {};
   if (prospect.deleted_at) return "fiche à la corbeille";
   if (prospect.do_not_contact) return "« ne plus contacter »";
+  if (prospect.status === "perdu" || prospect.status === "gagne") return `fiche ${prospect.status === "perdu" ? "perdue" : "gagnée"}`;
   if (figures.refuses_prospecting === true) return "entreprise opposée à la prospection";
   if (figures.opposition_checked !== true) return "opposition non vérifiée";
   if (figures.unreachable) return "fiche non joignable";
@@ -139,6 +144,9 @@ export function ineligibility(prospect: UpgradeProspect, now = new Date()): stri
   const previous = figures.nominative as { checked_at?: string; version?: number } | undefined;
   const sameStrategy = (previous?.version ?? 1) >= NOMINATIVE_VERSION;
   if (previous?.checked_at && sameStrategy && now.getTime() - Date.parse(previous.checked_at) < NOMINATIVE_RETRY_MS) return "déjà cherché il y a moins de 90 jours";
+  // Hors cible (grand groupe, agence…) : aucune dépense Hunter (Cowork #52).
+  const offTarget = offTargetReason({ key_figures: figures as never, size_range: prospect.size_range ?? null } as never);
+  if (offTarget) return `hors cible : ${offTarget}`;
   return null;
 }
 
