@@ -27,6 +27,8 @@ interface UsageEntry {
   unitCost: number;
   cost: number;
   prospectId?: string | null;
+  /** Source imposée (job d'agent exécuté en prod, Cowork #56) ; sinon USAGE_SOURCE. */
+  source?: string | null;
 }
 
 /**
@@ -51,7 +53,8 @@ async function insert(entry: UsageEntry): Promise<void> {
       prospect_id: entry.prospectId ?? null,
       ...(scriptUserId ? { user_id: scriptUserId } : {}),
     };
-    const { error } = await supabase.from("api_usage").insert({ ...row, source: usageSource() } as never);
+    const source = entry.source ? usageSource({ USAGE_SOURCE: entry.source }) : usageSource();
+    const { error } = await supabase.from("api_usage").insert({ ...row, source } as never);
     // Base pas encore migrée (colonne `source` absente) : la ligne est gardée sans source.
     if (error && /source/i.test(error.message)) await supabase.from("api_usage").insert(row);
   } catch {
@@ -72,6 +75,11 @@ export async function recordOpenAiUsage(params: {
   cachedTokens?: number;
   operation: string;
   prospectId?: string | null;
+  /**
+   * Source imposée (Cowork #56) : un job lancé par un script d'agent s'exécute en production, mais son coût
+   * est une MESURE — il est compté sous `agentN`, jamais dans les chiffres de prod.
+   */
+  source?: string | null;
 }): Promise<void> {
   const { cost, tokens } = openAiCost(
     params.model,
@@ -86,6 +94,7 @@ export async function recordOpenAiUsage(params: {
     unitCost: tokens > 0 ? cost / tokens : 0,
     cost,
     prospectId: params.prospectId,
+    source: params.source,
   });
 }
 

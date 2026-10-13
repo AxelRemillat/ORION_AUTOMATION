@@ -1,6 +1,7 @@
 "use client";
 
 import { MapPin, RefreshCw, Sparkles, Users } from "lucide-react";
+import { costLabel, FIRST_DRAFT_COST_EUR, REGEN_COST_EUR } from "@/lib/usage/draft-estimate";
 import { Badge, Button, Card, CardContent, ProspectStatusBadge } from "@/components/ui";
 import { formatEur } from "@/lib/utils";
 import type { Prospect } from "@/types";
@@ -114,9 +115,10 @@ export function ProspectHeader({
             loading={loading}
             disabled={closed}
             variant={hasAnalysis ? "secondary" : "primary"}
+            title={`Coût OpenAI estimé : ${costLabel(hasAnalysis ? REGEN_COST_EUR : FIRST_DRAFT_COST_EUR)}`}
           >
             <Sparkles className="h-4 w-4" aria-hidden />
-            {hasAnalysis ? "Régénérer le mail" : "Analyser et générer l'email"}
+            {hasAnalysis ? `Régénérer le mail · ${costLabel(REGEN_COST_EUR)}` : "Analyser et générer l'email"}
           </Button>
           {onReanalyze && (
             <Button variant="ghost" size="sm" onClick={onReanalyze} loading={reanalyzing} disabled={loading}>

@@ -31,7 +31,8 @@ import { modelFor, reasoningEffortFor } from "../lib/ai/models";
 import { buildParams } from "../lib/ai/params";
 import { envModelPrices, openAiCost } from "../lib/usage/pricing";
 import { SHORTEN_ROLE } from "../lib/emails/quality/generate";
-import { buildStrategistPrompt } from "../lib/emails/strategist";
+import { buildStrategistPrompt, factsHash } from "../lib/emails/strategist";
+import { autoRegenRefusal, isAgentSource, scriptJobSource } from "../lib/jobs/regen-cap";
 import { buildWritingPrompt } from "../app/api/emails/generate/prompt";
 import { draftFromBrief } from "../app/api/emails/generate/pipeline";
 import type { AskFn } from "../lib/ai/chat";
@@ -476,6 +477,35 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     check("brief stocké refusé par la validation : le stratège tourne", calls === 2);
     await briefForDraft({ mode: "other_angle", storedBrief: stored, strategist: input() }, strategist);
     check("« autre angle » : le stratège tourne (il doit changer d'angle)", calls === 3);
+  }
+
+  console.log("\nRégénérations plafonnées, brief repris tant que les faits ne changent pas (Cowork #56)");
+  {
+    let calls = 0;
+    const strategist = async () => {
+      calls += 1;
+      return validateBrief(rawBrief(), input());
+    };
+    const stored = validateBrief(rawBrief(), input()).brief!;
+    const hash = factsHash(input().facts);
+    check("empreinte des faits stable et sensible au contenu", hash === factsHash([...input().facts].reverse()) && hash !== factsHash(input().facts.slice(1)));
+    const same = await briefForDraft({ mode: "full", storedBrief: { ...stored, factsHash: hash }, strategist: input() }, strategist);
+    check("mêmes faits : brief repris, stratège non relancé", calls === 0 && same.reused === true);
+    await briefForDraft({ mode: "full", storedBrief: { ...stored, factsHash: "deadbeef" }, strategist: input() }, strategist);
+    check("faits changés : le stratège tourne une fois", calls === 1);
+    await briefForDraft({ mode: "full", storedBrief: stored, strategist: input() }, strategist);
+    check("brief d'avant (sans empreinte) : repris comme avant", calls === 1);
+
+    const NOW = new Date("2026-10-14T08:00:00Z");
+    const at = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
+    check("aucune génération : la première rédaction automatique passe", autoRegenRefusal([], NOW) === null);
+    check("rédaction initiale seule : une régénération automatique passe", autoRegenRefusal([{ createdAt: at(1), auto: true }], NOW) === null);
+    const refused = autoRegenRefusal([{ createdAt: at(3), auto: true }, { createdAt: at(1), auto: true }], NOW);
+    check("déjà une régénération automatique sur 7 jours : refusée, motif lisible", Boolean(refused && /au plus 1 par 7 jours/.test(refused) && /à la main/.test(refused)), String(refused));
+    check("régénération automatique de plus de 7 jours : une nouvelle passe", autoRegenRefusal([{ createdAt: at(20), auto: true }, { createdAt: at(9), auto: true }], NOW) === null);
+    check("régénérations MANUELLES : jamais comptées", autoRegenRefusal([{ createdAt: at(3), auto: true }, { createdAt: at(2), auto: false }, { createdAt: at(1), auto: false }], NOW) === null);
+    check("source d'agent reconnue (mesure, hors plafond)", isAgentSource("agent2") && !isAgentSource("prod") && !isAgentSource(null));
+    check("script d'agent : job étiqueté source agent2", scriptJobSource({ USAGE_SOURCE: "agent2" }).source === "agent2" && !("source" in scriptJobSource({ USAGE_SOURCE: "prod" })) && !("source" in scriptJobSource({})));
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en echec.\n`);

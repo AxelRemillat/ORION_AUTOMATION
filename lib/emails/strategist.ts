@@ -426,11 +426,29 @@ export function isBannedPain(text: string): boolean {
  * Brief absent ou refusé (faits qui ont changé, schéma) → le stratège tourne.
  * « Autre angle » et « réécrire » gardent leur chemin propre.
  */
+/**
+ * Empreinte des faits d'une fiche (Cowork #56) : identifiant, libellé et valeur de chaque fait. Stockée avec le
+ * brief ; tant qu'elle ne change pas, le stratège n'est pas relancé. Hachage FNV-1a 32 bits, sans dépendance.
+ */
+export function factsHash(facts: readonly { id: string; label?: string | null; value?: unknown }[]): string {
+  const text = facts.map((fact) => `${fact.id}|${fact.label ?? ""}|${String(fact.value ?? "")}`).sort().join("\n");
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
 export async function briefForDraft(
   input: { mode: string; storedBrief: unknown; strategist: StrategistInput },
   runStrategist: () => Promise<BriefOutcome>,
 ): Promise<BriefOutcome & { reused?: boolean }> {
-  if (input.mode === "full" && input.storedBrief) {
+  // Cowork #56 : un brief stocké avec l'empreinte des faits n'est repris que si les faits n'ont pas changé ;
+  // un brief d'avant (sans empreinte) est repris comme avant, s'il reste valide.
+  const storedHash = (input.storedBrief as { factsHash?: unknown } | null)?.factsHash;
+  const sameFacts = typeof storedHash !== "string" || storedHash === factsHash(input.strategist.facts);
+  if (input.mode === "full" && input.storedBrief && sameFacts) {
     const reused = validateBrief(input.storedBrief, { ...input.strategist, excludeAngles: [] });
     if (reused.brief) return { ...reused, reused: true };
   }

@@ -25,6 +25,7 @@ import {
   runStrategist,
   validateBrief,
   briefForDraft,
+  factsHash,
   type BriefAngle,
   type BriefOutcome,
   type HistoryMessage,
@@ -51,6 +52,7 @@ import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
 import { storedProfile } from "@/lib/emails/business-profile";
 import { ensureBusinessProfile, profileAsk } from "../business-profile";
+import { autoRegenRefusal, isAgentSource, loadPastGenerations } from "../regen-cap";
 import type { Evidence } from "@/app/api/emails/generate/prompt";
 import { JobError, type JobHandler, type StepContext, type StepOutcome } from "../runner";
 import { findContact as findContactOnSite } from "@/lib/contact-finder";
@@ -130,6 +132,11 @@ export const EMAIL_PARAMS_SCHEMA = z.object({
    * un crédit par fiche, pas deux. Sans adresse sur la fiche, chaîne normale.
    */
   storedContact: z.boolean().optional(),
+  /**
+   * Job lancé par un script d'agent (`agent1`…, Cowork #56) : coût compté sous cette source, jamais en prod,
+   * et hors du plafond des régénérations automatiques (c'est une mesure).
+   */
+  source: z.string().max(32).nullish(),
 });
 export type EmailParams = z.infer<typeof EMAIL_PARAMS_SCHEMA>;
 
@@ -282,7 +289,7 @@ export function openingsOf(rows: readonly { id: string; body: string }[], family
   return { total: rows.length, avec, byFamily };
 }
 
-function askFor(prospectId: string): AskFn {
+function askFor(prospectId: string, source?: string | null): AskFn {
   return (role, system, user, temperature, operation) =>
     chatJson({
       client: getOpenAI(),
@@ -299,6 +306,7 @@ function askFor(prospectId: string): AskFn {
           cachedTokens: usage.cachedTokens,
           operation: usage.operation,
           prospectId,
+          source,
         }),
     });
 }
@@ -489,6 +497,18 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
   const prospect = await loadProspect(ctx, params.prospectId);
   const warnings = [...warningsOf(ctx)];
 
+  // --- PLAFOND DES RÉGÉNÉRATIONS AUTOMATIQUES (Cowork #56) ----------------
+  // Avant tout appel payant (profil, stratège, rédacteur) : une régénération automatique de plus que permis
+  // passe la fiche « À revoir » avec le motif, sans appel. Le bouton (manuel) et les mesures d'agents passent.
+  if (params.auto && !isAgentSource(params.source)) {
+    const refusal = autoRegenRefusal(await loadPastGenerations(ctx.db, { userId: ctx.userId, prospectId: prospect.id, currentJobId: ctx.job.id }));
+    if (refusal) {
+      await markForReview(ctx, prospect, refusal);
+      warnings.push({ source: "openai", message: refusal });
+      return { state: { warnings }, done: true };
+    }
+  }
+
   // --- PROFIL MÉTIER : lu sur le site AVANT le stratège ------------------
   // Génération complète seulement : « autre angle » et « réécrire » relisent
   // le profil déjà stocké, sans nouvelle lecture du site.
@@ -617,22 +637,40 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
     if (outcome.brief) outcome.brief.excludedAngles = excludeAngles;
     if (!outcome.brief) throw new JobError(`Brief inexploitable : ${outcome.error}`, false, 502);
   } else {
-    const ask = askFor(prospect.id);
+    const ask = askFor(prospect.id, params.source);
     // Cowork #37 : régénération = brief stocké, sans relancer le stratège (≈ 0,09 € par appel).
     outcome = await briefForDraft({ mode: params.mode, storedBrief: prospect.brief, strategist: input }, () =>
       guardAi(() => runStrategist((system, user, operation) => ask("strategist", system, user, 0.2, operation), input)),
     );
     if ((outcome as { reused?: boolean }).reused) warnings.push({ source: "openai", message: "brief stocké réutilisé (stratège non relancé)" });
-    // Sortie du modèle invalide : une nouvelle tentative a ses chances.
-    if (!outcome.brief) throw new JobError(`Brief inexploitable : ${outcome.error}`, true, 502);
+    // Sortie du modèle invalide APRÈS le second essai du stratège (runStrategist) : relancer tout le job
+    // refaisait deux appels par tentative — jusqu'à six pour un échec (Cowork #56). Job automatique : la fiche
+    // passe « À revoir » ; clic d'Axel : l'erreur s'affiche, sans reprise automatique.
+    if (!outcome.brief) {
+      const reason = `Brief inexploitable : ${outcome.error}`;
+      if (params.auto) {
+        await markForReview(ctx, prospect, reason);
+        warnings.push({ source: "openai", message: reason });
+        return { state: { warnings }, done: true };
+      }
+      throw new JobError(reason, false, 502);
+    }
   }
 
-  // Stocké avec le prospect : « Autre angle » s'en sert pour exclure l'angle.
-  const saved = await ctx.db.from("prospects").update({ brief: outcome.brief }).eq("id", prospect.id);
+  // Stocké avec le prospect : « Autre angle » s'en sert pour exclure l'angle. L'empreinte des faits dit
+  // quand le stratège doit être relancé (Cowork #56).
+  const saved = await ctx.db.from("prospects").update({ brief: { ...outcome.brief, factsHash: factsHash(input.facts) } }).eq("id", prospect.id);
   if (saved.error) {
     warnings.push({ source: "openai", message: "brief non enregistré : appliquez la migration 20260925100000_prospect_brief.sql" });
   }
   return { state: { brief: outcome.brief, warnings }, progress: EMAIL_STAGES.writer };
+}
+
+/** Fiche « À revoir » avec le motif (même champ que la porte des faits), sans toucher au brouillon existant. */
+async function markForReview(ctx: StepContext, prospect: Prospect, reason: string): Promise<void> {
+  const { data: fresh } = await ctx.db.from("prospects").select("key_figures").eq("id", prospect.id).maybeSingle();
+  const current = ((fresh as { key_figures?: Record<string, unknown> | null } | null)?.key_figures ?? prospect.key_figures ?? {}) as Record<string, unknown>;
+  await ctx.db.from("prospects").update({ key_figures: { ...current, mail_review: { reason, at: new Date().toISOString() } } }).eq("id", prospect.id);
 }
 
 /** Accroches des derniers brouillons d'intro PRÊTS (note posée, aucune raison « À revoir »), du plus récent au plus ancien. */
