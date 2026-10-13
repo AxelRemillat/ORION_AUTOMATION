@@ -34,6 +34,8 @@ const envNumber = (name: string, fallback: number): number => {
 export interface ModelPrice {
   inputPerMillion: number;
   outputPerMillion: number;
+  /** Entrée servie par le cache de prompt (Cowork #54). Absent : prix d'entrée normal (aucune remise supposée). */
+  cachedInputPerMillion?: number;
 }
 
 /**
@@ -71,19 +73,21 @@ const DEFAULT_MODEL_PRICE: ModelPrice = { inputPerMillion: 0.15, outputPerMillio
 
 /**
  * Prix fournis par l'environnement, prioritaires sur la grille :
- *   OPENAI_PRICES_JSON='{"mon-modele":{"input":1.25,"output":10}}'
+ *   OPENAI_PRICES_JSON='{"mon-modele":{"input":1.25,"output":10,"cached_input":0.125}}'
+ * `cached_input` (optionnel) : prix des tokens d'entrée servis par le cache de prompt.
  * En dollars par million de tokens. Une entree mal formee est ignoree.
  */
 export function envModelPrices(raw = process.env.OPENAI_PRICES_JSON): Record<string, ModelPrice> {
   if (!raw) return {};
   try {
-    const parsed = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown }>;
+    const parsed = JSON.parse(raw) as Record<string, { input?: unknown; output?: unknown; cached_input?: unknown }>;
     const prices: Record<string, ModelPrice> = {};
     for (const [model, value] of Object.entries(parsed ?? {})) {
       const input = Number(value?.input);
       const output = Number(value?.output);
       if (Number.isFinite(input) && Number.isFinite(output) && input >= 0 && output >= 0) {
-        prices[model] = { inputPerMillion: input, outputPerMillion: output };
+        const cached = Number(value?.cached_input);
+        prices[model] = { inputPerMillion: input, outputPerMillion: output, ...(value?.cached_input !== undefined && Number.isFinite(cached) && cached >= 0 ? { cachedInputPerMillion: cached } : {}) };
       }
     }
     return prices;
@@ -111,11 +115,15 @@ export function openAiCost(
   model: string,
   promptTokens: number,
   completionTokens: number,
+  /** Partie de `promptTokens` servie par le cache de prompt (Cowork #54). */
+  cachedTokens = 0,
 ): OpenAiCost {
   const known = modelPrice(model);
   const price = known ?? DEFAULT_MODEL_PRICE;
+  const cached = Math.min(Math.max(0, cachedTokens), promptTokens);
   const usd =
-    (promptTokens / 1_000_000) * price.inputPerMillion +
+    ((promptTokens - cached) / 1_000_000) * price.inputPerMillion +
+    (cached / 1_000_000) * (price.cachedInputPerMillion ?? price.inputPerMillion) +
     (completionTokens / 1_000_000) * price.outputPerMillion;
 
   return {

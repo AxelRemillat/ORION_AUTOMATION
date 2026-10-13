@@ -69,8 +69,10 @@ export type ReasoningEffort = "low" | "medium" | "high";
 const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high"];
 
 /**
- * Effort de raisonnement d'un rôle : OPENAI_REASONING_EFFORT_<ROLE>, sinon
- * « medium » pour le stratège (c'est lui qui réfléchit) et « low » ailleurs.
+ * Effort de raisonnement d'un rôle : OPENAI_REASONING_EFFORT_<ROLE>, sinon « low » partout.
+ * Cowork #54 : le stratège passe de « medium » à « low » — même taux de mails prêts sur le même lot
+ * (8/11 en « low » contre 7/11 en « medium »), sortie ~40 % plus courte (raisonnement ÷ 3).
+ * `OPENAI_REASONING_EFFORT_STRATEGIST=medium` rétablit l'ancien réglage.
  *
  * Il n'est ENVOYÉ que si le modèle le supporte — c'est `lib/ai/params.ts` qui
  * en décide. Ce module ne dit plus rien des capacités : la détection par
@@ -80,5 +82,5 @@ const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high"];
 export function reasoningEffortFor(role: AiRole, env: Env = process.env): ReasoningEffort {
   const raw = env[`OPENAI_REASONING_EFFORT_${role.toUpperCase()}`]?.trim().toLowerCase();
   if (raw && (EFFORTS as readonly string[]).includes(raw)) return raw as ReasoningEffort;
-  return role === "strategist" ? "medium" : "low";
+  return "low";
 }

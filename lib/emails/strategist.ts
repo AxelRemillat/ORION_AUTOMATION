@@ -237,8 +237,9 @@ ${jobRolesBlock()}
 6. cta : UNE question ouverte, a laquelle on repond en une ligne.
 7. avoid : ce qu'il ne faut PAS dire a ce prospect (angle deja servi, sujet
    sensible, formulation qui sonnerait faux vu les faits).
-8. NOM : l'entreprise s'appelle « ${input.companyName} ». Aucun autre nom
-   d'entite ne la designe.${input.foreignEntities.length ? ` En particulier, ${input.foreignEntities.map((name) => `« ${name} »`).join(", ")} est une AUTRE entreprise (homonyme) : n'en parle jamais.` : ""}
+8. NOM : l'entreprise s'appelle exactement comme indique en tete du message
+   (« Entreprise : … »). Aucun autre nom d'entite ne la designe. Les homonymes
+   listes dans le message sont d'AUTRES entreprises : n'en parle jamais.
 9. N'invente aucun chiffre ; ne cite que des factIds existants.
 10. PROFIL METIER : quand il est fourni, le pain se choisit DEPUIS lui — ce qu'ils
    vendent, comment arrivent commandes et devis, leurs implantations. Le code
@@ -274,7 +275,9 @@ Reponds UNIQUEMENT avec un objet JSON :
   "avoid": ["..."]
 }`;
 
-  const user = `Entreprise : ${input.companyName}
+  // Cowork #54 : le nom et les homonymes vivent ICI, pas dans les règles du système — le système reste
+  // identique d'une fiche à l'autre, donc servi par le cache de prompt d'OpenAI (il ne l'était jamais : 0 %).
+  const user = `Entreprise : ${input.companyName}${input.foreignEntities.length ? `\nHomonymes (AUTRES entreprises, n'en parle jamais) : ${input.foreignEntities.map((name) => `« ${name} »`).join(", ")}` : ""}
 
 ${profileBlock(input.businessProfile ?? null)}
 

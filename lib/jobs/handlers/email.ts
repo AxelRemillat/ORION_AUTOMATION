@@ -296,6 +296,7 @@ function askFor(prospectId: string): AskFn {
           model: usage.model,
           promptTokens: usage.promptTokens,
           completionTokens: usage.completionTokens,
+          cachedTokens: usage.cachedTokens,
           operation: usage.operation,
           prospectId,
         }),

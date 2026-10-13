@@ -68,6 +68,8 @@ export async function recordOpenAiUsage(params: {
   model: string;
   promptTokens: number;
   completionTokens: number;
+  /** Tokens d'entrée servis par le cache de prompt (Cowork #54). */
+  cachedTokens?: number;
   operation: string;
   prospectId?: string | null;
 }): Promise<void> {
@@ -75,6 +77,7 @@ export async function recordOpenAiUsage(params: {
     params.model,
     params.promptTokens,
     params.completionTokens,
+    params.cachedTokens ?? 0,
   );
   await insert({
     service: "openai",
