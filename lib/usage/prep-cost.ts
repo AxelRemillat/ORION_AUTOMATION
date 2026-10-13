@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/trash/scope";
+import { readAll } from "@/lib/supabase/read-all";
 
 /**
  * COÛT OPENAI D'UNE PRÉPARATION (Cowork #44). `api_usage` ne porte pas l'id du
@@ -23,8 +24,22 @@ export function prepCost(rows: readonly { operation: string | null; cost: number
   return rows.reduce((total, row) => (WRITING_OPERATIONS.test(row.operation ?? "") ? total : total + (Number(row.cost) || 0)), 0);
 }
 
-/** Coût OpenAI de préparation depuis `since` (début du job). */
+/**
+ * Coût OpenAI de préparation depuis `since` (début du job) — EXACT.
+ *
+ * C'est le garde-fou qui arrête une préparation trop chère : il doit tout
+ * compter. Un `select` sans pagination s'arrêtait à 1 000 lignes SANS ERREUR
+ * (plafond de PostgREST), et le plafond du job sous-estimait alors sa propre
+ * dépense (Cowork #23, signalé par #24). Lecture page par page, tri stable.
+ *
+ * Pourquoi pas une somme côté base : il faudrait recopier en SQL la règle
+ * `WRITING_OPERATIONS`, déjà modifiée deux fois (#44, #47). Deux sources pour
+ * une même règle finissent par diverger ; le volume d'un job (quelques minutes
+ * d'appels) tient d'ordinaire dans une seule page, donc un seul aller-retour.
+ */
 export async function prepCostSince(db: Db, since: string): Promise<number> {
-  const { data } = await db.from("api_usage").select("operation, cost").eq("service", "openai").gte("created_at", since);
-  return prepCost((data ?? []) as { operation: string | null; cost: number | null }[]);
+  const rows = await readAll<{ operation: string | null; cost: number | null }>(
+    () => db.from("api_usage").select("id, operation, cost").eq("service", "openai").gte("created_at", since).order("id") as never,
+  );
+  return prepCost(rows);
 }

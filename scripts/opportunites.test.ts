@@ -427,7 +427,9 @@ async function main() {
       { fit_score: 6, status: "a_repondre" as const, seen_at: null, published_at: null, created_at: "x" },
       { fit_score: null, status: "ignoree" as const, filter_reason: "application mobile (iOS / Android)", seen_at: null, published_at: null, created_at: "x" },
     ];
-    check("alertes non vues : seulement score ≥ 8 et pas encore vues", unseenAlerts(rows).length === 1);
+    // `now` figé : sans lui, la fraîcheur de 7 jours écartait ces annonces du 06/10
+    // à partir du 13/10, et le test échouait quel que soit le code (Cowork #23).
+    check("alertes non vues : seulement score ≥ 8 et pas encore vues", unseenAlerts(rows, new Date("2026-10-06T09:00:00Z")).length === 1);
     check("classement : alerte / à voir / ignorée (filtre)", bucketOf(rows[0]) === "alertes" && bucketOf(rows[2]) === "a_voir" && bucketOf(rows[3]) === "ignorees" && bucketOf({ fit_score: 3, status: "a_repondre" }) === "ignorees");
     check("âge lisible : « il y a 7 min »", ageLabel("2026-10-06T08:53:00Z", new Date("2026-10-06T09:00:00Z")) === "il y a 7 min");
     check("« vue » enregistrée par le suivi", buildOpportunityPatch({ seen: true }, { status: "a_repondre", sent_at: null, replied_at: null }, new Date("2026-10-06T09:00:00Z")).ok);

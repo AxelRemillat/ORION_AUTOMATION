@@ -27,7 +27,13 @@ export class FakeDb {
    */
   constructor(
     public tables: Record<string, Row[]> = {},
-    private options: { strictTables?: boolean } = {},
+    /**
+     * `maxRows` : plafond de lignes par réponse, comme `db-max-rows` de
+     * PostgREST (1 000 chez Supabase). Les lignes au-delà manquent SANS
+     * ERREUR — c'est exactement le piège à tester ; sans cette option, un
+     * test « plus de 1 000 lignes » passerait aussi avec un code non paginé.
+     */
+    public options: { strictTables?: boolean; maxRows?: number } = {},
   ) {}
 
   has(table: string): boolean {
@@ -172,6 +178,9 @@ class FakeQuery implements PromiseLike<FakeResult> {
         result.sort((a, b) => (String(a[column]) < String(b[column]) ? -1 : 1) * (ascending ? 1 : -1));
       }
       if (this.max !== null) result = result.slice(this.offset, this.offset + this.max);
+      // Plafond du serveur : appliqué APRÈS la plage demandée, en silence.
+      const cap = this.db.options.maxRows;
+      if (cap && result.length > cap) result = result.slice(0, cap);
       if (this.head) return { data: null, error: null, count: matches.length };
       return this.finish(this.project(result), this.counted ? matches.length : null);
     }

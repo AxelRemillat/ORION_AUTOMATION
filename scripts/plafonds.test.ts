@@ -5,7 +5,7 @@
  */
 import { fetchPappers } from "../lib/enrichment/pappers";
 import { openAiGuarded, relancesStep } from "../lib/jobs/handlers/prepare";
-import { prepCost } from "../lib/usage/prep-cost";
+import { prepCost, prepCostSince } from "../lib/usage/prep-cost";
 import { capArg } from "../lib/cli/args";
 import { budgets } from "../lib/settings/costs";
 import { prepareAlert } from "../lib/today/auto-run";
@@ -144,6 +144,29 @@ async function main() {
       "relances des autres agents (relance:redaction, relance:grille…) hors du plafond du job",
       Math.abs(prepCost([{ operation: "facts", cost: 0.1 }, { operation: "relance:redaction:rewrite", cost: 0.064 }, { operation: "relance:grille:0", cost: 0.002 }, { operation: "relance", cost: 0.02 }]) - 0.1) < 1e-9,
     );
+    /*
+     * Cowork #23 : au-delà de 1 000 lignes, PostgREST tronque EN SILENCE. Le
+     * faux client reproduit ce plafond (`maxRows`) ; sans lui, ce test
+     * passerait aussi avec l'ancien `select` non paginé et ne prouverait rien.
+     * 2 500 appels de préparation à 0,001 €, plus 300 de rédaction (exclus).
+     */
+    {
+      const since = "2026-10-03T06:00:00Z";
+      const rows = [
+        ...Array.from({ length: 2_500 }, (_, i) => ({ id: `p${String(i).padStart(5, "0")}`, service: "openai", operation: "facts", cost: 0.001, created_at: "2026-10-03T07:00:00Z" })),
+        ...Array.from({ length: 300 }, (_, i) => ({ id: `r${String(i).padStart(5, "0")}`, service: "openai", operation: "qualite:redaction", cost: 0.01, created_at: "2026-10-03T07:00:00Z" })),
+        // Avant le début du job : jamais compté.
+        { id: "avant", service: "openai", operation: "facts", cost: 5, created_at: "2026-10-03T05:00:00Z" },
+      ];
+      const capped = new FakeDb({ api_usage: rows }, { maxRows: 1_000 });
+
+      // L'ancienne lecture, telle qu'elle était : un seul `select`, sans pagination.
+      const { data: truncated } = await capped.from("api_usage").select("operation, cost").eq("service", "openai").gte("created_at", since);
+      check("le piège existe : une lecture non paginée s'arrête à 1 000 lignes", (truncated as unknown[]).length === 1_000, (truncated as unknown[]).length);
+
+      const cost = await prepCostSince(capped as never, since);
+      check("garde-fou de la préparation : les 2 500 appels comptés (2,50 €, rédaction exclue)", Math.abs(cost - 2.5) < 1e-9, cost);
+    }
     // « Sans brouillons » : aucune relance rédigée (07/10 : 14 relances dans un lot sans brouillons).
     const noDraft = await relancesStep({ db: new FakeDb({}) as never, userId: "u1", job: { id: "j", params: { skipDrafts: true }, state: {}, result: {}, user_id: "u1", created_at: "" } } as never);
     check("préparation sans brouillons : les relances ne sont pas rédigées", /non rédigées/.test(noDraft.progress?.step ?? ""), noDraft.progress);
