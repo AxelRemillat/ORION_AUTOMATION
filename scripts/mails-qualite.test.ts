@@ -541,9 +541,12 @@ async function main() {
       // Cowork #32 : F2 au-delà de 80 mots → raccourcissement dédié AVANT le jugement, hors des essais.
       const longF2 = JSON.stringify({ ...f2Parts, hook: `${f2Parts.hook} ${"Le client rappelle ensuite pour savoir où en est sa commande du matin. ".repeat(3)}` });
       const operations: string[] = [];
+      const shortenRoles: string[] = [];
       const ask: AskFn = async (role, _system, _user, _temperature, operation) => {
         operations.push(operation.replace(/:lecture-\d+$/, ""));
-        if (role === "writer") return operation === "qualite:raccourci" ? f2Good : longF2;
+        // Cowork #54 : le raccourci passe par le modèle léger (rôle du juge), plus par le rédacteur.
+        if (operation === "qualite:raccourci") return (shortenRoles.push(role), f2Good);
+        if (role === "writer") return longF2;
         return JSON.stringify(Object.fromEntries(["C1", "C2", "C3", "C5"].map((id) => [id, { ok: true, citation: "ok" }])));
       };
       const outcome = await generateQualityDraft({ ...base, family: "F2", brief: doubtful, ask });
@@ -552,6 +555,7 @@ async function main() {
         isDraft(outcome) && outcome.attempts === 1 && !outcome.needsReview && operations.slice(0, 3).join(",") === "qualite:redaction,qualite:raccourci,qualite:checklist:0",
         JSON.stringify({ ops: operations, r: isDraft(outcome) ? outcome.reviewReason : outcome }),
       );
+      check("le raccourci appelle le modèle léger (rôle du juge)", shortenRoles.length > 0 && shortenRoles.every((role) => role === "judge"), shortenRoles.join(","));
     }
     const { ask: none, calls: noCalls } = scripted([], []);
     const noActivity = await generateQualityDraft({ ...base, family: undefined, brief: doubtful, activity: null, ask: none });
