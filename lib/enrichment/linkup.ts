@@ -133,7 +133,8 @@ export async function fetchWebResults(company: {
   // Plafond du jour et cache 90 jours, comme la recherche de site (lib/linkup/gate.ts).
   const store = supabaseLinkupStore();
   const query = buildQuery(company);
-  const gate = await linkupGate<WebResult[]>(store, query);
+  // Enrichissement : il laisse aux recherches de site leur part du budget du jour (Cowork #27).
+  const gate = await linkupGate<WebResult[]>(store, query, new Date(), "search", "enrich");
   if (gate.status === "cache") return { ok: true, data: gate.value };
   if (gate.status === "blocked") return { ok: false, error: gate.reason };
 
