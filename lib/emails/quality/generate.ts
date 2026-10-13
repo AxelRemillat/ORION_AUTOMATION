@@ -27,6 +27,13 @@ import type { KeyFact } from "./facts-gate";
 
 export const MAX_REWRITES = 2;
 
+/**
+ * Raccourcir un mail trop long est une tâche MÉCANIQUE (retirer des mots, garder le sens) : le modèle du juge
+ * (gpt-6-luna) suffit, 20 fois moins cher que celui du rédacteur (Cowork #54 : 6 % du coût OpenAI). Le résultat
+ * repasse les règles et le juge comme avant : un raccourci raté ne fait pas un mail prêt.
+ */
+export const SHORTEN_ROLE = "judge" as const;
+
 export interface QualityInput {
   ask: AskFn;
   brief: StrategyBrief;
@@ -188,7 +195,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     for (let pass = 0; pass < SHORTEN_PASSES && countWords(core) > max; pass += 1) {
       const shorter = parseParts(
         await input
-          .ask("writer", buildShortenMailPrompt(family, countWords(core), max), JSON.stringify({ subject: parts.subject, hook: parts.hook, proposal: parts.proposal }), 0.3, "qualite:raccourci")
+          .ask(SHORTEN_ROLE, buildShortenMailPrompt(family, countWords(core), max), JSON.stringify({ subject: parts.subject, hook: parts.hook, proposal: parts.proposal }), 0.3, "qualite:raccourci")
           .catch(() => ""),
         family,
       );

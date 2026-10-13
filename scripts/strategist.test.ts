@@ -30,6 +30,8 @@ import { isAnchored } from "../lib/enrichment/extract";
 import { modelFor, reasoningEffortFor } from "../lib/ai/models";
 import { buildParams } from "../lib/ai/params";
 import { envModelPrices, openAiCost } from "../lib/usage/pricing";
+import { SHORTEN_ROLE } from "../lib/emails/quality/generate";
+import { buildStrategistPrompt } from "../lib/emails/strategist";
 import { buildWritingPrompt } from "../app/api/emails/generate/prompt";
 import { draftFromBrief } from "../app/api/emails/generate/pipeline";
 import type { AskFn } from "../lib/ai/chat";
@@ -437,6 +439,25 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     const prices = envModelPrices('{"modele-x":{"input":1,"output":4},"casse":{"input":"x"}}');
     check("prix fournis par OPENAI_PRICES_JSON", prices["modele-x"]?.outputPerMillion === 4 && !prices.casse);
     check("modèle hors grille : prix marqué inconnu", openAiCost("modele-inconnu", 1000, 1000).priceKnown === false);
+
+    // Cowork #54 : tokens servis par le cache de prompt, au prix « cached_input » s'il est fourni.
+    const cachedPrices = envModelPrices('{"modele-c":{"input":2,"output":10,"cached_input":0.2},"modele-n":{"input":2,"output":10}}');
+    check("cached_input lu dans OPENAI_PRICES_JSON", cachedPrices["modele-c"]?.cachedInputPerMillion === 0.2 && cachedPrices["modele-n"]?.cachedInputPerMillion === undefined);
+    const before = process.env.OPENAI_PRICES_JSON;
+    process.env.OPENAI_PRICES_JSON = '{"modele-c":{"input":2,"output":10,"cached_input":0.2},"modele-n":{"input":2,"output":10}}';
+    const full = openAiCost("modele-c", 1_000_000, 0).cost;
+    const half = openAiCost("modele-c", 1_000_000, 0, 500_000).cost;
+    check("moitié de l'entrée en cache : coût = 0,5 × 2 $ + 0,5 × 0,2 $", Math.abs(half / full - 1.1 / 2) < 1e-6, `${half} / ${full}`);
+    check("sans prix cached_input : aucune remise supposée", openAiCost("modele-n", 1_000_000, 0, 500_000).cost === openAiCost("modele-n", 1_000_000, 0).cost);
+    check("cache borné aux tokens d'entrée", openAiCost("modele-c", 100, 0, 999).cost === openAiCost("modele-c", 100, 0, 100).cost);
+    if (before === undefined) delete process.env.OPENAI_PRICES_JSON; else process.env.OPENAI_PRICES_JSON = before;
+    check("raccourcissement d'un mail : modèle du juge (léger), pas celui du rédacteur", SHORTEN_ROLE === "judge");
+
+    // Cowork #54 : règles du stratège identiques d'une fiche à l'autre (cache de prompt) ; nom et homonymes dans le message.
+    const one = buildStrategistPrompt(input({ companyName: "ALPHA SAS" }));
+    const two = buildStrategistPrompt(input({ companyName: "BETA SARL", foreignEntities: ["Beta Holding"] }));
+    check("système du stratège identique pour deux fiches (servi par le cache)", one.system === two.system && !one.system.includes("ALPHA SAS"));
+    check("nom et homonymes dans le message utilisateur", two.user.startsWith("Entreprise : BETA SARL") && two.user.includes("« Beta Holding »") && !one.user.includes("Homonymes"));
   }
 
   console.log("\nRégénération sans stratège (Cowork #37)");

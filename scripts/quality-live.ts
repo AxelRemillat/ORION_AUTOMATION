@@ -79,7 +79,7 @@ export const liveAsk = (prospectId: string | null): AskFn => (role, system, user
     temperature,
     operation,
     onUsage: (usage) =>
-      recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, operation: usage.operation, prospectId }),
+      recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, cachedTokens: usage.cachedTokens, operation: usage.operation, prospectId }),
   });
 
 /** Coût OpenAI enregistré depuis `since` (€), pour le plafond des scripts. */

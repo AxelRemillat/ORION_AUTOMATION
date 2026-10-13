@@ -27,6 +27,10 @@ export interface ChatUsage {
   model: string;
   promptTokens: number;
   completionTokens: number;
+  /** Tokens d'entrée servis par le cache de prompt d'OpenAI (Cowork #54) — facturés au prix « cached_input ». */
+  cachedTokens?: number;
+  /** Tokens de raisonnement (inclus dans completionTokens). */
+  reasoningTokens?: number;
   latencyMs: number;
   operation: string;
 }
@@ -139,6 +143,8 @@ export async function chatJson(request: ChatJsonRequest): Promise<string> {
       model,
       promptTokens: completion.usage?.prompt_tokens ?? 0,
       completionTokens: completion.usage?.completion_tokens ?? 0,
+      cachedTokens: completion.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+      reasoningTokens: completion.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
       latencyMs: Date.now() - started,
       operation: request.operation,
     });

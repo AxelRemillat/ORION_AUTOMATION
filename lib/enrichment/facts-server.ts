@@ -39,7 +39,7 @@ export function liveFactsDeps(prospectId: string): FactsDeps {
         maxOutputTokens: 900,
         operation: "facts",
         onUsage: (usage) =>
-          recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, operation: usage.operation, prospectId }),
+          recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, cachedTokens: usage.cachedTokens, operation: usage.operation, prospectId }),
       }),
   };
 }

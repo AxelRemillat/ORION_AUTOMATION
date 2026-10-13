@@ -26,7 +26,7 @@ export function opportunityAsk(): AskFn {
       temperature,
       operation,
       onUsage: (usage) =>
-        recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, operation: usage.operation }),
+        recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, cachedTokens: usage.cachedTokens, operation: usage.operation }),
     });
 }
 

@@ -88,7 +88,7 @@ export function relanceAsk(prospectId?: string): AskFn {
       temperature,
       operation,
       onUsage: (usage) =>
-        recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, operation: usage.operation, prospectId: prospectId ?? null }),
+        recordOpenAiUsage({ model: usage.model, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, cachedTokens: usage.cachedTokens, operation: usage.operation, prospectId: prospectId ?? null }),
     });
 }
 
