@@ -453,10 +453,10 @@ async function main() {
     const filtered = await ingestPlatformEmail(deps, offTarget.email);
     const filteredRow = db.rows("opportunities").find((item) => item.id === filtered.opportunity_ids[0]) as Record<string, unknown>;
     void llmBefore;
-    // 11/10/2026 : un CMS imposé n'est plus « Ignorée » : « À voir », jamais d'alerte.
-    check("inconnu sur CMS (WordPress) : même pré-filtre → « À voir » (CMS imposé), sans alerte", filtered.status === "cree" && filtered.verdict === "a_voir" && filteredRow.status !== "ignoree" && !filteredRow.filter_reason && alerts.length === 1, JSON.stringify({ filtered, reason: filteredRow?.filter_reason }));
+    // Cowork #27 : un CMS est une mission de lancement → alerte.
+    check("inconnu sur CMS (WordPress) : même pré-filtre → alerte « lancement » (Cowork #27)", filtered.status === "cree" && filtered.verdict === "alerte" && filteredRow.status !== "ignoree" && !filteredRow.filter_reason && alerts.length === 2, JSON.stringify({ filtered, reason: filteredRow?.filter_reason }));
     const replay = await ingestPlatformEmail(deps, relevant.email);
-    check("e-mail rejoué : doublon par message_id, rien refait", replay.duplicate === true && db.rows("opportunities").length === 3 && alerts.length === 1);
+    check("e-mail rejoué : doublon par message_id, rien refait", replay.duplicate === true && db.rows("opportunities").length === 3 && alerts.length === 2);
     const noId = parsePlatformEmail({ ...relevant.email, message_id: "<x>", text: "Nouveau projet sans lien." });
     check("« Nouveau projet » sans identifiant → à trier", decideEmail(noId, null).action === "a_trier");
   }
@@ -571,7 +571,7 @@ async function main() {
 
     const wordpress = await ingestPlatformEmail(deps, alertFor("499101", "Refonte de notre site WordPress"));
     const wpRow = db.rows("opportunities").find((item) => item.id === wordpress.opportunity_ids[0]) as Record<string, unknown>;
-    check("titre WordPress → plus « Ignorée » : CMS imposé, « À voir », sans alerte (11/10/2026)", wordpress.verdict === "a_voir" && wpRow.status !== "ignoree" && !wpRow.filter_reason);
+    check("titre WordPress → alerte « lancement », jamais « Ignorée » (Cowork #27)", wordpress.verdict === "alerte" && wpRow.status !== "ignoree" && !wpRow.filter_reason);
     const mobile = await ingestPlatformEmail(deps, alertFor("499102", "Application iOS native en Swift"));
     check("titre « application iOS native » → « Ignorée »", mobile.verdict === "ignore");
     const ai = await ingestPlatformEmail(deps, alertFor("499103", "ERP"));

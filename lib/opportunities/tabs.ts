@@ -31,7 +31,7 @@ export function visibleTabs(items: readonly Pick<Opportunity, "platform">[]): Pl
  * score ≥ 8 — ou mission de lancement Codeur (11/10/2026), sans motif de filtre.
  */
 export const isBadgeAlert = (row: Pick<Opportunity, "fit_score" | "status" | "seen_at"> & Partial<Opportunity>, now = new Date()): boolean =>
-  !row.seen_at && row.status !== "ignoree" && !isOutdated(row as Parameters<typeof isOutdated>[0], now) && ((row.fit_score != null && row.fit_score >= 8) || (!row.filter_reason && rowLane(row as Parameters<typeof rowLane>[0]) === "lancement"));
+  !row.seen_at && row.status !== "ignoree" && !isOutdated(row as Parameters<typeof isOutdated>[0], now) && ((row.fit_score != null && row.fit_score >= 8) || (!row.filter_reason && ["lancement", "regie"].includes(rowLane(row as Parameters<typeof rowLane>[0]) ?? "")));
 
 /** Alertes non vues par onglet. */
 export function tabBadges(items: readonly Row[]): Record<PlatformTab, number> {

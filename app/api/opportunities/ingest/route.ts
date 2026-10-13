@@ -4,6 +4,7 @@ import { waitUntil } from "@/lib/jobs/dispatch";
 import { DEFAULT_DAILY_LLM_CAP, ingestOpportunity, parseIngestBody } from "@/lib/opportunities/ingest";
 import { opportunityAsk } from "@/lib/opportunities/run";
 import { pushNtfy } from "@/lib/notify/ntfy";
+import { runAlertCatchUp } from "@/lib/opportunities/rattrapage-alertes";
 import { ingestAuthorized, opportunitiesOwner, publicAppUrl } from "@/lib/opportunities/ingest-auth";
 
 export const runtime = "nodejs";
@@ -31,19 +32,19 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "Propriétaire introuvable : renseignez OPPORTUNITIES_USER_ID." }, { status: 500 });
 
   const cap = Number(process.env.OPPORTUNITIES_DAILY_LLM_CAP);
+  const deps = {
+    db: db as unknown as { from: (table: string) => any },
+    userId,
+    ask: opportunityAsk(),
+    baseUrl: publicAppUrl(request),
+    llmCap: Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_DAILY_LLM_CAP,
+    background: waitUntil,
+    notify: (notification: Parameters<typeof pushNtfy>[0]) => pushNtfy(notification),
+  };
   try {
-    const result = await ingestOpportunity(
-      {
-        db: db as unknown as { from: (table: string) => any },
-        userId,
-        ask: opportunityAsk(),
-        baseUrl: publicAppUrl(request),
-        llmCap: Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_DAILY_LLM_CAP,
-        background: waitUntil,
-        notify: (notification) => pushNtfy(notification),
-      },
-      parsed.value,
-    );
+    const result = await ingestOpportunity(deps, parsed.value);
+    // Rattrapage unique des alertes ratées (Cowork #27), en arrière-plan, verrouillé en base.
+    waitUntil(runAlertCatchUp(deps).catch(() => null));
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "ingestion impossible" }, { status: 500 });

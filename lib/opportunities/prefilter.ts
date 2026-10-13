@@ -49,8 +49,12 @@ interface Rule {
   unlessWebDev?: boolean;
 }
 
-/** CMS imposé (11/10/2026 : « À voir », plus jamais ignoré) ; Magento reste exclu par sa règle. */
-const CMS = /(wordpress|\bwix\b|shopify|webflow|squarespace|presta?s?hop|magento|woocommerce|jimdo|joomla|drupal|elementor|\bdivi\b)/;
+/**
+ * CMS (11/10/2026 : plus jamais ignoré). Depuis Cowork #27 (13/10/2026), un site sous CMS
+ * est une mission de LANCEMENT comme une autre (alerte) — la mention « CMS » reste un repère.
+ * Magento reste exclu par sa règle (e-commerce lourd). Grav ajouté (491216 ratée le 13/10).
+ */
+const CMS = /(wordpress|\bwix\b|shopify|webflow|squarespace|presta?s?hop|magento|woocommerce|jimdo|joomla|drupal|elementor|\bdivi\b|\bgrav\b)/;
 /** React Native, Flutter : pas exclus (l'analyse les plafonne à 6). */
 const CROSS_PLATFORM = /(react native|flutter|\bexpo\b)/;
 
@@ -139,6 +143,11 @@ const WEB_DEV = new RegExp(
     "(creation|creer|refonte|refaire|realisation|realiser|developpement|developper|construire|conception|concevoir|nouveau|mise en place) (d'un |de mon |de notre |du |de |d'une |une |un |mon |notre |le |la )?(site|blog|landing|application|appli|plate-?forme|saas|mvp|outil)",
     "^(un |mon |notre |nouveau )?site (web|internet|vitrine)", "application (web|educative|en ligne|sur mesure|de gestion|metier|saas)", "appli(cation)? web", "\\bsaas\\b", "\\bmvp\\b", "plate-?forme (web|en ligne|sur mesure|de mise en relation|educative)",
     "^(site|application|appli|plate-?forme|landing|blog)\\b",
+    // Cowork #27 (13/10/2026) : petits chantiers front sur un site existant — « amélioration
+    // visuelle », intégration HTML/maquette, retouches, refonte légère — sont du dev web.
+    "amelioration (visuelle|graphique|du design|de l'apparence|de l'aspect)", "(affiner|ameliorer|retoucher|moderniser|rafraichir) (l'aspect|l'apparence|le design|le visuel|l'esthetique)",
+    "integration (html|web|front|css|de (la |une |des )?maquettes?|figma)", "retouches? (front|graphiques?|css|du site|visuelles?)",
+    "refonte (legere|graphique|visuelle|partielle)", "(modifier|modification|mise a jour|mettre a jour|ameliorer|amelioration) (d'un |de mon |de notre |du |le |mon |notre )?site",
   ].join("|"),
 );
 
@@ -179,7 +188,7 @@ export function budgetBelow(budgetText: string | null | undefined, threshold = 1
   return Math.max(...amounts) < threshold;
 }
 
-/** Mention d'une fiche « CMS imposé » (À voir, jamais d'alerte). */
+/** Repère d'une fiche sous CMS (Lancement depuis Cowork #27 ; « à vous de juger » le CMS). */
 export const CMS_NOTE = "CMS imposé : à vous de juger";
 
 export interface AdClass {

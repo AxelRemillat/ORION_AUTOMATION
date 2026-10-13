@@ -1,8 +1,11 @@
 import type { Opportunity } from "@/lib/opportunities/types";
-import { isUrgent, LAUNCH_BADGE, offersCount } from "@/lib/opportunities/lane";
+import { isCmsAd, isUrgent, LAUNCH_BADGE, offersCount, REGIE_BADGE } from "@/lib/opportunities/lane";
 import { rowLane } from "@/lib/opportunities/view";
 
-/** Repères Codeur (11/10/2026) : « Lancement », « Urgent » (moins de 2 h), offres déjà déposées si connues. */
+/**
+ * Repères Codeur : « Lancement », « Urgent » (moins de 2 h), « CMS » (un site sous CMS est une
+ * mission de lancement depuis Cowork #27), « Régie · dispo à vérifier », offres déjà déposées si connues.
+ */
 export function LaneBadges({ item }: { item: Opportunity }) {
   const lane = item.filter_reason ? null : rowLane(item);
   const urgent = lane === "lancement" && isUrgent(item.published_at);
@@ -15,6 +18,12 @@ export function LaneBadges({ item }: { item: Opportunity }) {
         </span>
       )}
       {urgent && <span className="shrink-0 rounded-full border border-lost/30 bg-lost/10 px-2 py-0.5 text-[11px] text-lost-ink">Urgent</span>}
+      {lane === "lancement" && isCmsAd(item) && <span title="CMS imposé : à vous de juger" className="shrink-0 rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[11px] text-warn-ink">CMS</span>}
+      {lane === "regie" && (
+        <span title="Mission en régie sur votre stack : à vous de juger selon votre disponibilité (alternance)" className="shrink-0 rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[11px] text-warn-ink">
+          {REGIE_BADGE}
+        </span>
+      )}
       {lane === "cms_impose" && <span className="shrink-0 rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[11px] text-warn-ink">CMS imposé</span>}
       {offers !== null && <span className="shrink-0 font-data text-[11px] text-muted">{offers} offre{offers > 1 ? "s" : ""}</span>}
     </>

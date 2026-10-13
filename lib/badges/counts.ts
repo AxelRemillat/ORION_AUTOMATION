@@ -65,7 +65,7 @@ async function alertCount(db: Db, now: Date): Promise<number> {
     if (published && published < since) continue;
     const score = (row.fit_score as number | null) ?? 0;
     // Score élevé, ou mission de lancement Codeur reconnue sur le texte.
-    if (score >= 8 || laneOf(row as never, now) === "lancement") ids.add(row.id as string);
+    if (score >= 8 || ["lancement", "regie"].includes(laneOf(row as never, now) ?? "")) ids.add(row.id as string);
   }
   return ids.size;
 }

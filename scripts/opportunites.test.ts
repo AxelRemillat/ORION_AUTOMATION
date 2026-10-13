@@ -588,8 +588,9 @@ async function main() {
     }
     check("« Campagne Google Ads pour site WordPress » : reste ignorée (Ads sans création de site)", /Ads/.test(prefilterReason(ad("Campagne Google Ads pour site WordPress", "Gérer nos annonces Google Ads pour notre site WordPress", "Moins de 500 €")) ?? "") && titleOnlyReason("Campagne Google Ads pour site WordPress") !== null);
     const cms = ad("Création d'un site vitrine WordPress", "Site de 5 pages sous WordPress avec Elementor", "Moins de 500 €", ["Site internet"]);
-    check("CMS imposé : plus ignoré, « À voir », pas de lancement", prefilterReason(cms) === null && classifyAd(cms).cms && laneOf({ platform: "codeur", title: cms.title, body: cms.description, budget: cms.budgetText, categories: cms.categories }) === "cms_impose");
-    check("CMS imposé : bucket « À voir » même avec un score de 9, jamais d'alerte", bucketOf({ platform: "codeur", title: cms.title, body: cms.description, budget: cms.budgetText, fit_score: 9, status: "a_repondre" } as never) === "a_voir");
+    // Cowork #27 : un CMS est du dev web au sens large → mission de lancement, alerte.
+    check("CMS : jamais ignoré, mission de lancement (Cowork #27)", prefilterReason(cms) === null && classifyAd(cms).cms && laneOf({ platform: "codeur", title: cms.title, body: cms.description, budget: cms.budgetText, categories: cms.categories }) === "lancement");
+    check("CMS : bucket « Alertes », même avec un score de 2", bucketOf({ platform: "codeur", title: cms.title, body: cms.description, budget: cms.budgetText, fit_score: 2, status: "a_repondre" } as never) === "alertes");
     check("« Prestahop » (faute de frappe) reconnu comme CMS", classifyAd(ad("Site Prestahop 1.7.8.11 : mise à jour")).cms);
     check("toujours ignorés : app mobile native, graphisme, vidéo, Magento, catalogue > 100 produits, data science lourde", [
       ad("Application iOS native en Swift", "App iPhone de réservation"),
@@ -645,7 +646,7 @@ async function main() {
     check("ingestion lancement : verdict « alerte » avec un score de 3, pas « Ignorée », proposition 300 €", launch.verdict === "alerte" && launch.lane === "lancement" && launchStored.status !== "ignoree" && launchStored.suggested_amount_eur === 300 && /avis honnête/.test(String(launchStored.proposal)), JSON.stringify({ launch, status: launchStored.status }));
     const cmsIn = await ingestOpportunity(ldeps, (parseIngestBody({ ...base, external_id: "l-2", title: "Site vitrine WordPress", description: "Site de 5 pages sous WordPress.", budget_text: "Moins de 500 €" }) as { ok: true; value: IngestBody }).value);
     const cmsStored = ldb.rows("opportunities").find((row) => row.id === cmsIn.id) as Record<string, unknown>;
-    check("ingestion CMS imposé : « À voir », mention, jamais ignorée (score 3)", cmsIn.verdict === "a_voir" && cmsIn.lane === "cms_impose" && cmsIn.reasons[0] === CMS_NOTE && cmsStored.status !== "ignoree", JSON.stringify(cmsIn));
+    check("ingestion CMS : alerte « lancement » avec un score de 3, jamais ignorée (Cowork #27)", cmsIn.verdict === "alerte" && cmsIn.lane === "lancement" && cmsIn.reasons[0] !== CMS_NOTE && /^Mission de lancement/.test(cmsIn.reasons[0]) && cmsStored.status !== "ignoree", JSON.stringify(cmsIn));
     const ads = await ingestOpportunity(ldeps, (parseIngestBody({ ...base, external_id: "l-3", title: "Campagne Google Ads pour site WordPress", description: "Gérer nos campagnes Google Ads.", budget_text: "Moins de 500 €" }) as { ok: true; value: IngestBody }).value);
     check("ingestion « Campagne Google Ads pour site WordPress » : ignorée", ads.verdict === "ignore" && ads.filtered === true);
   }
