@@ -4,13 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Send, Sparkles } from "lucide-react";
 import { Button, Card, CardContent, Input, Label, Textarea, useToast } from "@/components/ui";
-import { createClient } from "@/lib/supabase/client";
 import { postJson } from "@/lib/enrichment/api-client";
 import { saveReply } from "@/lib/outbox/actions";
 import type { ReplyDraft } from "@/lib/outbox/reply-draft";
-import { MailActions } from "@/components/outbox/mail-actions";
 import { MailTrashButton } from "@/components/outbox/mail-trash-button";
 import { ScheduleDialog } from "@/components/outbox/schedule-dialog";
+import { FreeReplyComposer } from "./free-reply-composer";
+import { ScheduledReply } from "./scheduled-reply";
+import { useMarkHandled } from "./use-mark-handled";
 
 /**
  * Composeur de réponse — mode SEMI-AUTO : l'IA propose, l'utilisateur relit,
@@ -22,12 +23,15 @@ export function ReplyComposer({
   inboundId,
   prospectId,
   defaultTo,
+  subject: receivedSubject = null,
   draft,
 }: {
   inboundId: string;
   /** `null` quand l'expéditeur ne correspond à aucun prospect connu. */
   prospectId: string | null;
   defaultTo: string;
+  /** Objet du mail reçu : « Re: … » de la réponse sans fiche. */
+  subject?: string | null;
   /** Brouillon de réponse déjà enregistré (non envoyé), s'il y en a un. */
   draft: ReplyDraft | null;
 }) {
@@ -38,7 +42,7 @@ export function ReplyComposer({
   const [body, setBody] = useState(draft?.body ?? "");
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
-  const [marking, setMarking] = useState(false);
+  const { marking, markHandled } = useMarkHandled(inboundId);
   const scheduled = draft?.send_status === "scheduled" || draft?.send_status === "sending";
 
   async function propose() {
@@ -52,23 +56,6 @@ export function ReplyComposer({
     } finally {
       setDrafting(false);
     }
-  }
-
-  /** Clôt l'entrant sans répondre — utile pour un refus ou un message traité ailleurs. */
-  async function markHandled() {
-    setMarking(true);
-    // Traité à la main : c'est aussi lu (le badge « non lus » ne doit pas le garder).
-    const { error } = await createClient()
-      .from("inbound_messages")
-      .update({ handled: true, read_at: new Date().toISOString() })
-      .eq("id", inboundId);
-    if (error) {
-      toast.error(error.message);
-      return setMarking(false);
-    }
-    toast.success("Message classé comme traité.");
-    router.push("/cockpit");
-    router.refresh();
   }
 
   const save = () => saveReply(inboundId, subject, body);
@@ -90,46 +77,12 @@ export function ReplyComposer({
     }
   }
 
+  // Expéditeur sans fiche (Cowork #51) : réponse libre, dans le même fil.
   if (!prospectId) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-start gap-3 p-5">
-          <p className="text-[13px] leading-relaxed text-muted">
-            Cette adresse ne correspond à aucun prospect enregistré. La réponse assistée s&apos;appuie sur la fiche
-            entreprise et l&apos;historique : ajoutez d&apos;abord le contact depuis la Recherche, ou répondez
-            directement depuis votre messagerie.
-          </p>
-          <Button variant="secondary" loading={marking} onClick={markHandled}>
-            <Check className="h-4 w-4" aria-hidden />
-            Marquer comme traité
-          </Button>
-        </CardContent>
-      </Card>
-    );
+    return <FreeReplyComposer inboundId={inboundId} defaultTo={defaultTo} subject={receivedSubject} onHandled={markHandled} marking={marking} />;
   }
 
-  if (draft && scheduled) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col gap-3 p-5">
-          <h2 className="text-[15px] font-semibold tracking-tight text-text">Réponse programmée</h2>
-          {draft.subject && <p className="text-sm font-medium text-text">{draft.subject}</p>}
-          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted">{draft.body}</p>
-          <MailActions
-            state={{
-              messageId: draft.id,
-              sendStatus: draft.send_status,
-              scheduledAt: draft.scheduled_at,
-              scheduledTo: draft.scheduled_to,
-              sendError: draft.send_error,
-            }}
-            defaultTo={defaultTo}
-            label="la réponse"
-          />
-        </CardContent>
-      </Card>
-    );
-  }
+  if (draft && scheduled) return <ScheduledReply draft={draft} defaultTo={defaultTo} />;
 
   const ready = Boolean(body.trim() && to.trim());
   return (

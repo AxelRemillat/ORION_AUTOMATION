@@ -13,6 +13,8 @@ import { setInboundRead } from "@/lib/inbound/read-server";
 import { draftIfReady } from "@/lib/today/auto-draft";
 import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
+import { sendFreeReply } from "./free-reply";
+import { undoRefusal } from "@/lib/inbound/refusal-server";
 
 /**
  * Actions « mail » appelées depuis l'UI (fiche prospect, /prospection,
@@ -168,4 +170,21 @@ export async function markInboundRead(inboundId: string, read: boolean): Promise
   const id = await userId();
   if (!id) return SESSION_ERROR;
   return done(await setInboundRead(createClient(), { userId: id, inboundId, read }));
+}
+
+// --- Réponses sans fiche et refus (Cowork #51) -----------------------------
+
+/** Réponse à un mail reçu NON rattaché : part uniquement sur ce clic, garde « ne plus contacter » au départ. */
+export async function sendReplyWithoutProspect(inboundId: string, to: string, subject: string, body: string): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  const result = await sendFreeReply(createClient(), { userId: id, inboundId, to, subject, body });
+  return done(result.ok ? { ok: true } : { ok: false, error: result.error });
+}
+
+/** « Annuler (pas un refus) » : statut, catégorie du mail et « ne plus contacter » d'avant. */
+export async function undoProspectRefusal(prospectId: string): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  return done(await undoRefusal(createClient(), { userId: id, prospectId }));
 }
