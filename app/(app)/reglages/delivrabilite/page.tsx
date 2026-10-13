@@ -8,6 +8,9 @@ import { loadCapacity } from "@/lib/today/capacity";
 import { DncCard } from "./dnc-card";
 import { DnsCard } from "./dns-card";
 import { RampCard } from "./ramp-card";
+import { ReportCard } from "./report-card";
+import { loadDeliverabilityReport } from "@/lib/settings/deliverability-report-server";
+import { recommendation } from "@/lib/settings/deliverability-report";
 import { nextRampStep, type RampInbound } from "@/lib/settings/ramp";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +22,7 @@ const pct = (value: number | null) => (value === null ? "—" : `${(value * 100)
 export default async function DelivrabilitePage() {
   const user = await requireUser();
   const db = createClient();
-  const [checks, capacity, volumes, prospects, inbound] = await Promise.all([
+  const [checks, capacity, volumes, prospects, inbound, report] = await Promise.all([
     checkDomain(SENDING_DOMAIN).catch(() => []),
     loadCapacity(db, user.id),
     loadVolumes(db, user.id),
@@ -29,9 +32,11 @@ export default async function DelivrabilitePage() {
     readAll<RampInbound & { id: string }>(() =>
       db.from("inbound_messages").select("id, from_email, subject, body, category, received_at").is("deleted_at", null).order("id"),
     ).catch(() => []),
+    loadDeliverabilityReport(db, user.id).catch(() => null),
   ]);
   const ramp = nextRampStep({
     currentCap: capacity.dailyCap,
+    warmupDay: capacity.warmupDay,
     sentTotal: volumes.sent,
     inbound,
     dnsOk: { spf: checks.find((c) => c.name === "SPF")?.verdict === "ok", dkim: checks.find((c) => c.name === "DKIM")?.verdict === "ok" },
@@ -76,7 +81,8 @@ export default async function DelivrabilitePage() {
             </div>
           </CardContent>
         </Card>
-        <RampCard current={ramp.current} target={ramp.target} ready={ramp.ready} conditions={ramp.conditions} />
+        <RampCard step={ramp} />
+        {report && <ReportCard report={report} advice={recommendation(report, ramp.target ?? ramp.current)} />}
         <DncCard
           blocked={rows.filter((row) => row.dnc)}
           candidates={rows.filter((row) => !row.dnc)}

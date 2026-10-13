@@ -14,6 +14,8 @@ import { segmentOf } from "@/lib/segments";
 import { allowanceLabel, segmentAllowance } from "@/lib/segments/quota";
 import { sentTodayForSegment } from "@/lib/segments/sent-today";
 import { readAllResult } from "@/lib/supabase/read-all";
+import { checkRecipient, type RecipientDeps } from "./recipient-check";
+import { realRecipientDeps } from "./recipient-check-server";
 
 /**
  * LE chemin d'envoi d'un mail — manuel (/api/emails/send) comme programmé
@@ -103,7 +105,7 @@ export function sendTimeBlock(
 export const sendTimeRefusal = (reason: string) => `Envoi annulé au départ : ${reason}.`;
 
 /** Règles communes : `null` si l'envoi est permis, sinon le refus à afficher. */
-export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown, now: Date): Promise<SendResult | null> {
+export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown, now: Date, recipientDeps?: RecipientDeps): Promise<SendResult | null> {
   if (!isEmail(to)) return fail("invalid", "Destinataire invalide.", 400);
   // Boîte de rôle juridique (rgpd@, dpo@, no-reply@…) : jamais destinataire d'une prospection (Cowork #41).
   if (isRoleBox(to as string)) return fail("blocked", `Adresse ${String(to)} : ${ROLE_BOX_REASON}.`, 409);
@@ -199,6 +201,13 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
       commonRemaining: cap.remaining,
     });
     if (allowance.remaining <= 0) return fail("blocked", `${allowanceLabel(allowance)}.`, 429);
+  }
+
+  // VÉRIFICATION HUNTER (Cowork #26), EN DERNIER : un demi-crédit n'est dépensé que pour un mail qui partirait.
+  // Mémorisée 30 jours : la vérification de la programmation sert au départ. « invalid » bloque, le reste passe.
+  if (message.type !== "reponse") {
+    const recipient = await checkRecipient(String(to), recipientDeps ?? realRecipientDeps(db as never, now));
+    if (recipient.verdict === "bloquee") return fail("blocked", `${recipient.reason}.`, 422);
   }
   return null;
 }
