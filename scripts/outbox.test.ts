@@ -7,7 +7,7 @@
 import { FakeDb } from "./fake-supabase";
 import type { Db } from "../lib/trash/scope";
 import { loadPortfolio } from "../lib/trash/portfolio";
-import { sendNow, sendTimeBlock } from "../lib/outbox/send";
+import { gmailIds, sendNow, sendTimeBlock } from "../lib/outbox/send";
 import { cancelSchedule, runDueSends, scheduleMessage, STUCK_SENDING_MIN } from "../lib/outbox/scheduler";
 import {
   deleteMessageForever,
@@ -422,6 +422,23 @@ async function main() {
     const web = n8n();
     await runDueSends(db, { ...web.deps, now: at(11) });
     check("témoin : relance vers une fiche saine envoyée", web.calls.length === 1 && msg(fake, "o-r1").status === "sent", msg(fake, "o-r1"));
+  }
+
+  // -------------------------------------------------------------------------
+  console.log("\nFil Gmail renvoyé par n8n (Cowork #53)");
+  {
+    const n8nReply = { ok: true, gmail_message_id: "19a1b2c3d4e5f6a7", gmail_thread_id: "1a1117fff825694d" };
+    check("réponse n8n réelle { ok, gmail_message_id, gmail_thread_id } : fil et message lus", JSON.stringify(gmailIds(n8nReply)) === JSON.stringify({ threadId: "1a1117fff825694d", gmailId: "19a1b2c3d4e5f6a7" }), gmailIds(n8nReply));
+    check("réponse en tableau (sortie brute de nœud) : premier élément", gmailIds([n8nReply]).threadId === "1a1117fff825694d");
+    check("compatibilité : thread_id / threadId toujours acceptés", gmailIds({ thread_id: "t1", id: "g1" }).threadId === "t1" && gmailIds({ threadId: "t2" }).threadId === "t2");
+    check("aucune clé de fil : null", gmailIds({ ok: true }).threadId === null);
+
+    const { fake, db } = seed();
+    const reply = (async () => new Response(JSON.stringify(n8nReply), { status: 200 })) as unknown as typeof fetch;
+    await scheduleMessage(db, { userId: "u1", messageId: "m1", to: "a@acme.fr", at: at(10) }, at(0));
+    await runDueSends(db, { fetch: reply, webhookUrl: "https://n8n.test/send", now: at(11) });
+    const sent = msg(fake, "m1");
+    check("tick : le fil Gmail est enregistré dans messages.thread_id", sent.status === "sent" && sent.thread_id === "1a1117fff825694d" && sent.gmail_message_id === "19a1b2c3d4e5f6a7", sent);
   }
 
   console.log(failures === 0 ? "\nTous les tests passent.\n" : `\n${failures} test(s) en échec.\n`);
