@@ -13,6 +13,7 @@
  * retouché à la main (le job ne les réécrit pas). Aucun envoi.
  */
 import { db, ownerId } from "./quality-live";
+import { scriptJobSource } from "@/lib/jobs/regen-cap";
 import { createJob } from "@/lib/jobs/store";
 import { loadToday } from "@/lib/today/load";
 import { flatten } from "@/lib/today/group";
@@ -47,7 +48,7 @@ async function main() {
       {
         type: "email_generate",
         target: { prospectId: item.prospectId!, label: `Mail ${item.companyName}` },
-        params: { prospectId: item.prospectId!, mode: "full", saveDraft: true, storedContact: true, auto: true },
+        params: { prospectId: item.prospectId!, mode: "full", saveDraft: true, storedContact: true, auto: true, ...scriptJobSource() },
       },
       userId,
     );

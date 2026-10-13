@@ -60,6 +60,12 @@ async function main() {
   const ready = ((intros ?? []) as { quality_score: number | null; quality_reason: string | null }[]).filter((m) => (m.quality_score ?? 0) >= 9 && !m.quality_reason).length;
   const chain = MAIL_CHAIN.reduce((sum, stage) => sum + (by[stage]?.cost ?? 0), 0);
   console.log(`Chaîne mail : ${chain.toFixed(2)} € · intros prêtes ≥ 9 : ${ready} → ${(chain / Math.max(1, ready)).toFixed(3)} € par mail prêt (régénérations comprises)`);
+  // Cowork #56 : PROD SEULE (les mesures d'agents, source agent*, sont exclues), appels et € par mail prêt.
+  const prodChain = rows.filter((row) => row.source === "prod" && MAIL_CHAIN.includes(stageOf(String(row.operation))));
+  const prodCost = prodChain.reduce((sum, row) => sum + (Number(row.cost) || 0), 0);
+  const per = (stage: string) => prodChain.filter((row) => stageOf(String(row.operation)) === stage).length;
+  const r = Math.max(1, ready);
+  console.log(`PROD, chaîne mail : ${prodChain.length} appels, ${prodCost.toFixed(2)} € → ${(prodChain.length / r).toFixed(1)} appels et ${(prodCost / r).toFixed(3)} € par mail prêt (stratège ${(per("stratège") / r).toFixed(1)}, rédaction ${(per("rédaction") / r).toFixed(1)}, réécritures ${(per("réécritures") / r).toFixed(1)} par mail prêt)`);
 }
 
 if (require.main === module) {

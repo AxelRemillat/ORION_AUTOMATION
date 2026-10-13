@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { costLabel, FIRST_DRAFT_COST_EUR } from "@/lib/usage/draft-estimate";
 import { Loader2, PenLine } from "lucide-react";
 import { Button, useToast } from "@/components/ui";
 import { startJob, watchJob } from "@/lib/jobs/client";
@@ -56,7 +57,7 @@ export function MissingDraft({ item, onDone }: { item: TodayItem; onDone: () => 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line-soft bg-surface-2/60 p-3">
       <p className="text-[13px] text-muted">Aucun brouillon pour l&apos;instant.</p>
-      <Button size="sm" variant="secondary" loading={busy} onClick={generate} disabled={item.kind !== "reponse" && !item.contact.email}>
+      <Button size="sm" variant="secondary" loading={busy} onClick={generate} disabled={item.kind !== "reponse" && !item.contact.email} title={`Coût OpenAI estimé : ${costLabel(FIRST_DRAFT_COST_EUR)}`}>
         <PenLine className="h-3.5 w-3.5" aria-hidden /> Rédiger le brouillon
       </Button>
     </div>

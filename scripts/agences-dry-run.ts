@@ -26,6 +26,7 @@
  * Rapport : evals/agences/report-AAAA-MM-JJ.md
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { scriptJobSource } from "@/lib/jobs/regen-cap";
 import { createClient } from "@supabase/supabase-js";
 import { AGENCES_EFFECTIF_CODES, AGENCES_NAF, classifyAgence } from "@/lib/segments/agences";
 import { segmentMarks } from "@/lib/segments";
@@ -370,7 +371,7 @@ async function runJob(
       // `segment` active la part réservée de LINKUP_RESERVE (agent1, #105) pour
       // les handlers qui la lisent ; le contexte posé plus bas la garantit de
       // toute façon pour les appels de CE processus.
-      params: { prospectId, segment: "agences", ...params },
+      params: { prospectId, segment: "agences", ...params, ...scriptJobSource() },
       status: "queued",
       progress: EMPTY_PROGRESS,
     } as never)

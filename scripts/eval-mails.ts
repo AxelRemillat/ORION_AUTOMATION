@@ -16,6 +16,7 @@
  * Cas : evals/mails/cases.json. Rapport : evals/mails/report-AAAA-MM-JJ.md.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { scriptJobSource } from "@/lib/jobs/regen-cap";
 import { createClient } from "@supabase/supabase-js";
 import type { Prospect } from "@/types";
 import {
@@ -102,7 +103,7 @@ async function generate(prospect: Prospect): Promise<MailText | { error: string 
       target: { prospectId: prospect.id, label: `Éval · ${prospect.company_name}`.slice(0, 160) },
       // origin « eval » : brouillon marqué, jamais dans « Aujourd'hui », jamais
       // écrit par-dessus le brouillon de l'application.
-      params: { prospectId: prospect.id, tone: "direct", mode: "full", force: true, saveDraft: true, origin: "eval" },
+      params: { prospectId: prospect.id, tone: "direct", mode: "full", force: true, saveDraft: true, origin: "eval", ...scriptJobSource() },
       status: "queued",
       progress: EMPTY_PROGRESS,
     })

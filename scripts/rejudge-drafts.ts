@@ -10,6 +10,7 @@
  * qui échoue encore passe en « À revoir » (le job pose la raison). Aucun envoi.
  */
 import { db, liveAsk, ownerId, spentSince } from "./quality-live";
+import { scriptJobSource } from "@/lib/jobs/regen-cap";
 import { createJob } from "@/lib/jobs/store";
 import { emailBlocker } from "@/lib/jobs/handlers/email";
 import { loadToday } from "@/lib/today/load";
@@ -77,7 +78,7 @@ async function main() {
     }
     const created = await createJob(
       db as never,
-      { type: "email_generate", target: { prospectId: prospect.id, label: `Mail ${item.companyName}` }, params: { prospectId: prospect.id, mode: "full", saveDraft: true, storedContact: true, auto: true } },
+      { type: "email_generate", target: { prospectId: prospect.id, label: `Mail ${item.companyName}` }, params: { prospectId: prospect.id, mode: "full", saveDraft: true, storedContact: true, auto: true, ...scriptJobSource() } },
       userId,
     );
     tally.regenerated += 1;

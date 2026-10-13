@@ -18,6 +18,7 @@
  * part), aucun crédit Hunter, aucun envoi.
  */
 import { createClient } from "@supabase/supabase-js";
+import { scriptJobSource } from "@/lib/jobs/regen-cap";
 import { judgeChecklist } from "@/lib/emails/quality/checklist";
 import { countedText } from "@/lib/mail-preflight/words";
 import { checkF5 } from "@/lib/segments/mail-f5";
@@ -266,7 +267,7 @@ async function main(): Promise<void> {
         status: "queued",
         progress: EMPTY_PROGRESS,
         target: { prospectId: row.id, label: `Agences fait · ${row.company_name}`.slice(0, 160) },
-        params: { prospectId: row.id, segment: "agences", origin: "eval", force: true },
+        params: { prospectId: row.id, segment: "agences", origin: "eval", force: true, ...scriptJobSource() },
       } as never)
       .select("id")
       .single();
