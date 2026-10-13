@@ -5,6 +5,7 @@
 import { AUTO_REFRESH_MS, freshnessLabel, isTyping, shouldRefresh } from "../lib/auto-refresh";
 import { optimisticPatch } from "../lib/opportunities/optimistic";
 import { loadVariantStats } from "../lib/variants/load";
+import { lastPrepareHealth } from "../lib/today/auto-run";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -61,6 +62,37 @@ async function main() {
   const result = await loadVariantStats(db);
   check("variantes et réponses lues en même temps (plus l'une après l'autre)", peak >= 2 && started.includes("message_variants") && started.includes("inbound_messages"), `pic ${peak}`);
   check("famille de chaque message rendue (le pipeline n'a plus à la relire)", result.families.get("m1") === "F3" && result.sends === 1);
+
+  console.log("\n4. Aujourd'hui (Cowork #25) : santé de la préparation en une seule vague de lectures");
+  {
+    let active = 0;
+    let most = 0;
+    const job = { status: "done", error: null, created_at: "2026-10-12T05:00:00Z", finished_at: "2026-10-12T05:10:00Z", progress: null };
+    const drafts = [
+      { error: "quota", created_at: "2026-10-12T05:05:00Z" },
+      { error: "ancien", created_at: "2026-10-10T05:05:00Z" },
+    ];
+    const healthDb = {
+      from: () => {
+        let single = false;
+        const builder: Record<string, unknown> = {};
+        for (const name of ["select", "eq", "order", "limit", "gte"]) builder[name] = () => builder;
+        builder.maybeSingle = () => ((single = true), builder);
+        builder.then = (resolve: (value: unknown) => unknown) => {
+          active += 1;
+          most = Math.max(most, active);
+          return new Promise((done) => setTimeout(done, 15)).then(() => {
+            active -= 1;
+            return resolve({ data: single ? job : drafts, error: null });
+          });
+        };
+        return builder;
+      },
+    };
+    const health = await lastPrepareHealth(healthDb, "u1", new Date("2026-10-12T09:00:00Z"));
+    check("dernière préparation et brouillons ratés lus EN MÊME TEMPS", most >= 2, `pic ${most}`);
+    check("seuls les brouillons ratés depuis la dernière préparation comptent", health?.failedDrafts === 1 && health.firstDraftError === "quota", JSON.stringify(health));
+  }
 
   console.log(failures === 0 ? "\nTous les tests fluidité passent.\n" : `\n${failures} test(s) en echec.\n`);
   process.exit(failures === 0 ? 0 : 1);
