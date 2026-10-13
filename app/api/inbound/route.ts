@@ -9,6 +9,7 @@ import { absenceReturnDate, autoReplyKind } from "@/lib/inbound/auto-reply";
 import { findAntispamProspect, shiftFollowUpsAfterReturn } from "@/lib/inbound/auto-reply-server";
 import type { Db } from "@/lib/trash/scope";
 import { notifyInbound } from "@/lib/notify/events";
+import { pushInboundReply } from "@/lib/push/events";
 import { findProspectForInbound, withSecondaryContact, type AttachVia } from "@/lib/inbound/attach";
 import { applyRefusal, classifyInbound } from "@/lib/inbound/refusal-server";
 import { refusalJudge } from "@/lib/inbound/refusal-judge";
@@ -240,13 +241,16 @@ export async function POST(request: Request) {
 
   // Notification téléphone (ntfy) : vraie réponse ou anti-spam. Jamais bloquante,
   // une seule par mail reçu.
-  const notified = await notifyInbound(supabase as unknown as Db, {
+  const notifyInput = {
     userId: ownerId,
     inboundId: inserted.id,
     prospectId: prospect && !prospect.deleted_at ? prospect.id : null,
     companyName: prospect?.company_name ?? null,
     message: { from_email: fromEmail, subject: asText(payload?.subject, 500), body, auto_submitted: autoSubmitted },
-  }).catch(() => null);
+  };
+  const notified = await notifyInbound(supabase as unknown as Db, notifyInput).catch(() => null);
+  // Notification PC (Web Push, Cowork #28) : vraie réponse seulement, une par mail reçu.
+  await pushInboundReply(supabase as unknown as Db, notifyInput).catch(() => null);
 
   return NextResponse.json({
     ok: true,

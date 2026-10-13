@@ -5,6 +5,8 @@ import { DEFAULT_DAILY_LLM_CAP, ingestOpportunity, parseIngestBody } from "@/lib
 import { opportunityAsk } from "@/lib/opportunities/run";
 import { pushNtfy } from "@/lib/notify/ntfy";
 import { runAlertCatchUp } from "@/lib/opportunities/rattrapage-alertes";
+import { pushOpportunityAlert } from "@/lib/push/events";
+import type { Db } from "@/lib/trash/scope";
 import { ingestAuthorized, opportunitiesOwner, publicAppUrl } from "@/lib/opportunities/ingest-auth";
 
 export const runtime = "nodejs";
@@ -40,6 +42,8 @@ export async function POST(request: Request) {
     llmCap: Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_DAILY_LLM_CAP,
     background: waitUntil,
     notify: (notification: Parameters<typeof pushNtfy>[0]) => pushNtfy(notification),
+    // Notification PC (Web Push) quand une offre passe en Alerte (Cowork #28).
+    onAlert: (id: string) => pushOpportunityAlert(db as unknown as Db, userId, id),
   };
   try {
     const result = await ingestOpportunity(deps, parsed.value);

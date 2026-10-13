@@ -1,5 +1,6 @@
 import type { InboundMessage, Prospect } from "@/types";
 import { autoReplyKind } from "./auto-reply";
+import { isBounce } from "./bounce";
 
 /**
  * « Lu / non lu » des mails reçus — règles PURES, partagées par la boîte mail,
@@ -44,10 +45,13 @@ export function validatedAntispamIds(prospects: Pick<Prospect, "id" | "key_figur
 
 /**
  * `true` si ce mail doit peser dans le badge « boîte mail » : vivant, non lu,
- * et porteur d'une action — ni absence, ni anti-spam déjà validé.
+ * et porteur d'une action — ni absence, ni anti-spam déjà validé, ni rebond
+ * (Cowork #28 : le compteur de l'onglet ne compte que les vraies réponses ; un
+ * refus en est une, il compte tant qu'il n'est pas lu).
  */
 export function countsAsUnread(message: ReadableMessage, validatedIds: ReadonlySet<string> = new Set()): boolean {
   if (message.deleted_at || !isUnread(message)) return false;
+  if (isBounce({ from_email: message.from_email, subject: message.subject })) return false;
   const kind = autoReplyKind({ from_email: message.from_email, subject: message.subject, body: message.body });
   if (kind === "absence") return false;
   if (kind === "antispam" && validatedIds.has(message.id)) return false;

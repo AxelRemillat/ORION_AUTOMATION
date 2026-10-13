@@ -62,7 +62,7 @@ export class FakeDb {
 }
 
 /** Ce que rend une requête : `error` est renseignée pour une table inconnue (mode strict). */
-type FakeResult = { data: unknown; error: { message: string } | null; count: number | null };
+type FakeResult = { data: unknown; error: { message: string; code?: string } | null; count: number | null };
 
 class FakeQuery implements PromiseLike<FakeResult> {
   private op: "select" | "update" | "delete" | "insert" | "upsert" = "select";
@@ -202,7 +202,7 @@ class FakeQuery implements PromiseLike<FakeResult> {
       }));
       const keys = this.db.options.unique?.[this.table];
       if (keys && result.some((row) => all.some((item) => keys.every((key) => item[key] === row[key])))) {
-        return { data: null, error: { message: `duplicate key value violates unique constraint on ${this.table}` }, count: null };
+        return { data: null, error: { message: `duplicate key value violates unique constraint on ${this.table}`, code: "23505" }, count: null };
       }
       all.push(...result);
     } else if (this.op === "upsert") {

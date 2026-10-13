@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { Logo, ThemeToggle } from "@/components/ui";
 import type { BadgeCounts } from "@/lib/badges/counts";
 import { useBadges } from "./use-badges";
+import { TabBadge } from "./tab-badge";
+import { tabCount } from "@/lib/badges/tab";
 import { JobsIndicator } from "./jobs-indicator";
 import { OutboxIndicator } from "./outbox-indicator";
 import { HOME_ITEM, NAV_ITEMS } from "./nav-items";
@@ -26,6 +28,8 @@ export function TopNav({ email, badges }: { email: string; badges: BadgeCounts }
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur-md">
+      {/* Compteur de l'onglet (titre + favicon) : même source que les badges ci-dessous. */}
+      <TabBadge count={tabCount({ alerts, unread })} />
       <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-3 px-4 md:px-6">
         {/* Marque */}
         <Link

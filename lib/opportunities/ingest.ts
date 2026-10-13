@@ -171,6 +171,8 @@ export interface IngestDeps {
   background?: (work: Promise<unknown>) => void;
   /** Notification téléphone (ntfy) — « analyse indisponible » sur signal fort. */
   notify?: (notification: Notification) => Promise<unknown>;
+  /** Offre passée en Alerte, une seule fois (notification PC, Cowork #28). Ne doit pas lever. */
+  onAlert?: (id: string) => Promise<unknown>;
 }
 
 /** Statut d'analyse d'une offre que le crédit OpenAI épuisé n'a pas permis d'analyser. */
@@ -232,9 +234,16 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody, lane: 
  * C'est un FAIT enregistré : rejouer les règles d'aujourd'hui sur une vieille fiche dirait
  * à tort qu'elle avait alerté.
  */
-export async function markAlerted(deps: Pick<IngestDeps, "db" | "userId">, id: string): Promise<boolean> {
+export async function markAlerted(deps: Pick<IngestDeps, "db" | "userId" | "onAlert" | "background">, id: string): Promise<boolean> {
   const { error } = await deps.db.from("notification_log").insert({ key: `opportunite:${id}`, user_id: deps.userId, kind: "opportunite" });
-  return !error;
+  if (error) return false;
+  // Première trace = l'offre vient de passer en Alerte : notification PC (Cowork #28), sans retarder la réponse.
+  if (deps.onAlert) {
+    const work = deps.onAlert(id).catch(() => undefined);
+    if (deps.background) deps.background(work);
+    else await work;
+  }
+  return true;
 }
 
 export async function notifyLateAlert(deps: IngestDeps, id: string, body: IngestBody, analysis: Analysis | null, lane: Lane | null): Promise<boolean> {

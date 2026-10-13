@@ -65,9 +65,9 @@ export const config = {
   matcher: [
     /*
      * Toutes les routes sauf : fichiers statiques Next, images optimisées,
-     * favicon et assets à extension. La session est ainsi rafraîchie sur
-     * chaque navigation applicative.
+     * favicon, service worker des notifications PC (Cowork #28) et assets à
+     * extension. La session est ainsi rafraîchie sur chaque navigation applicative.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|orion-sw.js|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
