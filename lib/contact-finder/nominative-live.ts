@@ -1,3 +1,4 @@
+import { proposeRelance2Contact, type SentRow } from "./relance2";
 import { findEmailByName } from "@/lib/enrichment/hunter";
 import { recordUnitUsage } from "@/lib/usage/record";
 import { hunterStatus } from "@/lib/hunter/gate";
@@ -77,6 +78,17 @@ export async function upgradeProspectLive(
   const { data } = await db.from("prospects").select("*").eq("id", prospectId).maybeSingle();
   if (!data) return { status: "skipped", reason: "fiche introuvable", contact: null, targets: [], calls: { domainSearch: 0, finder: 0, verifier: 0 }, flagged: 0 };
   return upgradeToNominative(db, data as unknown as UpgradeProspect, liveNominativeDeps(prospectId), options);
+}
+
+/** Proposition de contact pour la relance 2 (Cowork #52), sous le garde-fou Hunter du jour. */
+export async function proposeRelance2Live(db: Db, prospectId: string, options: { dryRun?: boolean; now?: Date } = {}) {
+  const none = { domainSearch: 0, finder: 0, verifier: 0 };
+  const status = await hunterStatus(supabaseHunterStore(), options.now);
+  if (status.blocked) return { status: "skipped" as const, reason: status.blocked, contact: null, calls: none };
+  const { data } = await db.from("prospects").select("*").eq("id", prospectId).maybeSingle();
+  if (!data) return { status: "skipped" as const, reason: "fiche introuvable", contact: null, calls: none };
+  const { data: sent } = await db.from("messages").select("type, status, sent_to, deleted_at").eq("prospect_id", prospectId);
+  return proposeRelance2Contact(db, data as unknown as UpgradeProspect, (sent ?? []) as SentRow[], liveNominativeDeps(prospectId), options);
 }
 
 /**
