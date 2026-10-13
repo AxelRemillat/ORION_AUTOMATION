@@ -13,6 +13,13 @@ export interface ModalProps {
   /** Zone d'actions en pied de modale (boutons). */
   footer?: ReactNode;
   size?: "sm" | "md" | "lg";
+  /**
+   * La fenêtre tient dans l'écran (90 % de la hauteur visible) : titre et pied
+   * restent visibles, le corps devient une colonne dont l'enfant défilant
+   * (`min-h-0 flex-1 overflow-y-auto`) absorbe le surplus. Désactivé par
+   * défaut : les autres modales ne changent pas (Cowork #50).
+   */
+  fitScreen?: boolean;
 }
 
 const SIZES = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl" } as const;
@@ -29,6 +36,7 @@ export function Modal({
   children,
   footer,
   size = "md",
+  fitScreen = false,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -80,11 +88,12 @@ export function Modal({
         className={cn(
           "relative w-full overflow-hidden rounded-2xl border border-line bg-elev shadow-overlay outline-none animate-slide-up",
           SIZES[size],
+          fitScreen && "flex max-h-[90vh] flex-col supports-[height:100dvh]:max-h-[90dvh]",
         )}
       >
         <span className="absolute inset-x-0 top-0 h-px bg-brand-grad" aria-hidden />
         {(title || description) && (
-          <div className="border-b border-line-soft px-5 py-4 pr-12">
+          <div className={cn("border-b border-line-soft px-5 py-4 pr-12", fitScreen && "shrink-0")}>
             {title && (
               <h2 className="font-display text-[16px] font-semibold text-text">{title}</h2>
             )}
@@ -99,9 +108,9 @@ export function Modal({
         >
           <X className="h-4 w-4" />
         </button>
-        {children && <div className="px-5 py-4">{children}</div>}
+        {children && <div className={cn("px-5 py-4", fitScreen && "flex min-h-0 flex-1 flex-col overflow-y-auto")}>{children}</div>}
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-line-soft bg-surface-2/40 px-5 py-3">
+          <div className={cn("flex items-center justify-end gap-2 border-t border-line-soft bg-surface-2/40 px-5 py-3", fitScreen && "shrink-0")}>
             {footer}
           </div>
         )}

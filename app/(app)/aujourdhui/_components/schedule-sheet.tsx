@@ -7,6 +7,7 @@ import type { Capacity } from "@/lib/today/capacity";
 import type { TodayItem } from "@/lib/today/types";
 import { utcToParis } from "@/lib/outbox/paris-time";
 import { scheduleToday } from "../actions";
+import { ScheduleList } from "./schedule-list";
 
 /**
  * Feuille « Programmer les envois » : le plan AVANT confirmation — chaque mail
@@ -70,6 +71,7 @@ export function ScheduleSheet({
       title="Programmer les envois"
       description="Réparti sur les jours ouvrés, entre 9 h et 17 h, 2 à 7 min d'écart, sans dépasser le plafond de chaque jour."
       size="md"
+      fitScreen
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -81,7 +83,7 @@ export function ScheduleSheet({
         </>
       }
     >
-      <div role="radiogroup" aria-label="Horizon" className="mb-3 flex flex-wrap gap-1.5">
+      <div role="radiogroup" aria-label="Horizon" className="mb-3 flex shrink-0 flex-wrap gap-1.5">
         {HORIZONS.map((option) => (
           <Button key={option.days} size="sm" variant={horizon === option.days ? "secondary" : "ghost"} role="radio" aria-checked={horizon === option.days} onClick={() => setHorizon(option.days)}>
             {option.label}
@@ -89,7 +91,7 @@ export function ScheduleSheet({
         ))}
       </div>
       {plan && (
-        <p className="mb-3 font-data text-[12px] leading-5 text-muted">
+        <p className="mb-3 shrink-0 font-data text-[12px] leading-5 text-muted">
           {plan.days.map((room) => (
             <span key={room.day} className="mr-2 inline-block whitespace-nowrap" title={`Plafond ${room.cap}, déjà engagés ${room.used}`}>
               {dayLabel(room.day, today)} : <span className="text-text">{room.planned}</span>
@@ -97,25 +99,22 @@ export function ScheduleSheet({
           ))}
         </p>
       )}
-      <table className="w-full text-[13px]">
-        <tbody>
-          {plan?.planned.map((entry) => (
-            <tr key={entry.key} className="border-b border-line-soft">
-              <td className="py-1.5 text-text">{byKey.get(entry.key)?.companyName}</td>
-              <td className="py-1.5 text-muted">{TYPE[byKey.get(entry.key)?.messageType ?? "intro"]}</td>
-              <td className="whitespace-nowrap py-1.5 text-right font-data text-text">
-                {dayLabel(entry.day, today)} {time(entry.at)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* key : changer d'horizon replie la liste sur ses 5 premières lignes. */}
+      <ScheduleList
+        key={horizon}
+        rows={(plan?.planned ?? []).map((entry) => ({
+          key: entry.key,
+          company: byKey.get(entry.key)?.companyName ?? "",
+          type: TYPE[byKey.get(entry.key)?.messageType ?? "intro"],
+          when: `${dayLabel(entry.day, today)} ${time(entry.at)}`,
+        }))}
+      />
       {plan && plan.postponed.length > 0 && (
-        <p className="mt-3 text-[12px] text-warn-ink">
+        <p className="mt-3 shrink-0 text-[12px] text-warn-ink">
           {plan.postponed.length} mail(s) au-delà des plafonds de l&apos;horizon choisi : ils restent validés et reviennent en tête de file.
         </p>
       )}
-      <p className="mt-2 text-[12px] text-muted">Les relances J+4 et J+7 seront préparées automatiquement. Retirer la validation d&apos;un mail programmé libère sa place.</p>
+      <p className="mt-2 shrink-0 text-[12px] text-muted">Les relances J+4 et J+7 seront préparées automatiquement. Retirer la validation d&apos;un mail programmé libère sa place.</p>
     </Modal>
   );
 }

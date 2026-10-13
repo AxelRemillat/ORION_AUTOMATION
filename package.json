@@ -110,7 +110,7 @@
     "test:contact-report": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-report.test.js",
     "test:completion": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/completion-auto.test.js",
     "test:mails-qualite": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/mails-qualite.test.js",
-    "test:aujourdhui": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui.test.js && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui-flux.test.js",
+    "test:aujourdhui": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui.test.js && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui-flux.test.js && node -r ./scripts/alias.cjs .test-build/scripts/schedule-list.test.js",
     "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js",
     "check:site-offers": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/check-site-offers.js",
     "rome:explore": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rome-explore.js"
