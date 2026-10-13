@@ -8,6 +8,8 @@ import { FunnelSettings } from "../../recherche/funnel/funnel-settings";
 import { SendingCard } from "./sending-card";
 import { NotificationsCard } from "./notifications-card";
 import { notifyConfigured, readNotifyPrefs } from "@/lib/notify/ntfy";
+import { vapidPublicKey } from "@/lib/push/config";
+import { PushCard } from "./push-card";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Paramètres · Réglages · ORION" };
@@ -38,6 +40,7 @@ export default async function ParametresPage() {
         </Card>
         <SendingCard capacity={capacity} signature={signatureFor(loaded.offer)} entryUrl={loaded.offer.entry_url ?? null} />
         <NotificationsCard prefs={notifyPrefs} configured={notifyConfigured()} />
+        <PushCard publicKey={vapidPublicKey()} />
       </div>
     </>
   );

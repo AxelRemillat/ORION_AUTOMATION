@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { BadgeCounts } from "@/lib/badges/counts";
+import { AUTO_REFRESH_MS } from "@/lib/auto-refresh";
 
 /**
  * Badges de la barre, JAMAIS figés.
@@ -12,6 +13,9 @@ import type { BadgeCounts } from "@/lib/badges/counts";
  * chargement — Axel voyait « Opportunités 2 » longtemps après avoir tout
  * traité. On repart de la valeur rendue par le serveur (pas de clignotement),
  * puis on la recalcule à chaque changement de page et au retour sur l'onglet.
+ *
+ * Et toutes les 60 s, MÊME onglet caché (Cowork #28) : le compteur « (N) » du
+ * titre et du favicon sert justement à voir les nouveautés sans ouvrir ORION.
  */
 export function useBadges(initial: BadgeCounts): BadgeCounts {
   const pathname = usePathname();
@@ -20,7 +24,6 @@ export function useBadges(initial: BadgeCounts): BadgeCounts {
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      if (document.hidden) return;
       try {
         const response = await fetch("/api/badges", { cache: "no-store" });
         if (!response.ok) return;
@@ -32,11 +35,13 @@ export function useBadges(initial: BadgeCounts): BadgeCounts {
     };
 
     void load();
+    const timer = window.setInterval(() => void load(), AUTO_REFRESH_MS);
     const onVisible = () => void load();
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return () => {
       alive = false;
+      window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };

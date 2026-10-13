@@ -7,6 +7,8 @@ import { parseInboundEmail } from "@/lib/opportunities/email/parse";
 import { ingestAuthorized, opportunitiesOwner, publicAppUrl } from "@/lib/opportunities/ingest-auth";
 import { opportunityAsk } from "@/lib/opportunities/run";
 import { pushNtfy } from "@/lib/notify/ntfy";
+import { pushOpportunityAlert } from "@/lib/push/events";
+import type { Db } from "@/lib/trash/scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +58,8 @@ export async function POST(request: Request) {
         llmCap: Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_DAILY_LLM_CAP,
         background: waitUntil,
         notify: (notification) => pushNtfy(notification),
+        // Notification PC (Web Push) quand une offre passe en Alerte (Cowork #28).
+        onAlert: (id) => pushOpportunityAlert(db as unknown as Db, userId, id),
       },
       parsed.value,
     );
