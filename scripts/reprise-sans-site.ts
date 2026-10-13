@@ -6,7 +6,7 @@
  * l'enrichissement l'ayant consommé. On la remet « retenu », site « à chercher » : la
  * prochaine préparation la recherche de nouveau (Linkup désormais prioritaire pour les
  * sites), puis la creuse si un site est trouvé. Seuls `statut`, `motif_rejet` et
- * `contact.site_free` changent ; rien n'est supprimé, aucune règle de cible n'est assouplie
+ * `contact` (site_free retiré, trace `reprise`) changent ; rien n'est supprimé, aucune règle de cible n'est assouplie
  * (opposés et hors cible ne sont jamais repris).
  *
  *   … reprise-sans-site.js --dry            (combien, lesquelles)
@@ -19,7 +19,11 @@ const dry = process.argv.includes("--dry");
 const limitArg = process.argv.indexOf("--limit");
 const LIMIT = limitArg >= 0 ? Math.max(1, Number(process.argv[limitArg + 1]) || 40) : 40;
 const DAYS = 14;
-export const REPRISE_MOTIF = "repris : site à rechercher de nouveau (Cowork #27)";
+/**
+ * Trace de la reprise, dans `contact.reprise` : le motif reste VIDE, car les étapes « sites »
+ * et « creusage » ne reprennent un retenu d'un ancien run que sans motif (lib/funnel/store.ts).
+ */
+export const REPRISE_TRACE = "site à rechercher de nouveau (Cowork #27)";
 
 type Row = { id: string; company_name: string | null; score: number | null; contact: Record<string, unknown> | null; prospect_id: string | null; created_at: string };
 
@@ -39,7 +43,8 @@ async function main() {
   for (const row of chosen) {
     const contact = { ...(row.contact ?? {}) };
     delete contact.site_free;
-    const { error } = await table.from("signal_candidates").update({ statut: "retenu", motif_rejet: REPRISE_MOTIF, contact }).eq("id", row.id).eq("statut", "rejeté");
+    contact.reprise = REPRISE_TRACE;
+    const { error } = await table.from("signal_candidates").update({ statut: "retenu", motif_rejet: null, contact }).eq("id", row.id).eq("statut", "rejeté");
     if (!error) done += 1;
   }
   console.log(`${done} fiche(s) remise(s) en file pour la prochaine préparation.`);
