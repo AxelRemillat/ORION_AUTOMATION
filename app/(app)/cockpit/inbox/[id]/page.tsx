@@ -10,9 +10,11 @@ import { currentReplyDraft } from "@/lib/outbox/reply-draft";
 import { MailTrashButton } from "@/components/outbox/mail-trash-button";
 import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
 import { ReplyComposer } from "./reply-composer";
-import { ThreadView, type ThreadEntry } from "./thread-view";
+import { ThreadView, threadEntries } from "./thread-view";
 import { AntispamControls } from "@/components/outbox/antispam-controls";
 import { AUTO_REPLY_LABEL, antispamLink, autoReplyKind } from "@/lib/inbound/auto-reply";
+import { refusalOf } from "@/lib/inbound/refusal";
+import { RefusalControls } from "@/components/outbox/refusal-controls";
 
 export const metadata = { title: "Réponse reçue — ORION" };
 
@@ -71,26 +73,9 @@ export default async function InboxThreadPage({ params }: { params: { id: string
   // Réponse automatique (anti-spam, absence) : pas de « Répondre » IA.
   const auto = autoReplyKind(inbound);
   const figures = (prospect?.key_figures ?? {}) as Record<string, unknown>;
+  const refusal = refusalOf(prospect?.key_figures);
 
-  const entries: ThreadEntry[] = [
-    ...messages
-      .filter((message) => message.status === "sent")
-      .map((message) => ({
-        id: message.id,
-        who: "moi" as const,
-        subject: message.subject,
-        body: message.body,
-        at: message.sent_at ?? message.created_at,
-      })),
-    ...inbounds.map((item) => ({
-      id: item.id,
-      who: "lui" as const,
-      subject: item.subject,
-      body: item.body,
-      at: item.received_at,
-      answering: item.id === inbound.id,
-    })),
-  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const entries = threadEntries(messages, inbounds, inbound.id);
 
   return (
     <>
@@ -111,6 +96,7 @@ export default async function InboxThreadPage({ params }: { params: { id: string
         }
         actions={
           <>
+            {prospect && refusal && <RefusalControls prospectId={prospect.id} kind={refusal.kind} />}
             {prospect && (
               <DoNotContactButton
                 prospectId={prospect.id}
@@ -145,6 +131,7 @@ export default async function InboxThreadPage({ params }: { params: { id: string
             inboundId={inbound.id}
             prospectId={inbound.prospect_id}
             defaultTo={inbound.from_email}
+            subject={inbound.subject}
             draft={replyDraft}
           />
         )}

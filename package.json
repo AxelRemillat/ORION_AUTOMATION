@@ -113,7 +113,9 @@
     "test:aujourdhui": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui.test.js && node -r ./scripts/alias.cjs .test-build/scripts/aujourdhui-flux.test.js && node -r ./scripts/alias.cjs .test-build/scripts/schedule-list.test.js",
     "contact:live": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/contact-live.js",
     "check:site-offers": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/check-site-offers.js",
-    "rome:explore": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rome-explore.js"
+    "rome:explore": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/rome-explore.js",
+    "test:reponses": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/reponses-refus.test.js",
+    "reponses:rattrapage": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/reponses-rattrapage.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

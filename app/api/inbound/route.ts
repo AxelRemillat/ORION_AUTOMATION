@@ -9,6 +9,10 @@ import { absenceReturnDate, autoReplyKind } from "@/lib/inbound/auto-reply";
 import { findAntispamProspect, shiftFollowUpsAfterReturn } from "@/lib/inbound/auto-reply-server";
 import type { Db } from "@/lib/trash/scope";
 import { notifyInbound } from "@/lib/notify/events";
+import { findProspectForInbound, withSecondaryContact, type AttachVia } from "@/lib/inbound/attach";
+import { applyRefusal, classifyInbound } from "@/lib/inbound/refusal-server";
+import { refusalJudge } from "@/lib/inbound/refusal-judge";
+import { recordProspectEvent } from "@/lib/history/record";
 
 /**
  * POST /api/inbound — réception d'un email trié par n8n.
@@ -104,18 +108,18 @@ export async function POST(request: Request) {
   // --- À qui appartient cet email ? ---------------------------------------
   // Instance mono-compte : le propriétaire est celui du prospect correspondant,
   // ou, à défaut de correspondance, le titulaire du portefeuille.
-  let { data: prospect } = await supabase
-    .from("prospects")
-    .select("id, user_id, status, deleted_at, company_name")
-    .ilike("email", fromEmail)
-    .limit(1)
-    .maybeSingle();
+  // Adresse exacte, sinon le FIL (mail envoyé par ORION), sinon le domaine de
+  // l'entreprise (Cowork #51 : ARTFLEX répondait d'une autre adresse).
+  const threadId = asText(payload?.thread_id, 200);
+  const found = await findProspectForInbound(supabase as unknown as Db, { fromEmail, threadId });
+  let prospect = found?.prospect ?? null;
+  const attachedVia: AttachVia | null = found?.via ?? null;
   // Challenge anti-spam : l'expéditeur est le service, pas le prospect.
   if (!prospect && autoKind === "antispam") {
-    const found = await findAntispamProspect(supabase as unknown as Db, { from_email: fromEmail, subject: asText(payload?.subject, 500), body });
-    if (found) {
-      const { data } = await supabase.from("prospects").select("id, user_id, status, deleted_at, company_name").eq("id", found.id).maybeSingle();
-      prospect = data;
+    const spam = await findAntispamProspect(supabase as unknown as Db, { from_email: fromEmail, subject: asText(payload?.subject, 500), body });
+    if (spam) {
+      const { data } = await supabase.from("prospects").select("id, user_id, status, deleted_at, company_name, email, key_figures").eq("id", spam.id).maybeSingle();
+      prospect = data as typeof prospect;
     }
   }
 
@@ -150,7 +154,7 @@ export async function POST(request: Request) {
       subject: asText(payload?.subject, 500),
       body,
       category,
-      thread_id: asText(payload?.thread_id, 200),
+      thread_id: threadId,
       gmail_message_id: asText(payload?.gmail_message_id ?? payload?.message_id, 200),
       received_at: receivedAt,
     })
@@ -182,12 +186,41 @@ export async function POST(request: Request) {
     doNotContact = outcome.ok;
   }
 
+  // Rattaché par le fil ou le domaine : le correspondant devient un contact
+  // secondaire de la fiche, et l'historique le dit (Cowork #51).
+  if (prospect && !prospect.deleted_at && attachedVia && attachedVia !== "adresse") {
+    const figures = withSecondaryContact(prospect.key_figures, { email: fromEmail, via: attachedVia, at: receivedAt });
+    if (figures) {
+      await supabase.from("prospects").update({ key_figures: figures }).eq("id", prospect.id);
+      prospect = { ...prospect, key_figures: figures };
+      await recordProspectEvent(supabase, { prospectId: prospect.id, userId: ownerId, kind: "contact", data: { title: `Réponse de ${fromEmail} (rattachée par ${attachedVia === "fil" ? "le fil" : "le domaine"}) : contact secondaire ajouté` } });
+    }
+  }
+
+  // REFUS dans la réponse (Cowork #51) : règles, LLM léger si ambigu. Un refus
+  // passe la fiche en Perdu (relances annulées) ; un « stop » coche aussi
+  // « ne plus contacter ». Un report garde le statut (rappel à la date dite).
+  let refusal: string | null = null;
+  if (prospect && !prospect.deleted_at && !doNotContact && !autoKind) {
+    const kind = await classifyInbound(body, refusalJudge(prospect.id));
+    const applied = await applyRefusal(supabase as unknown as Db, {
+      userId: ownerId,
+      prospect: { id: prospect.id, status: prospect.status, key_figures: prospect.key_figures },
+      inbound: { id: inserted.id, category, received_at: receivedAt, body },
+      kind,
+    }).catch(() => ({ applied: false, reminder: null }));
+    if (applied.applied) {
+      refusal = kind;
+      doNotContact = kind === "stop";
+    } else if (kind === "plus_tard") refusal = "plus_tard";
+  }
+
   // --- Le prospect a répondu : on fait avancer son statut ------------------
   let newStatus: ProspectStatus | null = null;
   // Prospect à la corbeille : l'email reste rattaché (il réapparaît à la
   // restauration) mais le statut ne bouge pas — il sera restauré tel quel.
   // « Ne plus contacter » a déjà posé le statut « perdu » : on n'y touche plus.
-  if (prospect && !prospect.deleted_at && !doNotContact && !autoKind) {
+  if (prospect && !prospect.deleted_at && !doNotContact && !refusal?.match(/^(refus|stop)$/) && !autoKind) {
     newStatus = advanceStatus(prospect.status as ProspectStatus, "repondu");
     if (newStatus) {
       await supabase.from("prospects").update({ status: newStatus }).eq("id", prospect.id);
@@ -221,6 +254,8 @@ export async function POST(request: Request) {
     notified: notified?.sent ?? false,
     inbound_id: inserted.id,
     matched_prospect_id: prospect?.id ?? null,
+    attached_via: attachedVia,
+    refusal,
     prospect_status: newStatus,
     cancelled_relances: cancelledRelances,
     auto_reply: autoKind,

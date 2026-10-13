@@ -134,6 +134,8 @@ export function buildHistory(row: HistoryRow, now = new Date()): { events: Histo
     else if (event.kind === "opposition") push({ ...base, title: `Opposition vérifiée (${data.source === "inpi" ? "INPI" : data.source === "pappers" ? "Pappers" : "à la main"}) : ${data.refuses ? "opposée" : "non opposée"}`, tone: data.refuses ? "lost" : "good" });
     else if (event.kind === "send_failed") push({ ...base, title: String(data.title ?? "Envoi en échec"), detail: data.detail ? String(data.detail) : null, tone: "lost" });
     else if (event.kind === "antispam") push({ ...base, title: String(data.title ?? "Validation anti-spam"), tone: /annulée/.test(String(data.title ?? "")) ? "neutral" : "good" });
+    // Cowork #51 : refus détecté dans une réponse (ou son annulation), nouveau correspondant rattaché.
+    else if (event.kind === "refus" || event.kind === "contact") push({ ...base, title: String(data.title ?? "Réponse"), tone: event.kind === "refus" && data.undone !== true ? "lost" : "neutral" });
     else if (event.kind === "note") push({ ...base, title: "Note", body: String(data.text ?? ""), excerpt: excerptOf(String(data.text ?? "")), tone: "neutral" });
     else push({ ...base, title: String(data.title ?? `${event.channel} · ${event.kind}`), detail: data.detail ? String(data.detail) : null, tone: "info" });
   }

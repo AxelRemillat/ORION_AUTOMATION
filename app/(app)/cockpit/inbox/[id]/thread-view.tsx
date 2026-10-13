@@ -1,4 +1,5 @@
 import { formatDateTime } from "@/lib/utils";
+import type { InboundMessage, Message } from "@/types";
 
 /** Une entrée du fil, quel que soit son sens. */
 export interface ThreadEntry {
@@ -9,6 +10,16 @@ export interface ThreadEntry {
   at: string;
   /** Vrai pour le message auquel on est en train de répondre. */
   answering?: boolean;
+}
+
+/** Le fil : seuls les messages réellement partis (un brouillon n'a pas été lu), puis les reçus, dans l'ordre. */
+export function threadEntries(messages: Message[], inbounds: InboundMessage[], answeringId: string): ThreadEntry[] {
+  return [
+    ...messages
+      .filter((message) => message.status === "sent")
+      .map((message) => ({ id: message.id, who: "moi" as const, subject: message.subject, body: message.body, at: message.sent_at ?? message.created_at })),
+    ...inbounds.map((item) => ({ id: item.id, who: "lui" as const, subject: item.subject, body: item.body, at: item.received_at, answering: item.id === answeringId })),
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
 /**

@@ -11,6 +11,8 @@ import { DealTimeline } from "../_components/deal-timeline";
 import { TrashButton } from "@/components/trash/trash-button";
 import { SendStateBadge } from "@/components/outbox/send-state-badge";
 import { DoNotContactButton } from "@/components/outbox/do-not-contact-button";
+import { RefusalControls } from "@/components/outbox/refusal-controls";
+import { refusalOf } from "@/lib/inbound/refusal";
 import { FollowUpButton } from "../_components/follow-up-button";
 import { followUpBlock } from "@/lib/outbox/follow-up-policy";
 import { ProspectSummary } from "../_components/prospect-summary";
@@ -107,6 +109,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
               />
             )}
             {typed.do_not_contact && <Badge tone="danger">Ne plus contacter</Badge>}
+            {refusalOf(typed.key_figures) && <RefusalControls prospectId={typed.id} kind={refusalOf(typed.key_figures)!.kind} />}
             {/* Opposé, « ne plus contacter », perdu ou a répondu : pas de bouton « Relancer ». */}
             {followUp && !followUpBlock(typed) && <FollowUpButton prospectId={typed.id} type={followUp} />}
             <DoNotContactButton
