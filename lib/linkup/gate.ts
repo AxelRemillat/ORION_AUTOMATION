@@ -57,6 +57,22 @@ export function registerLinkupRunReader(reader: () => LinkupRunContext | undefin
   readRunContext = reader;
 }
 
+/**
+ * PRIORITÉ À LA RECHERCHE DE SITE (Cowork #27) : sans site, une fiche retenue est perdue
+ * (« Sans site » : 159 retenues de score 4-5 en 14 jours, autant que les fiches creusées),
+ * alors que l'enrichissement n'ajoute que des faits. `LINKUP_SITE_RESERVE` recherches du
+ * budget du jour (15 par défaut) restent aux sites : l'enrichissement s'arrête à
+ * budget − réserve, la recherche de site garde tout le budget. Rien n'est relevé.
+ */
+export const DEFAULT_LINKUP_SITE_RESERVE = 15;
+export function linkupSiteReserve(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.LINKUP_SITE_RESERVE;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_LINKUP_SITE_RESERVE;
+  const value = Math.floor(Number(raw));
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_LINKUP_SITE_RESERVE;
+}
+export type LinkupPurpose = "site" | "enrich";
+
 /** « agences:10, autre:5 » → { agences: 10, autre: 5 }. */
 export function linkupReserves(env: Record<string, string | undefined> = process.env): Record<string, number> {
   const out: Record<string, number> = {};
@@ -88,7 +104,7 @@ export interface LinkupGateStore {
 export type Gated<T> = { status: "cache"; value: T } | { status: "blocked"; reason: string } | { status: "call" };
 
 /** Que faire de cette recherche : servir le cache, la refuser, ou l'appeler. */
-export async function linkupGate<T>(store: LinkupGateStore, query: string, now: Date = new Date(), kind: LinkupKind = "search"): Promise<Gated<T>> {
+export async function linkupGate<T>(store: LinkupGateStore, query: string, now: Date = new Date(), kind: LinkupKind = "search", purpose: LinkupPurpose = "site"): Promise<Gated<T>> {
   const hit = await store.read(linkupCacheKey(kind === "fetch" ? `fetch:${query}` : query)).catch(() => null);
   if (hit !== null && hit !== undefined) return { status: "cache", value: hit as T };
   const budget = linkupDailyBudget(process.env, kind);
@@ -100,6 +116,9 @@ export async function linkupGate<T>(store: LinkupGateStore, query: string, now: 
     const reserves = linkupReserves();
     const allowed = budgetFor(budget, run?.segment, reserves);
     if (used >= allowed) return { status: "blocked", reason: `${LINKUP_EPUISE} : part réservée à un autre segment (${used}/${allowed} sur ${budget})` };
+    // L'enrichissement laisse la réserve aux recherches de site (Cowork #27).
+    const forEnrich = Math.max(0, allowed - linkupSiteReserve());
+    if (purpose === "enrich" && used >= forEnrich) return { status: "blocked", reason: `${LINKUP_EPUISE} : part réservée à la recherche de site (${used}/${forEnrich} sur ${budget})` };
     if (run && typeof run.cap === "number" && run.cap >= 0) {
       const inRun = await store.usedSince(run.since, kind).catch(() => run.cap!);
       if (inRun >= run.cap) return { status: "blocked", reason: `${LINKUP_EPUISE} : plafond du job atteint (${inRun}/${run.cap})` };
