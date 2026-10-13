@@ -243,14 +243,20 @@ export async function preflightFor(
   });
 }
 
-/** Identifiants Gmail renvoyés par le nœud Gmail de n8n, s'il y en a. */
-function gmailIds(payload: unknown): { threadId: string | null; gmailId: string | null } {
-  const body = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+/**
+ * Identifiants Gmail renvoyés par le workflow d'envoi n8n, s'il y en a.
+ * Cowork #53 : le workflow renvoie `{ ok, gmail_message_id, gmail_thread_id }` ; seul `thread_id` était lu,
+ * le fil n'était donc jamais enregistré. `thread_id` / `threadId` restent acceptés (anciennes réponses), et une
+ * réponse en tableau (sortie brute d'un nœud n8n) est lue sur son premier élément.
+ */
+export function gmailIds(payload: unknown): { threadId: string | null; gmailId: string | null } {
+  const first = Array.isArray(payload) ? payload[0] : payload;
+  const body = (first && typeof first === "object" ? first : {}) as Record<string, unknown>;
   const pick = (...keys: string[]) => {
     for (const key of keys) if (typeof body[key] === "string" && body[key]) return body[key] as string;
     return null;
   };
-  return { threadId: pick("thread_id", "threadId"), gmailId: pick("gmail_message_id", "id", "messageId") };
+  return { threadId: pick("gmail_thread_id", "thread_id", "threadId"), gmailId: pick("gmail_message_id", "id", "messageId") };
 }
 
 /**
