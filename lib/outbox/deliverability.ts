@@ -11,13 +11,31 @@ import { utcToParis } from "./paris-time";
  * ajustés en un seul endroit.
  */
 
-/** Montée en charge : plafond d'envois par jour selon l'ancienneté de l'adresse. */
+/**
+ * Montée en charge AUTOMATIQUE : plafond d'envois par jour selon l'ancienneté de l'adresse.
+ * Plan validé avec Axel le 13/10/2026 (Cowork #26) : 25 jusqu'au jour 14, puis 30 (le 16/10)
+ * — et plus rien d'automatique au-delà : 40 puis 50 se débloquent à la main (`MANUAL_STEPS`).
+ */
 export const WARMUP_STEPS: readonly { untilDay: number; cap: number }[] = [
   { untilDay: 3, cap: 10 },
   { untilDay: 7, cap: 15 },
   { untilDay: 14, cap: 25 },
-  { untilDay: Number.POSITIVE_INFINITY, cap: 40 },
+  { untilDay: Number.POSITIVE_INFINITY, cap: 30 },
 ];
+
+/**
+ * Paliers CONDITIONNELS, jamais automatiques : 40 (après deux semaines propres à 30),
+ * puis 50, le maximum sur cette boîte. Débloqués par `SEND_DAILY_CAP_UNLOCKED=40|50`
+ * (variable du déploiement), seulement une fois la montée automatique terminée.
+ */
+export const MANUAL_STEPS = [40, 50] as const;
+export const MAX_DAILY_CAP = 50;
+
+/** Palier débloqué à la main (40 ou 50), sinon `null` ; toute autre valeur est ignorée. */
+export function unlockedDailyCap(env: Record<string, string | undefined> = typeof process === "undefined" ? {} : process.env): number | null {
+  const value = Number(env.SEND_DAILY_CAP_UNLOCKED);
+  return (MANUAL_STEPS as readonly number[]).includes(value) ? value : null;
+}
 
 /** Au-delà, on considère l'adresse chauffée. */
 const WARMUP_DURATION_DAYS = 14;
@@ -78,7 +96,7 @@ export interface Deliverability {
   level: DeliverabilityLevel;
 }
 
-export function buildDeliverability(messages: readonly SentRow[], now = new Date()): Deliverability {
+export function buildDeliverability(messages: readonly SentRow[], now = new Date(), env?: Record<string, string | undefined>): Deliverability {
   const sent = messages.filter((message) => message.status === "sent" && message.sent_at);
   const sevenDaysAgo = now.getTime() - 7 * DAY_MS;
   // « Aujourd'hui » à Paris, pas dans le fuseau du serveur (UTC sur Vercel).
@@ -90,8 +108,10 @@ export function buildDeliverability(messages: readonly SentRow[], now = new Date
   const first = firstRealSend(messages);
   const warmupDay = first === null ? null : businessDaysSince(first, now);
 
-  const cap = (WARMUP_STEPS.find((step) => (warmupDay ?? 1) <= step.untilDay) ?? WARMUP_STEPS[0])
-    .cap;
+  const automatic = (WARMUP_STEPS.find((step) => (warmupDay ?? 1) <= step.untilDay) ?? WARMUP_STEPS[0]).cap;
+  // Palier débloqué à la main : seulement une fois la montée automatique terminée, jamais au-delà de 50.
+  const unlocked = warmupDay !== null && warmupDay > WARMUP_DURATION_DAYS ? unlockedDailyCap(env) : null;
+  const cap = Math.min(MAX_DAILY_CAP, Math.max(automatic, unlocked ?? 0));
   const remaining = Math.max(cap - sentToday, 0);
 
   return {

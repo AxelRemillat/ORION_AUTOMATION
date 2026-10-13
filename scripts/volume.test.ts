@@ -104,11 +104,11 @@ async function main() {
     check("attribut absent : « non renseigné » ; longueur en tranches", stats.demo[0].value === "non renseigné" && lengthBand(80) === "60–90 mots");
   }
 
-  console.log("\n5. Prochaine marche (20/jour) et ses conditions");
+  console.log("\n5. Prochaine marche et ses conditions");
   {
     const now = new Date("2026-10-05T10:00:00Z");
     const ok = nextRampStep({ currentCap: 15, sentTotal: 120, inbound: [], dnsOk: { spf: true, dkim: true }, now });
-    check("conditions réunies : marche 20 prête", ok.ready && ok.target === 20 && ok.current === 15);
+    check("conditions réunies : palier suivant (25) prêt", ok.ready && ok.target === 25 && ok.current === 15);
     const bounce = nextRampStep({ currentCap: 15, sentTotal: 120, inbound: [{ from_email: "mailer-daemon@googlemail.com", subject: "Delivery Status Notification", received_at: "2026-10-03T10:00:00Z" }], dnsOk: { spf: true, dkim: true }, now });
     check("un rebond dur il y a 2 jours : pas prête", !bounce.ready && !bounce.conditions[0].ok);
     const stops = nextRampStep({ currentCap: 15, sentTotal: 100, inbound: [{ from_email: "a@b.fr", body: "STOP", received_at: "2026-09-01T10:00:00Z" }, { from_email: "c@b.fr", body: "stop", received_at: "2026-09-02T10:00:00Z" }], dnsOk: { spf: true, dkim: true }, now });
