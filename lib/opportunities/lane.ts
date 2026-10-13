@@ -18,7 +18,27 @@ export const LAUNCH_PRICES = { small: 300, regular: 400 } as const;
 /** « Urgent » : publiée il y a moins de 2 h (répondre parmi les premiers). */
 export const URGENT_HOURS = 2;
 
-export type Lane = "lancement" | "cms_impose";
+/**
+ * « cms_impose » n'est plus produit par `laneOf` depuis Cowork #27 (un CMS est une mission
+ * de lancement) ; le type reste accepté pour les fiches et l'affichage existants.
+ * « regie » (Cowork #27) : mission en régie / TJM / « X jours par semaine » sur la stack
+ * d'Axel → alerte, badge « Régie · dispo à vérifier » (Axel est en alternance).
+ */
+export type Lane = "lancement" | "cms_impose" | "regie";
+
+/** Badge d'une mission en régie : à Axel de juger s'il a la disponibilité. */
+export const REGIE_BADGE = "Régie · dispo à vérifier";
+
+/** Régie, temps partiel, taux journalier. */
+const REGIE = /(\bregie\b|\btjm\b|taux journalier|tarif journalier|€\s*(\/|par)\s*j(our)?\b|eur\s*(\/|par)\s*j(our)?\b|\bpar jour\b|(\d\s*(a|-|ou)\s*)?\d\s*j(ours)?\s*(\/|par)\s*sem(aine)?|jours? par semaine|temps partiel|mission longue)/;
+/** La stack d'Axel : Next.js, React, TypeScript, Node / NestJS, IA. */
+const AXEL_STACK = /(next\.?js|\breact\b|typescript|\bnode(\.?js)?\b|nest\.?js|\bprisma\b|\bia\b|intelligence artificielle|\bllm\b|openai|\bgpt\b)/;
+
+/** Mission en régie sur la stack d'Axel (titre, texte, catégories, budget). */
+export function isRegie(text: string, budget: string | null | undefined = null): boolean {
+  const value = plainText(`${text} ${budget ?? ""}`);
+  return REGIE.test(value) && AXEL_STACK.test(value);
+}
 
 export const plainText = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const plain = plainText;
@@ -71,16 +91,28 @@ type LaneInput = {
 /** Au-delà de 7 jours, une annonce n'est plus une mission à prendre parmi les premiers (cf. STALE_AFTER_DAYS). */
 export const LAUNCH_FRESH_DAYS = 7;
 
-/** Catégorie Codeur d'une annonce : « lancement », « cms_impose » ou `null` (y compris si elle est exclue). */
+/**
+ * Catégorie Codeur d'une annonce : « regie », « lancement » ou `null` (y compris si elle est exclue).
+ *   - régie / TJM / « X jours par semaine » sur la stack d'Axel → « regie » (alerte, quel que soit le budget) ;
+ *   - développement web au sens large, CMS COMPRIS (Cowork #27), budget ≤ 1 000 € ou non indiqué → « lancement ».
+ * Une annonce de plus de 7 jours n'est ni l'une ni l'autre.
+ */
 export function laneOf(row: LaneInput, now = new Date()): Lane | null {
   if (row.platform !== "codeur") return null;
   const ad: PrefilterInput = { title: row.title ?? "", description: row.description ?? row.body ?? "", categories: row.categories ?? [], budgetText: row.budget ?? null };
   const found = classifyAd(ad);
   if (found.reason) return null;
-  if (found.cms) return "cms_impose";
   const at = row.published_at ?? row.created_at;
   const fresh = !at || Number.isNaN(Date.parse(at)) || now.getTime() - Date.parse(at) <= LAUNCH_FRESH_DAYS * 86_400_000;
-  return found.webDev && launchBudget(row.budget) && fresh ? "lancement" : null;
+  if (!fresh) return null;
+  if (isRegie(`${ad.title}\n${ad.description}\n${ad.categories.join(" ")}`, row.budget)) return "regie";
+  return (found.webDev || found.cms) && launchBudget(row.budget) ? "lancement" : null;
+}
+
+/** Fiche sous CMS (WordPress, Grav…) : repère affiché à côté du badge « Lancement ». */
+export function isCmsAd(row: LaneInput): boolean {
+  const found = classifyAd({ title: row.title ?? "", description: row.description ?? row.body ?? "", categories: row.categories ?? [], budgetText: row.budget ?? null });
+  return !found.reason && found.cms;
 }
 
 export { CMS_NOTE };

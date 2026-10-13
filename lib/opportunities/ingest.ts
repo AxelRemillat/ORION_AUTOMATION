@@ -7,6 +7,7 @@ import { analyzeOpportunity, type Analysis } from "./analyze";
 import { prefilterReason, titleOnlyReason } from "./prefilter";
 import { generateProposal } from "./proposal";
 import { CMS_NOTE, generateLaunchProposal, laneOf, type Lane } from "./launch";
+import { REGIE_BADGE } from "./lane";
 import { isPlatform, proposalLanguage, type Platform } from "./types";
 
 /**
@@ -116,11 +117,12 @@ export interface IngestResponse {
 export const LANE_REASONS: Record<Lane, string> = {
   lancement: "Mission de lancement : développement web, petit budget — répondre parmi les premiers",
   cms_impose: CMS_NOTE,
+  regie: `${REGIE_BADGE} — mission en régie sur votre stack (Next.js, React, Node, IA) : à vous de juger selon l'alternance`,
 };
 
-/** Verdict d'une fiche selon sa catégorie : lancement → alerte ; CMS imposé → à voir ; sinon le score. */
+/** Verdict d'une fiche selon sa catégorie : lancement ou régie → alerte ; CMS imposé (ancien) → à voir ; sinon le score. */
 export function laneVerdict(lane: Lane | null, score: number | null): Verdict {
-  if (lane === "lancement") return "alerte";
+  if (lane === "lancement" || lane === "regie") return "alerte";
   if (lane === "cms_impose") return "a_voir";
   return verdictOf(score);
 }
@@ -218,6 +220,39 @@ async function analyzeRow(deps: IngestDeps, id: string, body: IngestBody, lane: 
   return analysis;
 }
 
+/**
+ * ALERTE ENVOYÉE PAR ORION (Cowork #27). n8n ne notifie que sur la réponse synchrone de
+ * l'ingestion : une analyse finie APRÈS la réponse (échéance de 20 s dépassée), ou faite par
+ * un rattrapage, n'était jamais notifiée — une offre à 9/10 se perdait en silence. ORION
+ * notifie donc lui-même dans ces cas-là, une seule fois par offre (`notification_log`).
+ */
+/**
+ * Trace « cette offre a déjà été signalée en alerte » (n8n prévenu, ou notification d'ORION).
+ * `true` si la trace vient d'être posée, `false` si elle existait déjà (clé unique en base).
+ * C'est un FAIT enregistré : rejouer les règles d'aujourd'hui sur une vieille fiche dirait
+ * à tort qu'elle avait alerté.
+ */
+export async function markAlerted(deps: Pick<IngestDeps, "db" | "userId">, id: string): Promise<boolean> {
+  const { error } = await deps.db.from("notification_log").insert({ key: `opportunite:${id}`, user_id: deps.userId, kind: "opportunite" });
+  return !error;
+}
+
+export async function notifyLateAlert(deps: IngestDeps, id: string, body: IngestBody, analysis: Analysis | null, lane: Lane | null): Promise<boolean> {
+  if (!deps.notify || laneVerdict(lane, analysis?.score ?? null) !== "alerte") return false;
+  if (!(await markAlerted(deps, id))) return false; // déjà signalée : pas de doublon
+  const reasons = [...(lane ? [LANE_REASONS[lane]] : []), ...(analysis?.reasons ?? [])].slice(0, 2);
+  await deps
+    .notify({
+      title: `${analysis ? `${analysis.score}/10 · ` : ""}${body.title}`,
+      body: `${reasons.join(" · ")}${body.budget_text ? ` · Budget : ${body.budget_text}` : ""}`,
+      priority: "high",
+      tags: ["briefcase"],
+      click: orionUrl(deps.baseUrl, id),
+    })
+    .catch(() => undefined);
+  return true;
+}
+
 /** Analyse impossible : alerte quand même si l'offre touche le cœur de cible. */
 async function alertWithoutAnalysis(deps: IngestDeps, id: string, body: IngestBody): Promise<void> {
   const signals = coreSignals({ title: body.title, description: body.description, categories: body.categories });
@@ -245,7 +280,8 @@ export async function catchUpUnanalyzed(deps: IngestDeps): Promise<number> {
     .from("opportunities")
     .select("id, platform, title, body, budget, categories, published_at, description_truncated, url, external_id")
     .eq("user_id", deps.userId)
-    .eq("analysis_state", NOT_ANALYZED)
+    // « À analyser » (plafond quotidien atteint) aussi : une annonce n'est jamais perdue (Cowork #27).
+    .in("analysis_state", [NOT_ANALYZED, "a_analyser"])
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(CATCH_UP_BATCH);
@@ -262,10 +298,12 @@ export async function catchUpUnanalyzed(deps: IngestDeps): Promise<number> {
       categories: Array.isArray(row.categories) ? (row.categories as string[]) : [],
       published_at: (row.published_at as string | null) ?? null,
     };
-    const analysis = await analyzeRow(deps, String(row.id), body);
+    const lane = laneOf({ platform: body.platform, title: body.title, description: body.description, categories: body.categories, budget: body.budget_text, published_at: body.published_at }, now);
+    const analysis = await analyzeRow(deps, String(row.id), body, lane);
     if (!analysis) break; // toujours indisponible : on s'arrête là
     done += 1;
-    if (analysis.score >= PROPOSAL_SCORE) await proposeRow(deps, String(row.id), body, analysis).catch(() => undefined);
+    if (lane === "lancement" || analysis.score >= PROPOSAL_SCORE) await proposeRow(deps, String(row.id), body, analysis, lane).catch(() => undefined);
+    await notifyLateAlert(deps, String(row.id), body, analysis, lane);
   }
   return done;
 }
@@ -325,12 +363,19 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   // 1. Idempotence : une annonce = une ligne, jamais deux analyses.
   const { data: known } = await deps.db
     .from("opportunities")
-    .select("id, fit_score, fit_reasons, filter_reason")
+    .select("id, fit_score, fit_reasons, filter_reason, analysis_state, status, title")
     .eq("user_id", deps.userId)
     .eq("platform", body.platform)
     .eq("external_id", body.external_id)
     .limit(1);
-  const existing = (known ?? [])[0] as { id: string; fit_score: number | null; fit_reasons: string[] | null; filter_reason: string | null } | undefined;
+  const existing = (known ?? [])[0] as { id: string; fit_score: number | null; fit_reasons: string[] | null; filter_reason: string | null; analysis_state: string | null; status: string | null; title: string } | undefined;
+  // MISE À NIVEAU (Cowork #27) : depuis le 08/10, l'alerte e-mail Codeur arrive AVANT le flux RSS
+  // et crée une fiche réduite au TITRE. L'item RSS (texte, budget, catégories) qui suivait était
+  // traité en doublon : jamais analysé, verdict « à voir », aucune notification. Désormais il
+  // complète la fiche puis suit le chemin normal. Une seule fois : la fiche ne reste pas « titre seul ».
+  if (existing && !body.titleOnly && existing.analysis_state === TITLE_ONLY && existing.status === "a_repondre") {
+    return upgradeTitleOnly(deps, body, existing.id, now);
+  }
   if (existing) {
     return {
       ...base,
@@ -379,6 +424,7 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   if (body.titleOnly) {
     const id = await insert({ analysis_state: TITLE_ONLY });
     if (!id) return ingestRace(deps, body, base);
+    if (laneVerdict(lane, null) === "alerte") await markAlerted(deps, id);
     return { ...base, id, score: null, verdict: laneVerdict(lane, null), reasons: lane ? [LANE_REASONS[lane], TITLE_ONLY_NOTE] : [TITLE_ONLY_NOTE], orion_url: orionUrl(deps.baseUrl, id), title_only: true, ...(lane ? { lane } : {}) };
   }
 
@@ -388,6 +434,7 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   if ((today ?? []).length >= (deps.llmCap ?? DEFAULT_DAILY_LLM_CAP)) {
     const id = await insert({ analysis_state: "a_analyser" });
     if (!id) return ingestRace(deps, body, base);
+    if (laneVerdict(lane, null) === "alerte") await markAlerted(deps, id);
     return { ...base, id, score: null, verdict: laneVerdict(lane, null), reasons: [...(laneFields?.reasons ?? []), "plafond quotidien d'analyses atteint : à analyser"], orion_url: orionUrl(deps.baseUrl, id), ...(lane ? { lane } : {}) };
   }
 
@@ -403,9 +450,17 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   const first = await Promise.race([analysisWork, timeout]);
   clearTimeout(timer);
   if (first === "timeout") {
-    // Trop lent pour la réponse : on finit en arrière-plan, sans alerte push pour cet item.
-    deps.background?.(analysisWork.then(finish));
+    // Trop lent pour la réponse : on finit en arrière-plan. Avant Cowork #27, aucune alerte ne
+    // partait pour cet item (n8n n'a que la réponse) : ORION notifie lui-même si l'analyse finit
+    // à 8 ou plus. Une mission de lancement ou de régie a déjà son verdict « alerte » ci-dessous.
+    deps.background?.(
+      analysisWork.then(async (analysis) => {
+        await finish(analysis);
+        if (!lane) await notifyLateAlert(deps, id, body, analysis, lane);
+      }),
+    );
     // Mission de lancement : l'alerte ne dépend pas de l'analyse, elle part tout de suite.
+    if (laneVerdict(lane, null) === "alerte") await markAlerted(deps, id);
     return { ...base, id, score: null, verdict: laneVerdict(lane, null), reasons: laneFields?.reasons ?? [], orion_url: orionUrl(deps.baseUrl, id), pending: true, ...(lane ? { lane } : {}) };
   }
   const analysis = first;
@@ -414,6 +469,7 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
   else await proposalWork;
   // L'analyse repasse : les « Non analysées » récentes sont rattrapées (arrière-plan).
   if (analysis && deps.background) deps.background(catchUpUnanalyzed(deps).catch(() => 0));
+  if (laneVerdict(lane, analysis?.score ?? null) === "alerte") await markAlerted(deps, id);
   return {
     ...base,
     id,
@@ -423,6 +479,46 @@ export async function ingestOpportunity(deps: IngestDeps, body: IngestBody): Pro
     ...(analysis ? {} : { not_analyzed: true as const }),
     orion_url: orionUrl(deps.baseUrl, id),
     ...(lane ? { lane } : {}),
+  };
+}
+
+/**
+ * Complète une fiche « titre seul » avec l'item RSS, puis pré-filtre, catégorie et analyse
+ * comme une annonce neuve. Si l'alerte e-mail avait déjà déclenché une notification (mission
+ * de lancement repérée sur le titre seul), la réponse le dit (`duplicate`) : n8n ne renotifie pas.
+ */
+async function upgradeTitleOnly(deps: IngestDeps, body: IngestBody, id: string, now: Date): Promise<IngestResponse> {
+  const base = { title: body.title, url: body.url };
+  const stamp = now.toISOString();
+  await deps.db
+    .from("opportunities")
+    .update({ body: body.description || body.title, budget: body.budget_text, categories: body.categories, description_truncated: body.description_truncated, published_at: body.published_at, updated_at: stamp })
+    .eq("id", id);
+
+  const filtered = prefilterReason({ title: body.title, description: body.description, categories: body.categories, budgetText: body.budget_text });
+  if (filtered) {
+    await deps.db.from("opportunities").update({ status: "ignoree", analysis_state: "filtre", filter_reason: filtered, updated_at: stamp }).eq("id", id).eq("status", "a_repondre");
+    return { ...base, id, score: null, verdict: "ignore", reasons: [filtered], orion_url: orionUrl(deps.baseUrl, id), filtered: true };
+  }
+  const lane = laneOf({ platform: body.platform, title: body.title, description: body.description, categories: body.categories, budget: body.budget_text, published_at: body.published_at }, now);
+  await deps.db.from("opportunities").update({ analysis_state: "pending", updated_at: stamp }).eq("id", id);
+  const analysis = await analyzeRow(deps, id, body, lane);
+  const proposal = lane === "lancement" || (analysis && analysis.score >= PROPOSAL_SCORE) ? proposeRow(deps, id, body, analysis, lane).catch(() => undefined) : Promise.resolve();
+  if (deps.background) deps.background(proposal);
+  else await proposal;
+  const verdict = laneVerdict(lane, analysis?.score ?? null);
+  // Alerte déjà signalée au passage de l'e-mail (trace en base) : n8n ne renotifie pas.
+  const alreadyAlerted = verdict === "alerte" && !(await markAlerted(deps, id));
+  return {
+    ...base,
+    id,
+    score: analysis?.score ?? null,
+    verdict,
+    reasons: [...(lane ? [LANE_REASONS[lane]] : []), ...(analysis?.reasons ?? ["analyse indisponible : à analyser"])],
+    ...(analysis ? {} : { not_analyzed: true as const }),
+    orion_url: orionUrl(deps.baseUrl, id),
+    ...(lane ? { lane } : {}),
+    ...(alreadyAlerted ? { duplicate: true as const } : {}),
   };
 }
 

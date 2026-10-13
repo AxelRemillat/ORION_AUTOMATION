@@ -33,7 +33,16 @@ export class FakeDb {
      * ERREUR — c'est exactement le piège à tester ; sans cette option, un
      * test « plus de 1 000 lignes » passerait aussi avec un code non paginé.
      */
-    public options: { strictTables?: boolean; maxRows?: number } = {},
+    public options: {
+      strictTables?: boolean;
+      maxRows?: number;
+      /**
+       * `unique` : colonnes uniques par table (`{ notification_log: ["key"] }`), comme une clé
+       * primaire en base : un insert en doublon rend une ERREUR. Indispensable pour tester un
+       * verrou ou un anti-doublon qui repose sur la contrainte (Cowork #27).
+       */
+      unique?: Record<string, string[]>;
+    } = {},
   ) {}
 
   has(table: string): boolean {
@@ -191,6 +200,10 @@ class FakeQuery implements PromiseLike<FakeResult> {
         id: `gen-${++generated}`,
         ...row,
       }));
+      const keys = this.db.options.unique?.[this.table];
+      if (keys && result.some((row) => all.some((item) => keys.every((key) => item[key] === row[key])))) {
+        return { data: null, error: { message: `duplicate key value violates unique constraint on ${this.table}` }, count: null };
+      }
       all.push(...result);
     } else if (this.op === "upsert") {
       for (const row of Array.isArray(this.payload) ? this.payload : [this.payload]) {

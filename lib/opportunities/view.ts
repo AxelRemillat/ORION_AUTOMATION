@@ -27,7 +27,8 @@ export function bucketOf(row: Row): Bucket {
   if (row.filter_reason || row.status === "ignoree") return "ignorees";
   // Mission de lancement : alerte quel que soit le score ; CMS imposé : à voir (11/10/2026).
   const lane = rowLane(row);
-  if (lane === "lancement") return "alertes";
+  // Régie sur la stack d'Axel (Cowork #27) : alerte aussi, badge « Régie · dispo à vérifier ».
+  if (lane === "lancement" || lane === "regie") return "alertes";
   if (lane === "cms_impose") return "a_voir";
   // Titre seul (alerte Codeur, plateformes #11) : « À voir » tant que l'annonce n'est pas collée,
   // même si une ancienne analyse sur le titre a laissé un score (il ne veut rien dire).
