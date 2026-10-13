@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { loadPortfolio } from "@/lib/trash/portfolio";
+import { readAll } from "@/lib/supabase/read-all";
 import { CockpitHeader } from "./_components/cockpit-header";
 import { MailboxPanel } from "./_components/mailbox/mailbox-panel";
 import { buildMailbox, threadsFor } from "./_lib/mailbox-data";
@@ -150,25 +151,33 @@ export default async function CockpitPage({
 
 type PlatformRow = Pick<Opportunity, "platform" | "status" | "sent_at" | "replied_at" | "updated_at" | "conversation_at" | "won_at">;
 
-/** Opportunités touchées ces 30 derniers jours (jalons datés), pour la carte « Plateformes freelance ». */
+/**
+ * Opportunités touchées ces 30 derniers jours (jalons datés), pour la carte
+ * « Plateformes freelance ».
+ *
+ * `.limit(2000)` ne servait à rien : PostgREST plafonne une réponse à 1 000
+ * lignes quoi qu'on demande, et les lignes manquantes ne font aucun bruit
+ * (Cowork #22). `readAll` pagine, donc un seul aller-retour tant qu'on tient
+ * sous la page.
+ */
 async function loadPlatformRows(supabase: ReturnType<typeof createClient>): Promise<PlatformRow[]> {
   const since = new Date(Date.now() - 31 * 86_400_000).toISOString();
   const db = supabase as unknown as { from: (table: string) => any };
-  const { data, error } = await db
-    .from("opportunities")
-    .select("platform, status, sent_at, replied_at, updated_at, conversation_at, won_at")
-    .gte("updated_at", since)
-    .limit(2000);
-  if (error) throw error;
-  return (data ?? []) as PlatformRow[];
+  return readAll<PlatformRow>(() =>
+    db
+      .from("opportunities")
+      .select("platform, status, sent_at, replied_at, updated_at, conversation_at, won_at")
+      .gte("updated_at", since)
+      .order("id"),
+  );
 }
 
 type SentRow = Pick<Opportunity, "platform" | "status" | "sent_at" | "replied_at" | "followed_up_at">;
 
-/** Propositions « Envoyées » (relances dues, plateformes #6). */
+/** Propositions « Envoyées » (relances dues, plateformes #6), toutes, sans troncature. */
 async function loadSentRows(supabase: ReturnType<typeof createClient>): Promise<SentRow[]> {
   const db = supabase as unknown as { from: (table: string) => any };
-  const { data, error } = await db.from("opportunities").select("platform, status, sent_at, replied_at, followed_up_at").eq("status", "envoyee").limit(2000);
-  if (error) throw error;
-  return (data ?? []) as SentRow[];
+  return readAll<SentRow>(() =>
+    db.from("opportunities").select("platform, status, sent_at, replied_at, followed_up_at").eq("status", "envoyee").order("id"),
+  );
 }

@@ -43,6 +43,8 @@
     "test:troncature": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/troncature.test.js",
     "test:upwork-lancement": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/upwork-lancement.test.js",
     "test:antispam-lien": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/antispam-lien.test.js",
+    "chrono:cockpit": "tsx scripts/cockpit-chrono.ts",
+    "chrono:pilotage": "tsx scripts/pilotage-chrono.ts",
     "test:badges": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/badges.test.js",
     "test:fluidite": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/fluidite.test.js",
     "test:plateformes-today": "tsc -p tsconfig.test.json && node -r ./scripts/alias.cjs .test-build/scripts/plateformes-today.test.js",

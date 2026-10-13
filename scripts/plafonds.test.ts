@@ -5,7 +5,7 @@
  */
 import { fetchPappers } from "../lib/enrichment/pappers";
 import { openAiGuarded, relancesStep } from "../lib/jobs/handlers/prepare";
-import { prepCost } from "../lib/usage/prep-cost";
+import { prepCost, prepCostSince } from "../lib/usage/prep-cost";
 import { capArg } from "../lib/cli/args";
 import { budgets } from "../lib/settings/costs";
 import { prepareAlert } from "../lib/today/auto-run";
@@ -21,6 +21,7 @@ import {
 } from "../lib/usage/budgets";
 import { openAiBudget, pappersAllowance } from "../lib/usage/budgets-server";
 import { FakeDb } from "./fake-supabase";
+import { resetDailyViewMemo } from "../lib/usage/usage-daily";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -41,14 +42,19 @@ async function main() {
     check("39/40 : permis ; 40/40 : refusé, motif lisible", pappersGate(39, 40).allowed && !pappersGate(40, 40).allowed && /40\/40/.test((pappersGate(40, 40) as { reason: string }).reason));
     check("minuit Paris (UTC+2 en octobre)", parisDayStart(NOW).toISOString() === "2026-10-02T22:00:00.000Z");
 
-    const db = new FakeDb({
-      api_usage: [
-        ...Array.from({ length: 39 }, (_, i) => ({ id: `t${i}`, service: "pappers", units: 1, cost: 0, created_at: "2026-10-03T06:00:00Z" })),
-        { id: "minuit", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T22:30:00Z" }, // 00 h 30 Paris : aujourd'hui
-        { id: "hier", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T21:30:00Z" }, // 23 h 30 Paris la veille
-        { id: "h", service: "hunter", units: 5, cost: 0, created_at: "2026-10-03T06:00:00Z" },
-      ],
-    });
+    // Vue `api_usage_daily` absente (mode strict) : on vérifie ici le repli ligne à ligne.
+    const db = new FakeDb(
+      {
+        api_usage: [
+          ...Array.from({ length: 39 }, (_, i) => ({ id: `t${i}`, service: "pappers", units: 1, cost: 0, created_at: "2026-10-03T06:00:00Z" })),
+          { id: "minuit", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T22:30:00Z" }, // 00 h 30 Paris : aujourd'hui
+          { id: "hier", service: "pappers", units: 1, cost: 0, created_at: "2026-10-02T21:30:00Z" }, // 23 h 30 Paris la veille
+          { id: "h", service: "hunter", units: 5, cost: 0, created_at: "2026-10-03T06:00:00Z" },
+        ],
+      },
+      { strictTables: true },
+    );
+    resetDailyViewMemo();
     const gate = await pappersAllowance({ db: db as never, now: NOW, env: {} });
     check("compteur réel : 40 crédits aujourd'hui (la veille et Hunter exclus) → refusé", !gate.allowed && gate.used === 40, gate);
 
@@ -75,15 +81,45 @@ async function main() {
     const cap = openAiBudgetState(15.2, 15);
     check("100 % : plafond, préparation arrêtée", cap.level === "plafond" && /arrêtée/.test(cap.message ?? ""), cap);
     check("mois de Paris : 1er octobre 00 h", parisMonthStart(NOW).toISOString() === "2026-09-30T22:00:00.000Z");
-    const db = new FakeDb({
-      api_usage: [
-        { id: "o1", service: "openai", units: 1, cost: 10, created_at: "2026-10-01T08:00:00Z" },
-        { id: "o2", service: "openai", units: 1, cost: 5.5, created_at: "2026-10-02T08:00:00Z" },
-        { id: "sept", service: "openai", units: 1, cost: 99, created_at: "2026-09-30T21:00:00Z" }, // 23 h Paris le 30/09
-      ],
-    });
+    const db = new FakeDb(
+      {
+        api_usage: [
+          { id: "o1", service: "openai", units: 1, cost: 10, created_at: "2026-10-01T08:00:00Z" },
+          { id: "o2", service: "openai", units: 1, cost: 5.5, created_at: "2026-10-02T08:00:00Z" },
+          { id: "sept", service: "openai", units: 1, cost: 99, created_at: "2026-09-30T21:00:00Z" }, // 23 h Paris le 30/09
+        ],
+      },
+      { strictTables: true },
+    );
+    resetDailyViewMemo();
     const state = await openAiBudget({ db: db as never, now: NOW, env: {} });
     check("dépense du mois lue en base : 15,50 € → plafond", state.level === "plafond" && state.spent === 15.5, state);
+
+    /*
+     * Même décision quand la base agrège (Cowork #22). Le plafond décide d'une
+     * dépense : une vue qui agrège à la lecture reste EXACTE, mais il faut le
+     * prouver, et prouver aussi que septembre n'entre pas dans le mois.
+     */
+    resetDailyViewMemo();
+    const aggregated = await openAiBudget({
+      db: new FakeDb(
+        {
+          api_usage_daily: [
+            { user_id: "u1", day: "2026-10-01", service: "openai", calls: 1, eur: 10, units: 1 },
+            { user_id: "u1", day: "2026-10-02", service: "openai", calls: 1, eur: 5.5, units: 1 },
+            { user_id: "u1", day: "2026-09-30", service: "openai", calls: 1, eur: 99, units: 1 },
+          ],
+        },
+        { strictTables: true },
+      ) as never,
+      now: NOW,
+      env: {},
+    });
+    check(
+      "vue agrégée : la même dépense, la même décision",
+      aggregated.spent === state.spent && aggregated.level === state.level,
+      { vue: aggregated, lignes: state },
+    );
   }
 
   console.log("\n3. Préparation : arrêt propre à 100 %");
@@ -108,6 +144,29 @@ async function main() {
       "relances des autres agents (relance:redaction, relance:grille…) hors du plafond du job",
       Math.abs(prepCost([{ operation: "facts", cost: 0.1 }, { operation: "relance:redaction:rewrite", cost: 0.064 }, { operation: "relance:grille:0", cost: 0.002 }, { operation: "relance", cost: 0.02 }]) - 0.1) < 1e-9,
     );
+    /*
+     * Cowork #23 : au-delà de 1 000 lignes, PostgREST tronque EN SILENCE. Le
+     * faux client reproduit ce plafond (`maxRows`) ; sans lui, ce test
+     * passerait aussi avec l'ancien `select` non paginé et ne prouverait rien.
+     * 2 500 appels de préparation à 0,001 €, plus 300 de rédaction (exclus).
+     */
+    {
+      const since = "2026-10-03T06:00:00Z";
+      const rows = [
+        ...Array.from({ length: 2_500 }, (_, i) => ({ id: `p${String(i).padStart(5, "0")}`, service: "openai", operation: "facts", cost: 0.001, created_at: "2026-10-03T07:00:00Z" })),
+        ...Array.from({ length: 300 }, (_, i) => ({ id: `r${String(i).padStart(5, "0")}`, service: "openai", operation: "qualite:redaction", cost: 0.01, created_at: "2026-10-03T07:00:00Z" })),
+        // Avant le début du job : jamais compté.
+        { id: "avant", service: "openai", operation: "facts", cost: 5, created_at: "2026-10-03T05:00:00Z" },
+      ];
+      const capped = new FakeDb({ api_usage: rows }, { maxRows: 1_000 });
+
+      // L'ancienne lecture, telle qu'elle était : un seul `select`, sans pagination.
+      const { data: truncated } = await capped.from("api_usage").select("operation, cost").eq("service", "openai").gte("created_at", since);
+      check("le piège existe : une lecture non paginée s'arrête à 1 000 lignes", (truncated as unknown[]).length === 1_000, (truncated as unknown[]).length);
+
+      const cost = await prepCostSince(capped as never, since);
+      check("garde-fou de la préparation : les 2 500 appels comptés (2,50 €, rédaction exclue)", Math.abs(cost - 2.5) < 1e-9, cost);
+    }
     // « Sans brouillons » : aucune relance rédigée (07/10 : 14 relances dans un lot sans brouillons).
     const noDraft = await relancesStep({ db: new FakeDb({}) as never, userId: "u1", job: { id: "j", params: { skipDrafts: true }, state: {}, result: {}, user_id: "u1", created_at: "" } } as never);
     check("préparation sans brouillons : les relances ne sont pas rédigées", /non rédigées/.test(noDraft.progress?.step ?? ""), noDraft.progress);

@@ -19,11 +19,32 @@ const CASCADE: Record<string, { delete: string[]; nullify: string[] }> = {
 };
 
 export class FakeDb {
-  constructor(public tables: Record<string, Row[]> = {}) {}
+  /**
+   * `strictTables` : une table ou une vue absente rend une ERREUR, comme
+   * PostgREST (« Could not find the table … in the schema cache »). À utiliser
+   * dès qu'un code a un repli quand une vue manque — sinon le test prend le
+   * chemin rapide avec zéro ligne et ne prouve rien.
+   */
+  constructor(
+    public tables: Record<string, Row[]> = {},
+    /**
+     * `maxRows` : plafond de lignes par réponse, comme `db-max-rows` de
+     * PostgREST (1 000 chez Supabase). Les lignes au-delà manquent SANS
+     * ERREUR — c'est exactement le piège à tester ; sans cette option, un
+     * test « plus de 1 000 lignes » passerait aussi avec un code non paginé.
+     */
+    public options: { strictTables?: boolean; maxRows?: number } = {},
+  ) {}
+
+  has(table: string): boolean {
+    return !this.options.strictTables || table in this.tables;
+  }
 
   from(table: string) {
+    // L'ordre compte : `??=` crée la table, donc on relève son existence avant.
+    const known = this.has(table);
     this.tables[table] ??= [];
-    return new FakeQuery(this, table);
+    return new FakeQuery(this, table, known);
   }
 
   rows(table: string): Row[] {
@@ -31,7 +52,10 @@ export class FakeDb {
   }
 }
 
-class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: number | null }> {
+/** Ce que rend une requête : `error` est renseignée pour une table inconnue (mode strict). */
+type FakeResult = { data: unknown; error: { message: string } | null; count: number | null };
+
+class FakeQuery implements PromiseLike<FakeResult> {
   private op: "select" | "update" | "delete" | "insert" | "upsert" = "select";
   private filters: Filter[] = [];
   private columns = "*";
@@ -46,7 +70,12 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
   private offset = 0;
   private one: "single" | "maybe" | null = null;
 
-  constructor(private db: FakeDb, private table: string) {}
+  constructor(
+    private db: FakeDb,
+    private table: string,
+    /** `false` pour une table ou une vue inconnue en mode strict : toute lecture rend une erreur. */
+    private known = true,
+  ) {}
 
   select(columns = "*", options: { count?: string; head?: boolean } = {}) {
     if (this.op === "select") {
@@ -134,7 +163,10 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
     return rows.map((row) => Object.fromEntries(keys.map((key) => [key, row[key] ?? null])));
   }
 
-  private run(): { data: unknown; error: null; count: number | null } {
+  private run(): FakeResult {
+    if (!this.known) {
+      return { data: null, error: { message: `Could not find the table 'public.${this.table}' in the schema cache` }, count: null };
+    }
     const all = this.db.tables[this.table];
     const matches = all.filter((row) => this.filters.every((filter) => filter(row)));
     let result: Row[] = [];
@@ -146,6 +178,9 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
         result.sort((a, b) => (String(a[column]) < String(b[column]) ? -1 : 1) * (ascending ? 1 : -1));
       }
       if (this.max !== null) result = result.slice(this.offset, this.offset + this.max);
+      // Plafond du serveur : appliqué APRÈS la plage demandée, en silence.
+      const cap = this.db.options.maxRows;
+      if (cap && result.length > cap) result = result.slice(0, cap);
       if (this.head) return { data: null, error: null, count: matches.length };
       return this.finish(this.project(result), this.counted ? matches.length : null);
     }
@@ -200,8 +235,8 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count: numb
     return { data: data[0] ?? null, error: null, count };
   }
 
-  then<A = { data: unknown; error: null; count: number | null }, B = never>(
-    resolve?: ((value: { data: unknown; error: null; count: number | null }) => A | PromiseLike<A>) | null,
+  then<A = FakeResult, B = never>(
+    resolve?: ((value: FakeResult) => A | PromiseLike<A>) | null,
     reject?: ((reason: unknown) => B | PromiseLike<B>) | null,
   ): PromiseLike<A | B> {
     return Promise.resolve()
