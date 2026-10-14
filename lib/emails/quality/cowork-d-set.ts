@@ -296,3 +296,74 @@ export const COWORK_SET_3: CoworkGradedMail[] = [
     note: "pas du recrutement ; problème générique (« une pièce manquante »)",
   },
 ];
+
+
+/**
+ * JEU N°4 (Cowork #58) : les 7 désaccords juge / Cowork de l'A/B du rédacteur (13/10), la NOTE DE COWORK faisant
+ * foi (prêt seulement si ≥ 9). Le juge disait « prêt » (10/10) ; le problème y reste souvent générique.
+ */
+export const COWORK_SET_AB: CoworkGradedMail[] = [
+  {
+    company: "CONTI FRERES",
+    family: "F2",
+    subject: "Dossiers d’aides",
+    core: "Bonjour,\n\nJe suis Axel Remillat, j'automatise les tâches répétitives des PME : je vous écris pour l'une des vôtres.\n\nPour vos dossiers Prime Rénov', un revenu fiscal manquant impose une relance avant chiffrage.\n\nJ’automatise la lecture des tests d’éligibilité, signale les manques et renseigne votre outil pour établir le devis.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/agent?v=2\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "A/B du 13/10 (mail 2B) : juge « prêt », Cowork 8",
+  },
+  {
+    company: "GROUPAGEF",
+    family: "F1",
+    subject: "Documents de chantier",
+    core: "Bonjour,\n\nPour vos travaux de voirie et réseaux auprès de RTE et ENEDIS, chaque document doit rejoindre le bon chantier. Un numéro de chantier manquant retarde son classement.\n\nJ'automatise ce tri : je lis les documents reçus par e-mail et vous signale les numéros de chantier manquants.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=1\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "A/B du 13/10 (mail 3B) : juge « prêt », Cowork 8",
+  },
+  {
+    company: "BATI CONCEPT 04",
+    family: "F3",
+    subject: "Références des dossiers d’assèchement ?",
+    core: "Bonjour,\n\nQui vérifie les références des dossiers d’assèchement dans les e-mails reçus ?\n\nJ'automatise leur tri et je signale les références manquantes à votre équipe administrative de six personnes.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "A/B du 13/10 (mail 6B) : juge « prêt », Cowork 8",
+  },
+  {
+    company: "MEDIA IMMO",
+    family: "F1",
+    subject: "Commandes de dossiers",
+    core: "Bonjour,\n\nAvec vos dossiers d’urbanisme et de prévention des risques, chaque commande client doit être traitée avec l’adresse du bien. Une adresse manquante bloque le traitement et impose une relance.\n\nJ’automatise le tri des commandes reçues par e-mail : je repère les adresses manquantes et transmets les demandes complètes à l’équipe.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=1\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
+    coworkReady: false,
+    coworkScore: "7",
+    note: "A/B du 13/10 (mail 7A) : juge « prêt », Cowork 7",
+  },
+  {
+    company: "DUGUIT TECHNOLOGIES SAS (CHAMPAGEL - ALLIANS ROBOTICS)",
+    family: "F3",
+    subject: "Écarts de facturation ?",
+    core: "Bonjour,\n\nQui rapproche vos factures fournisseurs des bons de livraison avant la clôture ?\n\nJ'automatise ce rapprochement et je signale tout écart de quantité ou de prix dès réception.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=invoice&v=3\n\nAuriez-vous 15 minutes la semaine prochaine pour en parler ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "A/B du 13/10 (mail 8B) : juge « prêt », Cowork 8",
+  },
+  {
+    company: "INDUST RECHERCH PROCEDES APPLICAT LASER (IREPA LASER)",
+    family: "F1",
+    subject: "Suivi des commandes laser",
+    core: "Bonjour,\n\nVos assemblages laser en petites et moyennes séries impliquent un suivi de chaque commande. Une référence manquante retarde la confirmation du délai.\n\nJ'automatise le tri des e-mails reçus : je signale les références manquantes et transmets les commandes complètes à la bonne personne.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=1\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "A/B du 13/10 (mail 9A) : juge « prêt », Cowork 8",
+  },
+  {
+    company: "LEFRANC SAS",
+    family: "F2",
+    subject: "Références de commandes",
+    core: "Bonjour Madame,\n\nJe suis Axel Remillat, j'automatise les tâches répétitives des PME : je vous écris pour l'une des vôtres.\n\nVos commandes en ligne, traitées en temps réel : une référence manquante peut retarder l’expédition.\n\nJe trie commandes et demandes, signale les références manquantes et prépare une réponse que votre commercial vérifie.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    coworkReady: false,
+    coworkScore: "8",
+    note: "A/B du 13/10 (mail 10B) : juge « prêt », Cowork 8",
+  },
+];
