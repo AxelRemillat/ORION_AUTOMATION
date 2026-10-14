@@ -6,6 +6,7 @@
  *   2. domaines déduits du nom (lib/funnel/free-site-recovery.ts), filtrés par le DNS ;
  *   3. robots.txt respecté, puis UNE lecture de la page d'accueil, user-agent honnête ;
  *   4. site gardé seulement si la correspondance est sûre (nom + SIREN ou ville).
+ * Structures publiques, mutuelles et associations écartées (catégorie juridique 7, 8, 9).
  * Ni Linkup, ni Hunter, ni Pappers, ni modèle.
  *
  *   … sans-site-gratuit.js                simulation : combien, échantillon
@@ -18,9 +19,11 @@ import { matchHomepage, recoveryDomains, robotsForbidsHome, type RecoveryCompany
 
 const UA = "ORION-prospection/1.0 (recherche du site officiel d'une entreprise ; une page par domaine ; +https://axelremillat.com)";
 const apply = process.argv.includes("--appliquer");
+/** Catégorie juridique INSEE : 7 = droit public, 8 = mutuelles, 9 = associations (Cowork #31 : hors cible). */
+const NON_PME = /^[789]/;
 export const RECOVERY_TRACE = "site retrouvé gratuitement (Cowork #30)";
 
-type Base = { siren?: string; city?: string; postal_code?: string; company_name?: string; website?: string | null; email?: string | null };
+type Base = { figures?: { legal_code?: string | null }; siren?: string; city?: string; postal_code?: string; company_name?: string; website?: string | null; email?: string | null };
 type Row = { id: string; company_name: string | null; score: number | null; contact: Record<string, unknown> | null; identity: { name?: string; base?: Base } | null };
 
 async function get(url: string): Promise<{ status: number; url: string; text: string } | null> {
@@ -66,8 +69,8 @@ async function main() {
     await readAll<Row>(() =>
       table.from("signal_candidates").select("id, company_name, score, contact, identity").eq("user_id", userId).eq("statut", "rejeté").like("motif_rejet", "Sans site%").gte("score", 4).is("prospect_id", null).gte("created_at", since).order("id"),
     )
-  ).filter((row) => row.identity);
-  console.log(`${rows.length} fiche(s) « Sans site » (score ≥ 4, 14 j)${apply ? "" : " — SIMULATION, rien n'est écrit"}`);
+  ).filter((row) => row.identity && !NON_PME.test(row.identity.base?.figures?.legal_code ?? ""));
+  console.log(`${rows.length} fiche(s) « Sans site » (score ≥ 4, 14 j, hors public et associations)${apply ? "" : " — SIMULATION, rien n'est écrit"}`);
   const found: { row: Row; website: string; by: string }[] = [];
   let resolved = 0;
   for (let index = 0; index < rows.length; index += 4) {
