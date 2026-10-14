@@ -3,6 +3,7 @@
  * (eval-quality, regenerate-drafts). Lit `.env.local`, n'affiche aucun secret.
  * Appels OpenAI PAYANTS : chaque appel est enregistré dans `api_usage`.
  */
+import { contactOriginOf, optOutSentence } from "@/lib/mail-preflight/contact-origin";
 import { existsSync, readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import type { Database, Prospect } from "@/types";
@@ -205,6 +206,8 @@ export async function prepareMail(
     website: prospect.website,
     family: options.family,
     keyFacts: factsGate.keyFactsOf(figures),
+    // Comme le job (Cowork #59) : origine de l'adresse + « stop » en fin de mail.
+    optOut: optOutSentence(contactOriginOf(prospect)),
   });
   return { outcome, civilities, greeting: salutation, brief, profileNote, foundSite };
 }
