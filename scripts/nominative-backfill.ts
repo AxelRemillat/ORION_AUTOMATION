@@ -20,11 +20,20 @@
  * nominatif est PROPOSÉ (`key_figures.relance2_contact`), sans rien envoyer ni
  * reprogrammer. Même plafond de crédits pour les deux étapes. `--no-relance2`
  * pour ne faire que le stock.
+ *
+ * Cowork #53 : troisième étape, FICHES SANS E-MAIL — recherche de contact
+ * (site, Email Finder dirigeant, Domain Search ; jamais Linkup) sur celles qui
+ * ont un vrai domaine, hors cible / opposées / perdues / « ne plus contacter »
+ * exclues (lib/contact-finder/no-email.ts). Même plafond. `--no-sans-email`
+ * pour l'écarter. Lancer avec USAGE_SOURCE=agent1 pour tracer la dépense.
  */
 import { db, ownerId } from "./quality-live";
 import { readAll } from "@/lib/supabase/read-all";
 import { proposeRelance2Live, upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
 import { relance2Ineligibility, type SentRow } from "@/lib/contact-finder/relance2";
+import { noEmailIneligibility, type NoEmailProspect } from "@/lib/contact-finder/no-email";
+import { findContact } from "@/lib/contact-finder";
+import { segmentOf } from "@/lib/segments";
 import { topicOf } from "@/lib/contact-finder/nominative";
 import { addresseeHint, ineligibility, isFreeDraft, isGenericAddress, nominativeShare, type UpgradeProspect } from "@/lib/contact-finder/upgrade";
 import { usagePerson } from "@/lib/emails/salutation";
@@ -39,6 +48,7 @@ const APPLY = process.argv.includes("--apply");
 const LIMIT = arg("--limit", 60);
 const MAX_CREDITS = arg("--max-credits", 150);
 const RELANCE2 = !process.argv.includes("--no-relance2");
+const NO_EMAIL = !process.argv.includes("--no-sans-email");
 /** Crédits Hunter par fiche, d'après les runs du 06/10 (recherche de domaine, finder, vérification). */
 const CREDITS_PER_PROSPECT = 3;
 
@@ -60,7 +70,9 @@ async function loadStock(userId: string) {
   const stock = prospects.filter((prospect) => prospect.email && !(byProspect.get(prospect.id) ?? []).some((row) => row.status === "sent"));
   // RELANCE 2 : contactés, intro + relance 1 parties sur une générique, sans réponse.
   const relance2 = prospects.filter((prospect) => relance2Ineligibility(prospect, (byProspect.get(prospect.id) ?? []) as SentRow[]) === null);
-  return { stock, byProspect, relance2 };
+  // SANS E-MAIL : vrai domaine, ni hors cible, ni opposée, ni perdue, ni « ne plus contacter ».
+  const noEmail = prospects.filter((prospect) => noEmailIneligibility(prospect as unknown as NoEmailProspect) === null);
+  return { stock, byProspect, relance2, noEmail };
 }
 
 const pct = (share: { nominative: number; total: number }) => (share.total ? `${Math.round((share.nominative / share.total) * 100)} % (${share.nominative}/${share.total})` : "—");
@@ -68,7 +80,7 @@ const pct = (share: { nominative: number; total: number }) => (share.total ? `${
 async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
-  const { stock, byProspect, relance2 } = await loadStock(userId);
+  const { stock, byProspect, relance2, noEmail } = await loadStock(userId);
   const before = nominativeShare(stock);
 
   const reasons = new Map<string, number>();
@@ -84,11 +96,20 @@ async function main() {
   for (const [reason, count] of reasons) console.log(`  écartées — ${reason} : ${count}`);
 
   console.log(`Relance 2 vers une personne (intro + relance 1 sur une générique, sans réponse) : ${RELANCE2 ? relance2.length : "désactivé"}`);
+  console.log(`Sans e-mail, avec un vrai domaine (ni hors cible, ni opposée, ni perdue) : ${NO_EMAIL ? noEmail.length : "désactivé"}`);
+  // Répartition par famille (segment) de tout ce qui consommerait un crédit.
+  const families = new Map<string, number>();
+  for (const prospect of [...candidates.slice(0, LIMIT), ...(RELANCE2 ? relance2 : []), ...(NO_EMAIL ? noEmail : [])]) {
+    const family = segmentOf(prospect as never) ?? "sans segment";
+    families.set(family, (families.get(family) ?? 0) + 1);
+  }
+  console.log(`Par famille : ${[...families].sort((a, b) => b[1] - a[1]).map(([family, count]) => `${family} ${count}`).join(" · ")}`);
   if (!APPLY) {
-    const fiches = Math.min(candidates.length, LIMIT) + (RELANCE2 ? relance2.length : 0);
+    const fiches = Math.min(candidates.length, LIMIT) + (RELANCE2 ? relance2.length : 0) + (NO_EMAIL ? noEmail.length : 0);
     console.log(`\nSIMULATION (aucun appel Hunter, aucune écriture). ${fiches} fiche(s) : au plus ~${fiches * CREDITS_PER_PROSPECT} crédits Hunter (plafond du run : ${MAX_CREDITS}).`);
     for (const prospect of candidates.slice(0, 20)) console.log(`  · ${prospect.company_name} <${prospect.email}> — sujet : ${topicOf(prospect.brief?.pain?.task ?? prospect.pain_point)}`);
     for (const prospect of (RELANCE2 ? relance2 : []).slice(0, 20)) console.log(`  · relance 2 · ${prospect.company_name} <${prospect.email}>`);
+    for (const prospect of (NO_EMAIL ? noEmail : []).slice(0, 40)) console.log(`  · sans e-mail · ${prospect.company_name} (${prospect.website})`);
     console.log("\nRelancer avec --apply pour exécuter.");
     return;
   }
@@ -130,6 +151,27 @@ async function main() {
     if (result.status === "proposed") proposed += 1;
   }
 
+  // SANS E-MAIL : recherche de contact (site, Email Finder dirigeant, Domain Search ; pas de Linkup).
+  let foundNoEmail = 0;
+  let nominativeNoEmail = 0;
+  for (const prospect of NO_EMAIL ? noEmail : []) {
+    if ((await hunterCreditsSince(started)) >= MAX_CREDITS) {
+      console.log(`arrêt : plafond du run atteint (${MAX_CREDITS} crédits)`);
+      break;
+    }
+    const found = await findContact(prospect.id, { db: db as never, userId, linkup: 0 }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }) as { error: string });
+    if ("error" in found) {
+      console.log(`sans e-mail · ${prospect.company_name} | erreur : ${found.error}`);
+      continue;
+    }
+    console.log(`sans e-mail · ${prospect.company_name} | ${found.email ? `${found.email} (${found.email_type ?? "?"}, ${found.found_by}, ${found.confidence})` : `aucune — ${found.found_by}`}`);
+    if (/Hunter épuisé/.test(found.found_by ?? "")) break;
+    if (found.email) {
+      foundNoEmail += 1;
+      if (found.email_type === "nominatif") nominativeNoEmail += 1;
+    }
+  }
+
   // Générique restante (brouillon verrouillé, etc.), hors opposées et « ne plus
   // contacter » : « À l'attention de <dirigeant> » pour le générateur, sans crédit.
   const { stock: remaining } = await loadStock(userId);
@@ -153,8 +195,10 @@ async function main() {
   console.log(`Fiches passées en nominatif : ${upgraded} ; brouillons marqués « à régénérer » : ${flagged}`);
   const spent = await hunterCreditsSince(started);
   console.log(`Relance 2 : contact nominatif proposé sur ${proposed} fiche(s)`);
+  console.log(`Sans e-mail → contact trouvé : ${foundNoEmail} fiche(s), dont ${nominativeNoEmail} nominative(s)`);
   console.log(`Crédits Hunter consommés par ce run : ${spent}`);
-  console.log(`Coût par adresse nominative trouvée : ${upgraded + proposed ? (spent / (upgraded + proposed)).toFixed(1) : "—"} crédit(s)`);
+  const nominatives = upgraded + proposed + nominativeNoEmail;
+  console.log(`Coût par adresse nominative trouvée : ${nominatives ? (spent / nominatives).toFixed(1) : "—"} crédit(s) (${nominatives} adresse(s))`);
   console.log(`« À l'attention de… » posé sur ${hinted} fiche(s) restée(s) générique(s) (sans crédit)`);
   console.log(`Sans résultat Hunter (${misses.length}) :`);
   for (const miss of misses) console.log(`  · ${miss}`);
