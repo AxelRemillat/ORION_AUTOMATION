@@ -1,4 +1,5 @@
 import { isRoleBox, ROLE_BOX_REASON } from "@/lib/contact-finder/role-boxes";
+import { departedEmails } from "@/lib/inbound/departed-server";
 import { advanceStatus } from "@/lib/constants";
 import { TRASHED_ERROR, type Db } from "@/lib/trash/scope";
 import type { Message, MessageType, ProspectStatus } from "@/types";
@@ -126,6 +127,10 @@ export async function checkSendRules(db: Db, message: OutboxMessage, to: unknown
   if (!row || row.deleted_at) return fail("blocked", TRASHED_ERROR, 409);
   if (row.do_not_contact) {
     return fail("blocked", "Prospect marqué « ne plus contacter » : envoi refusé.", 409);
+  }
+  // Cowork #54 : « je ne travaille plus chez … » — l'adresse est morte.
+  if (departedEmails(row.key_figures as Record<string, unknown> | null).includes(String(to).toLowerCase())) {
+    return fail("blocked", `${String(to)} : contact parti de l'entreprise (réponse automatique). Choisissez un contact proposé sur la fiche.`, 409);
   }
 
   // Une INTRO ne part jamais vers un prospect déjà contacté : il ne se relance

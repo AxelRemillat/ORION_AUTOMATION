@@ -19,6 +19,8 @@ import { ProspectSummary } from "../_components/prospect-summary";
 import { BusinessProfileCard } from "../_components/business-profile-card";
 import { ContactCard } from "@/components/prospect/contact-card";
 import { Relance2Proposal } from "@/components/prospect/relance2-proposal";
+import { ProposedContacts } from "@/components/prospect/proposed-contacts";
+import { departedEmails, proposedOf } from "@/lib/inbound/departed-server";
 import { EstimateInput } from "../_components/estimate-input";
 import { StatusControl } from "../_components/status-control";
 import { defaultRecipient, foundAddresses } from "../_lib/contact";
@@ -189,6 +191,7 @@ export default async function ProspectDetailPage({ params }: { params: { id: str
           {/* Site et adresse, avec leur provenance : le bouton relance la recherche. */}
           <ContactCard prospect={typed} />
           <Relance2Proposal figures={typed.key_figures} />
+          <ProposedContacts prospectId={typed.id} departed={departedEmails(typed.key_figures)} proposed={proposedOf(typed.key_figures)} current={typed.email ?? null} />
           <ProspectSummary prospect={typed} deals={deals} reminders={reminders} />
           <BusinessProfileCard prospect={typed} />
         </div>
