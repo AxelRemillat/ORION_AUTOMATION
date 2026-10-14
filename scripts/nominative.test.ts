@@ -15,6 +15,7 @@ import { isRoleBox } from "../lib/contact-finder/role-boxes";
 import { classifyEmail, extractEmails } from "../lib/contact-finder/extract";
 import { checkSendRules } from "../lib/outbox/send";
 import { proposeRelance2Contact, relance2Ineligibility, type SentRow } from "../lib/contact-finder/relance2";
+import { noEmailIneligibility } from "../lib/contact-finder/no-email";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
@@ -323,6 +324,21 @@ async function main() {
     check("… l'adresse principale ne change pas (rien n'est reprogrammé)", row.email === "contact@acme.fr");
     check("… trace dans l'historique", db.rows("prospect_events").length === 1);
     check("… plus de seconde proposition (aucun crédit)", relance2Ineligibility(row as unknown as UpgradeProspect, r1) === "contact déjà proposé");
+  }
+
+  console.log("\n11. Fiches sans e-mail (Cowork #53) : un crédit seulement s'il peut servir");
+  {
+    const now = new Date("2026-10-14T10:00:00Z");
+    const fiche = { email: null, website: "https://irepa-laser.com", status: "nouveau", key_figures: {} };
+    check("vrai domaine, rien d'exclu : éligible", noEmailIneligibility(fiche, now) === null);
+    check("pas de site : non (pas de domaine pour Hunter)", noEmailIneligibility({ ...fiche, website: null }, now) === "pas de site");
+    check("adresse déjà connue : non", noEmailIneligibility({ ...fiche, email: "contact@irepa-laser.com" }, now) === "adresse déjà connue");
+    check("opposée, perdue, « ne plus contacter » : non", noEmailIneligibility({ ...fiche, key_figures: { refuses_prospecting: true } }, now) !== null && noEmailIneligibility({ ...fiche, status: "perdu" }, now) === "fiche perdue" && noEmailIneligibility({ ...fiche, do_not_contact: true }, now) !== null);
+    check("hors cible (plus de 250 salariés) : non", /^hors cible/.test(noEmailIneligibility({ ...fiche, size_range: "250-499" }, now) ?? "") || /^hors cible/.test(noEmailIneligibility({ ...fiche, key_figures: { company_category: "GE" } }, now) ?? ""));
+    check("plateforme (pages jaunes) : non", noEmailIneligibility({ ...fiche, website: "https://www.pagesjaunes.fr/pros/123" }, now) !== null);
+    const unknown = { ...fiche, contact_search: { hunter: [{ call: "domain-search", result: "0 adresse" }] } };
+    check("Hunter « 0 adresse » il y a 10 jours : non (crédit perdu)", /domaine inconnu/.test(noEmailIneligibility({ ...unknown, contact_checked_at: "2026-10-04T10:00:00Z" }, now) ?? ""));
+    check("… il y a 4 mois : de nouveau éligible", noEmailIneligibility({ ...unknown, contact_checked_at: "2026-06-01T10:00:00Z" }, now) === null);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);
