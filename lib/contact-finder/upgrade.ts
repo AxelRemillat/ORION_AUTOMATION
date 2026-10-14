@@ -90,6 +90,13 @@ export interface AddresseeHint {
 }
 
 /** Premier prénom d'usage : « Daniel Claude Christian Marie » → « Daniel » ; « Jean-Pierre » reste entier. */
+/**
+ * Nom envoyé à Hunter (Cowork #56) : « Carro-(carro) » du registre donne « Carro- »
+ * après lecture ; la RECHERCHE se fait sur « Carro ». La salutation, elle, garde
+ * sa prudence (civilité seule sur un nom incomplet — lib/emails/salutation.ts).
+ */
+export const searchLastName = (lastName: string): string => lastName.replace(/[-–\s]+$/, "");
+
 export function firstGiven(firstName: string): string {
   return firstName.trim().split(/\s+/)[0] ?? firstName;
 }
@@ -210,7 +217,7 @@ export async function upgradeToNominative(
   const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? null;
   const headcount = typeof figures.headcount === "number" ? figures.headcount : null;
   // Registre : tous les prénoms sont donnés ; on n'écrit (et ne cherche) qu'avec le premier.
-  const leaderName = leader ? { firstName: firstGiven(leader.firstName), lastName: leader.lastName } : null;
+  const leaderName = leader ? { firstName: firstGiven(leader.firstName), lastName: searchLastName(leader.lastName) } : null;
   // Noms + fonctions lus sur le site (gratuit) : des candidats de plus avant Hunter.
   const sitePeople = deps.sitePeople ? await deps.sitePeople(domain).catch(() => []) : [];
   const outcome = await findNominativeContact({ domain, pain, headcount, leader: leaderName, blocked, sitePeople }, deps);
