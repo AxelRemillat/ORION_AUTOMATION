@@ -10,6 +10,8 @@ import { extractEmails } from "../lib/contact-finder/extract";
 import { exclusionReason, isServiceProvider } from "../lib/contact-finder/domains";
 import { runContactSearch, type ContactDeps } from "../lib/contact-finder/finder";
 import { contactDomainMismatch } from "../lib/today/contact-domain";
+import { ownerMismatch } from "../lib/contact-finder/owner";
+import { buildQualityGreeting } from "../lib/emails/quality/greeting";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -93,6 +95,18 @@ check("portail de marque refusé (spoticar.fr)", exclusionReason("spoticar.fr") 
 check("garage indépendant au nom de marque accepté", exclusionReason("renault-garage-dupont.fr") === null);
 check("sous-domaine applicatif refusé, domaine nu accepté", exclusionReason("workspace.outsourcia.fr") === "sous-domaine applicatif" && exclusionReason("outsourcia.fr") === null);
 check("adresse hors domaine = « à vérifier » dans Aujourd'hui", contactDomainMismatch("contact@sbflorac.com", "https://maconnerie-renovation-florac.fr") !== null);
+
+console.log("Contact ≠ titulaire de l'adresse (Cowork #35)");
+check("RISO : f.taoufik@ ≠ Toshihiko Kawatsu", ownerMismatch("f.taoufik@risofrance.fr", "Toshihiko Kawatsu") === true);
+check("tduguit@ = Timothee Duguit", ownerMismatch("tduguit@duguit.com", "Timothee Duguit") === false);
+check("xu.an@ = Xu An (mot court = segment)", ownerMismatch("xu.an@telma.com", "Xu An") === false);
+check("boîte de rôle : rien à vérifier", ownerMismatch("contact@arcomprovence.com", "Robert Abbes") === null);
+const greet = (email: string, contactName: string | null, leaderPerson: string | null, contactIsRecipient = true) => buildQualityGreeting({ email, contactName, leaderPerson, contactIsRecipient });
+check("RISO : « Bonjour, », jamais M. Kawatsu", greet("f.taoufik@risofrance.fr", "Toshihiko Kawatsu", "Toshihiko Kawatsu") === "Bonjour,");
+check("SKI SHOP : benjamin.d@ ne salue pas le dirigeant", greet("benjamin.d@skishop.fr", "Nicolas Jacquier", "Nicolas Jacquier") === "Bonjour,");
+check("titulaire nommé : salué", greet("paul.marolleau@sud-ouest-radiateurs.com", "Paul Marolleau", null) === "Bonjour Monsieur Marolleau,");
+check("boîte générique : le dirigeant (inchangé)", greet("contact@arcomprovence.com", "Robert Abbes", "Robert Abbes", false) === "Bonjour Monsieur Abbes,");
+check("boîte de service (aktid@aktid.fr) : le dirigeant (inchangé)", greet("aktid@aktid.fr", null, "Jean Martin", false) === "Bonjour Monsieur Martin,");
 
 async function finder() {
   const page = `<html><body><h1>S ET B Maçonnerie</h1><p>SARL DOS SANTOS - BARROSO, SIREN 123 456 789, 48400 Florac</p><a href="/contact">Contact</a><a href="/cdn-cgi/l/email-protection#${cf("contact@sbflorac.com")}">écrire</a><a href="https://linkeo.com">service@linkeo.com</a></body></html>`;
