@@ -18,6 +18,8 @@ export interface DraftPatch {
   body: string;
   quality_score?: number | null;
   quality_reason?: string | null;
+  /** Brouillon d'un script repris par l'application (Cowork #58) : il devient un brouillon de l'application. */
+  origin?: null;
 }
 
 /**

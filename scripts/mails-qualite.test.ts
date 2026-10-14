@@ -4,6 +4,8 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { ensureDemoV, F3_CTA } from "../lib/emails/quality/families";
+import { adoptableScriptDraft } from "../lib/jobs/handlers/email";
 import { JOB_OFFER } from "../lib/emails/quality/rules";
 import { repeatedExpressions } from "../lib/emails/quality/checklist";
 import { DAF_GUARDS } from "../lib/emails/quality/cowork-d-set";
@@ -989,6 +991,41 @@ async function main() {
     check("« associations candidates » : pas du recrutement", !JOB_OFFER.test("les associations candidates à votre programme"));
     check("un candidat à relancer avant l'entretien (SKI SHOP) : recrutement", JOB_OFFER.test("Une date de disponibilité manquante oblige à relancer le candidat avant de fixer un entretien."));
     check("« pour postuler », CV, « vous recrutez » : recrutement", JOB_OFFER.test("le formulaire pour postuler") && JOB_OFFER.test("Un CV incomplet") && JOB_OFFER.test("Vous recrutez un technicien"));
+  }
+
+  console.log("\nCowork #58 : liens de démo toujours marqués v=, F3 sous expérience, brouillon de script repris");
+  {
+    // Garde-fou : AUCUN lien de démo généré ne sort sans v= — toutes familles, toutes démos.
+    const unmarked: string[] = [];
+    for (const family of ["F1", "F2", "F3", "F4", "F5"] as const) {
+      for (const demo of Object.values(DEMO_LINKS)) {
+        const core = assembleFamily(family, parts({}), { greeting: GREETING, demo, cta: ctaFor("p-v") });
+        for (const link of core.match(/axelremillat\.com\/(?:automatisations|agent|pipeline|demos)[^\s]*/g) ?? []) {
+          if (!/[?&]v=[1-5]\b/.test(link)) unmarked.push(`${family} ${link}`);
+        }
+      }
+    }
+    check("tout lien de démo assemblé porte v= (5 familles × toutes les démos)", unmarked.length === 0, unmarked.join(" | "));
+    check("lien sans v= : v= de la famille ajouté", ensureDemoV("Exemple : axelremillat.com/automatisations?demo=email", "F2") === "Exemple : axelremillat.com/automatisations?demo=email&v=2");
+    check("/agent sans paramètre : ?v=", ensureDemoV("Testez : axelremillat.com/agent.", "F3") === "Testez : axelremillat.com/agent?v=3.");
+    check("famille inconnue : v=0", ensureDemoV("https://axelremillat.com/automatisations?demo=sav") === "https://axelremillat.com/automatisations?demo=sav&v=0");
+    check("lien déjà marqué et reste du texte : inchangés", ensureDemoV("Voir axelremillat.com/automatisations?demo=invoice&v=3 et axelremillat.com/pme", "F1") === "Voir axelremillat.com/automatisations?demo=invoice&v=3 et axelremillat.com/pme");
+
+    const miniBrief = { companyName: "ACME", angle: { type: "métier", hookFactIds: [], insight: "" }, pain: { task: "Confirmer les délais", whyThem: [], automationIdea: "" }, rankedFacts: [], avoid: [], cta: "", proofId: null, targetingWarning: null, excludedAngles: [] } as unknown as StrategyBrief;
+    const f3Input = { brief: miniBrief, facts: [], own: [], activity: null, companyName: "ACME", demo: DEMO_LINKS.emails, greeting: GREETING, cta: ctaFor("p-f3"), family: "F3" as const };
+    const withoutExperiment = buildWriterPrompt(f3Input);
+    const withExperiment = buildWriterPrompt({ ...f3Input, fixedCta: "Voulez-vous que je vous envoie une vidéo de 2 minutes ?" });
+    check("F3 sans expérience : le gabarit finit par F3_CTA, comme avant", withoutExperiment.includes(F3_CTA));
+    check("F3 avec expérience : la variante est la SEULE phrase finale montrée", withExperiment.includes("Voulez-vous que je vous envoie une vidéo de 2 minutes ?") && !withExperiment.includes(F3_CTA));
+  }
+  {
+    const fake = new FakeDb({ messages: [
+      { id: "eval-1", user_id: "u1", prospect_id: "p-jb", type: "intro", status: "draft", send_status: "draft", origin: "eval", validated_at: null, edited_by_hand: false, deleted_at: null, created_at: "2026-10-09T08:00:00Z" },
+      { id: "eval-2", user_id: "u1", prospect_id: "p-locked", type: "intro", status: "draft", send_status: "draft", origin: "eval", validated_at: "2026-10-10T08:00:00Z", edited_by_hand: false, deleted_at: null, created_at: "2026-10-09T08:00:00Z" },
+    ] } as never);
+    const ctxFake = { db: fake as never, userId: "u1" };
+    check("AGENCE JB : le brouillon libre d'un script est repris par l'application", (await adoptableScriptDraft(ctxFake, "p-jb")) === "eval-1");
+    check("brouillon de script VALIDÉ : jamais repris", (await adoptableScriptDraft(ctxFake, "p-locked")) === null);
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

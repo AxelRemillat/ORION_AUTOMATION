@@ -1,5 +1,5 @@
 import { OpenAIQuotaError, QUOTA_MESSAGE, quotaHitSince } from "@/lib/ai/quota";
-import { familyForSegment } from "@/lib/emails/quality/families";
+import { ensureDemoV, familyForSegment } from "@/lib/emails/quality/families";
 import { segmentOf } from "@/lib/segments";
 import { singleCompanyName } from "@/lib/company-name";
 import { z } from "zod";
@@ -713,8 +713,28 @@ async function draftTarget(
   return (
     ctx.job.result.messageId ??
     (origin ? null : await replaceableDraft(ctx, prospectId, params.replaceMessageId)) ??
-    (await latestIntroDraft(ctx, prospectId, origin))
+    (await latestIntroDraft(ctx, prospectId, origin)) ??
+    // Cowork #58 (AGENCE JB) : sans brouillon à elle, l'application reprend le brouillon LIBRE d'un script
+    // (eval, script) au lieu d'en créer un second. Il est archivé (message_versions) puis réécrit.
+    (origin ? null : await adoptableScriptDraft(ctx, prospectId))
   );
+}
+
+/** Brouillon d'intro d'un script, libre : ni validé, ni programmé, ni retouché à la main. */
+export async function adoptableScriptDraft(ctx: Pick<StepContext, "db" | "userId">, prospectId: string): Promise<string | null> {
+  const { data } = await ctx.db
+    .from("messages")
+    .select("*")
+    .eq("user_id", ctx.userId)
+    .eq("prospect_id", prospectId)
+    .eq("type", "intro")
+    .eq("status", "draft")
+    .is("deleted_at", null)
+    .not("send_status", "in", "(scheduled,sending)")
+    .order("created_at", { ascending: false })
+    .limit(20);
+  const rows = (data ?? []) as { id: string; origin?: string | null; validated_at?: string | null; edited_by_hand?: boolean }[];
+  return rows.find((row) => row.origin && !row.validated_at && !row.edited_by_hand)?.id ?? null;
 }
 
 /** Le brouillon précédent n'est réécrit que s'il est à nous, à ce prospect, et pas parti. */
@@ -906,7 +926,8 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
     }
     throw new JobError(`À revoir — ${draft.blocked}. Aucun brouillon.`, false, 409);
   }
-  const email = { subject: draft.subject, body: draft.body };
+  // Cowork #58 : tout lien de démo enregistré porte `v=` (le gabarit le pose déjà ; garde-fou pour tout chemin).
+  const email = { subject: draft.subject, body: ensureDemoV(draft.body, draft.family) };
   const best = draft.history.find((attempt) => attempt.body === draft.body);
   const validation = best?.rules ?? { ok: false, failures: [] };
   const critique = null;
@@ -961,7 +982,10 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
     const existing = target;
     const quality = { quality_score: draft.score, quality_reason: draft.needsReview ? draft.reviewReason : null };
     if (existing) {
-      const saved = await replaceDraft(ctx, existing, { subject: email.subject.trim() || null, body: email.body.trim(), ...quality }, {
+      // Brouillon d'un script repris (Cowork #58) : il redevient un brouillon de l'application.
+      const { data: owner } = origin ? { data: null } : await ctx.db.from("messages").select("*").eq("id", existing).maybeSingle();
+      const adopt = Boolean((owner as { origin?: string | null } | null)?.origin) ? { origin: null } : {};
+      const saved = await replaceDraft(ctx, existing, { subject: email.subject.trim() || null, body: email.body.trim(), ...quality, ...adopt }, {
         auto: params.auto === true,
         reason: params.auto ? "régénération automatique" : "régénération demandée",
       });
