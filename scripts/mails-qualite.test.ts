@@ -777,7 +777,7 @@ async function main() {
 
   console.log("\nJeu d'étalonnage D — verdict humain de Cowork (#34)");
   {
-    check("jeu D versionné : 15 mails, 5 prêts selon Cowork", COWORK_D_SET.length === 15 && COWORK_D_SET.filter((mail) => mail.coworkReady).length === 5);
+    check("jeu D versionné : 15 mails, 4 prêts selon Cowork (IMAGINE OPTIC renoté 7, #60)", COWORK_D_SET.length === 15 && COWORK_D_SET.filter((mail) => mail.coworkReady).length === 4);
     const codeVerdict = (mail: (typeof COWORK_D_SET)[number]) => deterministicChecks(mail.core, { family: mail.family, greeting: mail.core.split("\n\n")[0] });
     for (const mail of COWORK_D_SET.filter((item) => item.family === "F4")) {
       check(`D7 : ${mail.company} (F4, Cowork ${mail.coworkScore}) refusé par le code (démo en ouverture)`, codeVerdict(mail).find((item) => item.id === "D7")?.ok === false);

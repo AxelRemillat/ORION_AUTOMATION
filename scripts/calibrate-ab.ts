@@ -19,6 +19,8 @@ import type { MailFamily } from "@/lib/emails/quality/families";
 import type { Prospect } from "@/types";
 
 const TARGET = 17;
+/** Arbitrages de Cowork (#60) : ses notes corrigées priment sur la table du fichier d'éval. */
+const ARBITRATION: Record<string, number> = { "3B": 9 };
 /** Règle corrigée depuis l'A/B (Cowork #57) : le blocage « recrutement » est rejugé avec la règle actuelle. */
 const RECRUITMENT_BLOCK = /Offre d'emploi ou recrutement/;
 
@@ -45,7 +47,7 @@ export function parseAb(markdown: string): AbMail[] {
       const blocked = /^—\/10/.test(judgeLine) && (!recruitment || JOB_OFFER.test(`${subject} ${body}`));
       const note = notes.get(index)?.[letter];
       if (!body || note === undefined) continue;
-      mails.push({ index, company: head[2].trim(), family, letter, subject, core: body.replace(/^Bonjour (Monsieur|Madame) \[Nom\],/, "Bonjour,").trim(), blocked, cowork: note });
+      mails.push({ index, company: head[2].trim(), family, letter, subject, core: body.replace(/^Bonjour (Monsieur|Madame) \[Nom\],/, "Bonjour,").trim(), blocked, cowork: ARBITRATION[`${index}${letter}`] ?? note });
     }
   }
   return mails;

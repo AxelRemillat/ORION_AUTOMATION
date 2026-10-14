@@ -142,9 +142,9 @@ export const COWORK_D_SET: CoworkGradedMail[] = [
     "family": "F1",
     "subject": "Commandes de capteurs",
     "core": "Bonjour Monsieur Bereux,\n\nAvec vos capteurs de front d’onde et miroirs déformables, les commandes portent sur des références précises. Une référence oubliée retarde la confirmation au client.\n\nJ'automatise le tri des commandes reçues par e-mail : je relève les références et signale celles à vérifier avant votre réponse au client.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=1\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
-    "coworkReady": true,
-    "coworkScore": "9",
-    "note": "excellent fait (capteurs de front d'onde, miroirs déformables)"
+    "coworkReady": false,
+    "coworkScore": "7",
+    "note": "renoté 7 par Cowork (#60) : « une référence oubliée retarde la confirmation » est une généralité (C2)"
   },
   {
     "company": "SARL FIRSTPELLETS",
@@ -310,16 +310,16 @@ export const COWORK_SET_AB: CoworkGradedMail[] = [
     core: "Bonjour,\n\nJe suis Axel Remillat, j'automatise les tâches répétitives des PME : je vous écris pour l'une des vôtres.\n\nPour vos dossiers Prime Rénov', un revenu fiscal manquant impose une relance avant chiffrage.\n\nJ’automatise la lecture des tests d’éligibilité, signale les manques et renseigne votre outil pour établir le devis.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/agent?v=2\n\nSeriez-vous disponible 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
     coworkReady: false,
     coworkScore: "8",
-    note: "A/B du 13/10 (mail 2B) : juge « prêt », Cowork 8",
+    note: "A/B du 13/10 (mail 2B) : Cowork 8 pour C3 (#60) — « renseigne votre outil pour établir le devis » : quel outil, quel gain ?",
   },
   {
     company: "GROUPAGEF",
     family: "F1",
     subject: "Documents de chantier",
     core: "Bonjour,\n\nPour vos travaux de voirie et réseaux auprès de RTE et ENEDIS, chaque document doit rejoindre le bon chantier. Un numéro de chantier manquant retarde son classement.\n\nJ'automatise ce tri : je lis les documents reçus par e-mail et vous signale les numéros de chantier manquants.\n\nExemple testable en une minute : axelremillat.com/automatisations?demo=email&v=1\n\nAuriez-vous 15 minutes la semaine prochaine pour voir si ça s'applique chez vous ?",
-    coworkReady: false,
-    coworkScore: "8",
-    note: "A/B du 13/10 (mail 3B) : juge « prêt », Cowork 8",
+    coworkReady: true,
+    coworkScore: "9",
+    note: "A/B du 13/10 (mail 3B) : renoté 9 par Cowork (#60) — n° de chantier RTE/ENEDIS, problème spécifique",
   },
   {
     company: "BATI CONCEPT 04",
