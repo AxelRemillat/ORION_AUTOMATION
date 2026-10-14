@@ -114,8 +114,8 @@ export default async function InboxThreadPage({ params }: { params: { id: string
         {auto ? (
           <div className="rounded-lg border border-line bg-surface p-4 text-[13px] text-muted">
             <p>
-              <strong className="text-text">{AUTO_REPLY_LABEL[auto]}</strong> : ce n&apos;est pas le prospect qui écrit. Ce mail ne compte pas
-              comme réponse et n&apos;arrête pas les relances.
+              <strong className="text-text">{AUTO_REPLY_LABEL[auto]}</strong> : ce n&apos;est pas le prospect qui écrit.{" "}
+              {auto === "parti" ? "Plus aucune relance vers cette adresse ; les contacts cités sont proposés sur la fiche." : "Ce mail ne compte pas comme réponse et n'arrête pas les relances."}
             </p>
             {auto === "antispam" && (
               <AntispamControls

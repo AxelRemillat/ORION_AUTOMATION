@@ -14,6 +14,7 @@ import { findProspectForInbound, withSecondaryContact, type AttachVia } from "@/
 import { applyRefusal, classifyInbound } from "@/lib/inbound/refusal-server";
 import { refusalJudge } from "@/lib/inbound/refusal-judge";
 import { recordProspectEvent } from "@/lib/history/record";
+import { applyDeparted } from "@/lib/inbound/departed-server";
 
 /**
  * POST /api/inbound — réception d'un email trié par n8n.
@@ -234,6 +235,10 @@ export async function POST(request: Request) {
   const cancelledRelances = prospect && !autoKind
     ? await cancelRelancesOnReply(supabase, { userId: ownerId, prospectId: prospect.id, receivedAt })
     : 0;
+  // Contact parti (Cowork #54) : relances vers l'adresse annulées, adresse marquée, contacts proposés.
+  const departed = prospect && !prospect.deleted_at && autoKind === "parti"
+    ? await applyDeparted(supabase as unknown as Db, { userId: ownerId, prospect: { id: prospect.id, email: prospect.email ?? null, key_figures: prospect.key_figures ?? null }, inbound: { id: inserted.id, from_email: fromEmail, body, received_at: receivedAt } }).catch(() => null)
+    : null;
   const returnDate = autoKind === "absence" ? absenceReturnDate({ from_email: fromEmail, subject: asText(payload?.subject, 500), body, received_at: receivedAt }) : null;
   const shiftedRelances = prospect && !prospect.deleted_at && returnDate
     ? await shiftFollowUpsAfterReturn(supabase as unknown as Db, { userId: ownerId, prospectId: prospect.id, returnDate })
@@ -266,5 +271,6 @@ export async function POST(request: Request) {
     return_date: returnDate,
     shifted_relances: shiftedRelances,
     do_not_contact: doNotContact,
+    departed_cancelled: departed?.cancelled ?? 0,
   });
 }

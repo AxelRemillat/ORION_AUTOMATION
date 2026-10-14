@@ -14,6 +14,8 @@ const CATEGORY_STYLE: Record<InboundCategory, { label: string; className: string
 const AUTO_STYLE: Record<AutoReplyKind, string> = {
   antispam: "border-warn/45 bg-warn/15 text-warn-ink",
   absence: "border-line bg-surface-2 text-muted",
+  // Cowork #54 : l'adresse ne servira plus — ses relances programmées sont annulées.
+  parti: "border-lost/30 bg-lost/10 text-lost-ink",
 };
 
 export function CategoryBadge({ category, auto = null }: { category: InboundCategory; auto?: AutoReplyKind | null }) {

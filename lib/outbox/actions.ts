@@ -15,6 +15,7 @@ import { saveReplyDraft } from "./reply-draft";
 import { editScheduledMessage, type EditResult } from "./edit-scheduled";
 import { sendFreeReply } from "./free-reply";
 import { undoRefusal } from "@/lib/inbound/refusal-server";
+import { setPrimaryContact } from "@/lib/inbound/departed-server";
 
 /**
  * Actions « mail » appelées depuis l'UI (fiche prospect, /prospection,
@@ -187,4 +188,11 @@ export async function undoProspectRefusal(prospectId: string): Promise<MailActio
   const id = await userId();
   if (!id) return SESSION_ERROR;
   return done(await undoRefusal(createClient(), { userId: id, prospectId }));
+}
+
+/** « Utiliser comme contact principal » (Cowork #54) : un contact proposé seulement ; aucune relance reprogrammée. */
+export async function setPrimaryContactAction(prospectId: string, email: string): Promise<MailActionResult> {
+  const id = await userId();
+  if (!id) return SESSION_ERROR;
+  return done(await setPrimaryContact(createClient(), { userId: id, prospectId, email }));
 }

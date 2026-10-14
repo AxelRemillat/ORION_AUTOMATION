@@ -44,6 +44,9 @@ export function ReceivedReader({ entry, onTrashed }: { entry: InboxEntry; onTras
       {entry.autoKind === "absence" && (
         <p className="mt-4 text-[12px] text-faint">Réponse automatique : pas une réponse du prospect, les relances continuent.</p>
       )}
+      {entry.autoKind === "parti" && (
+        <p className="mt-4 text-[12px] text-faint">Contact parti : plus aucune relance vers cette adresse. Les contacts cités sont proposés sur la fiche.</p>
+      )}
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
         {/* Réponse automatique : personne à qui répondre, pas de « Répondre » IA. */}

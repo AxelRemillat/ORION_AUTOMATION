@@ -1,4 +1,5 @@
 import { isBounce } from "./bounce";
+import { isDeparted } from "./departed";
 
 /**
  * Réponses AUTOMATIQUES — ce ne sont pas des réponses du prospect.
@@ -12,13 +13,15 @@ import { isBounce } from "./bounce";
  * reclassés sans toucher à la base.
  *   - « antispam » : challenge-response (Mailinblack et consorts) — il faut
  *     cliquer un lien pour que le mail soit délivré ;
- *   - « absence » : réponse automatique, absence, out of office.
+ *   - « absence » : réponse automatique, absence, out of office ;
+ *   - « parti » : « je ne travaille plus chez … » (Cowork #54) — l'adresse ne
+ *     servira plus : ses relances programmées sont annulées (lib/inbound/departed*.ts).
  * Ni l'une ni l'autre ne compte comme réponse, n'arrête les relances, ne fait
  * avancer le statut ou n'appelle de « Répondre » IA. Les rebonds restent gérés
  * à part (`isBounce`).
  */
 
-export type AutoReplyKind = "antispam" | "absence";
+export type AutoReplyKind = "antispam" | "absence" | "parti";
 
 export interface MailLike {
   from_email: string;
@@ -31,6 +34,7 @@ export interface MailLike {
 export const AUTO_REPLY_LABEL: Record<AutoReplyKind, string> = {
   antispam: "Validation anti-spam",
   absence: "Absence",
+  parti: "Contact parti",
 };
 
 const ANTISPAM_SENDER = /mailinblack|@(?:[a-z0-9-]+\.)*(?:spamarrest|boxbe|sendio|altospam|humail|vadesecure)\.[a-z]+$/i;
@@ -71,6 +75,8 @@ export function autoReplyKind(message: MailLike): AutoReplyKind | null {
   const body = message.body ?? "";
   if (ANTISPAM_SENDER.test((message.from_email ?? "").trim())) return "antispam";
   if (ANTISPAM_TEXT.some((pattern) => pattern.test(subject) || pattern.test(body))) return "antispam";
+  // Avant l'absence : « Réponse automatique » + « je ne travaille plus chez … » est un départ.
+  if (isDeparted(message)) return "parti";
   if (message.auto_submitted && /auto-(?:replied|generated)/i.test(message.auto_submitted)) return "absence";
   if (ABSENCE_SUBJECT.test(subject)) return "absence";
   if (body.length <= 1500 && ABSENCE_BODY.test(body.slice(0, ABSENCE_LEAD))) return "absence";
