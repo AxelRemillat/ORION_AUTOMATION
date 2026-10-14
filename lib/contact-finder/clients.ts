@@ -10,6 +10,8 @@ import type { ContactDeps, HunterHit, VerifierStatus } from "./finder";
 import type { CompanyIdentity } from "./types";
 import { gatedHunterCall, hunterCacheKey } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
+import { wwwVariant } from "@/lib/enrichment/www";
+
 
 /**
  * Branchements réels de `ContactDeps`. Chaque appel payant laisse une ligne
@@ -75,6 +77,14 @@ async function allowed(url: URL): Promise<boolean> {
 const MAX_HTML_BYTES = 2_000_000;
 
 export async function fetchHtml(url: string): Promise<{ html: string; url: string } | null> {
+  const page = await fetchHtmlAt(url);
+  if (page) return page;
+  // Domaine nu muet, « www. » servi (Cowork #35) : une seconde tentative.
+  const www = wwwVariant(url);
+  return www ? fetchHtmlAt(www) : null;
+}
+
+async function fetchHtmlAt(url: string): Promise<{ html: string; url: string } | null> {
   let parsed: URL;
   try {
     parsed = new URL(url);

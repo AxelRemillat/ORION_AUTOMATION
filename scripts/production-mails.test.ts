@@ -12,6 +12,7 @@ import { runContactSearch, type ContactDeps } from "../lib/contact-finder/finder
 import { contactDomainMismatch } from "../lib/today/contact-domain";
 import { ownerMismatch } from "../lib/contact-finder/owner";
 import { buildQualityGreeting } from "../lib/emails/quality/greeting";
+import { wwwVariant } from "../lib/enrichment/www";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -106,6 +107,12 @@ check("RISO : « Bonjour, », jamais M. Kawatsu", greet("f.taoufik@risofrance.fr
 check("SKI SHOP : benjamin.d@ ne salue pas le dirigeant", greet("benjamin.d@skishop.fr", "Nicolas Jacquier", "Nicolas Jacquier") === "Bonjour,");
 check("titulaire nommé : salué", greet("paul.marolleau@sud-ouest-radiateurs.com", "Paul Marolleau", null) === "Bonjour Monsieur Marolleau,");
 check("boîte de rôle : « Bonjour, » (règle #59)", greet("contact@arcomprovence.com", "Robert Abbes", "Robert Abbes", false) === "Bonjour,");
+
+console.log("Domaine nu muet → www. (Cowork #35)");
+check("https://planfor.fr → www.planfor.fr", wwwVariant("https://planfor.fr") === "https://www.planfor.fr");
+check("le chemin est gardé", wwwVariant("https://gravir.fr/contact") === "https://www.gravir.fr/contact");
+check("déjà « www. » ou sous-domaine : rien", wwwVariant("https://www.planfor.fr") === null && wwwVariant("https://shop.exemple.fr") === null);
+check("suffixe à deux niveaux", wwwVariant("https://exemple.co.uk") === "https://www.exemple.co.uk");
 
 async function finder() {
   const page = `<html><body><h1>S ET B Maçonnerie</h1><p>SARL DOS SANTOS - BARROSO, SIREN 123 456 789, 48400 Florac</p><a href="/contact">Contact</a><a href="/cdn-cgi/l/email-protection#${cf("contact@sbflorac.com")}">écrire</a><a href="https://linkeo.com">service@linkeo.com</a></body></html>`;
