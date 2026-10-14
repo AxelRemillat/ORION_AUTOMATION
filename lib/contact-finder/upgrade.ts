@@ -1,4 +1,5 @@
 import { offTargetReason } from "@/lib/funnel/off-target";
+import { nonCommercialReason } from "./non-commercial";
 import { recordProspectEvent } from "@/lib/history/record";
 import type { Db } from "@/lib/trash/scope";
 import { domainOfEmail, toDomain } from "./domains";
@@ -147,6 +148,9 @@ export function ineligibility(prospect: UpgradeProspect, now = new Date()): stri
   // Hors cible (grand groupe, agence…) : aucune dépense Hunter (Cowork #52).
   const offTarget = offTargetReason({ key_figures: figures as never, size_range: prospect.size_range ?? null } as never);
   if (offTarget) return `hors cible : ${offTarget}`;
+  // Associations, fondations, structures publiques : écartées d'office (Cowork #55).
+  const nonCommercial = nonCommercialReason(prospect);
+  if (nonCommercial) return nonCommercial;
   return null;
 }
 

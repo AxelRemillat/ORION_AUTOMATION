@@ -1,5 +1,6 @@
 import { offTargetReason } from "@/lib/funnel/off-target";
 import { isExcludedDomain, isFreeMailbox, isServiceProvider, toDomain } from "./domains";
+import { nonCommercialReason } from "./non-commercial";
 
 /**
  * FICHES SANS E-MAIL (Cowork #53, relais d'agent4 #27) : une recherche Hunter
@@ -8,6 +9,7 @@ import { isExcludedDomain, isFreeMailbox, isServiceProvider, toDomain } from "./
  */
 
 export interface NoEmailProspect {
+  company_name?: string | null;
   email: string | null;
   website: string | null;
   status?: string | null;
@@ -31,6 +33,8 @@ export function noEmailIneligibility(prospect: NoEmailProspect, now = new Date()
   if (prospect.status === "perdu" || prospect.status === "gagne") return `fiche ${prospect.status === "perdu" ? "perdue" : "gagnée"}`;
   const offTarget = offTargetReason({ key_figures: figures as never, size_range: prospect.size_range ?? null } as never);
   if (offTarget) return `hors cible : ${offTarget}`;
+  const nonCommercial = nonCommercialReason(prospect);
+  if (nonCommercial) return nonCommercial;
   const domain = toDomain(prospect.website);
   if (!domain) return "pas de site";
   if (isExcludedDomain(domain) || isServiceProvider(domain) || isFreeMailbox(domain)) return "pas un vrai domaine d'entreprise";

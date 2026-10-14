@@ -51,6 +51,64 @@ export function relance2Ineligibility(prospect: UpgradeProspect, sent: SentRow[]
   return null;
 }
 
+/**
+ * Recherche NOMINATIVE sur un domaine (dirigeant du registre, noms du site, puis
+ * Hunter : Domain Search, Email Finder, vérification) — score ≥ 80 et vérifiée
+ * seulement (lib/contact-finder/nominative.ts). Partagée : relance 2, fiches sans e-mail.
+ */
+export async function searchNominative(db: Db, prospect: UpgradeProspect, domain: string, deps: UpgradeDeps) {
+  const figures = prospect.key_figures ?? {};
+  const usage = usagePerson(typeof figures.leader_person === "string" ? figures.leader_person : null);
+  const leader = usage?.first && usage.last ? { firstName: firstGiven(usage.first), lastName: usage.last } : null;
+  const { data: dnc } = await db.from("prospects").select("email").eq("user_id", prospect.user_id).eq("do_not_contact", true);
+  const blocked = ((dnc ?? []) as { email: string | null }[]).map((row) => row.email).filter((email): email is string => Boolean(email));
+  const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? null;
+  const headcount = typeof figures.headcount === "number" ? figures.headcount : null;
+  const sitePeople = deps.sitePeople ? await deps.sitePeople(domain).catch(() => []) : [];
+  return findNominativeContact({ domain, pain, headcount, leader, blocked, sitePeople }, deps);
+}
+
+/**
+ * Fiche SANS e-mail (Cowork #55) : seule une adresse NOMINATIVE vérifiée (≥ 80)
+ * est gardée — jamais une générique. Rien d'autre ne change sur la fiche.
+ */
+export async function fillNoEmailNominative(
+  db: Db,
+  prospect: UpgradeProspect,
+  deps: UpgradeDeps,
+  options: { now?: Date } = {},
+): Promise<{ status: "found" | "none" | "skipped"; reason: string; contact: NominativeContact | null; calls: { domainSearch: number; finder: number; verifier: number } }> {
+  const now = options.now ?? new Date();
+  const none = { domainSearch: 0, finder: 0, verifier: 0 };
+  const domain = toDomain(prospect.website);
+  if (prospect.email) return { status: "skipped", reason: "adresse déjà connue", contact: null, calls: none };
+  if (!domain) return { status: "skipped", reason: "pas de site", contact: null, calls: none };
+  const outcome = await searchNominative(db, prospect, domain, deps);
+  const figures = prospect.key_figures ?? {};
+  const trace = { checked_at: now.toISOString(), domain, steps: outcome.steps, found: outcome.contact?.email ?? null, mode: "sans e-mail" };
+  if (!outcome.contact) {
+    await db.from("prospects").update({ key_figures: { ...figures, nominative: { ...trace, version: 4 } } } as never).eq("id", prospect.id).eq("user_id", prospect.user_id);
+    return { status: "none", reason: "aucune adresse nominative vérifiée ≥ 80", contact: null, calls: outcome.calls };
+  }
+  const c = outcome.contact;
+  await db
+    .from("prospects")
+    .update({
+      email: c.email,
+      email_type: "nominatif",
+      contact_name: c.name,
+      contact_role: c.role,
+      contact_source: c.source,
+      contact_confidence: c.confidence,
+      contact_found_by: `${c.source}+verifier:${c.verifier}`,
+      key_figures: { ...figures, nominative: { ...trace, version: 4 } },
+    } as never)
+    .eq("id", prospect.id)
+    .eq("user_id", prospect.user_id);
+  await recordProspectEvent(db, { prospectId: prospect.id, userId: prospect.user_id, kind: "contact", at: now.toISOString(), data: { title: `Contact nominatif trouvé (fiche sans e-mail) : ${[c.name, c.role].filter(Boolean).join(" — ")} <${c.email}>` } });
+  return { status: "found", reason: `${c.email} (${c.verifier}, ${c.confidence})`, contact: c, calls: outcome.calls };
+}
+
 export async function proposeRelance2Contact(
   db: Db,
   prospect: UpgradeProspect,
@@ -66,14 +124,7 @@ export async function proposeRelance2Contact(
   if (!domain) return { status: "skipped", reason: "aucun domaine", contact: null, calls: none };
 
   const figures = prospect.key_figures ?? {};
-  const usage = usagePerson(typeof figures.leader_person === "string" ? figures.leader_person : null);
-  const leader = usage?.first && usage.last ? { firstName: firstGiven(usage.first), lastName: usage.last } : null;
-  const { data: dnc } = await db.from("prospects").select("email").eq("user_id", prospect.user_id).eq("do_not_contact", true);
-  const blocked = ((dnc ?? []) as { email: string | null }[]).map((row) => row.email).filter((email): email is string => Boolean(email));
-  const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? null;
-  const headcount = typeof figures.headcount === "number" ? figures.headcount : null;
-  const sitePeople = deps.sitePeople ? await deps.sitePeople(domain).catch(() => []) : [];
-  const outcome = await findNominativeContact({ domain, pain, headcount, leader, blocked, sitePeople }, deps);
+  const outcome = await searchNominative(db, prospect, domain, deps);
   if (options.dryRun) return { status: outcome.contact ? "proposed" : "none", reason: "simulation", contact: outcome.contact, calls: outcome.calls };
 
   if (!outcome.contact) {
