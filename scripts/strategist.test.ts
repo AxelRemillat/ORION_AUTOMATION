@@ -31,7 +31,7 @@ import { modelFor, reasoningEffortFor } from "../lib/ai/models";
 import { buildParams } from "../lib/ai/params";
 import { envModelPrices, openAiCost } from "../lib/usage/pricing";
 import { SHORTEN_ROLE } from "../lib/emails/quality/generate";
-import { buildStrategistPrompt, factsHash } from "../lib/emails/strategist";
+import { buildStrategistPrompt, factsHash, hrBriefReason } from "../lib/emails/strategist";
 import { autoRegenRefusal, isAgentSource, scriptJobSource } from "../lib/jobs/regen-cap";
 import { buildWritingPrompt } from "../app/api/emails/generate/prompt";
 import { draftFromBrief } from "../app/api/emails/generate/pipeline";
@@ -505,6 +505,14 @@ const rawBrief = (over: Record<string, unknown> = {}) => ({
     check("régénération automatique de plus de 7 jours : une nouvelle passe", autoRegenRefusal([{ createdAt: at(20), auto: true }, { createdAt: at(9), auto: true }], NOW) === null);
     check("régénérations MANUELLES : jamais comptées", autoRegenRefusal([{ createdAt: at(3), auto: true }, { createdAt: at(2), auto: false }, { createdAt: at(1), auto: false }], NOW) === null);
     check("source d'agent reconnue (mesure, hors plafond)", isAgentSource("agent2") && !isAgentSource("prod") && !isAgentSource(null));
+    // Cowork #57 (SKI SHOP) : brief RH tiré d'une offre d'emploi → écarté avant la rédaction.
+    const job = { id: "f3", label: "Signal web", value: "Renfort service paie (H/F) (17 septembre 2026)" };
+    const shop = { angle: { type: "recrutement", hookFactIds: ["f3", "f2"], insight: "Les dossiers du personnel arrivent de quarante magasins." }, pain: { task: "Réunir les pièces des dossiers salariés, repérer celles qui manquent et préremplir les documents d’entrée.", whyThem: [], automationIdea: "" } } as never;
+    check("SKI SHOP : angle RH tiré d'une offre d'emploi → écarté, motif lisible", /Angle écarté avant la rédaction/.test(hrBriefReason(shop, [job]) ?? ""));
+    const hint = { angle: { type: "recrutement", hookFactIds: ["f3"], insight: "Une assistante devis recrutée : les devis débordent." }, pain: { task: "Préparer les devis de menuiserie à partir des demandes reçues.", whyThem: [], automationIdea: "" } } as never;
+    check("offre d'emploi qui sert d'INDICE d'un pain métier (devis) : rédigeable", hrBriefReason(hint, [{ id: "f3", label: "Signal web", value: "Assistante devis (H/F)" }]) === null);
+    const payroll = { angle: { type: "métier", hookFactIds: ["f1"], insight: "Cabinet comptable." }, pain: { task: "Réunir les variables de paie de leurs clients.", whyThem: [], automationIdea: "" } } as never;
+    check("paie d'un cabinet comptable, angle métier : rédigeable", hrBriefReason(payroll, [{ id: "f1", label: "Activité", value: "Expertise comptable" }]) === null);
     check("script d'agent : job étiqueté source agent2", scriptJobSource({ USAGE_SOURCE: "agent2" }).source === "agent2" && !("source" in scriptJobSource({ USAGE_SOURCE: "prod" })) && !("source" in scriptJobSource({})));
   }
 

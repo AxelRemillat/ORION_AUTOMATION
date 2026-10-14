@@ -280,3 +280,19 @@ export const DAF_GUARDS: (CoworkGradedMail & { expectFail: "D6" })[] = [
     expectFail: "D6",
   },
 ];
+
+/**
+ * JEU N°3 (Cowork #57) : A/B du rédacteur, notation de Cowork. WENABI : « candidatures associatives » n'est pas
+ * du recrutement (faux positif corrigé) — le mail est jugé sur le fond, 7/10 pour Cowork (problème générique).
+ */
+export const COWORK_SET_3: CoworkGradedMail[] = [
+  {
+    company: "WENABI",
+    family: "F2",
+    subject: "Candidatures associatives",
+    core: "Bonjour,\n\nJe suis Axel Remillat, j'automatise les tâches répétitives des PME : je vous écris pour l'une des vôtres.\n\nVos programmes en 36 langues : une pièce manquante complique le suivi des candidatures d’associations.\n\nJ’automatise la lecture des candidatures et pièces reçues par e-mail, signale les manques et prépare la relance à valider.\n\nUne démo proche de ce que vous pourriez avoir chez vous : axelremillat.com/automatisations?demo=email&v=2\n\nAuriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous concerne ?",
+    coworkReady: false,
+    coworkScore: "7",
+    note: "pas du recrutement ; problème générique (« une pièce manquante »)",
+  },
+];

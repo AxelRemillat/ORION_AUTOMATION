@@ -52,7 +52,13 @@ export const FORBIDDEN_WORDS = [
 /** Sigles autorisés d'office : on les emploie tous. */
 const COMMON_ACRONYMS = new Set(["PME", "TVA", "HT", "TTC"]);
 
-const JOB_OFFER = /(offre(s)? d['’]emploi|vous recrutez|recrute[rz]?\b|recrutement|votre annonce|l['’]annonce|poste de|postes? (ouvert|à pourvoir)|candidat|embauch|\bh\s*\/\s*f\b|\bf\s*\/\s*h\b|\bcdi\b|\bcdd\b|offre de (préparateur|comptable|assistant|technicien|commercial))/i;
+/**
+ * Recrutement AU SENS ÉTROIT : un poste, une embauche, un CV, une personne candidate à un emploi.
+ * Cowork #57 (WENABI) : « candidatures associatives », des associations qui candidatent à un programme, ne
+ * sont pas une offre d'emploi — « candidature » seule ne suffit plus ; « candidat » (la personne) et
+ * « postuler » restent refusés, sauf « associations candidates ».
+ */
+export const JOB_OFFER = /(offre(s)? d['’]emploi|vous recrutez|recrute[rz]?\b|recrutement|votre annonce|l['’]annonce|poste de|postes? (ouvert|à pourvoir)|(?<!associations?\s)\bcandidat(e|es|s)?\b|postul|\bcv\b|curriculum|entretien d['’]embauche|embauch|\bh\s*\/\s*f\b|\bf\s*\/\s*h\b|\bcdi\b|\bcdd\b|offre de (préparateur|comptable|assistant|technicien|commercial))/i;
 const REGISTRY = /(\bsalarié|\bsalarie|effectif|chiffre d['’]affaires|\bca de\b|capital social|\bnaf\b|code ape|cr[ée]{1,2}e en \d{4}|fond[ée]e en \d{4}|depuis \d{4}|immatricul|\bsiren\b|\bsiret\b|\bk€|\bm€|millions? d['’]euros)/i;
 const SITE_AS_SOURCE = /(sur votre site|d['’]apr[èe]s votre site|votre site (indique|pr[ée]sente|mentionne)|j['’]ai vu (que|sur)|en parcourant)/i;
 const VAGUE_PROOF = /(exemples? testables?|sur mon site|démos? en ligne)/i;
