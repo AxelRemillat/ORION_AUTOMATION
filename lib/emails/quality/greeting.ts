@@ -1,6 +1,7 @@
 import { addresseeOf, civilityFor, isCompleteName, usagePerson, type Person } from "@/lib/emails/salutation";
 import type { AskFn } from "@/lib/ai/chat";
 import { isRoleAddress } from "@/lib/contact-finder/extract";
+import { ownerMismatch } from "@/lib/contact-finder/owner";
 
 /**
  * SALUTATION du gabarit qualité.
@@ -64,7 +65,9 @@ export function greetingPerson(input: GreetingInput): Person | null {
   if (input.addressee) return usagePerson(input.addressee);
   // Contact nominatif choisi pour la fiche : son nom COMPLET, plutôt que ce que
   // l'adresse laisse deviner (« jmartin@ » ne donne pas le prénom).
-  if (input.contactIsRecipient && input.contactName) {
+  // … sauf s'il n'est visiblement PAS le titulaire de l'adresse (RISO FRANCE, Cowork #35 :
+  // f.taoufik@ affiché au nom du dirigeant) : on salue alors le titulaire lu dans l'adresse.
+  if (input.contactIsRecipient && input.contactName && ownerMismatch(input.email, input.contactName) !== true) {
     const recipient = usagePerson(input.contactName);
     if (recipient) return recipient;
   }
