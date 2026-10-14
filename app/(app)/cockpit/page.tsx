@@ -17,6 +17,8 @@ import { PlatformsCard } from "./_components/platforms/platforms-card";
 import { freelanceSources, platformActivity } from "@/lib/opportunities/stats";
 import { dueFollowUps } from "@/lib/opportunities/follow-up-due";
 import type { Opportunity } from "@/lib/opportunities/types";
+import { loadExperimentStats } from "@/lib/experiments/stats";
+import { ExperimentCard } from "./_components/experiments/experiment-card";
 
 export const metadata = { title: "Cockpit — ORION" };
 
@@ -46,7 +48,7 @@ export default async function CockpitPage({
   const supabase = createClient();
 
   // Corbeille exclue partout : boîte de réception, courbes.
-  const [{ prospects, messages, deals, inbound }, pilotage, prefs, opportunities, sentRows] = await Promise.all([
+  const [{ prospects, messages, deals, inbound }, pilotage, prefs, opportunities, sentRows, experiments] = await Promise.all([
     loadPortfolio(supabase, ["messages", "deals", "inbound"]),
     // Pilotage : agrégats serveur, soldes fournisseurs en cache 1 h. Une panne
     // ici ne doit jamais empêcher le Cockpit de s'afficher.
@@ -56,6 +58,8 @@ export default async function CockpitPage({
     loadPlatformRows(supabase).catch(() => [] as PlatformRow[]),
     // Relances dues : toutes les propositions « Envoyées », quelle que soit leur date.
     loadSentRows(supabase).catch(() => [] as SentRow[]),
+    // Expériences de mails (Cowork #30) : aucune créée par défaut, aucun encart.
+    loadExperimentStats(supabase, user.id),
   ]);
   const now = new Date();
   // Aperçu de la boîte mail : les plus récents ; « Tout voir » → /cockpit/mails.
@@ -133,6 +137,10 @@ export default async function CockpitPage({
       />
 
       <PlatformsCard week={platformActivity(opportunities, 7, now)} month={platformActivity(opportunities, 30, now)} />
+
+      {experiments.map((experiment) => (
+        <ExperimentCard key={experiment.id} experiment={experiment} />
+      ))}
 
       {pilotage && (
         <section id="pilotage" className="scroll-mt-24">

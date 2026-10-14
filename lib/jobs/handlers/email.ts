@@ -59,6 +59,7 @@ import { JobError, type JobHandler, type StepContext, type StepOutcome } from ".
 import { findContact as findContactOnSite } from "@/lib/contact-finder";
 import { findSiteFree, siteIdentity } from "@/lib/contact-finder/free-site";
 import { realDeps as realContactDeps } from "@/lib/contact-finder/clients";
+import { recordAssignment, variantForDraft } from "@/lib/experiments/assign";
 
 /**
  * Génération d'un mail, en trois étapes reprenables :
@@ -699,6 +700,23 @@ async function recentReadyHooks(ctx: StepContext, prospectId: string): Promise<s
   return ((data ?? []) as { body: string }[]).map((row) => hookOfBody(row.body));
 }
 
+/**
+ * Le brouillon que la génération réécrit (null = nouveau brouillon) : celui du job (reprise),
+ * celui désigné par l'appelant, sinon le dernier brouillon d'intro non envoyé.
+ */
+async function draftTarget(
+  ctx: StepContext,
+  prospectId: string,
+  params: { origin?: MessageOrigin | null; replaceMessageId?: string | null },
+): Promise<string | null> {
+  const origin = params.origin ?? null;
+  return (
+    ctx.job.result.messageId ??
+    (origin ? null : await replaceableDraft(ctx, prospectId, params.replaceMessageId)) ??
+    (await latestIntroDraft(ctx, prospectId, origin))
+  );
+}
+
 /** Le brouillon précédent n'est réécrit que s'il est à nous, à ce prospect, et pas parti. */
 async function replaceableDraft(
   ctx: StepContext,
@@ -831,6 +849,11 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
   const dayOpenings = lock.held ? counted : closeAvec(counted);
   const quotaStart = Date.now();
   const recentHooks = await recentReadyHooks(ctx, prospect.id);
+  // EXPÉRIENCE DE MAILS (Cowork #30, lib/experiments) : le brouillon que cette génération écrit ou
+  // réécrit, et sa variante — tirée seulement pour un NOUVEAU brouillon et si une expérience est
+  // active ; un brouillon déjà rédigé garde la sienne (ou aucune). Sans expérience : `null`, rien ne change.
+  const target = params.saveDraft ? await draftTarget(ctx, prospect.id, params) : null;
+  const experiment = params.saveDraft ? await variantForDraft(ctx.db, { userId: ctx.userId, existingMessageId: target }) : null;
   const draft = await guardAi(() =>
     generateQualityDraft({
       ask: askFor(prospect.id),
@@ -855,6 +878,8 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       // SEGMENT (agent3) : une fiche de segment impose sa famille de mail —
       // F5 « partenaire » pour une agence. `null` laisse le tirage habituel.
       family: familyForSegment(segmentOf(prospect)) ?? undefined,
+      // Seule la phrase d'appel à l'action change avec la variante (prompts et juge inchangés).
+      ...(experiment ? { cta: experiment.variant.cta } : {}),
     }),
   );
   // Crédit OpenAI épuisé pendant la rédaction : ni « À revoir » ni brouillon.
@@ -933,10 +958,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
     // Écrit en dernier, juste avant le commit de l'étape : seule une coupure
     // entre les deux laisserait un brouillon en double (jamais un mail envoyé).
     const origin = params.origin ?? null;
-    const existing =
-      ctx.job.result.messageId ??
-      (origin ? null : await replaceableDraft(ctx, prospect.id, params.replaceMessageId)) ??
-      (await latestIntroDraft(ctx, prospect.id, origin));
+    const existing = target;
     const quality = { quality_score: draft.score, quality_reason: draft.needsReview ? draft.reviewReason : null };
     if (existing) {
       const saved = await replaceDraft(ctx, existing, { subject: email.subject.trim() || null, body: email.body.trim(), ...quality }, {
@@ -966,6 +988,9 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       messageId = data.id;
     }
   }
+
+  // Variante d'expérience d'un NOUVEAU brouillon (insertion seule : elle ne changera plus).
+  if (messageId && !target) await recordAssignment(ctx.db, { messageId, userId: ctx.userId, draft: experiment });
 
   // Variante mesurée (lib/variants/record.ts) : expérience n° 1 = style d'objet.
   // Ne lève jamais — mesurer ne doit pas casser la rédaction.

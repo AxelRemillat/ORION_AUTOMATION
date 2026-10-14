@@ -162,13 +162,14 @@ export const PROOF_PREFIXES: Record<MailFamily, string> = {
 const clean = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /** Corps d'une famille, SANS mention « stop » ni signature. Le modèle n'écrit que l'objet, `hook` et `proposal`. */
-export function assembleFamily(family: MailFamily, parts: MailParts, frame: { greeting: string; demo: DemoLink; cta: string }): string {
+export function assembleFamily(family: MailFamily, parts: MailParts, frame: { greeting: string; demo: DemoLink; cta: string; fixedCta?: string }): string {
   const proof = `${PROOF_PREFIXES[family]} ${familyDemoUrl(frame.demo, family)}`;
   switch (family) {
     case "F2":
       return [frame.greeting, F2_INTRO, clean(parts.hook), clean(parts.proposal), proof, frame.cta].join("\n\n");
     case "F3":
-      return [frame.greeting, clean(parts.hook), clean(parts.proposal), proof, F3_CTA].join("\n\n");
+      // Une variante d'expérience (lib/experiments) remplace aussi la demande fixe de F3.
+      return [frame.greeting, clean(parts.hook), clean(parts.proposal), proof, frame.fixedCta ?? F3_CTA].join("\n\n");
     case "F4":
       // Cowork #34 : jamais d'ouverture par la démo. Fait propre + problème, puis la démo comme PREUVE.
       return [frame.greeting, clean(parts.hook), proof, clean(parts.proposal), frame.cta].join("\n\n");

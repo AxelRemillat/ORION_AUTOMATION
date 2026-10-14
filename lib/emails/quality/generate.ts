@@ -3,6 +3,7 @@ import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import { withOptOut } from "@/lib/mail-preflight/opt-out";
+import { numbersIn } from "@/lib/emails/validate";
 import { DEMO_LINKS, demoFor, demoForProposal, demoForSupplierSide } from "./demo-links";
 import { checklistFeedback, checklistReason, judgeChecklist, type ChecklistVerdict } from "./checklist";
 import { checkMail, type RuleResult } from "./rules";
@@ -65,6 +66,12 @@ export interface QualityInput {
   recentHooks?: readonly string[];
   /** `key_figures.facts` triés (lib/emails/quality/facts-gate.ts) ; absent = fiche d'avant. */
   keyFacts?: readonly KeyFact[] | null;
+  /**
+   * EXPÉRIENCE DE MAILS (Cowork #30, lib/experiments) : phrase d'appel à l'action imposée par la
+   * variante tirée. Absente (aucune expérience active) : `ctaFor` et F3_CTA, comportement d'avant.
+   * Seule la DERNIÈRE PHRASE change : prompts, règles et juge sont les mêmes pour toutes les variantes.
+   */
+  cta?: string;
 }
 
 export interface QualityAttempt {
@@ -139,7 +146,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   const demo = demoFor(`${input.brief.pain.task} ${input.brief.pain.automationIdea}`);
   // Expérience n° 1 en pause : l'objet suit la famille.
   const arm = input.subjectArm ?? subjectArmFor(family);
-  const cta = ctaFor(input.prospectId);
+  const cta = input.cta ?? ctaFor(input.prospectId);
   const facts = briefFacts(input.brief, input.facts);
   // Le juge voit les MÊMES faits que le rédacteur : faits du brief + faits
   // propres (site, profil). Sinon il tient pour « supposé » ce qui est lu sur
@@ -189,7 +196,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     const picked = fromProposal.key !== "general" ? fromProposal : fromText.key !== "general" ? fromText : demo.key !== "general" ? demo : DEMO_LINKS.emails;
     // Cowork #40 : devis / commandes FOURNISSEURS → jamais la démo devis client (/agent).
     const chosen = daf ? DEMO_LINKS.factures : demoForSupplierSide(`${parts.hook} ${parts.proposal}`, picked);
-    let core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta });
+    let core = assembleFamily(family, parts, { greeting: input.greeting, demo: chosen, cta, fixedCta: input.cta });
     // Trop long : raccourcissement dédié AVANT le jugement, hors des essais.
     const { max } = FAMILY_LIMITS[family];
     for (let pass = 0; pass < SHORTEN_PASSES && countWords(core) > max; pass += 1) {
@@ -200,7 +207,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
         family,
       );
       if (!shorter) continue;
-      const next = assembleFamily(family, shorter, { greeting: input.greeting, demo: chosen, cta });
+      const next = assembleFamily(family, shorter, { greeting: input.greeting, demo: chosen, cta, fixedCta: input.cta });
       if (countWords(next) < countWords(core)) {
         parts = shorter;
         core = next;
@@ -212,7 +219,8 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
       prospectText: input.prospectText,
       companyName: input.companyName,
       forbiddenNames: input.forbiddenNames,
-      offerNumbers: input.offerNumbers,
+      // Les nombres de la phrase d'appel imposée (« 2 min ») sont permis comme ceux de l'offre.
+      offerNumbers: input.cta ? [...(input.offerNumbers ?? []), ...numbersIn(input.cta)] : input.offerNumbers,
       usedCliches: input.usedCliches,
       demo: chosen.key,
       subjectArm: arm,
