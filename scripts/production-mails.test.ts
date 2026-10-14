@@ -4,6 +4,7 @@
  */
 import { buildProductionFunnel, costFamily, type FunnelSignal } from "../lib/funnel/production-funnel";
 import { linkupGate, linkupSiteReserve, type LinkupGateStore } from "../lib/linkup/gate";
+import { matchHomepage, recoveryDomains, robotsForbidsHome } from "../lib/funnel/free-site-recovery";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -58,6 +59,21 @@ check("prêt = ≥ 9/10 sans motif ; le reste « à revoir »", report.totals["p
 check("par jour : mardi porte tout", report.byDay["2026-10-13"]["prêt (≥ 9/10)"] === 1 && report.byDay["2026-10-12"]["collectés"] === 0);
 check("coût par famille", report.cost[0].family === "OpenAI · rédaction" && Math.abs(report.cost[0].eur - 0.2) < 1e-9);
 check("familles de coût", costFamily("linkup", "linkup_site").startsWith("Linkup") && costFamily("openai", "entonnoir:tri") === "OpenAI · tri des signaux" && costFamily("openai", "qualite:checklist") === "OpenAI · juge");
+
+console.log("Rattrapage gratuit des « Sans site »");
+const ovinalp = { names: ["OVINALP FERTILISATION"], siren: "123456789", city: "Saint-Jean-de-Maurienne", postalCode: "73300" };
+const domains = recoveryDomains(ovinalp);
+check("candidats : nom entier collé et tiré", domains.includes("ovinalpfertilisation.fr") && domains.includes("ovinalp-fertilisation.com"), domains.join(","));
+check("candidats : 16 au plus, aucun annuaire", domains.length <= 16 && !domains.some((domain) => /pagesjaunes|societe\.com/.test(domain)));
+check("sigle pour 3 mots et plus", recoveryDomains({ names: ["ATELIER MECANIQUE GENERALE"], siren: null, city: null, postalCode: null }).includes("amg.fr"));
+check("sûr : nom + SIREN (espacé)", JSON.stringify(matchHomepage("<h1>Ovinalp Fertilisation</h1><footer>SIREN 123 456 789</footer>", ovinalp)) === JSON.stringify({ sure: true, by: "siren" }));
+check("sûr : nom + ville", matchHomepage("<p>OVINALP - Fertilisation</p><p>73300 Saint-Jean-de-Maurienne</p>", ovinalp).sure);
+check("refusé : nom seul", !matchHomepage("<title>Ovinalp Fertilisation</title>", ovinalp).sure);
+check("refusé : ville seule (homonyme de domaine)", !matchHomepage("<p>Saint-Jean-de-Maurienne 73300</p>", ovinalp).sure);
+check("le texte des scripts ne compte pas", !matchHomepage("<script>var a='Ovinalp Fertilisation 73300'</script>", ovinalp).sure);
+check("robots : Disallow / pour * = interdit", robotsForbidsHome("User-agent: *\nDisallow: /"));
+check("robots : Disallow /admin = permis", !robotsForbidsHome("User-agent: *\nDisallow: /admin"));
+check("robots : interdit à un autre robot seulement = permis", !robotsForbidsHome("User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nDisallow:"));
 
 async function linkup() {
   console.log("Réserve Linkup des recherches de site");

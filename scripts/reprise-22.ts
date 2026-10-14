@@ -11,6 +11,8 @@
  *
  *   … reprise-22.js               simulation : liste, avant → après
  *   … reprise-22.js --appliquer   écrit (accord d'Axel requis)
+ *   … reprise-22.js --seulement-sans-site [--appliquer]   les 10 « Sans site » seulement (Cowork #30) ;
+ *     les 12 offres de score 3 restent telles quelles (essai #28 : 0 creusée sur 12)
  */
 import { db, ownerId } from "./quality-live";
 import { readAll } from "@/lib/supabase/read-all";
@@ -21,6 +23,8 @@ export const TRACES: Record<string, string> = {
   "essai score 3 (Cowork #27)": "essai score 3 (Cowork #27, lot du 13/10)",
 };
 const apply = process.argv.includes("--appliquer");
+const onlyNoSite = process.argv.includes("--seulement-sans-site");
+const NO_SITE_MOTIF = "repris : site à rechercher de nouveau (Cowork #27)";
 
 type Row = { id: string; company_name: string | null; score: number | null; statut: string; motif_rejet: string; contact: Record<string, unknown> | null };
 
@@ -28,9 +32,9 @@ async function main() {
   const userId = await ownerId();
   const table = db as never as { from: (t: string) => any };
   const rows = await readAll<Row>(() =>
-    table.from("signal_candidates").select("id, company_name, score, statut, motif_rejet, contact").eq("user_id", userId).eq("statut", "retenu").in("motif_rejet", Object.keys(TRACES)).order("id"),
+    table.from("signal_candidates").select("id, company_name, score, statut, motif_rejet, contact").eq("user_id", userId).eq("statut", "retenu").in("motif_rejet", onlyNoSite ? [NO_SITE_MOTIF] : Object.keys(TRACES)).order("id"),
   );
-  console.log(`${rows.length} fiche(s) « retenu » portant un motif de traçage du 13/10${apply ? "" : " — SIMULATION, rien n'est écrit"}\n`);
+  console.log(`${rows.length} fiche(s) « retenu » portant un motif de traçage du 13/10${onlyNoSite ? " (« Sans site » seulement)" : ""}${apply ? "" : " — SIMULATION, rien n'est écrit"}\n`);
   for (const row of rows) {
     console.log(`· ${row.company_name} (score ${row.score})\n    avant : retenu · motif « ${row.motif_rejet} »\n    après : retenu · motif vide · contact.reprise « ${TRACES[row.motif_rejet]} »`);
   }
