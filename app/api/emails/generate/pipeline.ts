@@ -1,5 +1,6 @@
 import type { AskFn } from "@/lib/ai/chat";
 import type { DerivedFact } from "@/lib/emails/derived-facts";
+import { ensureDemoV } from "@/lib/emails/quality/families";
 import { briefFacts, type StrategyBrief } from "@/lib/emails/strategist";
 import {
   validateEmail,
@@ -134,7 +135,8 @@ export function stripSignature(body: string): string {
 export async function draftFromBrief(input: DraftInput): Promise<DraftOutcome | { error: string }> {
   const outcome = await writeDraft(input);
   if ("error" in outcome) return outcome;
-  const body = withOptOut(outcome.email.body, signatureFor(input.offer));
+  // Cowork #58 : un lien de démo écrit par ce chemin porte toujours `v=` (famille inconnue ici : v=0).
+  const body = ensureDemoV(withOptOut(outcome.email.body, signatureFor(input.offer)));
   return { ...outcome, email: { ...outcome.email, body } };
 }
 

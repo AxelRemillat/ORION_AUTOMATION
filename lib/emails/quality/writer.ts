@@ -30,6 +30,11 @@ export interface WriterInput {
   demo: DemoLink;
   greeting: string;
   cta: string;
+  /**
+   * Phrase finale imposée par une expérience active (Cowork #30/#58) : en F3, le gabarit montré au rédacteur
+   * finit par CETTE phrase, la seule source de la phrase finale. Absente : F3_CTA, comme avant.
+   */
+  fixedCta?: string;
   /** Clichés de fin déjà servis aujourd'hui (« sans ressaisie »…). */
   usedCliches?: readonly string[];
   /** Quota d'ouvertures « Avec… » atteint pour la journée (1 mail sur 3). */
@@ -204,7 +209,7 @@ function buildFamilyPrompt(input: WriterInput, family: Exclude<MailFamily, "F1">
     family === "F2"
       ? `${input.greeting}\n\n${F2_INTRO}\n\n<BESOIN — c'est toi>\n\n<PROPOSITION — c'est toi>\n\n${proof}\n\n${input.cta}`
       : family === "F3"
-        ? `${input.greeting}\n\n<QUESTION — c'est toi>\n\n<CE QUE JE FAIS — c'est toi>\n\n${proof}\n\n${F3_CTA}`
+        ? `${input.greeting}\n\n<QUESTION — c'est toi>\n\n<CE QUE JE FAIS — c'est toi>\n\n${proof}\n\n${input.fixedCta ?? F3_CTA}`
         // F5 « partenaire » (agent3) : même ordre que F1, contenu différent.
         : family === "F5"
           ? `${input.greeting}\n\n<FAIT SUR L'AGENCE + PROBLÈME DE SES CLIENTS — c'est toi>\n\n<PROPOSITION EN MARQUE BLANCHE — c'est toi>\n\n${proof}\n\n${input.cta}`

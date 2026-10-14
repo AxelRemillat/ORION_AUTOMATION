@@ -148,6 +148,25 @@ export function familyDemoUrl(demo: DemoLink, family: MailFamily): string {
 }
 
 /** URL nue (sans le marqueur de famille, ancien `f=F4` compris), pour la vérifier contre la liste blanche. */
+/**
+ * LIENS DE DÉMO TOUJOURS MARQUÉS (Cowork #58) : 25 mails envoyés portaient un lien de démo sans `v=`, donc
+ * invisibles dans Umami (le portfolio attribue au canal « orion » toute visite qui porte `v=` ; aucun autre
+ * paramètre n'est attendu — lib/analytics.ts de PORTFOLIO_V2). Chaque lien vers une page de démo
+ * (/automatisations, /agent, /pipeline, /demos) qui n'a pas de `v=` le reçoit : le chiffre de la famille si on
+ * la connaît, sinon `0`. Un lien déjà marqué et le reste du texte ne changent pas.
+ */
+const DEMO_PAGE_LINK = /(?:https?:\/\/)?(?:www\.)?axelremillat\.com\/(?:automatisations|agent|pipeline|demos)\b[^\s)»"<>]*/g;
+
+export function ensureDemoV(text: string, family?: MailFamily | null): string {
+  const v = family ? FAMILY_PARAM[family] : "0";
+  return text.replace(DEMO_PAGE_LINK, (match) => {
+    const url = match.replace(/[.,;:!?]+$/, "");
+    const tail = match.slice(url.length);
+    if (/[?&]v=[^&\s]+/.test(url)) return match;
+    return `${url}${url.includes("?") ? "&" : "?"}v=${v}${tail}`;
+  });
+}
+
 export const bareDemoUrl = (url: string) => url.replace(/[?&](v=[1-5]|f=F[1-5])\b/, "");
 
 export const PROOF_PREFIXES: Record<MailFamily, string> = {
