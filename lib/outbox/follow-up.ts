@@ -3,6 +3,7 @@ import { getOpenAI } from "@/lib/openai";
 import { recordOpenAiUsage } from "@/lib/usage/record";
 import { withOptOut } from "@/lib/mail-preflight";
 import { OPT_OUT_SENTENCE } from "@/lib/mail-preflight/opt-out";
+import { contactOriginOf, optOutSentence } from "@/lib/mail-preflight/contact-origin";
 import { loadOffer } from "@/lib/offer/read";
 import { signatureFor } from "@/lib/offer/model";
 import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
@@ -170,16 +171,18 @@ export async function composeFollowUp(
   }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "rédaction impossible" }));
 
   const base = { thread_id: last?.thread_id ?? null, reply_to_gmail_message_id: last?.gmail_message_id ?? null };
+  // Cowork #59 : la relance redit d'où vient l'adresse, puis le « stop » (même source que l'intro : la fiche).
+  const optOut = optOutSentence(contactOriginOf(prospect));
   if ("error" in written) {
     const subject = intro.subject ? `Re: ${intro.subject.replace(/^re\s*:\s*/i, "")}` : `${prospect.company_name} — suite`;
-    return { ok: true, draft: { ...base, subject, body: withOptOut(`${fallbackFollowUp(prospect.company_name, type)}\n\n${signature}`, signature), quality_score: null, quality_reason: `Rédaction indisponible : à réécrire (${written.error}).`, ready: false } };
+    return { ok: true, draft: { ...base, subject, body: withOptOut(`${fallbackFollowUp(prospect.company_name, type)}\n\n${signature}`, signature, optOut), quality_score: null, quality_reason: `Rédaction indisponible : à réécrire (${written.error}).`, ready: false } };
   }
   return {
     ok: true,
     draft: {
       ...base,
       subject: written.subject,
-      body: withOptOut(`${written.body}\n\n${signature}`, signature),
+      body: withOptOut(`${written.body}\n\n${signature}`, signature, optOut),
       quality_score: written.verdict?.score ?? null,
       quality_reason: written.ready ? null : written.reason,
       ready: written.ready,

@@ -155,7 +155,7 @@ async function main() {
     check("salutation : la personne contactée, pas le dirigeant", greeting(true) === "Bonjour Madame Martin,", greeting(true));
     check("(avant : « jmartin@ » ne donnait ni prénom ni civilité)", greeting(false) === "Bonjour,", greeting(false));
     const generic = buildQualityGreeting({ email: "contact@acme.fr", leaderPerson: "Pierre DURAND", contactName: null });
-    check("adresse générique : le dirigeant reste salué (inchangé)", generic === "Bonjour Monsieur Durand,", generic);
+    check("adresse générique : « Bonjour, », jamais le dirigeant (Cowork #59)", generic === "Bonjour,", generic);
   }
 
   console.log("\n5. Noms du site, schéma d'adresse (#32)");

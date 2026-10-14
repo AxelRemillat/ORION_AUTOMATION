@@ -103,6 +103,16 @@ const GENERIC_LOCAL =
 export type EmailKind = "nominatif" | "generique";
 
 /**
+ * Boîte de RÔLE : contact@, secretariat@, info@, « service.clients@ »… (Cowork #59). Plus étroit que
+ * `classifyEmail` : « redouane@ » n'est pas une boîte de rôle, c'est un prénom.
+ */
+export function isRoleAddress(email: string | null | undefined): boolean {
+  const local = (email ?? "").split("@")[0].toLowerCase();
+  if (!local) return false;
+  return GENERIC_LOCAL.test(local) || GENERIC_LOCAL.test(local.split(/[._-]/)[0] ?? "");
+}
+
+/**
  * Nominatif ou générique ?
  *
  * Nominatif si la partie locale porte le nom (ou prénom.nom, p.nom) d'une
