@@ -2,7 +2,7 @@ import { setDoNotContact } from "@/lib/outbox/do-not-contact";
 import { scheduleMessage } from "@/lib/outbox/scheduler";
 import type { Db } from "@/lib/trash/scope";
 import type { DiscardReason, TodayKind } from "@/types";
-import { joinBody } from "./body";
+import { joinBody, optOutLineOf } from "./body";
 import { loadToday } from "./load";
 import { flatten } from "./group";
 import { PLAN_CLOSE, PLAN_OPEN } from "./plan";
@@ -31,12 +31,13 @@ export interface DraftEdit {
 
 /** Enregistre la retouche ; `validate` pose (true) ou lève (false) la validation. */
 export async function saveDraft(db: Db, userId: string, edit: DraftEdit, validate?: boolean): Promise<CoreResult> {
-  const body = joinBody(edit.core, edit);
   if (!edit.core.trim()) return { ok: false, error: "Le message est vide." };
   // « Modifié à la main » seulement si le texte a VRAIMENT changé : Valider
   // renvoie aussi le texte, tel quel le plus souvent.
   const { data: current } = await db.from("messages").select("subject, body").eq("id", edit.messageId).eq("user_id", userId).maybeSingle();
   const stored = current as { subject: string | null; body: string } | null;
+  // La ligne d'opposition stockée (avec l'origine de l'adresse, Cowork #59) est gardée telle quelle.
+  const body = joinBody(edit.core, { ...edit, optOutText: optOutLineOf(stored?.body) });
   const changed = Boolean(stored) && (stored!.body.trim() !== body.trim() || (stored!.subject ?? "") !== (edit.subject.trim() || ""));
   // Retirer la validation d'un mail PROGRAMMÉ le déprogramme : sa place du jour se libère (Cowork #50).
   // Un mail en cours d'envoi (`sending`) ne se rattrape pas.
