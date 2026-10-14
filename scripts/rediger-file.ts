@@ -11,6 +11,8 @@
  *
  *   USAGE_SOURCE=agent4 … rediger-file.js                 liste, rien n'est lancé
  *   USAGE_SOURCE=agent4 … rediger-file.js --lancer [--max 30]
+ *   … --reprendre-echecs   seulement les fiches dont le dernier job (24 h) a ÉCHOUÉ (site illisible…) :
+ *                          « une génération chacun », jamais une seconde pour une fiche déjà rédigée
  */
 import { db, ownerId } from "./quality-live";
 import { loadToday } from "@/lib/today/load";
@@ -21,6 +23,7 @@ import { autoRegenRefusal, scriptJobSource } from "@/lib/jobs/regen-cap";
 const launch = process.argv.includes("--lancer");
 const maxArg = process.argv.indexOf("--max");
 const MAX = maxArg >= 0 ? Math.max(1, Number(process.argv[maxArg + 1]) || 30) : 30;
+const retryFailed = process.argv.includes("--reprendre-echecs");
 const BLOCKERS = ["Email manquant", "Email non vérifié", "Site introuvable", "Faits insuffisants", "Filiale de groupe"];
 
 async function main() {
@@ -36,6 +39,13 @@ async function main() {
     if (blocker) {
       console.log(`· ${item.companyName} | laissée : ${blocker}`);
       continue;
+    }
+    if (retryFailed) {
+      const { data: last } = await table.from("jobs").select("status").eq("user_id", userId).eq("type", "email_generate").contains("params", { prospectId: item.prospectId }).gte("created_at", new Date(Date.now() - 86_400_000).toISOString()).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (last?.status !== "failed") {
+        console.log(`· ${item.companyName} | laissée : ${last ? "déjà rédigée ou arrêtée par une porte dans les 24 h" : "aucun échec dans les 24 h"}`);
+        continue;
+      }
     }
     if (item.messageId) {
       const { data: draft } = await table.from("messages").select("status, edited_by_hand, validated_at, send_status").eq("id", item.messageId).maybeSingle();
