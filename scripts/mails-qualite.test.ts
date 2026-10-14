@@ -4,6 +4,7 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { JOB_OFFER } from "../lib/emails/quality/rules";
 import { repeatedExpressions } from "../lib/emails/quality/checklist";
 import { DAF_GUARDS } from "../lib/emails/quality/cowork-d-set";
 import { concreteDafQuestion } from "../lib/emails/quality/daf";
@@ -980,6 +981,14 @@ async function main() {
     check("expression faite de mots-outils et de noms génériques (« les références manquantes », FIRSTPELLETS) : pas une répétition", repeatedExpressions("Les références manquantes bloquent la commande. Je signale les références manquantes.").length === 0);
     check("expression répétée dans la même phrase aussi détectée", repeatedExpressions("Le suivi de production et le suivi de production.").includes("suivi de production"));
     check("consigne DAF : la proposition reprend l'objet par un renvoi, sans répéter la question", /renvoi/.test(DAF_FOCUS) && /ce rapprochement/.test(DAF_FOCUS) && !/je signale les écarts avant la clôture/.test(DAF_FOCUS));
+  }
+
+  console.log("\nCowork #57 : recrutement au sens étroit (WENABI)");
+  {
+    check("« candidatures associatives » (associations qui candidatent à un programme) : pas du recrutement", !JOB_OFFER.test("Vos programmes en 36 langues : une pièce manquante complique le suivi des candidatures d’associations.") && !JOB_OFFER.test("Candidatures associatives"));
+    check("« associations candidates » : pas du recrutement", !JOB_OFFER.test("les associations candidates à votre programme"));
+    check("un candidat à relancer avant l'entretien (SKI SHOP) : recrutement", JOB_OFFER.test("Une date de disponibilité manquante oblige à relancer le candidat avant de fixer un entretien."));
+    check("« pour postuler », CV, « vous recrutez » : recrutement", JOB_OFFER.test("le formulaire pour postuler") && JOB_OFFER.test("Un CV incomplet") && JOB_OFFER.test("Vous recrutez un technicien"));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

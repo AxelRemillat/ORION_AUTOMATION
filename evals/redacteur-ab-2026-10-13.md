@@ -405,3 +405,28 @@ Auriez-vous un créneau de 15 minutes la semaine prochaine pour voir si ça vous
 Juge : 10/10 · D1 OUI · D2 OUI · D3 OUI · D4 OUI · D5 OUI · D6 OUI · D7 OUI · C1 OUI · C2 OUI · C3 OUI · C5 OUI
 
 Note Cowork — A : __/10 · B : __/10 · préféré : __
+
+---
+
+## Résultat (Cowork #57, clé révélée le 14/10/2026)
+
+| Fiche | A | B | Note Cowork A | Note Cowork B | Préféré | Juge A | Juge B |
+|---|---|---|---|---|---|---|---|
+| 1 WENABI | gpt-6-sol | gpt-6-luna | 6 | 7 | B (luna) | bloqué (faux positif recrutement) | bloqué (idem) |
+| 2 CONTI FRERES | luna | sol | 6 | 8 | B (sol) | 7 | 10 prêt |
+| 3 GROUPAGEF | luna | sol | 7 | 8 | B (sol) | 9 (D6) | 10 prêt |
+| 4 PETTON ENERGIES | luna | sol | 5 | 7 | B (sol) | 8 | 9 (D6) |
+| 5 SKI SHOP | sol | luna | 4 | 3 | A (sol), aucun envoyable | bloqué | bloqué |
+| 6 BATI CONCEPT 04 | luna | sol | 6 | 8 | B (sol) | 8 | 10 prêt |
+| 7 MEDIA IMMO | luna | sol | 7 | 9 | B (sol) | 10 prêt | 10 prêt |
+| 8 DUGUIT | sol | luna | 9 | 8 | A (sol) | 10 prêt | 10 prêt |
+| 9 IREPA LASER | sol | luna | 8 | 9 | B (luna) | 10 prêt | 10 prêt |
+| 10 LEFRANC | luna | sol | 6 | 8 | B (sol) | bloqué (liste d'étapes) | 10 prêt |
+
+- **Moyenne Cowork** : gpt-6-sol (production) **7,5** · gpt-6-luna (léger) **6,4** (écart 1,1).
+- **Préférences** : sol 8, luna 2 (WENABI, IREPA LASER).
+- **Accord Cowork / juge** (prêt = 9+ chez Cowork, « prêt » chez le juge) : **13/20**. Les 7 désaccords vont tous dans le même sens : le juge dit « prêt » (10/10) des mails que Cowork note 7 ou 8 — 5 sur 7 viennent du rédacteur de production, 2 du modèle léger.
+
+**Décision** : la règle (léger ≥ production − 0,3 ET ≥ 7,5) n'est pas remplie (6,4 < 7,2 et < 7,5). **Le rédacteur reste gpt-6-sol.** Le modèle léger écrit plus souvent un problème générique (« une réponse manquante ») et des propositions en liste d'étapes.
+
+**Correctifs tirés de l'échantillon** : règle « recrutement » ramenée au sens étroit (WENABI : « candidatures associatives » n'est plus refusé) ; brief RH tiré d'une offre d'emploi écarté avant la rédaction (SKI SHOP : « À revoir », zéro appel rédacteur). `calibrate:judge` : 23/24 (WENABI ajouté au jeu).

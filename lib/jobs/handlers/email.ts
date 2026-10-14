@@ -26,6 +26,7 @@ import {
   validateBrief,
   briefForDraft,
   factsHash,
+  hrBriefReason,
   type BriefAngle,
   type BriefOutcome,
   type HistoryMessage,
@@ -655,6 +656,15 @@ async function briefStep(ctx: StepContext): Promise<StepOutcome> {
       }
       throw new JobError(reason, false, 502);
     }
+  }
+
+  // Cowork #57 : brief RH (angle recrutement, douleur = recrutement ou dossiers du personnel) → « À revoir »,
+  // AUCUN appel rédacteur. « Générer quand même » (force) et le brief édité à la main passent.
+  const hr = params.force || params.mode === "rewrite" ? null : hrBriefReason(outcome.brief, input.facts);
+  if (hr) {
+    await markForReview(ctx, prospect, hr);
+    warnings.push({ source: "openai", message: hr });
+    return { state: { warnings }, done: true };
   }
 
   // Stocké avec le prospect : « Autre angle » s'en sert pour exclure l'angle. L'empreinte des faits dit

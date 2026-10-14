@@ -427,6 +427,26 @@ export function isBannedPain(text: string): boolean {
  * « Autre angle » et « réécrire » gardent leur chemin propre.
  */
 /**
+ * BRIEF RH TIRÉ D'UNE OFFRE D'EMPLOI (Cowork #57, SKI SHOP) : angle « recrutement », accroche = une offre d'emploi
+ * (« Renfort service paie (H/F) »), et la douleur porte sur le personnel lui-même (dossiers salariés, paie,
+ * candidatures). Le rédacteur en fait un mail sur les candidatures — refusé par les règles : deux rédactions
+ * perdues. Les trois conditions ensemble : une offre d'emploi qui sert d'INDICE d'un pain métier passe. Le motif,
+ * ou `null` si le brief est rédigeable.
+ */
+const HR_TASK = /(candidat|postul|\bcv\b|dossiers? (du personnel|salari|d['’]embauche)|documents? d['’]entr[ée]e|onboarding|\bpaie\b)/i;
+const JOB_POSTING = /(\(?\bh\s*\/\s*f\b\)?|\bf\s*\/\s*h\b|recrut|offres? d['’]emploi|\bposte\b|alternan|\bstage\b|renfort)/i;
+
+export function hrBriefReason(
+  brief: Pick<StrategyBrief, "angle" | "pain">,
+  facts: readonly { id: string; value?: unknown; label?: string | null }[] = [],
+): string | null {
+  if (brief.angle.type !== "recrutement" || !HR_TASK.test(brief.pain.task)) return null;
+  const hooks = facts.filter((fact) => brief.angle.hookFactIds.includes(fact.id)).map((fact) => `${fact.label ?? ""} ${String(fact.value ?? "")}`);
+  if (!hooks.some((hook) => JOB_POSTING.test(hook))) return null;
+  return "Angle écarté avant la rédaction : tiré d'une offre d'emploi, il porte sur le personnel (dossiers, paie, candidatures) — le mail parlerait de recrutement. Choisissez un autre angle.";
+}
+
+/**
  * Empreinte des faits d'une fiche (Cowork #56) : identifiant, libellé et valeur de chaque fait. Stockée avec le
  * brief ; tant qu'elle ne change pas, le stratège n'est pas relancé. Hachage FNV-1a 32 bits, sans dépendance.
  */

@@ -9,7 +9,7 @@
  * (« prêt » = 9 ou plus). Cible : au moins 13 accords sur 15. Rien n'est écrit.
  */
 import { db, liveAsk, ownerId, spentSince } from "./quality-live";
-import { COWORK_D_SET, COWORK_SET_2, DAF_GUARDS, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
+import { COWORK_D_SET, COWORK_SET_2, COWORK_SET_3, DAF_GUARDS, F4_GUARDS } from "@/lib/emails/quality/cowork-d-set";
 import { judgeChecklist } from "@/lib/emails/quality/checklist";
 import { keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { buildFacts } from "@/lib/emails/derived-facts";
@@ -27,7 +27,7 @@ async function main() {
   const guards: string[] = [];
   const rows: string[] = [];
   let judged = 0;
-  for (const mail of [...COWORK_D_SET, ...COWORK_SET_2, ...F4_GUARDS, ...DAF_GUARDS]) {
+  for (const mail of [...COWORK_D_SET, ...COWORK_SET_2, ...COWORK_SET_3, ...F4_GUARDS, ...DAF_GUARDS]) {
     const guard = "expectFail" in mail ? (mail as { expectFail: string }).expectFail : null;
     const name = mail.company.replace(/\s*\(.*$/, "").slice(0, 30);
     const { data } = await loose.from("prospects").select("*").eq("user_id", userId).ilike("company_name", `%${name}%`).is("deleted_at", null).limit(1);
