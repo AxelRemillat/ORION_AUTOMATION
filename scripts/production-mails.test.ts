@@ -105,8 +105,7 @@ const greet = (email: string, contactName: string | null, leaderPerson: string |
 check("RISO : « Bonjour, », jamais M. Kawatsu", greet("f.taoufik@risofrance.fr", "Toshihiko Kawatsu", "Toshihiko Kawatsu") === "Bonjour,");
 check("SKI SHOP : benjamin.d@ ne salue pas le dirigeant", greet("benjamin.d@skishop.fr", "Nicolas Jacquier", "Nicolas Jacquier") === "Bonjour,");
 check("titulaire nommé : salué", greet("paul.marolleau@sud-ouest-radiateurs.com", "Paul Marolleau", null) === "Bonjour Monsieur Marolleau,");
-check("boîte générique : le dirigeant (inchangé)", greet("contact@arcomprovence.com", "Robert Abbes", "Robert Abbes", false) === "Bonjour Monsieur Abbes,");
-check("boîte de service (aktid@aktid.fr) : le dirigeant (inchangé)", greet("aktid@aktid.fr", null, "Jean Martin", false) === "Bonjour Monsieur Martin,");
+check("boîte de rôle : « Bonjour, » (règle #59)", greet("contact@arcomprovence.com", "Robert Abbes", "Robert Abbes", false) === "Bonjour,");
 
 async function finder() {
   const page = `<html><body><h1>S ET B Maçonnerie</h1><p>SARL DOS SANTOS - BARROSO, SIREN 123 456 789, 48400 Florac</p><a href="/contact">Contact</a><a href="/cdn-cgi/l/email-protection#${cf("contact@sbflorac.com")}">écrire</a><a href="https://linkeo.com">service@linkeo.com</a></body></html>`;

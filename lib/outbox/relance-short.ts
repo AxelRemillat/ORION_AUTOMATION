@@ -22,6 +22,7 @@ import {
 } from "./relance-quality";
 import { addresseeOf, isCompleteName, usagePerson } from "@/lib/emails/salutation";
 import { civilityOf, type CivilityCache } from "@/lib/emails/quality/greeting";
+import { isRoleAddress } from "@/lib/contact-finder/extract";
 
 /**
  * DEUX MODES DE RELANCE (Cowork #16), choisis par le CODE :
@@ -243,6 +244,8 @@ const COMPLEMENT = /(?:^|\s)(?:(?:de|des|du|à|au|aux|par|pour|avec|sur|dans|en|
  * quelqu'un d'autre. Sinon la salutation de l'intro, « Bonjour, » le plus souvent.
  */
 export function relanceGreeting(input: { introGreeting: string; generic: boolean; email: string | null | undefined; contactName: string | null | undefined; civilities?: CivilityCache | null }): string {
+  // Cowork #59 (BEYNAT) : boîte de rôle (secretariat@, contact@…) → « Bonjour, », même si l'intro nommait quelqu'un.
+  if (isRoleAddress(input.email)) return "Bonjour,";
   if (input.introGreeting !== "Bonjour," || input.generic) return input.introGreeting;
   const person = usagePerson(input.contactName);
   if (!person || !isCompleteName(person.last)) return input.introGreeting;

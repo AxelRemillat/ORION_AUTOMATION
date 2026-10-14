@@ -72,6 +72,8 @@ export interface QualityInput {
    * Seule la DERNIÈRE PHRASE change : prompts, règles et juge sont les mêmes pour toutes les variantes.
    */
   cta?: string;
+  /** Ligne de fin : origine de l'adresse + « stop » (Cowork #59, optOutSentence) ; hors juge et hors comptage. */
+  optOut?: string;
 }
 
 export interface QualityAttempt {
@@ -235,7 +237,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     const verdict = rules.ok
       ? await judgeChecklist(input.ask, { subject: parts.subject, core, family, greeting: input.greeting, company: input.companyName, facts: checklistFacts, recipientRole: input.recipientRole, siteText: input.prospectText, daf }, `qualite:checklist:${attempt}`)
       : null;
-    const body = withOptOut(`${core}\n\n${input.signature}`, input.signature);
+    const body = withOptOut(`${core}\n\n${input.signature}`, input.signature, input.optOut);
     history.push({ parts, body, rules, verdict, demo: chosen.path });
     if (rules.ok && verdict?.ready) break;
 

@@ -4,6 +4,11 @@
  *
  * Exécution : `npm run test:mails-qualite`.
  */
+import { contactOriginOf, optOutSentence } from "../lib/mail-preflight/contact-origin";
+import { OPT_OUT_SENTENCE, hasOptOut, withOptOut, withoutOptOut } from "../lib/mail-preflight/opt-out";
+import { joinBody, optOutLineOf } from "../lib/today/body";
+import { relanceGreeting } from "../lib/outbox/relance-short";
+import { isRoleAddress } from "../lib/contact-finder/extract";
 import { ensureDemoV, F3_CTA } from "../lib/emails/quality/families";
 import { adoptableScriptDraft } from "../lib/jobs/handlers/email";
 import { JOB_OFFER } from "../lib/emails/quality/rules";
@@ -128,21 +133,26 @@ async function main() {
   check("1PACT : prénom inconnu → demandé au modèle", unknownFirstName(lebreton) === "Silouane");
   check("1PACT nominatif → « Bonjour Monsieur Lebreton, »", buildQualityGreeting(lebreton, { silouane: "M" }) === "Bonjour Monsieur Lebreton,");
   const ivanov = { email: "contact@komaks.fr", leaderPerson: "Gradimir Ivanov" };
-  check("KOMAKS générique + dirigeant → « Bonjour Monsieur Ivanov, »", buildQualityGreeting(ivanov, { gradimir: "M" }) === "Bonjour Monsieur Ivanov,", buildQualityGreeting(ivanov, { gradimir: "M" }));
-  check("BELLEDONNE → « Bonjour Monsieur Anquetil, »", buildQualityGreeting({ email: "contact@belledonnebio.shop", leaderPerson: "Bruno Vincent Anquetil" }) === GREETING);
+  // Cowork #59 (BEYNAT, secretariat@) : une boîte de rôle n'est lue par personne en particulier → « Bonjour, ».
+  check("KOMAKS contact@ + dirigeant → « Bonjour, » (Cowork #59)", buildQualityGreeting(ivanov, { gradimir: "M" }) === "Bonjour,", buildQualityGreeting(ivanov, { gradimir: "M" }));
+  check("BELLEDONNE contact@ → « Bonjour, » (Cowork #59)", buildQualityGreeting({ email: "contact@belledonnebio.shop", leaderPerson: "Bruno Vincent Anquetil" }) === "Bonjour,");
+  check("BEYNAT secretariat@ + dirigeant → « Bonjour, », jamais « Monsieur Rodriguez »", buildQualityGreeting({ email: "secretariat@beynat-fermetures.fr", leaderPerson: "Pascal Rodriguez", contactName: "Pascal Rodriguez", contactIsRecipient: true }) === "Bonjour,");
+  check("info@, service.clients@ → « Bonjour, »", ["info@x.fr", "service.clients@x.fr", "accueil2@x.fr"].every((email) => buildQualityGreeting({ email, leaderPerson: "Jean Martin" }) === "Bonjour,"));
+  check("adresse opaque (« xbr@ ») : dirigeant non vérifié → « Bonjour, »", buildQualityGreeting({ email: "xbr@x.fr", leaderPerson: "Jean Martin" }) === "Bonjour,");
+  check("BELLEDONNE sans adresse (aperçu) : le dirigeant", buildQualityGreeting({ email: null, leaderPerson: "Bruno Vincent Anquetil" }) === GREETING);
   check("AKTID (aktid@aktid.fr, pas de dirigeant) → « Bonjour, »", buildQualityGreeting({ email: "aktid@aktid.fr" }) === "Bonjour,");
   check("prénom mixte ou inconnu (« ? ») → « Bonjour, »", buildQualityGreeting(ivanov, { gradimir: "?" }) === "Bonjour,");
   check("nominatif sans prénom (j.benes@) → « Bonjour, »", buildQualityGreeting({ email: "j.benes@briol-diffusion.fr", leaderPerson: "Séverine Nassif" }) === "Bonjour,");
   // Noms composés, à trait d'union, à particule : jamais tronqués (FONDERIE DE LA BRUCHE, 05/10/2026).
-  const fonderie = { email: "contact@fonderiebruche.fr", leaderPerson: "Virginie Danancher-(attard)", contactName: "Virginie Danancher-(attard)" };
+  const fonderie = { email: null, leaderPerson: "Virginie Danancher-(attard)", contactName: "Virginie Danancher-(attard)" };
   check("FONDERIE : « Danancher-(attard) » → « Bonjour Madame, », jamais « Danancher- »", buildQualityGreeting(fonderie) === "Bonjour Madame,", buildQualityGreeting(fonderie));
-  check("nom finissant par « - » → civilité seule", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Virginie Danancher-" }) === "Bonjour Madame,");
-  check("registre « Marie VACHERAND-GRANGER » → nom entier", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Marie VACHERAND-GRANGER" }) === "Bonjour Madame Vacherand-Granger,");
+  check("nom finissant par « - » → civilité seule", buildQualityGreeting({ email: null, leaderPerson: "Virginie Danancher-" }) === "Bonjour Madame,");
+  check("registre « Marie VACHERAND-GRANGER » → nom entier", buildQualityGreeting({ email: null, leaderPerson: "Marie VACHERAND-GRANGER" }) === "Bonjour Madame Vacherand-Granger,");
   check("adresse « marie.vacherand-granger@ » → nom entier", buildQualityGreeting({ email: "marie.vacherand-granger@x.fr" }) === "Bonjour Madame Vacherand-Granger,", buildQualityGreeting({ email: "marie.vacherand-granger@x.fr" }));
-  check("« Jean de La Fontaine » → « Monsieur de La Fontaine »", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Jean de La Fontaine" }) === "Bonjour Monsieur de La Fontaine,", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Jean de La Fontaine" }));
-  check("« Jean DE LA FONTAINE » (registre) → « Monsieur de La Fontaine »", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Jean DE LA FONTAINE" }) === "Bonjour Monsieur de La Fontaine,");
-  check("« Yann LE GALL » reste « Le Gall »", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Yann LE GALL" }) === "Bonjour Monsieur Le Gall,");
-  check("« Danancher-Attard » complet → gardé", buildQualityGreeting({ email: "contact@x.fr", leaderPerson: "Virginie DANANCHER-ATTARD" }) === "Bonjour Madame Danancher-Attard,");
+  check("« Jean de La Fontaine » → « Monsieur de La Fontaine »", buildQualityGreeting({ email: null, leaderPerson: "Jean de La Fontaine" }) === "Bonjour Monsieur de La Fontaine,", buildQualityGreeting({ email: null, leaderPerson: "Jean de La Fontaine" }));
+  check("« Jean DE LA FONTAINE » (registre) → « Monsieur de La Fontaine »", buildQualityGreeting({ email: null, leaderPerson: "Jean DE LA FONTAINE" }) === "Bonjour Monsieur de La Fontaine,");
+  check("« Yann LE GALL » reste « Le Gall »", buildQualityGreeting({ email: null, leaderPerson: "Yann LE GALL" }) === "Bonjour Monsieur Le Gall,");
+  check("« Danancher-Attard » complet → gardé", buildQualityGreeting({ email: null, leaderPerson: "Virginie DANANCHER-ATTARD" }) === "Bonjour Madame Danancher-Attard,");
 
   console.log("\n3. Preuve : une démo par pain, URL vérifiée");
   check("devis → /agent", demoFor("préparer les devis de menuiserie").path === "/agent");
@@ -677,11 +687,11 @@ async function main() {
 
     // Salutation : adresse générique + addressee_hint (agent1).
     const hint = (name: string, civility: "Monsieur" | "Madame" | null) => ({ addressee_hint: { name, role: "dirigeant", civility, text: "", source: "site" } });
-    check("générique + addressee_hint → « Bonjour Madame Durand, »", buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf(hint("Claude Durand", "Madame")) }) === "Bonjour Madame Durand,");
-    check("générique + addressee_hint sans civilité connue → civilité du prénom", buildQualityGreeting({ email: "contact@plimetal.fr", addresseeHint: addresseeHintOf(hint("Pierre Durand", null)) }) === "Bonjour Monsieur Durand,");
+    check("générique + addressee_hint → « Bonjour, » (Cowork #59 : jamais un nom sur contact@)", buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf(hint("Claude Durand", "Madame")) }) === "Bonjour,");
+    check("sans adresse + addressee_hint sans civilité connue → civilité du prénom", buildQualityGreeting({ email: null, addresseeHint: addresseeHintOf(hint("Pierre Durand", null)) }) === "Bonjour Monsieur Durand,");
     check("générique, addressee_hint calculé mais vide → « Bonjour, »", buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({ addressee_hint: null }) }) === "Bonjour,");
     check("adresse nominative : son titulaire, jamais l'addressee_hint", buildQualityGreeting({ email: "jean.martin@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf(hint("Claude Durand", "Madame")) }) === "Bonjour Monsieur Martin,");
-    check("fiche d'avant (pas de champ) : comportement d'avant (dirigeant)", addresseeHintOf({}) === undefined && buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({}) }) === "Bonjour Monsieur Martin,");
+    check("fiche d'avant (pas de champ), contact@ : « Bonjour, » (Cowork #59)", addresseeHintOf({}) === undefined && buildQualityGreeting({ email: "contact@plimetal.fr", leaderPerson: "Jean Martin", addresseeHint: addresseeHintOf({}) }) === "Bonjour,");
   }
 
   console.log("\nCheck-list des mails (Cowork #32)");
@@ -1026,6 +1036,26 @@ async function main() {
     const ctxFake = { db: fake as never, userId: "u1" };
     check("AGENCE JB : le brouillon libre d'un script est repris par l'application", (await adoptableScriptDraft(ctxFake, "p-jb")) === "eval-1");
     check("brouillon de script VALIDÉ : jamais repris", (await adoptableScriptDraft(ctxFake, "p-locked")) === null);
+  }
+
+  console.log("\nCowork #59 : origine de l'adresse + « stop » en fin de mail, salutation sur boîte de rôle");
+  {
+    check("origine : site:accueil → site, hunter:pattern → Hunter, inconnue → aucune", contactOriginOf({ contact_found_by: "site:accueil" }) === "site" && contactOriginOf({ contact_found_by: "hunter:pattern+verifier" }) === "hunter" && contactOriginOf({ contact_source: "hunter:domain-search" }) === "hunter" && contactOriginOf({ contact_found_by: "reponse:contact-parti" }) === "reponse" && contactOriginOf({}) === null);
+    const siteLine = optOutSentence("site");
+    check("ligne site : « Votre adresse figure sur votre site. Un simple « stop »… »", siteLine === "Votre adresse figure sur votre site. Un simple « stop » en réponse et je ne vous écris plus.");
+    check("source inconnue : phrase d'avant, aucune origine inventée", optOutSentence(null) === OPT_OUT_SENTENCE);
+    check("la nouvelle ligne est reconnue comme mention d'opposition (contrôle avant envoi)", hasOptOut(siteLine) && hasOptOut(optOutSentence("hunter")));
+    const signature = "Axel Remillat\naxelremillat.com";
+    const body = withOptOut(`Bonjour,\n\nUn texte de dix mots pour compter la longueur du mail ici.\n\n${signature}`, signature, siteLine);
+    check("une seule ligne, juste avant la signature", body.endsWith(`${siteLine}\n\n${signature}`) && body.split(siteLine).length === 2);
+    check("hors comptage de longueur : la ligne entière est retirée du texte compté", !withoutOptOut(body).includes("Votre adresse"));
+    check("déjà présente : rien n'est ajouté", withOptOut(body, signature, siteLine) === body);
+    check("Aujourd'hui : la ligne stockée est retrouvée…", optOutLineOf(body) === siteLine);
+    check("… et gardée telle quelle à l'enregistrement d'une retouche", joinBody("Bonjour,\n\nTexte retouché.", { optOut: true, signature, optOutText: siteLine }) === `Bonjour,\n\nTexte retouché.\n\n${siteLine}\n\n${signature}`);
+    check("sans ligne stockée : la forme canonique, comme avant", joinBody("Bonjour,", { optOut: true, signature: null }) === `Bonjour,\n\n${OPT_OUT_SENTENCE}`);
+    check("relance sur secretariat@ : « Bonjour, » même si l'intro nommait quelqu'un (BEYNAT)", relanceGreeting({ introGreeting: "Bonjour Monsieur Rodriguez,", generic: true, email: "secretariat@beynat.fr", contactName: "Pascal Rodriguez" }) === "Bonjour,");
+    check("relance nominative : salutation de l'intro gardée", relanceGreeting({ introGreeting: "Bonjour Madame Martin,", generic: false, email: "s.martin@x.fr", contactName: "Sophie Martin" }) === "Bonjour Madame Martin,");
+    check("boîte de rôle : contact@, secretariat@, service.clients@ ; pas « redouane@ »", isRoleAddress("contact@x.fr") && isRoleAddress("secretariat@x.fr") && isRoleAddress("service.clients@x.fr") && !isRoleAddress("redouane@x.fr") && !isRoleAddress("paul.marolleau@x.fr"));
   }
 
   console.log(failures === 0 ? "\nTous les tests qualité passent.\n" : `\n${failures} test(s) en echec.\n`);

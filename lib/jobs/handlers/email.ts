@@ -48,6 +48,7 @@ import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import { acquireAvecLock, closeAvec, type AvecLock, type LockDb } from "@/lib/emails/quality/avec-lock";
 import { factsGate, hasDistinctiveFacts, keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { ENTRE_WINDOW } from "@/lib/emails/quality/daf";
+import { contactOriginOf, optOutSentence } from "@/lib/mail-preflight/contact-origin";
 import { addresseeHintOf, askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
@@ -898,6 +899,9 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       // SEGMENT (agent3) : une fiche de segment impose sa famille de mail —
       // F5 « partenaire » pour une agence. `null` laisse le tirage habituel.
       family: familyForSegment(segmentOf(prospect)) ?? undefined,
+      // Cowork #59 : d'où vient l'adresse, puis le « stop ». Seule l'adresse de la fiche a une source connue ;
+      // une autre adresse trouvée pour ce mail garde la phrase d'avant (aucune origine inventée).
+      optOut: optOutSentence(greetingInput.email === prospect.email ? contactOriginOf(prospect) : null),
       // Seule la phrase d'appel à l'action change avec la variante (prompts et juge inchangés).
       ...(experiment ? { cta: experiment.variant.cta } : {}),
     }),

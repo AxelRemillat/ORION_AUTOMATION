@@ -1,13 +1,14 @@
 import { addresseeOf, civilityFor, isCompleteName, usagePerson, type Person } from "@/lib/emails/salutation";
 import type { AskFn } from "@/lib/ai/chat";
+import { isRoleAddress } from "@/lib/contact-finder/extract";
 import { ownerMismatch } from "@/lib/contact-finder/owner";
-import { classifyEmail } from "@/lib/contact-finder/extract";
 
 /**
  * SALUTATION du gabarit qualité.
  *
  *   - adresse NOMINATIVE → son titulaire : « Bonjour Monsieur Lebreton, » ;
- *   - adresse GÉNÉRIQUE + dirigeant connu → le dirigeant : « Bonjour Monsieur Ivanov, » ;
+ *   - adresse GÉNÉRIQUE (contact@, secretariat@, info@…) → « Bonjour, », même si le dirigeant est connu
+ *     (Cowork #59 : BEYNAT FERMETURES a refusé un « Bonjour Monsieur Rodriguez » reçu sur secretariat@) ;
  *   - sinon « Bonjour, ».
  *
  * Le 03/10, 1PACT (silouane.lebreton@) et KOMAKS (contact@, dirigeant Gradimir
@@ -55,6 +56,12 @@ export function addresseeHintOf(figures: Record<string, unknown> | null | undefi
 
 /** La personne à saluer, avec son prénom quand on le connaît. */
 export function greetingPerson(input: GreetingInput): Person | null {
+  // `aktid@aktid.fr` : la partie locale reprend le domaine, c'est une boîte de service.
+  const [local = "", domain = ""] = (input.email ?? "").toLowerCase().split("@");
+  const serviceBox = Boolean(local) && key(domain.split(".")[0] ?? "").replace(/[^a-z0-9]/g, "") === local.replace(/[^a-z0-9]/g, "");
+  // Cowork #59 (BEYNAT FERMETURES, refus du 14/10 : « Bonjour Monsieur Rodriguez » à secretariat@) : une boîte
+  // de rôle ou de service n'est lue par personne en particulier → « Bonjour, », jamais un nom.
+  if (isRoleAddress(input.email) || serviceBox) return null;
   if (input.addressee) return usagePerson(input.addressee);
   // Contact nominatif choisi pour la fiche : son nom COMPLET, plutôt que ce que
   // l'adresse laisse deviner (« jmartin@ » ne donne pas le prénom).
@@ -64,10 +71,7 @@ export function greetingPerson(input: GreetingInput): Person | null {
     const recipient = usagePerson(input.contactName);
     if (recipient) return recipient;
   }
-  // `aktid@aktid.fr` : la partie locale reprend le domaine, c'est une boîte de service.
-  const [local = "", domain = ""] = (input.email ?? "").toLowerCase().split("@");
-  const serviceBox = Boolean(local) && key(domain.split(".")[0] ?? "").replace(/[^a-z0-9]/g, "") === local.replace(/[^a-z0-9]/g, "");
-  const owner = serviceBox ? null : addresseeOf(input.email);
+  const owner = addresseeOf(input.email);
   if (owner) {
     // Le titulaire de la boîte, nommé par son nom COMPLET quand on le connaît
     // ailleurs : c'est le prénom qui donne la civilité.
@@ -76,14 +80,11 @@ export function greetingPerson(input: GreetingInput): Person | null {
       .find((person) => person && key(person.last) === key(owner.last));
     return known ?? owner;
   }
-  // Adresse GÉNÉRIQUE (Cowork #31) : la personne visée par agent1, sinon personne.
+  // Ni boîte de rôle, ni nom lisible dans l'adresse (« xbr@ ») : personne de VÉRIFIÉ → « Bonjour, » (Cowork #59).
+  if (local) return null;
+  // Sans adresse (aperçu) : la personne visée par agent1 (Cowork #31), sinon le dirigeant.
   if (input.addresseeHint !== undefined) return input.addresseeHint ? usagePerson(input.addresseeHint.name) : null;
-  // Adresse PERSONNELLE d'un autre (SKI SHOP, benjamin.d@ ; dirigeant Nicolas Jacquier) : on ne
-  // salue pas le dirigeant dans la boîte d'un salarié — « Bonjour, » (Cowork #35).
-  const fallback = input.leaderPerson ?? input.contactName;
-  const personal = !serviceBox && (classifyEmail(input.email ?? "", null) === "nominatif" || Boolean(civilityFor(local.split(/[._-]/)[0] ?? "")));
-  if (personal && ownerMismatch(input.email, fallback) === true) return null;
-  return usagePerson(fallback);
+  return usagePerson(input.leaderPerson ?? input.contactName);
 }
 
 export function civilityOf(first: string, cache: CivilityCache = {}): Civility | null {

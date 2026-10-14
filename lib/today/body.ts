@@ -36,10 +36,19 @@ export function splitBody(body: string, signature?: string | null): SplitBody {
   return { core: core.replace(/\n{3,}/g, "\n\n").trimEnd(), optOut, signature: found };
 }
 
-/** Recompose le corps à enregistrer à partir du texte édité. */
-export function joinBody(core: string, parts: { optOut: boolean; signature: string | null }): string {
+/** La ligne d'opposition telle qu'elle est stockée (avec l'origine de l'adresse, Cowork #59), ou `null`. */
+export function optOutLineOf(body: string | null | undefined): string | null {
+  const line = (body ?? "").replace(/\r\n/g, "\n").split("\n").find((row) => hasOptOut(row));
+  return line?.trim() || null;
+}
+
+/**
+ * Recompose le corps à enregistrer à partir du texte édité. `optOutText` : la ligne d'opposition déjà
+ * stockée, gardée telle quelle (origine de l'adresse comprise) ; à défaut, la forme canonique.
+ */
+export function joinBody(core: string, parts: { optOut: boolean; signature: string | null; optOutText?: string | null }): string {
   const blocks = [(core ?? "").replace(/\r\n/g, "\n").trimEnd()];
-  if (parts.optOut) blocks.push(OPT_OUT_SENTENCE);
+  if (parts.optOut) blocks.push(parts.optOutText ?? OPT_OUT_SENTENCE);
   if (parts.signature) blocks.push(parts.signature.trim());
   return blocks.filter(Boolean).join("\n\n");
 }

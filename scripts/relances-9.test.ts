@@ -189,7 +189,8 @@ async function main() {
     check("composée sans rien écrire en base", composed.ok && db.rows("messages").length === 1, composed);
     if (composed.ok) {
       const draft = composed.draft;
-      check("même fil, objet « Re: <objet exact> », salutation de l'intro", draft.thread_id === "thr-1" && draft.subject === `Re: ${INTRO_SUBJECT}` && draft.body.startsWith("Bonjour Madame Martin,"));
+      // Cowork #59 : l'intro nommait Mme Martin sur contact@ ; la relance dit « Bonjour, » (boîte de rôle).
+      check("même fil, objet « Re: <objet exact> », « Bonjour, » sur contact@", draft.thread_id === "thr-1" && draft.subject === `Re: ${INTRO_SUBJECT}` && draft.body.startsWith("Bonjour,\n"));
       check("adresse générique : transfert ; mention stop une seule fois", draft.body.includes(TRANSFER_SENTENCE) && draft.body.split(OPT_OUT_SENTENCE).length === 2, draft.body);
       check("prête : note 10, aucun motif", draft.ready && draft.quality_score === 10 && draft.quality_reason === null, draft);
       check("le rédacteur n'a vu ni la mention stop ni le recrutement", !seen.some((user) => user.includes(OPT_OUT_SENTENCE) || /recrute/i.test(user)), seen[0]);

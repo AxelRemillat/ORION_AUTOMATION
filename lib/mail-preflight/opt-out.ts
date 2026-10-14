@@ -31,7 +31,7 @@ export const OPT_OUT_SENTENCE =
  */
 const STOP_WORD = /(^|[^\p{L}])stop([^\p{L}]|$)/iu;
 const NO_FOLLOW_UP =
-  /(relanc\p{L}*|recontact\p{L}*|plus de (messages?|mails?|nouvelles)|n'?\s*[eé]crirai plus|ne vous [eé]crirai plus)/iu;
+  /(relanc\p{L}*|recontact\p{L}*|plus de (messages?|mails?|nouvelles)|n'?\s*[eé]crirai plus|ne vous [eé]cri(?:s|rai) plus)/iu;
 
 /** Espaces (insécables comprises) ramenées à une seule, guillemets et apostrophes unifiés. */
 const flatten = (text: string) =>
@@ -77,23 +77,24 @@ function signOffStart(blocks: string[]): number {
 }
 
 /**
- * Insère la phrase juste avant la signature, si elle manque.
+ * Insère la phrase juste avant la signature, si elle manque. `sentence` : la ligne qui dit aussi d'où vient
+ * l'adresse (lib/mail-preflight/contact-origin.ts, Cowork #59) ; à défaut, la phrase d'avant.
  *
  * `signature` est le bloc posé par le code (lib/offer/model.ts). Sans lui, on
  * reconnaît la signature à sa forme (dernier bloc court, formule de politesse)
  * pour ne pas écrire la mention SOUS le nom de l'expéditeur.
  */
-export function withOptOut(body: string, signature?: string | null): string {
+export function withOptOut(body: string, signature?: string | null, sentence: string = OPT_OUT_SENTENCE): string {
   if (hasOptOut(body)) return body;
   const text = (body ?? "").trimEnd();
   const sign = (signature ?? "").trim();
 
   if (sign && text.endsWith(sign)) {
     const head = text.slice(0, text.length - sign.length).trimEnd();
-    return `${head}\n\n${OPT_OUT_SENTENCE}\n\n${sign}`;
+    return `${head}\n\n${sentence}\n\n${sign}`;
   }
   const blocks = text.split(/\n\s*\n/);
   const at = signOffStart(blocks);
-  if (at >= blocks.length) return `${text}\n\n${OPT_OUT_SENTENCE}`;
-  return [...blocks.slice(0, at), OPT_OUT_SENTENCE, ...blocks.slice(at)].join("\n\n");
+  if (at >= blocks.length) return `${text}\n\n${sentence}`;
+  return [...blocks.slice(0, at), sentence, ...blocks.slice(at)].join("\n\n");
 }

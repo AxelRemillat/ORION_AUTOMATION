@@ -155,7 +155,7 @@ async function main() {
     check("salutation : la personne contactée, pas le dirigeant", greeting(true) === "Bonjour Madame Martin,", greeting(true));
     check("(avant : « jmartin@ » ne donnait ni prénom ni civilité)", greeting(false) === "Bonjour,", greeting(false));
     const generic = buildQualityGreeting({ email: "contact@acme.fr", leaderPerson: "Pierre DURAND", contactName: null });
-    check("adresse générique : le dirigeant reste salué (inchangé)", generic === "Bonjour Monsieur Durand,", generic);
+    check("adresse générique : « Bonjour, », jamais le dirigeant (Cowork #59)", generic === "Bonjour,", generic);
   }
 
   console.log("\n5. Noms du site, schéma d'adresse (#32)");
@@ -359,6 +359,14 @@ async function main() {
     const found = await fillNoEmailNominative(db2 as unknown as Db, noMail, good.deps);
     const row = db2.rows("prospects")[0] as { email: string; email_type: string };
     check("sans e-mail : nominative vérifiée ≥ 80 → adresse de la fiche", found.status === "found" && row.email === "pierre.durand@acme-exemple.fr" && row.email_type === "nominatif", row);
+
+    // Cowork #56 : « Exemple-(exemple) » du registre → Hunter cherche « Exemple », pas « Exemple- ».
+    const asked: string[] = [];
+    const spy = hunter({ people: [] });
+    spy.deps.emailFinder = async (_domain, first, last) => { asked.push(`${first} ${last}`); return null; };
+    const odd: UpgradeProspect = { ...noMail, key_figures: { opposition_checked: true, leader_person: "Paul Exemple-(exemple)" } };
+    await fillNoEmailNominative(new FakeDb({ prospects: [{ ...odd }], prospect_events: [] }) as unknown as Db, odd, spy.deps);
+    check("Email Finder : nom du registre sans tiret orphelin", asked[0] === "Paul Exemple", asked);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);

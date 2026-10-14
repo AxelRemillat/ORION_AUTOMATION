@@ -4,7 +4,7 @@ import { usagePerson } from "@/lib/emails/salutation";
 import { domainOfEmail, toDomain } from "./domains";
 import { classifyEmail } from "./extract";
 import { findNominativeContact, type NominativeContact } from "./nominative";
-import { firstGiven, ineligibility, NOMINATIVE_RETRY_MS, type UpgradeDeps, type UpgradeProspect } from "./upgrade";
+import { firstGiven, ineligibility, searchLastName, NOMINATIVE_RETRY_MS, type UpgradeDeps, type UpgradeProspect } from "./upgrade";
 
 /**
  * RELANCE 2 VERS UNE PERSONNE (Cowork #52). ARTFLEX : info@ a dû transférer à
@@ -59,7 +59,7 @@ export function relance2Ineligibility(prospect: UpgradeProspect, sent: SentRow[]
 export async function searchNominative(db: Db, prospect: UpgradeProspect, domain: string, deps: UpgradeDeps) {
   const figures = prospect.key_figures ?? {};
   const usage = usagePerson(typeof figures.leader_person === "string" ? figures.leader_person : null);
-  const leader = usage?.first && usage.last ? { firstName: firstGiven(usage.first), lastName: usage.last } : null;
+  const leader = usage?.first && usage.last ? { firstName: firstGiven(usage.first), lastName: searchLastName(usage.last) } : null;
   const { data: dnc } = await db.from("prospects").select("email").eq("user_id", prospect.user_id).eq("do_not_contact", true);
   const blocked = ((dnc ?? []) as { email: string | null }[]).map((row) => row.email).filter((email): email is string => Boolean(email));
   const pain = prospect.brief?.pain?.task ?? prospect.pain_point ?? null;
