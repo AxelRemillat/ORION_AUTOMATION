@@ -7,6 +7,7 @@
  *   npm run drafts:lot -- --dry      liste des fiches, rien n'est lancé
  *   npm run drafts:lot               lance les jobs
  *   npm run drafts:lot -- --status   brouillons prêts (« Nouveaux ») par famille, à revoir, en cours
+ *   npm run drafts:lot -- --reprise "essai score 3 (Cowork #27)"   seulement les fiches de cette reprise
  *
  * Seuls les mails « prêts » (check-list à OUI) entrent dans « Nouveaux » ; les
  * autres passent en « À revoir ». Jamais un brouillon validé, programmé ou
@@ -36,7 +37,13 @@ async function status(userId: string) {
 async function main() {
   const userId = await ownerId();
   if (process.argv.includes("--status")) return status(userId);
-  const items = flatten((await loadToday(db as never, userId)).groups).filter(needsIntroDraft);
+  const all = flatten((await loadToday(db as never, userId)).groups).filter(needsIntroDraft);
+  // Lot restreint à une reprise tracée (`contact.reprise`, Cowork #28) : le reste attend la préparation.
+  const reprise = process.argv.indexOf("--reprise") >= 0 ? process.argv[process.argv.indexOf("--reprise") + 1] : null;
+  const scope = reprise
+    ? new Set((((await (db as never as { from: (table: string) => any }).from("signal_candidates").select("prospect_id").eq("user_id", userId).eq("contact->>reprise", reprise)).data ?? []) as { prospect_id: string | null }[]).map((row) => row.prospect_id))
+    : null;
+  const items = scope ? all.filter((item) => scope.has(item.prospectId ?? null)) : all;
   console.log(`${items.length} fiche(s) prête(s) sans brouillon${process.argv.includes("--dry") ? " (aperçu)" : ""}.`);
   for (const item of items) {
     if (process.argv.includes("--dry")) {
