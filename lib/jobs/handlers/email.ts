@@ -824,7 +824,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
   };
   const unknown = unknownFirstName(greetingInput, civilities);
   if (unknown) {
-    civilities[cacheKey(unknown)] = await askCivility(askFor(prospect.id), unknown, greetingPerson(greetingInput)?.last ?? "");
+    civilities[cacheKey(unknown)] = await askCivility(askFor(prospect.id, params.source), unknown, greetingPerson(greetingInput)?.last ?? "");
     // Gardée sur la fiche : la question ne se repose jamais pour ce prénom.
     await ctx.db.from("prospects").update({ key_figures: { ...figures, civilites: civilities } }).eq("id", prospect.id);
     prospect.key_figures = { ...figures, civilites: civilities };
@@ -856,7 +856,7 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
   const experiment = params.saveDraft ? await variantForDraft(ctx.db, { userId: ctx.userId, existingMessageId: target }) : null;
   const draft = await guardAi(() =>
     generateQualityDraft({
-      ask: askFor(prospect.id),
+      ask: askFor(prospect.id, params.source),
       brief,
       facts,
       prospectId: prospect.id,
