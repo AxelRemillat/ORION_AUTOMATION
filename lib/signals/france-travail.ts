@@ -95,8 +95,6 @@ export const FUNNEL_ROME_CODES = [
   "N1303", // Approvisionneur / Approvisionneuse logistique
   "N1209", // Technicien / Technicienne logistique (gestion de stock)
   // SAV, hotline
-  "H1108", // Technicien / Technicienne support client en industrie
-  "I1404", // Conseiller / Conseillère support technique informatique
   // Logistique et transport
   "N1210", // Logisticien / Logisticienne
   "N1201", // Affréteur / Affréteuse (gestion transport)
@@ -111,23 +109,31 @@ export const FUNNEL_ROME_CODES = [
   // ADV et relation client (encadrement)
   "M1701", // Responsable de l'administration des ventes (169)
   "M1704", // Responsable service clients (540)
-  "D1415", // Chargé / Chargée de relation client (257)
   // Paie et administration du personnel
   "M1507", // Gestionnaire paie (2 560)
   "M1509", // Responsable paie et administration du personnel (186)
   // Comptabilité, contrôle de gestion, direction financière de PME
   "M1206", // Responsable comptabilité (1 256)
   "M1204", // Contrôleur / Contrôleuse de gestion (517)
-  "M1222", // Assistant / Assistante de contrôle budgétaire (24)
   "M1223", // Chef / Cheffe des services administratifs et financiers (315)
   "M1205", // Directeur administratif et financier / Directrice administrative et financière (DAF) (400)
-  "K1908", // Responsable de service contentieux et recouvrement (26)
   // Saisie, import-export, douane
-  "M1606", // Opérateur / Opératrice de saisie (84)
   "D1429", // Assistant / Assistante import-export (126)
   "N1203", // Déclarant / Déclarante en douane (57)
   // Planification de production
   "H1403", // Gestionnaire de flux de production (798)
+  /*
+   * ROME v2 (Cowork #32, 14/10/2026), mesuré par `scripts/rome-levier.ts` sur 14 jours :
+   * retirés I1404, D1415, H1108, M1222, K1908, M1606 (0 fiche creusée, 0 mail prêt) ;
+   * ajoutés ci-dessous (offres lues / 14 j entre parenthèses).
+   */
+  "F1135", // Chargé / Chargée d'affaires BTP — devis (695)
+  "N1301", // Responsable logistique (385)
+  "C1502", // Chargé / Chargée de gestion locative en immobilier (250)
+  "C1501", // Gestionnaire de copropriété (246)
+  "N4205", // Responsable d'exploitation transport routier de marchandises (81)
+  "N1202", // Agent / Agente de transit (102)
+  "N1302", // Responsable entrepôt logistique (101)
 ] as const;
 
 /** Offres France Travail : publiées depuis moins de 30 jours, sur toute la France. */

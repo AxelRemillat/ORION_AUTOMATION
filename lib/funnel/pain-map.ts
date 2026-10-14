@@ -76,6 +76,10 @@ const RULES: readonly PainRule[] = [
   { pattern: /import[- ]export|\bdouane|declarant|transit/, pain: "documents d'expédition et déclarations en douane" },
   { pattern: /\bsaisie\b|operat(eur|rice) de saisie/, pain: "saisie de données" },
   { pattern: /gestionnaire (de |des )?flux|flux de production|\bmrp\b/, pain: "planning" },
+  // ROME v2 (Cowork #32) : entrepôt, exploitation transport, gestion locative et copropriété.
+  { pattern: /entrepot|responsable (de |d')?(plateforme|site) logistique/, pain: "gestion du stock" },
+  { pattern: /(responsable|chef|cheffe) d'exploitation|exploitation transport/, pain: "suivi des approvisionnements et des expéditions" },
+  { pattern: /gestion locative|gestionnaire locati|copropriete|syndic|gestionnaire de biens|gestionnaire immobilier/, pain: "suivi des locataires, quittances et relances de loyers" },
 ];
 
 function normalize(value: string): string {
@@ -113,5 +117,8 @@ export function painMapBlock(): string {
     "- DAF / RAF / responsable administratif et financier → reporting financier et clôtures mensuelles",
     "- assistant import-export / déclarant en douane → documents d'expédition et déclarations en douane",
     "- opérateur de saisie → saisie de données",
+    "- responsable d'entrepôt → gestion du stock",
+    "- responsable d'exploitation transport → suivi des approvisionnements et des expéditions",
+    "- gestion locative / gestionnaire de copropriété / syndic → suivi des locataires, quittances et relances de loyers",
   ].join("\n");
 }

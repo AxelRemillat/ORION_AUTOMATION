@@ -279,18 +279,21 @@ async function main() {
   console.log("\n8. France Travail élargi (toute la France, 30 jours, back-office)");
   {
     const codes: readonly string[] = FUNNEL_ROME_CODES;
-    check("codes ROME : assistanat, office manager, ADV, compta, facturation, recouvrement, achats, SAV, logistique", ["M1607", "M1604", "M1432", "D1409", "M1225", "M1611", "D1422", "N1303", "H1108", "N1210", "N1201"].every((code) => codes.includes(code)));
+    check("codes ROME : assistanat, office manager, ADV, compta, facturation, recouvrement, achats, SAV, logistique", ["M1607", "M1604", "M1432", "D1409", "M1225", "M1611", "D1422", "N1303", "N1210", "N1201"].every((code) => codes.includes(code)));
     check("M1602 (secrétaire de collectivité territoriale en ROME 4) retiré", !codes.includes("M1602"));
     check("offres de moins de 30 jours", FUNNEL_FT_DAYS === 30);
-    for (const title of ["Office manager", "Assistant de direction", "Technicien support client", "Technicien SAV hotline", "Logisticien", "Affréteur", "Gestionnaire de commandes"]) {
+    for (const title of ["Office manager", "Assistant de direction", "Technicien support client", "Technicien SAV hotline", "Logisticien", "Affréteur", "Gestionnaire de commandes", "Chargé d'affaires BTP", "Responsable logistique", "Responsable d'entrepôt", "Gestionnaire locatif H/F", "Gestionnaire de copropriété", "Agent de transit", "Responsable d'exploitation transport"]) {
       check(`intitulé reconnu : ${title}`, painForJob(title) !== null);
     }
     check("hors back-office toujours écarté (développeur, chauffeur)", painForJob("Développeur web") === null && painForJob("Chauffeur poids lourd") === null);
 
     // Cowork #46 : 15 codes de plus, les 24 d'avant conservés.
-    const added = ["M1701", "M1704", "D1415", "M1507", "M1509", "M1206", "M1204", "M1222", "M1223", "M1205", "K1908", "M1606", "D1429", "N1203", "H1403"];
-    check("15 codes ajoutés, 39 au total, sans doublon", added.every((code) => codes.includes(code)) && codes.length === 39 && new Set(codes).size === codes.length, String(codes.length));
-    check("les 24 codes d'avant conservés", ["M1607", "M1604", "M1432", "M1605", "D1401", "D1409", "D1432", "D1407", "M1203", "M1225", "M1213", "M1608", "M1611", "D1422", "M1101", "D1431", "N1303", "N1209", "H1108", "I1404", "N1210", "N1201", "M1501", "H1401"].every((code) => codes.includes(code)));
+    // ROME v2 (Cowork #32) : 6 retirés, 7 ajoutés, 40 au total.
+    const removed = ["I1404", "D1415", "H1108", "M1222", "K1908", "M1606"];
+    const added = ["M1701", "M1704", "M1507", "M1509", "M1206", "M1204", "M1223", "M1205", "D1429", "N1203", "H1403", "F1135", "N1301", "C1502", "C1501", "N4205", "N1202", "N1302"];
+    check("ROME v2 : 6 retirés, 7 ajoutés, 40 au total, sans doublon", removed.every((code) => !codes.includes(code)) && added.every((code) => codes.includes(code)) && codes.length === 40 && new Set(codes).size === codes.length, String(codes.length));
+    check("M1507 (paie) conservé", codes.includes("M1507"));
+    check("les codes d'avant conservés (hors retirés)", ["M1607", "M1604", "M1432", "M1605", "D1401", "D1409", "D1432", "D1407", "M1203", "M1225", "M1213", "M1608", "M1611", "D1422", "M1101", "D1431", "N1303", "N1209", "N1210", "N1201", "M1501", "H1401"].every((code) => codes.includes(code)));
     const expected: Record<string, string> = {
       "Gestionnaire de paie H/F": "variables de paie et déclarations sociales",
       "Responsable paie et administration du personnel": "variables de paie et déclarations sociales",
