@@ -6,6 +6,10 @@ import { buildProductionFunnel, costFamily, type FunnelSignal } from "../lib/fun
 import { linkupGate, linkupSiteReserve, type LinkupGateStore } from "../lib/linkup/gate";
 import { matchHomepage, recoveryDomains, robotsForbidsHome } from "../lib/funnel/free-site-recovery";
 import { decodeCfEmails } from "../lib/contact-finder/cloudflare";
+import { extractEmails } from "../lib/contact-finder/extract";
+import { exclusionReason, isServiceProvider } from "../lib/contact-finder/domains";
+import { runContactSearch, type ContactDeps } from "../lib/contact-finder/finder";
+import { contactDomainMismatch } from "../lib/today/contact-domain";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -82,6 +86,24 @@ check("data-cfemail décodé", decodeCfEmails(`<a data-cfemail="${cf("contact@ba
 check("lien /cdn-cgi/l/email-protection décodé", decodeCfEmails(`<a href="/cdn-cgi/l/email-protection#${cf("info@sbflorac.com", 0x13)}">`).join() === "info@sbflorac.com");
 check("hexadécimal sans adresse ignoré", decodeCfEmails('<a data-cfemail="abcdef0123">').length === 0);
 
+console.log("Étape e-mail (Cowork #34)");
+check("extractEmails lit une adresse Cloudflare", extractEmails(`<a href="/cdn-cgi/l/email-protection#${cf("contact@barthouil.fr")}">x</a>`).includes("contact@barthouil.fr"));
+check("adresse de l'agence web écartée (Linkeo)", isServiceProvider("linkeo.com") && extractEmails("service@linkeo.com · contact@loiseaubleu.re").join() === "contact@loiseaubleu.re");
+check("portail de marque refusé (spoticar.fr)", exclusionReason("spoticar.fr") === "portail de marque ou de réseau");
+check("garage indépendant au nom de marque accepté", exclusionReason("renault-garage-dupont.fr") === null);
+check("sous-domaine applicatif refusé, domaine nu accepté", exclusionReason("workspace.outsourcia.fr") === "sous-domaine applicatif" && exclusionReason("outsourcia.fr") === null);
+check("adresse hors domaine = « à vérifier » dans Aujourd'hui", contactDomainMismatch("contact@sbflorac.com", "https://maconnerie-renovation-florac.fr") !== null);
+
+async function finder() {
+  const page = `<html><body><h1>S ET B Maçonnerie</h1><p>SARL DOS SANTOS - BARROSO, SIREN 123 456 789, 48400 Florac</p><a href="/contact">Contact</a><a href="/cdn-cgi/l/email-protection#${cf("contact@sbflorac.com")}">écrire</a><a href="https://linkeo.com">service@linkeo.com</a></body></html>`;
+  const deps: ContactDeps = { fetchHtml: async (url) => ({ html: page, url }), webSearch: async () => null, hunterDomainSearch: async () => null, hunterFinder: async () => null, hunterVerify: async () => null };
+  const company = { prospectId: null, legalName: "SARL DOS SANTOS - BARROSO (S ET B)", tradeNames: [], siren: "123456789", city: "Florac", postalCode: "48400", leader: null, activity: null, knownWebsite: "https://maconnerie-renovation-florac.fr", pappersWebsite: null, knownEmail: null };
+  const { result } = await runContactSearch(company, deps, { linkup: 0, pages: 4, llm: 0, hunterDomainSearch: 0, hunterFinder: 0, hunterVerifier: 0 }, { hunter: { allowed: false } });
+  check("site prouvé + adresse hors domaine : gardée, marquée douteuse", result.email === "contact@sbflorac.com" && result.doubtful === true, JSON.stringify(result));
+  const unproven = await runContactSearch({ ...company, siren: null, city: null, postalCode: null, legalName: "AUTRE NOM" }, deps, { linkup: 0, pages: 4, llm: 0, hunterDomainSearch: 0, hunterFinder: 0, hunterVerifier: 0 }, { hunter: { allowed: false } });
+  check("site NON prouvé : l'adresse hors domaine reste écartée", unproven.result.email !== "contact@sbflorac.com", JSON.stringify(unproven.result));
+}
+
 async function linkup() {
   console.log("Réserve Linkup des recherches de site");
   const store = (used: number): LinkupGateStore => ({ read: async () => null, write: async () => undefined, usedSince: async () => used });
@@ -106,7 +128,7 @@ async function linkup() {
   else process.env.LINKUP_SITE_RESERVE = previous.reserve;
 }
 
-void linkup().then(() => {
+void finder().then(linkup).then(() => {
   console.log(failures ? `\n${failures} échec(s)` : "\nproduction mails : tout est vert");
   process.exit(failures ? 1 : 0);
 });

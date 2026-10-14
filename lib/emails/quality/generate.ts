@@ -72,6 +72,8 @@ export interface QualityInput {
    * Seule la DERNIÈRE PHRASE change : prompts, règles et juge sont les mêmes pour toutes les variantes.
    */
   cta?: string;
+  /** Ligne de fin : origine de l'adresse + « stop » (Cowork #59, optOutSentence) ; hors juge et hors comptage. */
+  optOut?: string;
 }
 
 export interface QualityAttempt {
@@ -176,7 +178,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
   for (let attempt = 0; attempt <= MAX_REWRITES; attempt += 1) {
     const raw = await input.ask(
       "writer",
-      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole, keyFacts: input.keyFacts, focus: daf ? DAF_FOCUS : undefined, avoidEntre }),
+      buildWriterPrompt({ brief: input.brief, facts, own, activity: input.activity, sector: input.sector, companyName: input.companyName, demo, greeting: input.greeting, cta, fixedCta: input.cta, usedCliches: input.usedCliches, avoidAvec: !avecAllowed(input.dayOpenings) || !avecAllowed(input.dayOpenings?.byFamily?.[family]), subjectArm: arm, feedback, family, recipientRole: input.recipientRole, keyFacts: input.keyFacts, focus: daf ? DAF_FOCUS : undefined, avoidEntre }),
       `${feedback ? "Réécris" : "Écris"} l'accroche, la proposition et l'objet pour ${input.companyName}.`,
       feedback ? 0.6 : 0.8,
       `qualite:redaction${feedback ? ":rewrite" : ""}`,
@@ -235,7 +237,7 @@ export async function generateQualityDraft(input: QualityInput): Promise<Quality
     const verdict = rules.ok
       ? await judgeChecklist(input.ask, { subject: parts.subject, core, family, greeting: input.greeting, company: input.companyName, facts: checklistFacts, recipientRole: input.recipientRole, siteText: input.prospectText, daf }, `qualite:checklist:${attempt}`)
       : null;
-    const body = withOptOut(`${core}\n\n${input.signature}`, input.signature);
+    const body = withOptOut(`${core}\n\n${input.signature}`, input.signature, input.optOut);
     history.push({ parts, body, rules, verdict, demo: chosen.path });
     if (rules.ok && verdict?.ready) break;
 

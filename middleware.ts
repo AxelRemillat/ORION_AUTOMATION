@@ -22,7 +22,8 @@ const PUBLIC_PATHS = ["/login", "/auth"];
  * ferait que gêner.
  */
 // `x-ingest-secret` (OPPORTUNITIES_INGEST_SECRET) pour la veille Codeur et les e-mails des plateformes, poussés par n8n.
-const MACHINE_PATHS = ["/api/inbound", "/api/cron", "/api/jobs/tick", "/api/opportunities/ingest", "/api/opportunities/ingest-email"];
+// `x-demo-visits-secret` (DEMO_VISITS_SECRET) pour les compteurs de démos, poussés par le serveur du portfolio (Cowork #34).
+const MACHINE_PATHS = ["/api/inbound", "/api/cron", "/api/jobs/tick", "/api/opportunities/ingest", "/api/opportunities/ingest-email", "/api/demo-visits"];
 
 const matches = (pathname: string, paths: readonly string[]): boolean =>
   paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));

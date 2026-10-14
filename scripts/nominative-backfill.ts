@@ -29,10 +29,9 @@
  */
 import { db, ownerId } from "./quality-live";
 import { readAll } from "@/lib/supabase/read-all";
-import { proposeRelance2Live, upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
+import { fillNoEmailLive, proposeRelance2Live, upgradeProspectLive } from "@/lib/contact-finder/nominative-live";
 import { relance2Ineligibility, type SentRow } from "@/lib/contact-finder/relance2";
 import { noEmailIneligibility, type NoEmailProspect } from "@/lib/contact-finder/no-email";
-import { findContact } from "@/lib/contact-finder";
 import { segmentOf } from "@/lib/segments";
 import { topicOf } from "@/lib/contact-finder/nominative";
 import { addresseeHint, ineligibility, isFreeDraft, isGenericAddress, nominativeShare, type UpgradeProspect } from "@/lib/contact-finder/upgrade";
@@ -159,16 +158,13 @@ async function main() {
       console.log(`arrêt : plafond du run atteint (${MAX_CREDITS} crédits)`);
       break;
     }
-    const found = await findContact(prospect.id, { db: db as never, userId, linkup: 0 }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }) as { error: string });
-    if ("error" in found) {
-      console.log(`sans e-mail · ${prospect.company_name} | erreur : ${found.error}`);
-      continue;
-    }
-    console.log(`sans e-mail · ${prospect.company_name} | ${found.email ? `${found.email} (${found.email_type ?? "?"}, ${found.found_by}, ${found.confidence})` : `aucune — ${found.found_by}`}`);
-    if (/Hunter épuisé/.test(found.found_by ?? "")) break;
-    if (found.email) {
+    // Cowork #55 : seule une adresse NOMINATIVE vérifiée (≥ 80) est gardée, jamais une générique.
+    const result = await fillNoEmailLive(db as unknown as Db, prospect.id);
+    console.log(`sans e-mail · ${prospect.company_name} | ${result.status} | ${result.reason} | crédits ${result.calls.domainSearch + result.calls.finder + result.calls.verifier}`);
+    if (result.status === "skipped" && result.reason.startsWith("Hunter épuisé")) break;
+    if (result.status === "found") {
       foundNoEmail += 1;
-      if (found.email_type === "nominatif") nominativeNoEmail += 1;
+      nominativeNoEmail += 1;
     }
   }
 

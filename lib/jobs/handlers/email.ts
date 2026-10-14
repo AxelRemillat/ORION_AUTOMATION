@@ -1,5 +1,5 @@
 import { OpenAIQuotaError, QUOTA_MESSAGE, quotaHitSince } from "@/lib/ai/quota";
-import { familyForSegment } from "@/lib/emails/quality/families";
+import { ensureDemoV, familyForSegment } from "@/lib/emails/quality/families";
 import { segmentOf } from "@/lib/segments";
 import { singleCompanyName } from "@/lib/company-name";
 import { z } from "zod";
@@ -48,6 +48,7 @@ import { hookOfBody, opensWithAvec } from "@/lib/emails/quality/readiness";
 import { acquireAvecLock, closeAvec, type AvecLock, type LockDb } from "@/lib/emails/quality/avec-lock";
 import { factsGate, hasDistinctiveFacts, keyFactsOf } from "@/lib/emails/quality/facts-gate";
 import { ENTRE_WINDOW } from "@/lib/emails/quality/daf";
+import { contactOriginOf, optOutSentence } from "@/lib/mail-preflight/contact-origin";
 import { addresseeHintOf, askCivility, buildQualityGreeting, cacheKey, greetingPerson, unknownFirstName, type CivilityCache } from "@/lib/emails/quality/greeting";
 import { replaceDraft } from "@/lib/emails/quality/versions";
 import { signatureFor } from "@/lib/offer/model";
@@ -713,8 +714,28 @@ async function draftTarget(
   return (
     ctx.job.result.messageId ??
     (origin ? null : await replaceableDraft(ctx, prospectId, params.replaceMessageId)) ??
-    (await latestIntroDraft(ctx, prospectId, origin))
+    (await latestIntroDraft(ctx, prospectId, origin)) ??
+    // Cowork #58 (AGENCE JB) : sans brouillon à elle, l'application reprend le brouillon LIBRE d'un script
+    // (eval, script) au lieu d'en créer un second. Il est archivé (message_versions) puis réécrit.
+    (origin ? null : await adoptableScriptDraft(ctx, prospectId))
   );
+}
+
+/** Brouillon d'intro d'un script, libre : ni validé, ni programmé, ni retouché à la main. */
+export async function adoptableScriptDraft(ctx: Pick<StepContext, "db" | "userId">, prospectId: string): Promise<string | null> {
+  const { data } = await ctx.db
+    .from("messages")
+    .select("*")
+    .eq("user_id", ctx.userId)
+    .eq("prospect_id", prospectId)
+    .eq("type", "intro")
+    .eq("status", "draft")
+    .is("deleted_at", null)
+    .not("send_status", "in", "(scheduled,sending)")
+    .order("created_at", { ascending: false })
+    .limit(20);
+  const rows = (data ?? []) as { id: string; origin?: string | null; validated_at?: string | null; edited_by_hand?: boolean }[];
+  return rows.find((row) => row.origin && !row.validated_at && !row.edited_by_hand)?.id ?? null;
 }
 
 /** Le brouillon précédent n'est réécrit que s'il est à nous, à ce prospect, et pas parti. */
@@ -878,6 +899,9 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
       // SEGMENT (agent3) : une fiche de segment impose sa famille de mail —
       // F5 « partenaire » pour une agence. `null` laisse le tirage habituel.
       family: familyForSegment(segmentOf(prospect)) ?? undefined,
+      // Cowork #59 : d'où vient l'adresse, puis le « stop ». Seule l'adresse de la fiche a une source connue ;
+      // une autre adresse trouvée pour ce mail garde la phrase d'avant (aucune origine inventée).
+      optOut: optOutSentence(greetingInput.email === prospect.email ? contactOriginOf(prospect) : null),
       // Seule la phrase d'appel à l'action change avec la variante (prompts et juge inchangés).
       ...(experiment ? { cta: experiment.variant.cta } : {}),
     }),
@@ -906,7 +930,8 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
     }
     throw new JobError(`À revoir — ${draft.blocked}. Aucun brouillon.`, false, 409);
   }
-  const email = { subject: draft.subject, body: draft.body };
+  // Cowork #58 : tout lien de démo enregistré porte `v=` (le gabarit le pose déjà ; garde-fou pour tout chemin).
+  const email = { subject: draft.subject, body: ensureDemoV(draft.body, draft.family) };
   const best = draft.history.find((attempt) => attempt.body === draft.body);
   const validation = best?.rules ?? { ok: false, failures: [] };
   const critique = null;
@@ -961,7 +986,10 @@ async function draftStepWith(ctx: StepContext, lock: AvecLock): Promise<StepOutc
     const existing = target;
     const quality = { quality_score: draft.score, quality_reason: draft.needsReview ? draft.reviewReason : null };
     if (existing) {
-      const saved = await replaceDraft(ctx, existing, { subject: email.subject.trim() || null, body: email.body.trim(), ...quality }, {
+      // Brouillon d'un script repris (Cowork #58) : il redevient un brouillon de l'application.
+      const { data: owner } = origin ? { data: null } : await ctx.db.from("messages").select("*").eq("id", existing).maybeSingle();
+      const adopt = Boolean((owner as { origin?: string | null } | null)?.origin) ? { origin: null } : {};
+      const saved = await replaceDraft(ctx, existing, { subject: email.subject.trim() || null, body: email.body.trim(), ...quality, ...adopt }, {
         auto: params.auto === true,
         reason: params.auto ? "régénération automatique" : "régénération demandée",
       });

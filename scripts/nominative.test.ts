@@ -14,7 +14,7 @@ import { FakeDb } from "./fake-supabase";
 import { isRoleBox } from "../lib/contact-finder/role-boxes";
 import { classifyEmail, extractEmails } from "../lib/contact-finder/extract";
 import { checkSendRules } from "../lib/outbox/send";
-import { proposeRelance2Contact, relance2Ineligibility, type SentRow } from "../lib/contact-finder/relance2";
+import { fillNoEmailNominative, proposeRelance2Contact, relance2Ineligibility, type SentRow } from "../lib/contact-finder/relance2";
 import { noEmailIneligibility } from "../lib/contact-finder/no-email";
 
 let failures = 0;
@@ -155,7 +155,7 @@ async function main() {
     check("salutation : la personne contactée, pas le dirigeant", greeting(true) === "Bonjour Madame Martin,", greeting(true));
     check("(avant : « jmartin@ » ne donnait ni prénom ni civilité)", greeting(false) === "Bonjour,", greeting(false));
     const generic = buildQualityGreeting({ email: "contact@acme.fr", leaderPerson: "Pierre DURAND", contactName: null });
-    check("adresse générique : le dirigeant reste salué (inchangé)", generic === "Bonjour Monsieur Durand,", generic);
+    check("adresse générique : « Bonjour, », jamais le dirigeant (Cowork #59)", generic === "Bonjour,", generic);
   }
 
   console.log("\n5. Noms du site, schéma d'adresse (#32)");
@@ -339,6 +339,34 @@ async function main() {
     const unknown = { ...fiche, contact_search: { hunter: [{ call: "domain-search", result: "0 adresse" }] } };
     check("Hunter « 0 adresse » il y a 10 jours : non (crédit perdu)", /domaine inconnu/.test(noEmailIneligibility({ ...unknown, contact_checked_at: "2026-10-04T10:00:00Z" }, now) ?? ""));
     check("… il y a 4 mois : de nouveau éligible", noEmailIneligibility({ ...unknown, contact_checked_at: "2026-06-01T10:00:00Z" }, now) === null);
+  }
+
+  console.log("\n12. Non commercial écarté d'office, sans e-mail : nominative vérifiée ≥ 80 seulement (Cowork #55)");
+  {
+    const base: UpgradeProspect = { id: "p", user_id: "u", company_name: "Acme", email: "contact@acme.fr", email_type: "generique", website: null, contact_found_by: "site", status: "contacte", key_figures: { opposition_checked: true } };
+    check("association (forme juridique) : aucun crédit", /^non commercial/.test(ineligibility({ ...base, key_figures: { opposition_checked: true, legal_form: "Association loi 1901" } }) ?? ""));
+    check("GEIQ / centre Léo Lagrange (nom) : aucun crédit", /^non commercial/.test(ineligibility({ ...base, company_name: "GEIQ Industrie Exemple" }) ?? "") && /^non commercial/.test(ineligibility({ ...base, company_name: "Centre Léo Lagrange Exemple" }) ?? ""));
+    check("fondation, sans e-mail : aucun crédit", /^non commercial/.test(noEmailIneligibility({ company_name: "X", email: null, website: "https://x-exemple.fr", key_figures: { legal_form: "Fondation" } }) ?? ""));
+    check("SAS ordinaire : toujours éligible", ineligibility({ ...base, key_figures: { opposition_checked: true, legal_form: "SAS, société par actions simplifiée" } }) === null);
+
+    const noMail: UpgradeProspect = { ...base, email: null, email_type: null, website: "https://acme-exemple.fr", key_figures: { opposition_checked: true, leader_person: "Pierre DURAND" } };
+    const generic = hunter({ people: [person("contact@acme-exemple.fr", null, 99, { type: "generic" })], finder: null });
+    const db1 = new FakeDb({ prospects: [{ ...noMail }], prospect_events: [] });
+    const none = await fillNoEmailNominative(db1 as unknown as Db, noMail, generic.deps);
+    check("sans e-mail : une générique n'est jamais gardée", none.status === "none" && (db1.rows("prospects")[0] as { email: string | null }).email === null, none);
+    const good = hunter({ people: [], finder: { email: "pierre.durand@acme-exemple.fr", score: 92 } });
+    const db2 = new FakeDb({ prospects: [{ ...noMail }], prospect_events: [] });
+    const found = await fillNoEmailNominative(db2 as unknown as Db, noMail, good.deps);
+    const row = db2.rows("prospects")[0] as { email: string; email_type: string };
+    check("sans e-mail : nominative vérifiée ≥ 80 → adresse de la fiche", found.status === "found" && row.email === "pierre.durand@acme-exemple.fr" && row.email_type === "nominatif", row);
+
+    // Cowork #56 : « Exemple-(exemple) » du registre → Hunter cherche « Exemple », pas « Exemple- ».
+    const asked: string[] = [];
+    const spy = hunter({ people: [] });
+    spy.deps.emailFinder = async (_domain, first, last) => { asked.push(`${first} ${last}`); return null; };
+    const odd: UpgradeProspect = { ...noMail, key_figures: { opposition_checked: true, leader_person: "Paul Exemple-(exemple)" } };
+    await fillNoEmailNominative(new FakeDb({ prospects: [{ ...odd }], prospect_events: [] }) as unknown as Db, odd, spy.deps);
+    check("Email Finder : nom du registre sans tiret orphelin", asked[0] === "Paul Exemple", asked);
   }
 
   console.log(failures === 0 ? "\nTous les tests des contacts nominatifs passent.\n" : `\n${failures} test(s) en échec.\n`);
