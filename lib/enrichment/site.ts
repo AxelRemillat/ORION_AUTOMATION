@@ -24,6 +24,8 @@ import { toDomain } from "./http";
 import { fetchPage, fetchWebResults, hasLinkupKey } from "./linkup";
 import { companyAliases, guessOwnWebsite } from "./signals";
 import { normalizeForMatch } from "./clean";
+import { wwwVariant } from "./www";
+
 
 /** Identification honnête : un site doit pouvoir nous reconnaître et nous bloquer. */
 export const USER_AGENT =
@@ -482,6 +484,18 @@ async function legalNoticeConfirms(
 
 /** Accueil + jusqu'à deux pages internes détectées depuis ses liens. */
 async function readSite(
+  origin: string,
+  prospectId: string | null,
+): Promise<{ pages: SitePage[]; html: string | null; linkupCalls: number }> {
+  const first = await readSiteAt(origin, prospectId);
+  // Domaine nu muet, « www. » servi (planfor.fr, gravir.fr… Cowork #35) : une seconde tentative.
+  const www = first.pages.length ? null : wwwVariant(origin);
+  if (!www) return first;
+  const second = await readSiteAt(www, prospectId);
+  return second.pages.length ? { ...second, linkupCalls: first.linkupCalls + second.linkupCalls } : first;
+}
+
+async function readSiteAt(
   origin: string,
   prospectId: string | null,
 ): Promise<{ pages: SitePage[]; html: string | null; linkupCalls: number }> {
