@@ -54,6 +54,14 @@ export interface ContactSearchOptions {
   hunter?: { allowed: boolean; reason?: string };
 }
 
+/** Site prouvé (raison sociale + SIREN ou ville), même seuil que MIN_SITE_CONFIDENCE (free-site.ts, qui importe ce module). */
+const SITE_PROVEN = 75;
+/**
+ * Boîte de contact d'entreprise : seule forme d'adresse hors domaine gardée « à vérifier ».
+ * Un prénom (« Site réalisé par Louis — louis@louis.info », HÖRMANN 30/09) reste écarté.
+ */
+const CONTACT_BOX = /^(contact|info|infos|accueil|secretariat|bonjour|hello|commercial|commerce|devis|administration|direction|compta|comptabilite|bureau|office|courrier)$/;
+
 interface SiteEmail {
   email: string;
   url: string;
@@ -349,8 +357,19 @@ export async function runContactSearch(
   // Générique hors domaine de confiance : JAMAIS gardé, même « valid » chez
   // Hunter — une boîte valide d'un tiers (support@ovhcloud.com) reste celle
   // d'un tiers. L'exception « valid » ne vaut que pour une adresse NOMINATIVE.
-  const generic = pickGeneric(siteEmails.filter((item) => trusted(item.email))) ?? pickGeneric(hunterGeneric.filter((item) => trusted(item.email)));
-  const genericDoubtful = false;
+  const trustedGeneric = pickGeneric(siteEmails.filter((item) => trusted(item.email))) ?? pickGeneric(hunterGeneric.filter((item) => trusted(item.email)));
+  /*
+   * HORS DOMAINE, LUE SUR LE SITE PROUVÉ (Cowork #34 : S ET B publie contact@sbflorac.com sur
+   * maconnerie-renovation-florac.fr) : gardée, mais « à vérifier » (`doubtful`) — la fiche reste
+   * « À compléter » tant qu'Axel ne l'a pas confirmée (lib/today/contact-domain.ts). Seulement une
+   * boîte de contact (CONTACT_BOX) ; jamais un prestataire, ni une adresse rendue par Hunter.
+   */
+  const outsiderOnSite = !trustedGeneric && site && site.confidence >= SITE_PROVEN
+    ? pickGeneric(siteEmails.filter((item) => CONTACT_BOX.test(item.email.split("@")[0]) && !isServiceProvider(domainOfEmail(item.email) ?? "")))
+    : undefined;
+  const generic = trustedGeneric ?? outsiderOnSite;
+  const genericDoubtful = Boolean(outsiderOnSite && generic === outsiderOnSite);
+  if (genericDoubtful) trace.steps.push(`adresse hors domaine lue sur le site, gardée à vérifier : ${outsiderOnSite!.email}`);
   if (!valid && !acceptAll && !generic) {
     const outsider = pickGeneric(siteEmails) ?? pickGeneric(hunterGeneric);
     if (outsider) trace.steps.push(`adresse écartée, domaine étranger au site et à l'entreprise : ${outsider.email}`);

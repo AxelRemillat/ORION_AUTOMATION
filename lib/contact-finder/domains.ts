@@ -47,6 +47,17 @@ const EXCLUDED_GROUPS: { reason: string; entries: string[] }[] = [
     entries: ["wikipedia", "doctolib", "ubereats", "deliveroo", "just-eat"],
   },
   {
+    // Cowork #34 : AMBERT AUTOMOBILE avait pour « site » spoticar.fr. Une page d'agence ou de
+    // concession sur le portail du réseau n'est pas le site de l'entreprise. Entrées POINTÉES
+    // seulement : « renault » écarterait renault-garage-dupont.fr, un garage indépendant.
+    reason: "portail de marque ou de réseau",
+    entries: [
+      "spoticar.fr", "peugeot.fr", "citroen.fr", "renault.fr", "dacia.fr", "toyota.fr", "volkswagen.fr", "distinxion.fr",
+      "orpi.com", "century21.fr", "laforet.com", "guy-hoquet.com", "stephaneplazaimmobilier.com", "nestenn.com",
+      "intermarche.com", "carrefour.fr", "magasins-u.com", "leclerc", "point-s.fr", "speedy.fr", "norauto.fr",
+    ],
+  },
+  {
     reason: "annuaire sectoriel",
     entries: [
       "habitatpresto", "travaux.com", "houzz", "batiweb", "123devis", "quotatis", "artisans-du-batiment",
@@ -67,10 +78,17 @@ function matchesEntry(host: string, labels: string[], entry: string): boolean {
     : labels.some((label) => label === entry || label.startsWith(`${entry}-`) || (label.startsWith(entry) && entry.length >= 6));
 }
 
+/**
+ * SOUS-DOMAINES APPLICATIFS (Cowork #34 : OUTSOURCIA → workspace.outsourcia.fr) : un espace
+ * client, une application ou un webmail n'est pas la vitrine de l'entreprise.
+ */
+const APP_SUBDOMAIN = /^(workspace|app|apps|portal|portail|extranet|intranet|login|auth|sso|my|mon-?compte|espace-?client|clients?|webmail|mail|crm|erp|admin|dashboard|api)$/;
+
 /** Pourquoi ce domaine n'est jamais un site officiel, ou `null` s'il peut l'être. */
 export function exclusionReason(domain: string): string | null {
   const host = domain.toLowerCase().replace(/^www\./, "");
   const labels = host.split(".");
+  if (labels.length >= 3 && APP_SUBDOMAIN.test(labels[0])) return "sous-domaine applicatif";
   return EXCLUDED_GROUPS.find((group) => group.entries.some((entry) => matchesEntry(host, labels, entry)))?.reason ?? null;
 }
 
@@ -96,6 +114,9 @@ const PROVIDERS = [
   "cloudflare", "amazonaws", "azurewebsites", "netlify", "vercel", "github", "gitlab",
   "hubspot", "mailchimp", "sendinblue", "brevo", "sellsy", "salesforce", "zendesk", "wengo",
   "sarbacane", "mailjet", "cegid", "orange-business",
+  // Agences et créateurs de sites pour TPE (Cowork #34 : service@linkeo.com sur loiseaubleu.re).
+  "linkeo", "solocal", "e-monsite", "webself", "simplebo", "sitew", "wizishop", "oxatis", "prestashop",
+  "site-solocal", "localfr", "jimdosite", "godaddysites", "weblocal", "kreatik",
 ];
 
 export function isServiceProvider(domain: string): boolean {

@@ -1,5 +1,6 @@
 import { isRoleBox } from "./role-boxes";
 import { domainOfEmail, isServiceProvider } from "./domains";
+import { decodeCfEmails } from "./cloudflare";
 
 /**
  * Extraction d'adresses dans une page, y compris masquées.
@@ -40,7 +41,9 @@ export function decodeJoomlaCloak(html: string): string[] {
 
 /** Remet en clair les formes masquées courantes. */
 export function deobfuscate(text: string): string {
-  const cloaked = /addy[\w]+\s*=/.test(text) ? decodeJoomlaCloak(text) : [];
+  // Joomla (« addy… ») et Cloudflare (`data-cfemail`, Cowork #34 : BARTHOUIL, S ET B) : adresses
+  // reconstruites, ajoutées en clair à la fin du texte.
+  const cloaked = [...(/addy[\w]+\s*=/.test(text) ? decodeJoomlaCloak(text) : []), ...(/cfemail|email-protection#/.test(text) ? decodeCfEmails(text) : [])];
   let out = cloaked.length ? `${text}\n${cloaked.join("\n")}` : text;
   for (const [entity, char] of Object.entries(ENTITY)) out = out.split(entity).join(char);
   return out
@@ -62,6 +65,8 @@ export function extractEmails(content: string): string[] {
     const email = match[0].toLowerCase().replace(/\.+$/, "");
     const [local, domain] = email.split("@");
     if (!local || !domain || FILE_EXT.test(email) || JUNK_DOMAIN.test(domain) || JUNK_LOCAL.test(local)) continue;
+    // Adresse de l'agence web ou de l'hébergeur (service@linkeo.com, Cowork #34) : jamais l'entreprise.
+    if (isServiceProvider(domain)) continue;
     // Boîte de rôle juridique (rgpd@, dpo@, no-reply@…) : jamais un contact (Cowork #41).
     if (isRoleBox(email)) continue;
     found.add(email);
