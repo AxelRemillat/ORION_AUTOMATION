@@ -729,7 +729,10 @@ async function main() {
     const votes = majority([sample({ C2: false }), sample({ C2: false }), sample({})].map(parseChecklistSample), semanticCriteria("F1"));
     check("majorité par critère : C2 NON 2 fois sur 3 → NON, citation gardée", votes?.find((item) => item.id === "C2")?.ok === false && votes.find((item) => item.id === "C2")?.citation === "citation C2" && votes.find((item) => item.id === "C1")?.ok === true);
     const wide = majority([sample({ C1: false, C2: false }), sample({ C1: false, C2: false }), sample({}), sample({}), sample({})].map(parseChecklistSample), semanticCriteria("F1"));
-    check("C1 sur 5 lectures (2 NON / 5 → OUI), C2 sur les 3 premières (2 NON / 3 → NON)", wide?.find((item) => item.id === "C1")?.ok === true && wide.find((item) => item.id === "C2")?.ok === false);
+    // Cowork #58 : C2 vote désormais, comme C1 et C5, sur les 5 lectures.
+    check("C1 et C2 sur 5 lectures (2 NON / 5 → OUI)", wide?.find((item) => item.id === "C1")?.ok === true && wide.find((item) => item.id === "C2")?.ok === true);
+    const wideC3 = majority([sample({ C3: false }), sample({ C3: false }), sample({}), sample({}), sample({})].map(parseChecklistSample), semanticCriteria("F1"));
+    check("C3 reste tranché sur les 3 premières lectures (2 NON / 3 → NON)", wideC3?.find((item) => item.id === "C3")?.ok === false);
     check("majorité : égalité (1 lecture illisible) → NON par prudence", majority([sample({ C3: false }), sample({}), null].map((raw) => (raw ? parseChecklistSample(raw) : null)), semanticCriteria("F1"))?.find((item) => item.id === "C3")?.ok === false);
     check("C4 seulement en F4, où il remplace C3", !semanticCriteria("F1").includes("C4") && semanticCriteria("F4").includes("C4") && !semanticCriteria("F4").includes("C3"));
     let reads = 0;
@@ -752,7 +755,7 @@ async function main() {
       const brokenAsk: AskFn = async () => (calls2++ === 0 ? "illisible" : sample({}));
       await judgeChecklist(brokenAsk, { subject: "Vos commandes", core: f1(), family: "F1", greeting, company: "Belledonne", facts: "- quatre fournils" });
       check("lecture illisible parmi les 3 premières → les 5 lectures sont faites", calls2 === CHECKLIST_SAMPLES);
-      check("arrêt anticipé seulement si unanime sur C1 ET C5", !unanimousOnWide([sample({ C5: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")) && unanimousOnWide([sample({ C2: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")));
+      check("arrêt anticipé seulement si unanime sur C1, C2 ET C5", !unanimousOnWide([sample({ C5: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")) && !unanimousOnWide([sample({ C2: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")) && unanimousOnWide([sample({ C3: false }), sample({}), sample({})].map(parseChecklistSample), 3, semanticCriteria("F1")));
     }
     reads = 0;
     const refused = await judgeChecklist(readsAsk, { subject: "x", core: f1({ greet: "Bonjour," }), family: "F1", greeting, company: "Belledonne", facts: "" });
@@ -774,7 +777,7 @@ async function main() {
 
   console.log("\nJeu d'étalonnage D — verdict humain de Cowork (#34)");
   {
-    check("jeu D versionné : 15 mails, 5 prêts selon Cowork", COWORK_D_SET.length === 15 && COWORK_D_SET.filter((mail) => mail.coworkReady).length === 5);
+    check("jeu D versionné : 15 mails, 4 prêts selon Cowork (IMAGINE OPTIC renoté 7, #60)", COWORK_D_SET.length === 15 && COWORK_D_SET.filter((mail) => mail.coworkReady).length === 4);
     const codeVerdict = (mail: (typeof COWORK_D_SET)[number]) => deterministicChecks(mail.core, { family: mail.family, greeting: mail.core.split("\n\n")[0] });
     for (const mail of COWORK_D_SET.filter((item) => item.family === "F4")) {
       check(`D7 : ${mail.company} (F4, Cowork ${mail.coworkScore}) refusé par le code (démo en ouverture)`, codeVerdict(mail).find((item) => item.id === "D7")?.ok === false);
@@ -838,7 +841,7 @@ async function main() {
     check("PARCOME (Cowork 8) : « type » manquant → refusé par le code (démo honnête)", parcomeRules.failures.some((line) => /démo honnête/.test(line)), parcomeRules.failures.join(" | "));
     const prompt = buildChecklistPrompt();
     check("C1 : test de substitution (10 concurrents) et fidélité du fait", /TEST DE SUBSTITUTION/.test(prompt) && /10 concurrents/.test(prompt) && /FIDÉLITÉ/.test(prompt) && /Qualimat/.test(prompt));
-    check("C2 : élément manquant précis + conséquence ; « le client attend » refusé", /élément manquant précis/.test(prompt) && /le client attend votre réponse/.test(prompt));
+    check("C2 : élément PROPRE AU MÉTIER + conséquence ; généralités et « le client attend » refusés (Cowork #58)", /PROPRE À LEUR MÉTIER/.test(prompt) && /une pièce manquante/.test(prompt) && /revenu fiscal manquant/.test(prompt) && /le client attend votre réponse/.test(prompt));
     check("C4 : l'objet lu par la démo est celui du prospect", /COHÉRENCE : l'objet lu par la démo/.test(prompt));
   }
 
