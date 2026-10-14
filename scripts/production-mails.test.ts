@@ -5,6 +5,7 @@
 import { buildProductionFunnel, costFamily, type FunnelSignal } from "../lib/funnel/production-funnel";
 import { linkupGate, linkupSiteReserve, type LinkupGateStore } from "../lib/linkup/gate";
 import { matchHomepage, recoveryDomains, robotsForbidsHome } from "../lib/funnel/free-site-recovery";
+import { decodeCfEmails } from "../lib/contact-finder/cloudflare";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
@@ -74,6 +75,12 @@ check("le texte des scripts ne compte pas", !matchHomepage("<script>var a='Ovina
 check("robots : Disallow / pour * = interdit", robotsForbidsHome("User-agent: *\nDisallow: /"));
 check("robots : Disallow /admin = permis", !robotsForbidsHome("User-agent: *\nDisallow: /admin"));
 check("robots : interdit à un autre robot seulement = permis", !robotsForbidsHome("User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nDisallow:"));
+
+console.log("Adresses protégées par Cloudflare");
+const cf = (email: string, key = 0x5a) => key.toString(16).padStart(2, "0") + [...email].map((char) => (char.charCodeAt(0) ^ key).toString(16).padStart(2, "0")).join("");
+check("data-cfemail décodé", decodeCfEmails(`<a data-cfemail="${cf("contact@barthouil.fr")}">[email protected]</a>`).join() === "contact@barthouil.fr");
+check("lien /cdn-cgi/l/email-protection décodé", decodeCfEmails(`<a href="/cdn-cgi/l/email-protection#${cf("info@sbflorac.com", 0x13)}">`).join() === "info@sbflorac.com");
+check("hexadécimal sans adresse ignoré", decodeCfEmails('<a data-cfemail="abcdef0123">').length === 0);
 
 async function linkup() {
   console.log("Réserve Linkup des recherches de site");
