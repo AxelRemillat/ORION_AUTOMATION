@@ -54,10 +54,14 @@ export interface Analysis {
   kind: ProjectKind;
 }
 
-/** Lien de démo suivi par plateforme : `&src=codeur` (ou `?src=` si le chemin n'a pas de paramètre). */
+/**
+ * Lien de démo suivi par plateforme : `&ref=upwork` (ou `?ref=` si le chemin n'a pas de paramètre). Le portfolio
+ * attribue la visite par `?ref=` (lib/analytics.ts de PORTFOLIO_V2) ; `src=` n'y était pas lu (Cowork #63).
+ * Upwork est en anglais : la version `/en` des pages de démo.
+ */
 export function opportunityDemoUrl(demo: DemoLink["key"], platform: Platform): string {
-  const path = DEMO_LINKS[demo].path;
-  return `${DEMO_HOST}${path}${path.includes("?") ? "&" : "?"}src=${platform}`;
+  const path = `${platform === "upwork" ? "/en" : ""}${DEMO_LINKS[demo].path}`;
+  return `${DEMO_HOST}${path}${path.includes("?") ? "&" : "?"}ref=${platform}`;
 }
 
 export function buildAnalysisPrompt(): string {

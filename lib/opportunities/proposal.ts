@@ -133,6 +133,14 @@ export const PORTFOLIO_TITLES = [
 ] as const;
 export type PortfolioTitle = (typeof PORTFOLIO_TITLES)[number];
 
+/** Titres EXACTS du portfolio Upwork (anglais, profil d'Axel du 15/10 — Cowork #63), dans l'ordre de PORTFOLIO_TITLES. */
+export const UPWORK_PORTFOLIO_TITLES = [
+  "AI Quote Assistant with Voice (Custom AI Agent)",
+  "AI Email Triage Automation for Small Businesses (n8n + OpenAI)",
+  "Invoice Data Extraction & Automatic Payment Reminders",
+  "ORION – B2B Prospecting Platform",
+] as const;
+
 /** Besoin de prospection : trouver des clients, leur écrire, mails commerciaux. */
 export const PROSPECTION_NEED = /(prospect|recherche de clients?|trouver (des |de nouveaux )?clients|g[ée]n[ée]ration de leads?|\bleads?\b|mails? commerciaux|e-?mails? de prospection|emailing|d[ée]marchage|lead gen)/i;
 
@@ -176,8 +184,31 @@ export function proposalSignature(platform: Platform, language: Language): strin
   return "Axel Remillat · Automatisation & IA pour PME · axelremillat.com/pme";
 }
 
+/** Chatbot, assistant qui répond à partir de documents : l'agent IA sur mesure est la réalisation la plus proche. */
+const CHATBOT_NEED = /chat ?bot|conversational|\brag\b|knowledge base|virtual assistant|ai assistant|answers? (customer )?questions/i;
+
+/**
+ * Réalisation du portfolio UPWORK à citer (titre anglais exact) : la même logique que Codeur, plus le chatbot ;
+ * toujours un titre (à défaut, le tri des e-mails, l'automatisation n8n + OpenAI la plus générale).
+ */
+export function upworkPortfolioTitle(demo: DemoLink["key"], context = "", kind: ProjectKind = "automatisation"): (typeof UPWORK_PORTFOLIO_TITLES)[number] {
+  // ORION seulement pour de la VRAIE prospection : « Typeform leads to HubSpot » est du routage vers un CRM (#63).
+  if (kind === "fullstack" || UPWORK_PROSPECTION.test(context)) return UPWORK_PORTFOLIO_TITLES[3];
+  if (CHATBOT_NEED.test(context)) return UPWORK_PORTFOLIO_TITLES[0];
+  const french = portfolioTitle(demo, "", kind);
+  return french && french !== PORTFOLIO_TITLES[3] ? UPWORK_PORTFOLIO_TITLES[PORTFOLIO_TITLES.indexOf(french)] : UPWORK_PORTFOLIO_TITLES[1];
+}
+
+/** Prospection au sens strict (anglais) : trouver des clients et leur écrire — pas recevoir des leads. */
+const UPWORK_PROSPECTION = /lead gen(eration)?|prospect(ing|ion|s)?|cold (e-?mail|outreach|calling)|outreach|find (new )?(clients|customers|leads)|b2b (sales|leads)/i;
+
+/** Démo Upwork : le titre et le lien doivent montrer la même chose (chatbot → l'agent conversationnel /agent). */
+export const upworkDemo = (demo: DemoLink["key"], context = ""): DemoLink["key"] => (CHATBOT_NEED.test(context) && !UPWORK_PROSPECTION.test(context) ? "devis" : demo);
+
 /** La ligne de démo : titre du portfolio (plateformes sans contact), lien suivi ailleurs ; `null` = aucune démo citée. */
 export function demoLine(platform: Platform, language: Language, demo: DemoLink["key"], context = "", kind: ProjectKind = "automatisation"): string | null {
+  // Upwork (Cowork #63) : le projet du portfolio par son TITRE EXACT, puis la démo anglaise suivie (?ref=upwork).
+  if (platform === "upwork") return `Related project in my Upwork portfolio: "${upworkPortfolioTitle(demo, context, kind)}". One-minute demo: ${opportunityDemoUrl(upworkDemo(demo, context), platform)}`;
   if (isNoContactPlatform(platform)) {
     const title = portfolioTitle(demo, context, kind);
     return title ? `Une démo d'un cas proche est visible dans mon portfolio ${PLATFORM_NAMES[platform]} (${title}).` : null;
@@ -215,7 +246,11 @@ export function assembleProposal(
 
 export const CONTACT_EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)+/;
 export const CONTACT_PHONE = /(\+\d{2,3}[\s.-]?|\b0)[1-9](?:[\s.-]?\d{2}){4}\b/;
-export const CALENDAR_LINK = /(calendly|cal\.com|zcal|savvycal|tidycal|youcanbook|prendre (un )?rendez-vous (sur|via)|book (a call|a meeting) (here|on|via))/i;
+/**
+ * Un LIEN ou une INVITATION de prise de rendez-vous — pas le nom d'un outil : « Calendly bookings to Pipedrive »
+ * est le besoin du client (Cowork #63, migration Zapier refusée à tort).
+ */
+export const CALENDAR_LINK = /(calendly\.com|cal\.com\/|zcal\.co|savvycal\.com|tidycal\.com|youcanbook\.me|prendre (un )?rendez-vous (sur|via)|book (a call|a meeting) (here|on|via)|schedule a (call|meeting) (here|on|via))/i;
 export const ANY_URL = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|fr|io|net|org|app|dev|ai|eu|co|me|pro|biz)\b)/i;
 
 /** Coordonnées dans le texte FINAL (signature comprise) : refus selon la plateforme. */
@@ -354,7 +389,7 @@ export function checkProposal(
     failures.push("Budget absent de l'annonce : pas de prix, pose une question de cadrage (volume, délai, outils).");
   }
   if (/https?:\/\/|www\.|axelremillat/i.test(written)) failures.push("Aucune URL dans le texte : le lien de démo est posé par le code.");
-  if (/mon portfolio|d[ée]mo d['’]un cas proche|one-minute demo/i.test(written)) failures.push("La ligne de démo est posée par le code : ne la répète pas dans le texte.");
+  if (/mon portfolio|d[ée]mo d['’]un cas proche|one-minute demo|my (upwork )?portfolio/i.test(written)) failures.push("La ligne de démo est posée par le code : ne la répète pas dans le texte.");
   if (context.language === "en" && (written.match(FRENCH_MARKERS) ?? []).length > 3) failures.push("La proposition doit être entièrement en anglais (Upwork).");
   return { ok: failures.length === 0, failures };
 }
@@ -391,7 +426,7 @@ ${upwork ? "<HOOK + READING — 2 phrases ; la 1re est l'APERÇU Upwork>" : `${G
 
 ${isNoContactPlatform(input.platform) ? `${APPROACH_LABEL[input.language]} <STEP 1> <STEP 2> <STEP 3>   (un seul paragraphe de trois PHRASES COMPLÈTES avec un sujet, comme Axel : « un agent surveille le dossier… Il interroge Sage en lecture seule… Vous validez les prix dans un écran de contrôle… » — la 1re commence par une minuscule, jamais d'infinitif seul comme « recenser… »)` : "1. <STEP 1>\n2. <STEP 2>\n3. <STEP 3>"}
 
-${isNoContactPlatform(input.platform) ? "<LIGNE DE DÉMO — posée par le code : le titre d'une réalisation du portfolio. Ne l'écris pas, ne la répète pas.>" : `${DEMO_LINE[input.language]} <lien vers la démo « ${DEMO_LINKS[input.demo].label} »>`}
+${isNoContactPlatform(input.platform) ? "<LIGNE DE DÉMO — posée par le code : le titre d'une réalisation du portfolio. Ne l'écris pas, ne la répète pas.>" : upwork ? "<LIGNE PORTFOLIO + DÉMO — posée par le code : le titre exact du projet du portfolio Upwork et le lien de démo. Ne l'écris pas, ne la répète pas, ne promets pas d'autre démo.>" : `${DEMO_LINE[input.language]} <lien vers la démo « ${DEMO_LINKS[input.demo].label} »>`}
 
 <FRAMING — prix, ${requested.includes("couts_mensuels") ? "coûts mensuels, " : ""}délai>
 ${requested.includes("references") ? "\n<REFERENCES — 1 ou 2 phrases>\n" : ""}

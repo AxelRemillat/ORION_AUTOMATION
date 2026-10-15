@@ -6,7 +6,7 @@ import { buildProposalChecklistPrompt, judgeProposalChecklist, proposalChecklist
 import { PROPOSAL_CHECKLIST_SAMPLES } from "../lib/opportunities/proposal-checklist";
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { upworkBid, upworkBidPhrase, assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
+import { upworkBid, upworkBidPhrase, assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, upworkPortfolioTitle, UPWORK_PORTFOLIO_TITLES, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
@@ -81,8 +81,8 @@ async function main() {
 
   console.log("\n3. Langue et lien de démo");
   check("Codeur → FR, Upwork → EN, Autre → langue de l'annonce", proposalLanguage("codeur", "en") === "fr" && proposalLanguage("upwork", "fr") === "en" && proposalLanguage("autre", "en") === "en");
-  check("lien suivi &src=codeur", opportunityDemoUrl("emails", "codeur") === "axelremillat.com/automatisations?demo=email&src=codeur");
-  check("lien suivi ?src=upwork sur /agent", opportunityDemoUrl("devis", "upwork") === "axelremillat.com/agent?src=upwork");
+  check("lien suivi &ref=codeur (lu par le portfolio)", opportunityDemoUrl("emails", "codeur") === "axelremillat.com/automatisations?demo=email&ref=codeur");
+  check("Upwork : page anglaise /en/agent?ref=upwork (Cowork #63)", opportunityDemoUrl("devis", "upwork") === "axelremillat.com/en/agent?ref=upwork");
   const analysis = parseAnalysis(JSON.stringify({ score: 12, reasons: ["a", "b", "c", "d"], need: "Trier les e-mails", demo: "inconnue", language: "en" }));
   check("analyse : score borné à 10, 3 raisons, démo inconnue → générale", analysis?.score === 10 && analysis.reasons.length === 3 && analysis.demo === "general" && analysis.language === "en");
   check("analyse illisible → null", parseAnalysis("pas du JSON") === null);
@@ -94,7 +94,7 @@ async function main() {
     const shape =
       item.platform === "codeur"
         ? text.endsWith(`\n\nAxel Remillat`) && core.includes("visible dans mon portfolio Codeur (") && !/axelremillat|https?:/.test(text)
-        : text.endsWith("Axel Remillat · AI & automation for small businesses") && core.includes(`src=${item.platform}`);
+        : text.endsWith("Axel Remillat · AI & automation for small businesses") && core.includes(`ref=${item.platform}`);
     check(`positif ${item.platform} « ${item.title.slice(0, 40)} » (${countWords(core)} mots)`, rules.ok && shape, rules.failures.join(" | "));
   }
   const caught = PROPOSAL_NEGATIVES.map((item) => {
@@ -130,8 +130,19 @@ async function main() {
     check("Codeur : téléphone international refusé (+33 7 49 72 71 92)", codeur("+33 7 49 72 71 92").some((line) => /Téléphone/.test(line)));
     check("Codeur : texte propre accepté", codeur("Une démo d'un cas proche est visible dans mon portfolio Codeur (Agent IA de devis par métier).").length === 0);
     const upwork = (text: string) => contactFailures(text, "upwork");
-    check("Upwork : lien de démo autorisé", upwork("A one-minute demo: axelremillat.com/agent?src=upwork").length === 0);
+    check("Upwork : lien de démo autorisé", upwork("A one-minute demo: axelremillat.com/en/agent?ref=upwork").length === 0);
     check("Upwork : e-mail, téléphone et calendrier refusés", upwork("mail me at axel@exemple.fr").length > 0 && upwork("call +33 7 49 72 71 92").length > 0 && upwork("book here: calendly.com/axel").length > 0);
+    // Cowork #63 : le nom d'un outil n'est pas un lien de rendez-vous ; projet du portfolio Upwork par son titre exact.
+    check("Upwork : « Calendly bookings to Pipedrive » (outil du client) accepté", upwork("Calendly bookings will reach Pipedrive as before.").length === 0);
+    check("Upwork : invitation « schedule a call here » refusée", upwork("You can schedule a call here.").length > 0);
+    const line = (demo: Parameters<typeof upworkPortfolioTitle>[0], context: string) => demoLine("upwork", "en", demo, context) ?? "";
+    check("Upwork : titre exact + /en + ref=upwork", line("emails", "support inbox triage") === 'Related project in my Upwork portfolio: "AI Email Triage Automation for Small Businesses (n8n + OpenAI)". One-minute demo: axelremillat.com/en/automatisations?demo=email&ref=upwork', line("emails", "x"));
+    check("Upwork : chatbot → l'agent IA sur mesure", upworkPortfolioTitle("sav", "OpenAI chatbot answering from our FAQ") === "AI Quote Assistant with Voice (Custom AI Agent)");
+    check("Upwork : factures PDF → extraction de factures", upworkPortfolioTitle("factures", "supplier PDF invoices") === "Invoice Data Extraction & Automatic Payment Reminders");
+    check("Upwork : « Typeform leads to HubSpot » (routage CRM) → pas ORION", upworkPortfolioTitle("general", "new Typeform leads to HubSpot") !== "ORION – B2B Prospecting Platform");
+    check("Upwork : chatbot → titre ET démo de l'agent (/en/agent)", line("sav", "OpenAI chatbot for our website").includes("/en/agent?ref=upwork"));
+    check("Upwork : prospection → ORION", upworkPortfolioTitle("emails", "lead generation for our sales team") === "ORION – B2B Prospecting Platform");
+    check("Upwork : toujours un titre de la liste", ["devis", "emails", "factures", "reporting", "fichier", "sav", "general"].every((demo) => (UPWORK_PORTFOLIO_TITLES as readonly string[]).includes(upworkPortfolioTitle(demo as never, "clean my spreadsheet"))));
     // Positionnement de prix (06/10/2026) : UN montant, plafonds, délai, coûts mensuels.
     const base = PROPOSAL_POSITIVES[2];
     const price = (framing: string, options: { budget?: string | null; kind?: "automatisation" | "fullstack"; ad?: string; amountEur?: number } = {}) => {
