@@ -42,4 +42,11 @@ export const UPWORK_ADS_63: UpworkAdFixture[] = [
     budget: "$500 fixed",
     body: "We sell maintenance software to manufacturing SMEs in France and Belgium. We need a lead generation pipeline that finds relevant B2B prospects (company size, sector, region), enriches them with a decision-maker contact, scores them against our ideal customer profile, and prepares a short first email for each that our sales rep approves before anything is sent. Output to our CRM (Pipedrive). How would you build it, and how do you keep the outreach compliant?",
   },
+  {
+    // Cowork #68 : doit citer « AI Quote Agent », avec sa démo /en/agent.
+    title: "AI agent that answers customer quote requests from our catalog",
+    url: "fixture",
+    budget: "$400 fixed",
+    body: "We distribute industrial fasteners (about 3,000 references in a Google Sheet catalog with prices and stock). Customers email us quote requests: product names, quantities, sometimes a photo of a part. We want an AI agent that finds the matching references in our catalog, computes the price with our volume discounts, and drafts a priced quote reply that our sales team checks before sending. Unclear requests should get a follow-up question instead of a guess. What approach would you take?",
+  },
 ];
