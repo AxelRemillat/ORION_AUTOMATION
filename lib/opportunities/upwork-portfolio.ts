@@ -46,8 +46,9 @@ export const UPWORK_PORTFOLIO: readonly UpworkPortfolioProject[] = [
     id: "quote-agent",
     titre: "AI Quote Agent: Customer Request to Priced Quote and Reply",
     lien: "axelremillat.com/en/agent?ref=upwork",
-    usages: /quotes?\b|quotation|estimates?\b|pricing request|function calling|tool calling|lead qualification|qualify (inbound )?leads|custom ai agent/i,
-    publie: false,
+    // Publié par Axel (Cowork #68) : agents IA sur mesure, function calling, devis, qualification de leads, réponse commerciale.
+    usages: /quotes?\b|quotation|estimates?\b|pricing request|price request|function calling|tool calling|lead qualification|qualify (inbound )?leads|custom ai agent|sales (reply|replies|response)|answers? (customer )?(quote|pricing|price) requests/i,
+    publie: true,
   },
   {
     id: "email-triage",
