@@ -22,7 +22,8 @@ export interface InboundEmail {
   received_at: string | null;
 }
 
-export type EmailKind = "invitation" | "demande" | "commande" | "message" | "offre" | "gagnee" | "perdue" | "recommandation" | "nouveau_projet" | "autre";
+/** `upwork_message` (Cowork #68) : message, invitation ou offre de contrat Upwork — un événement prioritaire, pas une fiche. */
+export type EmailKind = "invitation" | "demande" | "commande" | "message" | "offre" | "gagnee" | "perdue" | "recommandation" | "nouveau_projet" | "upwork_message" | "autre";
 
 export const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
   invitation: "Invitation",
@@ -34,6 +35,7 @@ export const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
   perdue: "Clôturée",
   recommandation: "Recommandation",
   nouveau_projet: "Nouveau projet",
+  upwork_message: "Message Upwork",
   autre: "À trier",
 };
 
@@ -169,7 +171,9 @@ export const SUBJECT_RULES: Record<ParsedPlatform, readonly KindRule[]> = {
     { kind: "perdue", subject: /(proposal (was |has been )?declined|declined your proposal|job (posting )?(has been |was )?(closed|cancelled|canceled|removed)|no longer (available|accepting)|(position|job) (has been )?filled|hired (someone|another freelancer))/ },
     { kind: "offre", subject: /(sent you an offer|received an offer|new offer|offer from|you have an offer)/ },
     { kind: "invitation", subject: /(invit(ed|ation)|wants you to (apply|interview)|requested? (a |your )?proposal)/ },
-    { kind: "recommandation", subject: /(jobs? (recommended|you might like|for you|matching|alert)|recommended jobs?|new jobs? (for|matching|that match)|jobs? that match|top job picks|job picks)/ },
+    // Alertes d'offres (Cowork #68) : recherches enregistrées (« New job: … », « job alert », « saved search »)
+    // et recommandations — elles ne tombent plus en « autre ».
+    { kind: "recommandation", subject: /(jobs? (recommended|you might like|for you|matching|alert)|recommended jobs?|new jobs? (for|matching|that match)|jobs? that match|top job picks|job picks|^\W*new jobs?\s*[:-]|a new job (was |has been )?posted|new jobs? posted|saved search|job alert)/ },
     { kind: "message", subject: /(new message|sent you a message|unread messages?|message from|replied to|responded to your proposal|messaged you)/ },
   ],
   malt: [
@@ -338,22 +342,42 @@ export function mainContent(body: string): string {
   return (cut > 80 ? body.slice(0, cut) : body).trim();
 }
 
+/**
+ * Budget d'une offre d'alerte Upwork, AVEC son unité (Cowork #68) : « Hourly: $30.00-$45.00 » devenait
+ * « $30.00-$45.00 », lu comme un prix FIXE de 45 $ — sous le plancher, et une enchère au forfait au lieu de l'heure.
+ */
+function jobBudgetOf(text: string): string | null {
+  const budget = budgetOf(text);
+  if (!budget) return null;
+  return /\bhourly\b/i.test(text) && !/hour|\/\s?hr\b/i.test(budget) ? `${budget} /hr` : budget;
+}
+
 /** Recommandations Upwork : une annonce par lien de job distinct (10 au plus). */
 export function recommendedJobs(email: Pick<InboundEmail, "text" | "html">, body: string): EmailJob[] {
   const jobs = new Map<string, EmailJob>();
-  // HTML : le texte de l'ancre est le titre.
-  for (const match of email.html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+  // HTML : le texte de l'ancre est le titre ; le texte qui suit, jusqu'à l'offre suivante, donne l'extrait et le
+  // budget (Cowork #68 : ils étaient perdus — budget toujours vide sur les alertes HTML).
+  const anchors = [...email.html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].map((match) => {
     let href = decodeEntities(match[1]);
     try {
       href = decodeURIComponent(href);
     } catch {
       /* lien laissé tel quel */
     }
-    const id = href.match(UPWORK_JOB_ID)?.[0].toLowerCase();
     const title = htmlToText(match[2]).replace(/\s+/g, " ").trim();
-    if (!id || jobs.has(id) || title.length < 6 || /^(view|apply|see|submit|voir)\b/i.test(title)) continue;
-    jobs.set(id, { title: title.slice(0, 300), url: `https://www.upwork.com/jobs/${id}`, externalId: id, budget: null, snippet: "" });
-  }
+    return { id: href.match(UPWORK_JOB_ID)?.[0].toLowerCase(), title, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length };
+  });
+  const isJobTitle = (anchor: (typeof anchors)[number]) => Boolean(anchor.id) && anchor.title.length >= 6 && !/^(view|apply|see|submit|voir)\b/i.test(anchor.title);
+  anchors.forEach((anchor, index) => {
+    if (!isJobTitle(anchor) || jobs.has(anchor.id!)) return;
+    const next = anchors.slice(index + 1).find(isJobTitle);
+    const following = htmlToText(email.html.slice(anchor.end, next ? next.start : anchor.end + 2000))
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter((line) => line && !/^(view job|see more jobs|manage email notifications|apply now|unsubscribe)/i.test(line))
+      .slice(0, 5);
+    jobs.set(anchor.id!, { title: anchor.title.slice(0, 300), url: `https://www.upwork.com/jobs/${anchor.id}`, externalId: anchor.id!, budget: jobBudgetOf(following.join("\n")), snippet: following.join(" ").slice(0, 400) });
+  });
   // Texte : le titre est la ligne non vide qui précède le lien ; l'extrait, les lignes qui suivent.
   const lines = body.split("\n");
   lines.forEach((line, index) => {
@@ -378,9 +402,9 @@ export function recommendedJobs(email: Pick<InboundEmail, "text" | "html">, body
     const snippet = following.join(" ").slice(0, 400);
     if (existing) {
       existing.snippet ||= snippet;
-      existing.budget ||= budgetOf(following.join("\n"));
+      existing.budget ||= jobBudgetOf(following.join("\n"));
     } else if (previous && previous.trim().length >= 6) {
-      jobs.set(id, { title: previous.trim().slice(0, 300), url: `https://www.upwork.com/jobs/${id}`, externalId: id, budget: budgetOf(following.join("\n")), snippet });
+      jobs.set(id, { title: previous.trim().slice(0, 300), url: `https://www.upwork.com/jobs/${id}`, externalId: id, budget: jobBudgetOf(following.join("\n")), snippet });
     }
   });
   return [...jobs.values()].slice(0, 10);

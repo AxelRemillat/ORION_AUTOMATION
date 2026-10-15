@@ -56,7 +56,8 @@ export function upworkIgnoreReason(offer: UpworkOffer): string | null {
   const budget = readUpworkBudget(offer.budgetText);
   // Moins de 30 $ : le temps de lire l'annonce coûte déjà plus que la mission.
   if (budget.kind === "fixed" && budget.usd !== null && budget.usd < 30) return `budget de ${budget.usd} $ : moins de 30 $`;
-  if (budget.kind === "hourly" && budget.usd !== null && budget.usd < 30) return `taux de ${budget.usd} $/h : moins de 30 $`;
+  // Horaire : plancher à 20 $/h (Cowork #68) — 25 $/h est justement le taux de lancement d'Axel.
+  if (budget.kind === "hourly" && budget.usd !== null && budget.usd < 20) return `taux de ${budget.usd} $/h : moins de 20 $`;
   return null;
 }
 
