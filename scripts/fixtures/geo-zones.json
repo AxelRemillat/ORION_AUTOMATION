@@ -1,0 +1,210 @@
+{
+ "_source": "geo.api.gouv.fr, réponses réelles enregistrées le 15/10/2026 (Cowork #41)",
+ "responses": {
+  "https://geo.api.gouv.fr/departements/69": {
+   "status": 200,
+   "body": {
+    "nom": "Rhône",
+    "code": "69",
+    "codeRegion": "84"
+   }
+  },
+  "https://geo.api.gouv.fr/communes?codePostal=69003&fields=nom,code,codesPostaux,departement,population": {
+   "status": 200,
+   "body": [
+    {
+     "nom": "Lyon",
+     "code": "69123",
+     "codesPostaux": [
+      "69001",
+      "69002",
+      "69003",
+      "69004",
+      "69005",
+      "69006",
+      "69007",
+      "69008",
+      "69009"
+     ],
+     "population": 519127,
+     "departement": {
+      "code": "69",
+      "nom": "Rhône"
+     }
+    }
+   ]
+  },
+  "https://geo.api.gouv.fr/communes?nom=Paris&fields=nom,code,codesPostaux,departement,population&boost=population&limit=5": {
+   "status": 200,
+   "body": [
+    {
+     "nom": "Paris",
+     "code": "75056",
+     "codesPostaux": [
+      "75001",
+      "75002",
+      "75003",
+      "75004",
+      "75005",
+      "75006",
+      "75007",
+      "75008",
+      "75009",
+      "75010",
+      "75011",
+      "75012",
+      "75013",
+      "75014",
+      "75015",
+      "75016",
+      "75017",
+      "75018",
+      "75019",
+      "75020",
+      "75116"
+     ],
+     "population": 2103778,
+     "_score": 9.535435286815508,
+     "departement": {
+      "code": "75",
+      "nom": "Paris"
+     }
+    },
+    {
+     "nom": "Parisot",
+     "code": "81202",
+     "codesPostaux": [
+      "81310"
+     ],
+     "population": 1033,
+     "_score": 0.5146125221077134,
+     "departement": {
+      "code": "81",
+      "nom": "Tarn"
+     }
+    },
+    {
+     "nom": "Parisot",
+     "code": "82137",
+     "codesPostaux": [
+      "82160"
+     ],
+     "population": 557,
+     "_score": 0.5121880116950436,
+     "departement": {
+      "code": "82",
+      "nom": "Tarn-et-Garonne"
+     }
+    },
+    {
+     "nom": "Cormeilles-en-Parisis",
+     "code": "95176",
+     "codesPostaux": [
+      "95240"
+     ],
+     "population": 27292,
+     "_score": 0.46319342931816143,
+     "departement": {
+      "code": "95",
+      "nom": "Val-d'Oise"
+     }
+    },
+    {
+     "nom": "Seyssinet-Pariset",
+     "code": "38485",
+     "codesPostaux": [
+      "38170"
+     ],
+     "population": 11739,
+     "_score": 0.4283454721108535,
+     "departement": {
+      "code": "38",
+      "nom": "Isère"
+     }
+    }
+   ]
+  },
+  "https://geo.api.gouv.fr/communes?nom=Lyon&fields=nom,code,codesPostaux,departement,population&boost=population&limit=5": {
+   "status": 200,
+   "body": [
+    {
+     "nom": "Lyon",
+     "code": "69123",
+     "codesPostaux": [
+      "69001",
+      "69002",
+      "69003",
+      "69004",
+      "69005",
+      "69006",
+      "69007",
+      "69008",
+      "69009"
+     ],
+     "population": 519127,
+     "_score": 3.3309776503428137,
+     "departement": {
+      "code": "69",
+      "nom": "Rhône"
+     }
+    },
+    {
+     "nom": "Cognat-Lyonne",
+     "code": "03080",
+     "codesPostaux": [
+      "03110"
+     ],
+     "population": 706,
+     "_score": 0.4452426608471379,
+     "departement": {
+      "code": "03",
+      "nom": "Allier"
+     }
+    },
+    {
+     "nom": "Lyons-la-Forêt",
+     "code": "27377",
+     "codesPostaux": [
+      "27480"
+     ],
+     "population": 756,
+     "_score": 0.43860828416329795,
+     "departement": {
+      "code": "27",
+      "nom": "Eure"
+     }
+    },
+    {
+     "nom": "Beauvoir-en-Lyons",
+     "code": "76067",
+     "codesPostaux": [
+      "76220"
+     ],
+     "population": 663,
+     "_score": 0.4121779779761865,
+     "departement": {
+      "code": "76",
+      "nom": "Seine-Maritime"
+     }
+    },
+    {
+     "nom": "Sainte-Foy-lès-Lyon",
+     "code": "69202",
+     "codesPostaux": [
+      "69110"
+     ],
+     "population": 21692,
+     "_score": 0.409021828687698,
+     "departement": {
+      "code": "69",
+      "nom": "Rhône"
+     }
+    }
+   ]
+  },
+  "https://geo.api.gouv.fr/communes?nom=Zorglub-sur-Mer&fields=nom,code,codesPostaux,departement,population&boost=population&limit=5": {
+   "status": 200,
+   "body": []
+  }
+ }
+}
