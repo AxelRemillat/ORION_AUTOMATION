@@ -157,7 +157,7 @@ console.log("\n4. Refus fermes");
   );
   check("contenu adulte : refusé", Boolean(upworkIgnoreReason({ title: "Automate posting for an adult website", budgetText: "$400" })));
   check("budget de 25 $ : refusé", (upworkIgnoreReason({ title: "n8n automation", budgetText: "$25" }) ?? "").includes("moins de 30"));
-  check("taux de 12 $/h : refusé", (upworkIgnoreReason({ title: "n8n automation", budgetText: "Hourly: $12.00" }) ?? "").includes("moins de 30"));
+  check("taux de 12 $/h : refusé", (upworkIgnoreReason({ title: "n8n automation", budgetText: "Hourly: $12.00" }) ?? "").includes("moins de 20"));
   check("une offre normale n'est pas refusée", upworkIgnoreReason({ title: "n8n workflow", budgetText: "$350" }) === null);
   check(
     "un refus l'emporte sur le sujet reconnu",
@@ -196,19 +196,19 @@ console.log("\n7. Invitations, messages, offres et contrats");
   const known = { id: "fiche-1", status: "envoyee" as const, external_id: "~021899001122334455" };
 
   const invitation = decideEmail(parsed(), known);
-  check("invitation sur une fiche connue : rattachee", invitation.action === "rattache", invitation.action);
-  check("et elle alerte", "alert" in invitation && invitation.alert === true);
+  check("invitation sur une fiche connue : evenement prioritaire rattache a la fiche (Cowork #68)", invitation.action === "evenement" && "opportunityId" in invitation && invitation.opportunityId !== null, invitation.action);
+  check("et elle alerte (evenement : alerte urgente a l ingestion)", invitation.action === "evenement");
 
   const message = decideEmail(parsed({ kind: "message" }), known);
-  check("message sur une fiche connue : rattache et statut Reponse", message.action === "rattache" && "status" in message && message.status === "reponse", JSON.stringify(message));
+  check("message sur une fiche connue : evenement et statut Reponse", message.action === "evenement" && message.status === "reponse", JSON.stringify(message));
 
   // Upwork : un message sans fiche connue est la reponse a une proposition
   // envoyee hors ORION. On cree la fiche en « Reponse » plutot que de la perdre.
   const inconnu = decideEmail(parsed({ kind: "message" }), null);
-  check("message Upwork inconnu : fiche creee en Reponse", inconnu.action === "cree" && "status" in inconnu && inconnu.status === "reponse", JSON.stringify(inconnu));
+  check("message Upwork inconnu : evenement, AUCUNE fiche creee (Cowork #68)", inconnu.action === "evenement" && inconnu.opportunityId === null, JSON.stringify(inconnu));
 
   const offre = decideEmail(parsed({ kind: "offre" }), known);
-  check("offre recue : statut Conversation", offre.action === "rattache" && "status" in offre && offre.status === "entretien", JSON.stringify(offre));
+  check("offre de contrat : evenement, statut Conversation", offre.action === "evenement" && offre.status === "entretien", JSON.stringify(offre));
 
   const gagnee = decideEmail(parsed({ kind: "gagnee" }), { ...known, status: "entretien" });
   check("« Contract started » sur une fiche connue : Gagnee", gagnee.action === "rattache" && "status" in gagnee && gagnee.status === "gagnee", JSON.stringify(gagnee));

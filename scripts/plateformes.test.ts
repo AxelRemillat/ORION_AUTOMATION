@@ -190,39 +190,41 @@ async function main() {
     const byName = (prefix: string) => EMAIL_FIXTURES.find((fixture) => fixture.name.startsWith(prefix))!.email;
     const opp = (id: string) => db.rows("opportunities").find((row) => row.id === id) as Record<string, unknown>;
 
+    // Cowork #68 : message, invitation et offre de contrat Upwork sont des ÉVÉNEMENTS prioritaires (alerte urgente),
+    // jamais une nouvelle fiche. Le suivi d'une annonce DÉJÀ connue (proposition envoyée) continue de la faire avancer.
+    db.rows("opportunities").push({ id: "up-1", user_id: "u1", platform: "upwork", title: "Build an n8n workflow to sync Shopify orders with Airtable", external_id: "~01a2b3c4d5e6f7a8b9", url: "https://www.upwork.com/jobs/~01a2b3c4d5e6f7a8b9", status: "envoyee", sent_at: "2026-10-07T09:00:00Z", client_name: null, source: "manuel", created_at: "2026-10-06T10:00:00Z" });
+    const knownRow = opp("up-1");
     const invitation = await ingestPlatformEmail(deps, byName("Upwork — invitation"));
-    const invitationRow = opp(invitation.opportunity_ids[0]);
-    check("invitation Upwork → opportunité créée, analysée, alerte envoyée", invitation.status === "cree" && invitation.alerted && invitationRow?.fit_score === 8 && invitationRow.source === "email" && invitationRow.external_id === "~01a2b3c4d5e6f7a8b9", JSON.stringify(invitation));
-    check("… client et lien de l'annonce gardés", invitationRow.client_name === "Jordan K." && invitationRow.url === "https://www.upwork.com/jobs/~01a2b3c4d5e6f7a8b9");
-    check("… alerte « Invitation Upwork : … » vers la fiche", /^Invitation Upwork : Build an n8n/.test(alerts[0]?.title ?? "") && alerts[0]?.click === invitation.orion_url, JSON.stringify(alerts[0]));
+    check("invitation Upwork → événement rattaché à la fiche connue, aucune fiche créée", invitation.kind === "upwork_message" && invitation.status === "rattache" && invitation.opportunity_ids[0] === "up-1" && invitation.alerted && db.rows("opportunities").length === 1, JSON.stringify(invitation));
+    check("… client gardé sur la fiche", knownRow.client_name === "Jordan K.");
+    check("… alerte URGENTE « Upwork – invitation » vers le lien de l'e-mail", alerts[0]?.title === "Upwork – invitation" && alerts[0]?.priority === "urgent" && /upwork\.com\/ab\/proposals\/interview\//.test(alerts[0]?.click ?? ""), JSON.stringify(alerts[0]));
     const calls = llmCalls;
     const replay = await ingestPlatformEmail(deps, byName("Upwork — invitation"));
     check("même message_id rejoué → doublon, aucun appel, aucune alerte", replay.duplicate === true && llmCalls === calls && alerts.length === 1 && db.rows("opportunities").length === 1);
 
-    db.rows("opportunities")[0].status = "envoyee";
-    db.rows("opportunities")[0].sent_at = "2026-10-07T09:00:00Z";
     const message = await ingestPlatformEmail(deps, byName("Upwork — nouveau message"));
-    check("message Upwork → rattaché (même titre), statut Réponse, sans alerte", message.status === "rattache" && message.opportunity_ids[0] === invitation.opportunity_ids[0] && message.opportunity_status === "reponse" && !message.alerted && alerts.length === 1, JSON.stringify(message));
-    check("… replied_at posé", typeof invitationRow.replied_at === "string");
+    check("message Upwork → événement rattaché (même titre), statut Réponse, alerte urgente « nouveau message »", message.status === "rattache" && message.opportunity_ids[0] === "up-1" && message.opportunity_status === "reponse" && message.alerted && alerts.at(-1)?.title === "Upwork – nouveau message" && alerts.at(-1)?.click === "https://www.upwork.com/ab/messages/rooms/room_8a7b6c5d4e", JSON.stringify(alerts.at(-1)));
+    check("… replied_at posé", typeof knownRow.replied_at === "string");
     const offer = await ingestPlatformEmail(deps, byName("Upwork — offre"));
-    check("offre → Conversation (conversation_at)", offer.opportunity_status === "entretien" && typeof invitationRow.conversation_at === "string");
+    check("offre de contrat → Conversation (conversation_at), alerte « offre de contrat »", offer.opportunity_status === "entretien" && typeof knownRow.conversation_at === "string" && alerts.at(-1)?.title === "Upwork – offre de contrat");
     const contract = await ingestPlatformEmail(deps, byName("Upwork — contrat"));
-    check("contrat démarré → Gagnée (won_at)", contract.opportunity_status === "gagnee" && invitationRow.status === "gagnee" && typeof invitationRow.won_at === "string", JSON.stringify(contract));
+    check("contrat démarré → Gagnée (won_at)", contract.opportunity_status === "gagnee" && knownRow.status === "gagnee" && typeof knownRow.won_at === "string", JSON.stringify(contract));
 
     const declined = await ingestPlatformEmail(deps, byName("Upwork — proposition refusée"));
     check("refus sur une annonce inconnue → à trier, rien créé", declined.status === "a_trier" && db.rows("opportunities").length === 1);
     const weekly = await ingestPlatformEmail(deps, byName("Upwork — résumé"));
-    check("e-mail Upwork non reconnu → à trier, sans alerte", weekly.status === "a_trier" && !weekly.alerted);
+    check("e-mail Upwork non reconnu (Connects) → ignoré, sans alerte", weekly.status === "a_trier" && !weekly.alerted && db.rows("opportunity_emails").find((row) => row.message_id === "<weekly-0007@upwork.com>")?.status === "ignore");
     const news = await ingestPlatformEmail(deps, byName("Expéditeur inconnu"));
     check("expéditeur inconnu → à trier", news.status === "a_trier" && news.platform === null);
-    check("les e-mails à trier sont stockés (3)", db.rows("opportunity_emails").filter((row) => row.status === "a_trier").length === 3);
+    check("les e-mails à trier sont stockés (2 ; le résumé Upwork est ignoré)", db.rows("opportunity_emails").filter((row) => row.status === "a_trier").length === 2);
 
+    const alertsBeforeReco = alerts.length;
     const reco = await ingestPlatformEmail(deps, byName("Upwork — recommandations"));
-    check("recommandations → 2 opportunités « brouillon sur extrait », sans alerte", reco.status === "cree" && reco.opportunity_ids.length === 2 && !reco.alerted && alerts.length === 1 && reco.opportunity_ids.every((id) => opp(id).description_truncated === true));
+    check("recommandations → 2 opportunités « brouillon sur extrait », budget lu dans le HTML", reco.status === "cree" && reco.opportunity_ids.length === 2 && reco.opportunity_ids.every((id) => opp(id).description_truncated === true) && /\$400/.test(String(opp(reco.opportunity_ids[0]).budget)), JSON.stringify(reco.opportunity_ids.map((id) => opp(id).budget)));
+    check("… notées 8 (moteur Codeur + critères Upwork) → 2 alertes « Upwork 8/10 – … » vers l'offre", alerts.length === alertsBeforeReco + 2 && alerts.at(-2)?.title === "Upwork 8/10 – Automate invoice extraction from PDF to QuickBooks" && alerts.at(-2)?.click === "https://www.upwork.com/jobs/~01ff00aa11bb22cc33", alerts.slice(alertsBeforeReco).map((alert) => alert.title).join(" | "));
 
     const unknownMessage = await ingestPlatformEmail(deps, byName("Upwork — message d'un client"));
-    const unknownRow = opp(unknownMessage.opportunity_ids[0]);
-    check("message Upwork sans fiche → opportunité « Réponse » (sent_at, replied_at), sans alerte", unknownMessage.status === "cree" && unknownRow.status === "reponse" && typeof unknownRow.sent_at === "string" && typeof unknownRow.replied_at === "string" && !unknownMessage.alerted, JSON.stringify(unknownRow));
+    check("message Upwork sans fiche → événement à trier, AUCUNE fiche, alerte urgente", unknownMessage.kind === "upwork_message" && unknownMessage.status === "a_trier" && unknownMessage.opportunity_ids.length === 0 && unknownMessage.alerted && alerts.at(-1)?.priority === "urgent", JSON.stringify(unknownMessage));
 
     const malt = await ingestPlatformEmail(deps, byName("Malt — nouvelle demande"));
     check("Malt : nouvelle demande → opportunité + alerte « Nouvelle demande Malt »", malt.status === "cree" && malt.alerted && /^Nouvelle demande Malt : Automatiser la saisie/.test(alerts.at(-1)?.title ?? "") && /Claire Fontaine/.test(alerts.at(-1)?.body ?? ""), JSON.stringify(alerts.at(-1)));
@@ -244,7 +246,7 @@ async function main() {
     const orderMessage = await ingestPlatformEmail(deps, byName("ComeUp — message du client"));
     check("ComeUp : message sur la commande → rattaché, Gagnée gardée", orderMessage.status === "rattache" && orderMessage.opportunity_ids[0] === order.opportunity_ids[0] && orderRow.status === "gagnee" && !orderMessage.alerted, JSON.stringify(orderMessage));
 
-    check("alertes uniquement pour invitation, demandes et commande (5)", alerts.length === 5, alerts.map((alert) => alert.title).join(" | "));
+    check("alertes : 4 événements Upwork, 2 offres Upwork, 2 demandes Malt, 2 ComeUp (10)", alerts.length === 10, alerts.map((alert) => alert.title).join(" | "));
     check("chaque e-mail tracé une seule fois (16 lignes)", db.rows("opportunity_emails").length === EMAIL_FIXTURES.length && new Set(db.rows("opportunity_emails").map((row) => row.message_id)).size === EMAIL_FIXTURES.length);
 
     console.log("\n9. Cockpit : par plateforme, 7 et 30 jours");
@@ -252,7 +254,7 @@ async function main() {
     const week = platformActivity(db.rows("opportunities") as never, 7, now);
     const upwork = week.find((row) => row.platform === "upwork");
     const malt7 = week.find((row) => row.platform === "malt");
-    check("Upwork 7 j : 2 envoyées, 2 réponses, 1 conversation, 1 gagnée", upwork?.sent === 2 && upwork.replies === 2 && upwork.conversations === 1 && upwork.won === 1, JSON.stringify(upwork));
+    check("Upwork 7 j : 1 envoyée, 1 réponse, 1 conversation, 1 gagnée (un message sans fiche ne crée plus de fiche)", upwork?.sent === 1 && upwork.replies === 1 && upwork.conversations === 1 && upwork.won === 1, JSON.stringify(upwork));
     check("Malt 7 j : 1 gagnée", malt7?.won === 1, JSON.stringify(malt7));
     const old = [{ platform: "codeur", status: "gagnee", sent_at: "2026-09-20T10:00:00Z", replied_at: "2026-09-21T10:00:00Z", updated_at: "2026-09-25T10:00:00Z", conversation_at: null, won_at: null }];
     const codeur30 = platformActivity(old as never, 30, now)[0];
@@ -275,8 +277,8 @@ async function main() {
     const before = snapshot();
     const invitation = await planPlatformEmail(deps, byName("Upwork — invitation"));
     check(
-      "invitation : créerait une fiche, avec alerte — rien d'écrit, aucun appel, aucune alerte",
-      invitation.dry_run && invitation.action === "cree" && invitation.would_alert && invitation.kind === "invitation" && invitation.parsed.external_id === "~01a2b3c4d5e6f7a8b9" && snapshot() === before && llm === 0 && alerts.length === 0,
+      "invitation : serait un événement prioritaire avec alerte, sans fiche (Cowork #68) — rien d'écrit, aucun appel, aucune alerte",
+      invitation.dry_run && invitation.action === "evenement" && invitation.would_alert && invitation.kind === "upwork_message" && invitation.parsed.external_id === "~01a2b3c4d5e6f7a8b9" && snapshot() === before && llm === 0 && alerts.length === 0,
       JSON.stringify(invitation),
     );
     const commande = await planPlatformEmail(deps, byName("ComeUp — nouvelle commande"));
@@ -289,21 +291,21 @@ async function main() {
     check("Malt, message sans fiche : deviendrait une nouvelle demande avec alerte", maltUnknown.action === "cree" && maltUnknown.kind === "demande" && maltUnknown.would_alert);
 
     // Une vraie ingestion, puis le mode test sur le message de suivi et sur le même e-mail rejoué.
+    db.rows("opportunities").push({ id: "up-1", user_id: "u1", platform: "upwork", title: "Build an n8n workflow to sync Shopify orders with Airtable", external_id: "~01a2b3c4d5e6f7a8b9", url: "https://www.upwork.com/jobs/~01a2b3c4d5e6f7a8b9", status: "envoyee", sent_at: "2026-10-07T09:00:00Z", client_name: null, created_at: "2026-10-06T10:00:00Z" });
     const real = await ingestPlatformEmail(deps, byName("Upwork — invitation"));
-    db.rows("opportunities")[0].status = "envoyee";
     const afterReal = snapshot();
     const alertsAfterReal = alerts.length;
     const message = await planPlatformEmail(deps, byName("Upwork — nouveau message"));
     check(
-      "message de suivi : rattacherait à la fiche visée, statut prévu « Réponse », sans alerte",
-      message.action === "rattache" && message.target?.id === real.opportunity_ids[0] && message.target.status === "envoyee" && message.opportunity_status === "reponse" && !message.would_alert,
+      "message de suivi : événement sur la fiche visée, statut prévu « Réponse », avec alerte urgente",
+      message.action === "evenement" && message.target?.id === real.opportunity_ids[0] && message.target.status === "envoyee" && message.opportunity_status === "reponse" && message.would_alert,
       JSON.stringify(message),
     );
     const replay = await planPlatformEmail(deps, byName("Upwork — invitation"));
     check("message_id déjà reçu : « doublon », fiche liée renvoyée", replay.action === "doublon" && replay.duplicate && replay.target?.id === real.opportunity_ids[0]);
     check("aucune écriture ni alerte pendant les essais à blanc", snapshot() === afterReal && alerts.length === alertsAfterReal);
     const decided = decideEmail(parsePlatformEmail(byName("Upwork — offre")), { id: "o1", status: "reponse" });
-    check("décision partagée : une offre sur « Réponse » → Conversation", decided.action === "rattache" && decided.status === "entretien" && decided.statusChanged);
+    check("décision partagée : une offre de contrat sur « Réponse » → événement, Conversation", decided.action === "evenement" && decided.status === "entretien" && decided.statusChanged);
   }
 
   console.log("\n11. Vue « À trier » : créer une fiche, rattacher, ignorer");

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Notification } from "@/lib/notify/ntfy";
 import { ingestOpportunity, type IngestBody, type IngestDeps, type IngestResponse, type Verdict } from "../ingest";
-import { upworkIgnoreReason, upworkLaunchVerdict } from "../upwork-launch";
+import { upworkIgnoreReason } from "../upwork-launch";
+import { isUpworkEvent, UPWORK_ALERT_SCORE, upworkEvent, upworkEventAlert, upworkJobAlert, upworkJobScore } from "./upwork-events";
 import { PLATFORM_LABELS, type OpportunityStatus, type Platform } from "../types";
 
 export { milestones, statusAfterEvent };
@@ -146,7 +147,12 @@ export type EmailDecision =
   | { action: "rattache"; kind: EmailKind; opportunityId: string; status: OpportunityStatus; statusChanged: boolean; alert: boolean }
   | { action: "cree"; kind: EmailKind; status: OpportunityStatus | null; alert: boolean }
   /** Codeur « Nouveau projet » déjà connu par le flux RSS : rien d'écrit, aucune alerte. */
-  | { action: "doublon"; kind: "nouveau_projet"; opportunityId: string };
+  | { action: "doublon"; kind: "nouveau_projet"; opportunityId: string }
+  /**
+   * Upwork (Cowork #68) : message, invitation ou offre de contrat — un ÉVÉNEMENT prioritaire (alerte urgente),
+   * jamais une nouvelle fiche ; une fiche déjà connue avance quand même (réponse, entretien).
+   */
+  | { action: "evenement"; kind: "upwork_message"; subtype: EmailKind; opportunityId: string | null; status: OpportunityStatus | null; statusChanged: boolean };
 
 /** Codeur : alerte pour un message du client ou un projet attribué. */
 export const CODEUR_ALERT_KINDS: readonly EmailKind[] = ["message", "gagnee"];
@@ -170,6 +176,10 @@ export function decideEmail(parsed: ParsedEmail, existing: (Pick<OpportunityRow,
     return { action: "rattache", kind: parsed.kind, opportunityId: existing.id, status: next ?? existing.status, statusChanged: Boolean(next), alert: CODEUR_ALERT_KINDS.includes(parsed.kind) };
   }
   if (parsed.kind === "recommandation") return { action: "recommandations", kind: "recommandation", jobs: parsed.jobs.length };
+  if (platform === "upwork" && isUpworkEvent(parsed.kind)) {
+    const next = existing ? statusAfterEvent(existing.status, parsed.kind) : null;
+    return { action: "evenement", kind: "upwork_message", subtype: parsed.kind, opportunityId: existing?.id ?? null, status: existing ? (next ?? existing.status) : null, statusChanged: Boolean(next) };
+  }
   const tracking = parsed.kind === "message" || parsed.kind === "offre" || parsed.kind === "gagnee" || parsed.kind === "perdue";
   if (existing && (tracking || parsed.kind === "invitation" || parsed.kind === "demande")) {
     const next = statusAfterEvent(existing.status, parsed.kind);
@@ -246,9 +256,9 @@ export async function planPlatformEmail(deps: Pick<EmailIngestDeps, "db" | "user
           : decision.kind === "nouveau_projet"
             ? "nouveau projet inconnu : même chemin que /ingest (filtre, analyse) ; alerte si le score atteint 8"
             : null,
-    opportunity_status: decision.action === "rattache" || decision.action === "cree" ? decision.status : null,
-    would_alert: decision.action === "rattache" || decision.action === "cree" ? decision.alert : false,
-    target: (decision.action === "rattache" || decision.action === "doublon") && existing ? { id: existing.id, title: existing.title, status: existing.status, orion_url: orionUrl(deps.baseUrl, existing.id) } : null,
+    opportunity_status: decision.action === "rattache" || decision.action === "cree" || decision.action === "evenement" ? decision.status : null,
+    would_alert: decision.action === "rattache" || decision.action === "cree" ? decision.alert : decision.action === "evenement",
+    target: (decision.action === "rattache" || decision.action === "doublon" || decision.action === "evenement") && existing ? { id: existing.id, title: existing.title, status: existing.status, orion_url: orionUrl(deps.baseUrl, existing.id) } : null,
     parsed: summary,
   };
 }
@@ -307,8 +317,35 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
   };
 
   // 2. Non reconnu (expéditeur inconnu, Codeur, type inconnu, clôture sans fiche) : à trier, sans alerte.
+  //    Upwork (Cowork #68) : newsletters, Connects, astuces — ignorés, sans alerte (pas dans « À trier »).
   if (decision.action === "a_trier" || !platform) {
+    if (platform === "upwork" && parsed.kind === "autre") await finish({ status: "ignore" });
     return { ok: true, message_id: email.message_id, platform, kind: parsed.kind, status: "a_trier", opportunity_ids: [], alerted: false, orion_url: null };
+  }
+
+  // 2b. Upwork : message, invitation, offre de contrat → ÉVÉNEMENT prioritaire, alerte URGENTE vers le lien de
+  //     l'e-mail. Aucune fiche créée ; une fiche déjà connue avance (réponse, entretien) et le garde en historique.
+  if (decision.action === "evenement") {
+    if (existing && decision.opportunityId) {
+      const patch: Record<string, unknown> = { last_event_at: base.received_at, updated_at: now };
+      if (decision.statusChanged && decision.status) Object.assign(patch, { status: decision.status }, milestones(decision.status, existing, base.received_at));
+      if (parsed.clientName && !existing.client_name) patch.client_name = parsed.clientName;
+      await db.from("opportunities").update(patch).eq("id", existing.id);
+    }
+    const event = upworkEvent(email, decision.subtype, parsed.url);
+    const alerted = await sendAlert(deps, upworkEventAlert(event));
+    await finish({ kind: "upwork_message", status: decision.opportunityId ? "rattache" : "a_trier", opportunity_id: decision.opportunityId, alerted, excerpt: `${event.sender} — ${event.label}\n${event.link}\n\n${parsed.body}`.slice(0, 2000) });
+    return {
+      ok: true,
+      message_id: email.message_id,
+      platform,
+      kind: "upwork_message",
+      status: decision.opportunityId ? "rattache" : "a_trier",
+      opportunity_ids: decision.opportunityId ? [decision.opportunityId] : [],
+      alerted,
+      orion_url: decision.opportunityId ? orionUrl(deps.baseUrl, decision.opportunityId) : null,
+      ...(decision.status ? { opportunity_status: decision.status } : {}),
+    };
   }
 
   const ingestDeps: IngestDeps = { ...deps, notify: undefined };
@@ -332,36 +369,28 @@ export async function ingestPlatformEmail(deps: EmailIngestDeps, email: InboundE
       });
       ids.push(result.id);
 
-      /*
-       * LANCEMENT UPWORK (#18). Axel vient d'ouvrir son compte : une offre dans
-       * son métier, petite ou horaire, publiée dans les 24 h, mérite qu'on le
-       * prévienne — les autres attendent dans « À voir ». Et ce qu'on ne fera
-       * jamais (scraping contre les CGU, contenu adulte, test non rémunéré,
-       * moins de 30 $) est marqué « ignorée » avec son motif, pour qu'on sache
-       * POURQUOI plutôt que de le retrouver en bas de liste.
-       *
-       * Cette règle s'ajoute au pré-filtre et au score, elle ne les remplace
-       * pas : une offre peut être une offre de lancement ET mal notée.
-       */
       if (platform !== "upwork") continue;
-      const verdict = upworkLaunchVerdict(
-        { title: job.title, description: job.snippet, budgetText: job.budget, publishedAt: email.received_at },
-        new Date(base.received_at),
-      );
-      if (verdict.alert) {
-        launched = true;
-        const sent = await sendAlert(
-          deps,
-          alertFor(platform, "demande", parsed, orionUrl(deps.baseUrl, result.id), `${verdict.reason}.`, job.title),
-        );
-        if (!sent) launched = false;
-        continue;
-      }
-      // Refus ferme : on le dit SUR la fiche, sans la supprimer, pour qu on
-      // sache pourquoi au lieu de la chercher en bas de liste.
+      // Refus ferme (scraping contre les CGU, contenu adulte, test non rémunéré, moins de 30 $) : « ignorée »
+      // avec son motif, sur la fiche, pour qu'on sache POURQUOI.
       const refusal = upworkIgnoreReason({ title: job.title, description: job.snippet, budgetText: job.budget });
       if (refusal) {
         await db.from("opportunities").update({ status: "ignoree", filter_reason: refusal }).eq("id", result.id);
+        continue;
+      }
+      /*
+       * SCORE UPWORK (Cowork #68) : le score du moteur Codeur (analyse du modèle), ajusté par les critères Upwork
+       * lisibles dans l'e-mail — budget plancher, adéquation au portfolio, expérience exigée, concurrence, paiement
+       * vérifié (jamais inventés). Offre à 7 ou plus : alerte « Upwork 8/10 – <titre> » vers l'offre.
+       */
+      if (result.duplicate || result.filtered) continue;
+      const scored = upworkJobScore(result.score, job);
+      if (scored.score === null) continue;
+      if (scored.score !== result.score || scored.reasons.length) {
+        await db.from("opportunities").update({ fit_score: scored.score, fit_reasons: [...result.reasons, ...scored.reasons].slice(0, 6) }).eq("id", result.id);
+      }
+      if (scored.score >= UPWORK_ALERT_SCORE) {
+        const sent = await sendAlert(deps, upworkJobAlert(job, scored, orionUrl(deps.baseUrl, result.id)));
+        launched ||= sent;
       }
     }
     await finish({ status: ids.length ? "cree" : "a_trier", opportunity_id: ids[0] ?? null, alerted: launched });
