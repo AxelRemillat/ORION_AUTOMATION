@@ -28,7 +28,8 @@ function cowork63(text: string, budget: string): string[] {
     const project = UPWORK_PORTFOLIO.find((item) => item.titre === title);
     if (!project) issues.push(`titre absent du portfolio Upwork : « ${title} »`);
     else if (!project.publie) issues.push(`projet non publié cité : « ${title} »`);
-    else if (!text.includes(project.lien)) issues.push(`lien de démo de « ${title} » absent (${project.lien})`);
+    else if (project.lien && !text.includes(project.lien)) issues.push(`lien de démo de « ${title} » absent (${project.lien})`);
+    else if (!project.lien && /one-minute demo|axelremillat\.com/i.test(text)) issues.push(`lien de démo de « ${title} » : ce projet est privé, aucun lien attendu`);
   }
   for (const url of text.match(/(?:https?:\/\/)?[\w.-]+\.[a-z]{2,}\/[^\s)]*/gi) ?? []) {
     if (!/^(?:https?:\/\/)?axelremillat\.com\/en\//.test(url) || !/[?&]ref=upwork(&|$)/.test(url)) issues.push(`lien non autorisé : ${url}`);

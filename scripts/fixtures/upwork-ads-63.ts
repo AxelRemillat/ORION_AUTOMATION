@@ -35,4 +35,11 @@ export const UPWORK_ADS_63: UpworkAdFixture[] = [
     budget: "$250 fixed",
     body: "We receive around 200 supplier invoices per month as PDF attachments by email (different layouts, some scanned). We need invoice number, date, supplier, total excl. VAT, VAT and due date extracted into a Google Sheet, with a flag when something can't be read. Ideally it runs automatically when a new invoice arrives. How accurate can you get on scanned invoices?",
   },
+  {
+    // Cowork #66 : doit citer le projet ORION, SANS lien de démo.
+    title: "Build a lead generation pipeline that finds and scores B2B prospects",
+    url: "fixture",
+    budget: "$500 fixed",
+    body: "We sell maintenance software to manufacturing SMEs in France and Belgium. We need a lead generation pipeline that finds relevant B2B prospects (company size, sector, region), enriches them with a decision-maker contact, scores them against our ideal customer profile, and prepares a short first email for each that our sales rep approves before anything is sent. Output to our CRM (Pipedrive). How would you build it, and how do you keep the outreach compliant?",
+  },
 ];

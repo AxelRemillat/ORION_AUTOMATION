@@ -144,7 +144,10 @@ async function main() {
     check("Upwork : migration Zapier, Typeform → HubSpot → AI Email Triage", upworkProject("Migrate 12 Zapier zaps to Make").id === "email-triage" && upworkProject("new Typeform leads to HubSpot + Slack alert").id === "email-triage");
     check("Upwork : agent de devis NON publié → jamais cité", upworkProject("AI agent that turns a customer request into a priced quote").id !== "quote-agent");
     check("Upwork : titres inexistants supprimés", !UPWORK_PORTFOLIO.some((project) => /Invoice Data Extraction & Automatic|AI Quote Assistant with Voice/.test(project.titre)));
-    check("Upwork : chaque lien de démo est en /en et porte ref=upwork", UPWORK_PORTFOLIO.every((project) => /^axelremillat\.com\/en\/.+[?&]ref=upwork$/.test(project.lien)));
+    check("Upwork : chaque lien de démo est en /en et porte ref=upwork", UPWORK_PORTFOLIO.every((project) => project.lien === null || /^axelremillat\.com\/en\/.+[?&]ref=upwork$/.test(project.lien)));
+    // Cowork #66 : ORION (projet privé) — prospection seulement, cité SANS lien de démo.
+    check("Upwork : lead generation B2B → AI Lead Generation System, sans démo", line("build a lead generation pipeline that finds and scores B2B prospects") === 'Related project in my Upwork portfolio: "AI Lead Generation System: Sourcing, Scoring and Human-Approved Emails".', line("lead generation"));
+    check("Upwork : ORION jamais pour un chatbot, du support ou de la facturation", upworkProject("chatbot that finds leads").id !== "lead-generation" && upworkProject("support inbox outreach replies").id !== "lead-generation" && upworkProject("invoice reminders outbound").id !== "lead-generation");
     // Positionnement de prix (06/10/2026) : UN montant, plafonds, délai, coûts mensuels.
     const base = PROPOSAL_POSITIVES[2];
     const price = (framing: string, options: { budget?: string | null; kind?: "automatisation" | "fullstack"; ad?: string; amountEur?: number } = {}) => {
