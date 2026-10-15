@@ -1,3 +1,4 @@
+import { upworkProject } from "./upwork-portfolio";
 import type { AskFn } from "@/lib/ai/chat";
 import { countWords } from "@/lib/emails/quality/template";
 import { DEMO_LINKS, type DemoLink } from "@/lib/emails/quality/demo-links";
@@ -133,14 +134,6 @@ export const PORTFOLIO_TITLES = [
 ] as const;
 export type PortfolioTitle = (typeof PORTFOLIO_TITLES)[number];
 
-/** Titres EXACTS du portfolio Upwork (anglais, profil d'Axel du 15/10 — Cowork #63), dans l'ordre de PORTFOLIO_TITLES. */
-export const UPWORK_PORTFOLIO_TITLES = [
-  "AI Quote Assistant with Voice (Custom AI Agent)",
-  "AI Email Triage Automation for Small Businesses (n8n + OpenAI)",
-  "Invoice Data Extraction & Automatic Payment Reminders",
-  "ORION – B2B Prospecting Platform",
-] as const;
-
 /** Besoin de prospection : trouver des clients, leur écrire, mails commerciaux. */
 export const PROSPECTION_NEED = /(prospect|recherche de clients?|trouver (des |de nouveaux )?clients|g[ée]n[ée]ration de leads?|\bleads?\b|mails? commerciaux|e-?mails? de prospection|emailing|d[ée]marchage|lead gen)/i;
 
@@ -184,31 +177,14 @@ export function proposalSignature(platform: Platform, language: Language): strin
   return "Axel Remillat · Automatisation & IA pour PME · axelremillat.com/pme";
 }
 
-/** Chatbot, assistant qui répond à partir de documents : l'agent IA sur mesure est la réalisation la plus proche. */
-const CHATBOT_NEED = /chat ?bot|conversational|\brag\b|knowledge base|virtual assistant|ai assistant|answers? (customer )?questions/i;
-
-/**
- * Réalisation du portfolio UPWORK à citer (titre anglais exact) : la même logique que Codeur, plus le chatbot ;
- * toujours un titre (à défaut, le tri des e-mails, l'automatisation n8n + OpenAI la plus générale).
- */
-export function upworkPortfolioTitle(demo: DemoLink["key"], context = "", kind: ProjectKind = "automatisation"): (typeof UPWORK_PORTFOLIO_TITLES)[number] {
-  // ORION seulement pour de la VRAIE prospection : « Typeform leads to HubSpot » est du routage vers un CRM (#63).
-  if (kind === "fullstack" || UPWORK_PROSPECTION.test(context)) return UPWORK_PORTFOLIO_TITLES[3];
-  if (CHATBOT_NEED.test(context)) return UPWORK_PORTFOLIO_TITLES[0];
-  const french = portfolioTitle(demo, "", kind);
-  return french && french !== PORTFOLIO_TITLES[3] ? UPWORK_PORTFOLIO_TITLES[PORTFOLIO_TITLES.indexOf(french)] : UPWORK_PORTFOLIO_TITLES[1];
-}
-
-/** Prospection au sens strict (anglais) : trouver des clients et leur écrire — pas recevoir des leads. */
-const UPWORK_PROSPECTION = /lead gen(eration)?|prospect(ing|ion|s)?|cold (e-?mail|outreach|calling)|outreach|find (new )?(clients|customers|leads)|b2b (sales|leads)/i;
-
-/** Démo Upwork : le titre et le lien doivent montrer la même chose (chatbot → l'agent conversationnel /agent). */
-export const upworkDemo = (demo: DemoLink["key"], context = ""): DemoLink["key"] => (CHATBOT_NEED.test(context) && !UPWORK_PROSPECTION.test(context) ? "devis" : demo);
-
 /** La ligne de démo : titre du portfolio (plateformes sans contact), lien suivi ailleurs ; `null` = aucune démo citée. */
 export function demoLine(platform: Platform, language: Language, demo: DemoLink["key"], context = "", kind: ProjectKind = "automatisation"): string | null {
-  // Upwork (Cowork #63) : le projet du portfolio par son TITRE EXACT, puis la démo anglaise suivie (?ref=upwork).
-  if (platform === "upwork") return `Related project in my Upwork portfolio: "${upworkPortfolioTitle(demo, context, kind)}". One-minute demo: ${opportunityDemoUrl(upworkDemo(demo, context), platform)}`;
+  // Upwork (Cowork #63-#64) : un projet PUBLIÉ du portfolio Upwork (lib/opportunities/upwork-portfolio.ts), par son
+  // TITRE EXACT, avec SA démo anglaise suivie (?ref=upwork).
+  if (platform === "upwork") {
+    const project = upworkProject(context);
+    return `Related project in my Upwork portfolio: "${project.titre}". One-minute demo: ${project.lien}`;
+  }
   if (isNoContactPlatform(platform)) {
     const title = portfolioTitle(demo, context, kind);
     return title ? `Une démo d'un cas proche est visible dans mon portfolio ${PLATFORM_NAMES[platform]} (${title}).` : null;

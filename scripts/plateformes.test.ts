@@ -532,7 +532,7 @@ async function main() {
     // Plateformes #11 : l'alerte ne donne que le titre → « À voir » SANS analyse (un score sur un titre ne veut rien dire).
     // 11/10/2026 : « Application ia agentiques » est une mission de lancement (application web, budget non indiqué) →
     // alerte tout de suite, toujours SANS analyse (titre seul).
-    check("format réel → pas filtré, « Titre seul », mission de lancement : alerte, sans appel au modèle", created.verdict === "alerte" && created.status === "cree" && !row.filter_reason && row.analysis_state === "titre_seul" && row.fit_score == null && bucketOf(row as never) === "alertes" && created.alerted && alerts.length === 1 && seen.length === 0, JSON.stringify({ created, state: row?.analysis_state, reason: row?.filter_reason }));
+    check("format réel → pas filtré, « Titre seul », mission de lancement : alerte, sans appel au modèle", created.verdict === "alerte" && created.status === "cree" && !row.filter_reason && row.analysis_state === "titre_seul" && row.fit_score == null && bucketOf(row as never, deps.now()) === "alertes" && created.alerted && alerts.length === 1 && seen.length === 0, JSON.stringify({ created, state: row?.analysis_state, reason: row?.filter_reason }));
     check("… lien de l'annonce gardé, annonce = le titre", row.url === "https://www.codeur.com/projects/499001-application-ia-agentiques" && row.body === "Application ia agentiques" && row.description_truncated === true, JSON.stringify({ url: row.url, body: row.body }));
 
     // Analyse impossible (erreur API, budget, réponse illisible) : « Non analysée », jamais « Ignorée ».

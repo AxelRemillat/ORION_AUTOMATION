@@ -2,11 +2,12 @@
  * Opportunités (Codeur, Upwork…) : saisie, analyse, proposition, suivi, stats.
  * Fixtures uniquement, aucun appel réel.
  */
+import { UPWORK_PORTFOLIO, upworkProject } from "../lib/opportunities/upwork-portfolio";
 import { buildProposalChecklistPrompt, judgeProposalChecklist, proposalChecklistFeedback, proposalCodeChecks, proposalMajority, proposalVerdictOf } from "../lib/opportunities/proposal-checklist";
 import { PROPOSAL_CHECKLIST_SAMPLES } from "../lib/opportunities/proposal-checklist";
 import { parseNewOpportunity, buildOpportunityPatch } from "../lib/opportunities/input";
 import { analyzeOpportunity, opportunityDemoUrl, parseAnalysis } from "../lib/opportunities/analyze";
-import { upworkBid, upworkBidPhrase, assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, upworkPortfolioTitle, UPWORK_PORTFOLIO_TITLES, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
+import { upworkBid, upworkBidPhrase, assembleProposal, buildClientJudgePrompt, buildProposalJudgePrompt, checkProposal, combineVerdicts, contactFailures, portfolioTitle, demoLine, generateProposal, parseProposalVerdict, proposalSignature, PROPOSAL_WORDS, PRIVATE_MESSAGE_MAX_CHARS, SHORTEN_ABOVE_CHARS } from "../lib/opportunities/proposal";
 import { AXEL_SENT, PROPOSAL_NEGATIVES, PROPOSAL_POSITIVES } from "../lib/opportunities/calibration";
 import { platformStats } from "../lib/opportunities/stats";
 import { proposalLanguage } from "../lib/opportunities/types";
@@ -135,14 +136,15 @@ async function main() {
     // Cowork #63 : le nom d'un outil n'est pas un lien de rendez-vous ; projet du portfolio Upwork par son titre exact.
     check("Upwork : « Calendly bookings to Pipedrive » (outil du client) accepté", upwork("Calendly bookings will reach Pipedrive as before.").length === 0);
     check("Upwork : invitation « schedule a call here » refusée", upwork("You can schedule a call here.").length > 0);
-    const line = (demo: Parameters<typeof upworkPortfolioTitle>[0], context: string) => demoLine("upwork", "en", demo, context) ?? "";
-    check("Upwork : titre exact + /en + ref=upwork", line("emails", "support inbox triage") === 'Related project in my Upwork portfolio: "AI Email Triage Automation for Small Businesses (n8n + OpenAI)". One-minute demo: axelremillat.com/en/automatisations?demo=email&ref=upwork', line("emails", "x"));
-    check("Upwork : chatbot → l'agent IA sur mesure", upworkPortfolioTitle("sav", "OpenAI chatbot answering from our FAQ") === "AI Quote Assistant with Voice (Custom AI Agent)");
-    check("Upwork : factures PDF → extraction de factures", upworkPortfolioTitle("factures", "supplier PDF invoices") === "Invoice Data Extraction & Automatic Payment Reminders");
-    check("Upwork : « Typeform leads to HubSpot » (routage CRM) → pas ORION", upworkPortfolioTitle("general", "new Typeform leads to HubSpot") !== "ORION – B2B Prospecting Platform");
-    check("Upwork : chatbot → titre ET démo de l'agent (/en/agent)", line("sav", "OpenAI chatbot for our website").includes("/en/agent?ref=upwork"));
-    check("Upwork : prospection → ORION", upworkPortfolioTitle("emails", "lead generation for our sales team") === "ORION – B2B Prospecting Platform");
-    check("Upwork : toujours un titre de la liste", ["devis", "emails", "factures", "reporting", "fichier", "sav", "general"].every((demo) => (UPWORK_PORTFOLIO_TITLES as readonly string[]).includes(upworkPortfolioTitle(demo as never, "clean my spreadsheet"))));
+    // Cowork #64 : seuls les projets PUBLIÉS du portfolio Upwork, par leur titre exact, avec leur propre démo.
+    const line = (context: string) => demoLine("upwork", "en", "general", context) ?? "";
+    check("Upwork : e-mails → AI Email Triage, démo demo=email&ref=upwork", line("triage our support inbox in Gmail") === 'Related project in my Upwork portfolio: "AI Email Triage Automation for Small Businesses (n8n + OpenAI)". One-minute demo: axelremillat.com/en/automatisations?demo=email&ref=upwork', line("x"));
+    check("Upwork : chatbot OpenAI → RAG AI Chatbot (/en/projets/vega)", upworkProject("OpenAI chatbot answering from our FAQ and product PDFs").titre === "RAG AI Chatbot: Ask Questions to Your Documents, With Sources" && line("chatbot for our FAQ").includes("axelremillat.com/en/projets/vega?ref=upwork"));
+    check("Upwork : factures PDF → AI Invoice Extraction", upworkProject("supplier PDF invoices into Google Sheets").titre === "AI Invoice Extraction: PDF or Photo to Structured Data in Seconds");
+    check("Upwork : migration Zapier, Typeform → HubSpot → AI Email Triage", upworkProject("Migrate 12 Zapier zaps to Make").id === "email-triage" && upworkProject("new Typeform leads to HubSpot + Slack alert").id === "email-triage");
+    check("Upwork : agent de devis NON publié → jamais cité", upworkProject("AI agent that turns a customer request into a priced quote").id !== "quote-agent");
+    check("Upwork : titres inexistants supprimés", !UPWORK_PORTFOLIO.some((project) => /Invoice Data Extraction & Automatic|AI Quote Assistant with Voice/.test(project.titre)));
+    check("Upwork : chaque lien de démo est en /en et porte ref=upwork", UPWORK_PORTFOLIO.every((project) => /^axelremillat\.com\/en\/.+[?&]ref=upwork$/.test(project.lien)));
     // Positionnement de prix (06/10/2026) : UN montant, plafonds, délai, coûts mensuels.
     const base = PROPOSAL_POSITIVES[2];
     const price = (framing: string, options: { budget?: string | null; kind?: "automatisation" | "fullstack"; ad?: string; amountEur?: number } = {}) => {
