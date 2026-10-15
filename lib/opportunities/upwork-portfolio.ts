@@ -7,12 +7,14 @@
  */
 
 export interface UpworkPortfolioProject {
-  id: "email-triage" | "invoice-extraction" | "rag-chatbot" | "quote-agent";
+  id: "email-triage" | "invoice-extraction" | "rag-chatbot" | "lead-generation" | "quote-agent";
   titre: string;
-  /** Lien de démo anglais, sans protocole, avec `ref=upwork`. */
-  lien: string;
+  /** Lien de démo anglais, sans protocole, avec `ref=upwork` ; `null` = projet privé, cité sans démo (ORION). */
+  lien: string | null;
   /** Besoins couverts (lus dans l'annonce). */
   usages: RegExp;
+  /** Besoins pour lesquels ce projet n'est JAMAIS cité, même si ses usages apparaissent. */
+  exclut?: RegExp;
   publie: boolean;
 }
 
@@ -29,6 +31,15 @@ export const UPWORK_PORTFOLIO: readonly UpworkPortfolioProject[] = [
     titre: "AI Invoice Extraction: PDF or Photo to Structured Data in Seconds",
     lien: "axelremillat.com/en/automatisations?demo=invoice&ref=upwork",
     usages: /invoices?|receipts?|\bocr\b|scanned|data extraction|extract(ing|ion)? (data|fields|information)|pdf (to|into)|from (pdf|documents?)|document (processing|extraction|parsing)|\berp\b/i,
+    publie: true,
+  },
+  {
+    // ORION (Cowork #66) : application privée — cité par son titre, SANS lien de démo. Prospection seulement.
+    id: "lead-generation",
+    titre: "AI Lead Generation System: Sourcing, Scoring and Human-Approved Emails",
+    lien: null,
+    usages: /lead gen(eration)?|prospect(ing|ion|s)?\b|lead (enrichment|scoring|sourcing|list)|enrich(ing|ment)? (of )?(b2b )?(leads|prospects|contacts)|scor(e|es|ing) (b2b )?(leads|prospects)|cold (e-?mail|outreach)|outbound|outreach|find (new )?(b2b )?(clients|customers|leads|prospects)/i,
+    exclut: /chat ?bot|\brag\b|knowledge base|faq|support (inbox|tickets?|team|emails?)|help ?desk|customer (support|service)|invoices?|billing|receipts?/i,
     publie: true,
   },
   {
@@ -59,7 +70,10 @@ const DEFAULT_ID: UpworkPortfolioProject["id"] = "email-triage";
  */
 export function upworkProject(context: string): UpworkPortfolioProject {
   const published = publishedUpworkProjects();
-  return published.find((project) => project.id !== DEFAULT_ID && project.usages.test(context)) ?? published.find((project) => project.id === DEFAULT_ID)!;
+  return (
+    published.find((project) => project.id !== DEFAULT_ID && project.usages.test(context) && !project.exclut?.test(context)) ??
+    published.find((project) => project.id === DEFAULT_ID)!
+  );
 }
 
 /** Titres citables : tout titre cité dans une proposition doit en faire partie. */

@@ -183,7 +183,8 @@ export function demoLine(platform: Platform, language: Language, demo: DemoLink[
   // TITRE EXACT, avec SA démo anglaise suivie (?ref=upwork).
   if (platform === "upwork") {
     const project = upworkProject(context);
-    return `Related project in my Upwork portfolio: "${project.titre}". One-minute demo: ${project.lien}`;
+    // Projet privé (ORION, Cowork #66) : le titre seul, sans « One-minute demo ».
+    return project.lien ? `Related project in my Upwork portfolio: "${project.titre}". One-minute demo: ${project.lien}` : `Related project in my Upwork portfolio: "${project.titre}".`;
   }
   if (isNoContactPlatform(platform)) {
     const title = portfolioTitle(demo, context, kind);
