@@ -7,9 +7,10 @@
  * « Paris » qui partait en recherche plein texte, invisible tant qu'on ne
  * regardait pas les paramètres envoyés.
  *
- * La résolution de zone tape le VRAI service geo.api.gouv.fr : c'est un
- * contrat externe, et le tester sur un bouchon ne prouverait rien. Il est
- * gratuit et sans clé.
+ * La résolution de zone lit des réponses RÉELLES de geo.api.gouv.fr enregistrées
+ * une fois (scripts/fixtures/geo-zones.json) : la CI ne dépend plus du réseau
+ * (Cowork #41 — trois échecs aléatoires le 15/10/2026 bloquaient toutes les PR).
+ * Le contrat externe reste vérifiable en direct : `LIVE_TESTS=1 npm run test:recherche`.
  *
  * Exécution : `npm run test:recherche`.
  */
@@ -33,6 +34,20 @@ import { jobUrlsFromSitemap } from "../lib/enrichment/site";
 import { whyNow } from "../lib/scoring";
 import { toCanvasColor, toRgbTriplet } from "../lib/canvas-color";
 
+/** Bouchon de fetch : les réponses enregistrées de geo.api.gouv.fr ; une autre URL geo non enregistrée échoue. */
+function geoFixtureFetch(fallback: typeof fetch): typeof fetch {
+  const fixtures = JSON.parse(readFileSync("scripts/fixtures/geo-zones.json", "utf8")) as { responses: Record<string, { status: number; body: unknown }> };
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const hit = fixtures.responses[url];
+    if (!hit) {
+      if (!url.startsWith("https://geo.api.gouv.fr/")) return fallback(input, init);
+      throw new Error(`Réponse geo.api.gouv.fr non enregistrée : ${url}`);
+    }
+    return new Response(JSON.stringify(hit.body), { status: hit.status, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+}
+
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
   if (condition) console.log(`  ok   ${name}`);
@@ -43,7 +58,10 @@ function check(name: string, condition: boolean, detail = "") {
 }
 
 async function main(): Promise<void> {
-  console.log("\n1. Résolution de zone (appels réels à geo.api.gouv.fr)");
+  const live = process.env.LIVE_TESTS === "1";
+  console.log(`\n1. Résolution de zone (${live ? "appels RÉELS à geo.api.gouv.fr" : "réponses enregistrées de geo.api.gouv.fr"})`);
+  const realFetch = globalThis.fetch;
+  if (!live) globalThis.fetch = geoFixtureFetch(realFetch);
   {
     const paris = await resolveZone("Paris");
     check("Paris est résolu", paris.ok, paris.ok ? "" : paris.error);
@@ -84,7 +102,15 @@ async function main(): Promise<void> {
       !unknown.ok && unknown.error.includes("code postal"),
       unknown.ok ? "" : unknown.error,
     );
+
+    if (!live) {
+      // Service en panne : un message clair, jamais une exception.
+      globalThis.fetch = (async () => new Response("indisponible", { status: 503, statusText: "Service Unavailable" })) as typeof fetch;
+      const down = await resolveZone("Marseille");
+      check("service indisponible : échec propre et explicite", !down.ok && down.error.includes("indisponible"), down.ok ? "" : down.error);
+    }
   }
+  globalThis.fetch = realFetch;
 
   console.log("\n2. Paramètres envoyés à l'annuaire");
   {
