@@ -21,12 +21,13 @@ type Row = Pick<Opportunity, "fit_score" | "status"> &
   Partial<Pick<Opportunity, "filter_reason" | "analysis_state" | "seen_at" | "published_at" | "created_at" | "platform" | "title" | "body" | "budget" | "categories">>;
 
 /** Catégorie Codeur d'une ligne (11/10/2026), si elle porte de quoi la calculer. */
-export const rowLane = (row: Row) => (row.platform && row.title ? laneOf({ platform: row.platform, title: row.title, body: row.body ?? null, categories: row.categories ?? [], budget: row.budget ?? null, published_at: row.published_at ?? null, created_at: row.created_at ?? null }) : null);
+export const rowLane = (row: Row, now = new Date()) => (row.platform && row.title ? laneOf({ platform: row.platform, title: row.title, body: row.body ?? null, categories: row.categories ?? [], budget: row.budget ?? null, published_at: row.published_at ?? null, created_at: row.created_at ?? null }, now) : null);
 
-export function bucketOf(row: Row): Bucket {
+/** `now` : la date de référence (les tests la fixent ; sans elle, une annonce de test vieillit et change de case). */
+export function bucketOf(row: Row, now = new Date()): Bucket {
   if (row.filter_reason || row.status === "ignoree") return "ignorees";
   // Mission de lancement : alerte quel que soit le score ; CMS imposé : à voir (11/10/2026).
-  const lane = rowLane(row);
+  const lane = rowLane(row, now);
   // Régie sur la stack d'Axel (Cowork #27) : alerte aussi, badge « Régie · dispo à vérifier ».
   if (lane === "lancement" || lane === "regie") return "alertes";
   if (lane === "cms_impose") return "a_voir";
@@ -71,7 +72,7 @@ export function seenAlerts<T extends Row>(rows: readonly T[], now = new Date()):
 /** Lignes d'un filtre : « Alertes » et « À voir » sans les annonces fermées ou trop anciennes ; alertes par fraîcheur. */
 export function rowsOfBucket<T extends Row>(rows: readonly T[], bucket: Bucket | "toutes", now = new Date()): T[] {
   if (bucket === "toutes") return [...rows];
-  const kept = rows.filter((row) => bucketOf(row) === bucket && (bucket === "ignorees" || !isOutdated(row, now)));
+  const kept = rows.filter((row) => bucketOf(row, now) === bucket && (bucket === "ignorees" || !isOutdated(row, now)));
   return bucket === "alertes" ? kept.sort(byFreshness) : kept;
 }
 
