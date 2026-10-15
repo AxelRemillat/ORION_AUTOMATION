@@ -16,12 +16,20 @@ import { proposalLanguage } from "@/lib/opportunities/types";
 import { isPlaceholder, UPWORK_ADS } from "./fixtures/upwork-ads";
 import { UPWORK_ADS_63 } from "./fixtures/upwork-ads-63";
 import { upworkLaunchPrice } from "@/lib/opportunities/upwork-launch";
-import { UPWORK_PORTFOLIO_TITLES } from "@/lib/opportunities/proposal";
+import { UPWORK_PORTFOLIO } from "@/lib/opportunities/upwork-portfolio";
 
 /** Contrôles de Cowork #63 sur le texte final : titre exact, lien /en + ref=upwork, aucun contact, prix de lancement, 1 question. */
 function cowork63(text: string, budget: string): string[] {
   const issues: string[] = [];
-  if (!UPWORK_PORTFOLIO_TITLES.some((title) => text.includes(title))) issues.push("aucun titre exact du portfolio");
+  // BLOQUANT (Cowork #64) : tout titre cité appartient à UPWORK_PORTFOLIO et y est PUBLIÉ.
+  const cited = [...text.matchAll(/portfolio: "([^"]+)"/g)].map((match) => match[1]);
+  if (!cited.length) issues.push("aucun projet du portfolio cité");
+  for (const title of cited) {
+    const project = UPWORK_PORTFOLIO.find((item) => item.titre === title);
+    if (!project) issues.push(`titre absent du portfolio Upwork : « ${title} »`);
+    else if (!project.publie) issues.push(`projet non publié cité : « ${title} »`);
+    else if (!text.includes(project.lien)) issues.push(`lien de démo de « ${title} » absent (${project.lien})`);
+  }
   for (const url of text.match(/(?:https?:\/\/)?[\w.-]+\.[a-z]{2,}\/[^\s)]*/gi) ?? []) {
     if (!/^(?:https?:\/\/)?axelremillat\.com\/en\//.test(url) || !/[?&]ref=upwork(&|$)/.test(url)) issues.push(`lien non autorisé : ${url}`);
   }
@@ -38,6 +46,7 @@ const BUDGET_EUR = 0.9;
 async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
+  let blocking = 0;
   const table = ["| Annonce | Adéquation | Note | Essais | Car. | Prix | Délai | Prête ? |", "| --- | --- | --- | --- | --- | --- | --- | --- |"];
   const ready = (process.argv.includes("63") ? UPWORK_ADS_63 : UPWORK_ADS).filter((ad) => !isPlaceholder(ad));
   if (!ready.length) {
@@ -69,10 +78,16 @@ async function main() {
     if (residual.length) console.log(`Règles Upwork sur le texte final : ${residual.join(" | ")}`);
     const issues = cowork63(proposal.text, ad.budget);
     console.log(`Contrôles #63 : ${issues.length ? issues.join(" | ") : "tous OK"}`);
+    // Cowork #64 : un titre absent du portfolio Upwork, ou non publié, fait ÉCHOUER l'essai.
+    if (issues.some((issue) => /portfolio|non publié|lien de démo/.test(issue))) blocking += 1;
     table.push(`| ${ad.title.slice(0, 55)} | ${analysis.score} | ${proposal.score ?? "?"}/10 | ${proposal.attempts} | ${proposal.text.length} | ${price} | ${proposal.delayDays ?? "?"} j | ${proposal.needsReview ? `non — ${(proposal.reason ?? "").slice(0, 80)}` : "OUI"} |`);
   }
   const spent = await spentSince(userId, started);
   console.log(`\n${table.join("\n")}\n\nCoût total : ${spent.toFixed(3)} € (plafond ${BUDGET_EUR} €)`);
+  if (blocking) {
+    console.log(`ÉCHEC : ${blocking} proposition(s) citent un projet absent ou non publié du portfolio Upwork.`);
+    process.exitCode = 1;
+  } else console.log("Portfolio : tous les titres cités sont publiés sur le profil Upwork.");
 }
 
 void main().catch((error) => {
