@@ -14,6 +14,24 @@ import { generateProposal } from "@/lib/opportunities/proposal";
 import { firstSentence, upworkFailures } from "@/lib/opportunities/platforms";
 import { proposalLanguage } from "@/lib/opportunities/types";
 import { isPlaceholder, UPWORK_ADS } from "./fixtures/upwork-ads";
+import { UPWORK_ADS_63 } from "./fixtures/upwork-ads-63";
+import { upworkLaunchPrice } from "@/lib/opportunities/upwork-launch";
+import { UPWORK_PORTFOLIO_TITLES } from "@/lib/opportunities/proposal";
+
+/** Contrôles de Cowork #63 sur le texte final : titre exact, lien /en + ref=upwork, aucun contact, prix de lancement, 1 question. */
+function cowork63(text: string, budget: string): string[] {
+  const issues: string[] = [];
+  if (!UPWORK_PORTFOLIO_TITLES.some((title) => text.includes(title))) issues.push("aucun titre exact du portfolio");
+  for (const url of text.match(/(?:https?:\/\/)?[\w.-]+\.[a-z]{2,}\/[^\s)]*/gi) ?? []) {
+    if (!/^(?:https?:\/\/)?axelremillat\.com\/en\//.test(url) || !/[?&]ref=upwork(&|$)/.test(url)) issues.push(`lien non autorisé : ${url}`);
+  }
+  if (/@|\+?\d[\d .]{8,}\d|calendly\.com|whatsapp|skype|telegram/i.test(text)) issues.push("contact hors plateforme");
+  if (text.length > 1200) issues.push(`${text.length} caractères`);
+  if ((text.match(/\?(?!\w)/g) ?? []).length !== 1) issues.push(`${(text.match(/\?(?!\w)/g) ?? []).length} questions`);
+  const launch = upworkLaunchPrice(budget);
+  if (launch.usd !== null && !text.includes(launch.kind === "hourly" ? `$${launch.usd}/hr` : `$${launch.usd}`)) issues.push(`prix de lancement $${launch.usd} absent`);
+  return issues;
+}
 
 const BUDGET_EUR = 0.9;
 
@@ -21,7 +39,7 @@ async function main() {
   const userId = await ownerId();
   const started = new Date().toISOString();
   const table = ["| Annonce | Adéquation | Note | Essais | Car. | Prix | Délai | Prête ? |", "| --- | --- | --- | --- | --- | --- | --- | --- |"];
-  const ready = UPWORK_ADS.filter((ad) => !isPlaceholder(ad));
+  const ready = (process.argv.includes("63") ? UPWORK_ADS_63 : UPWORK_ADS).filter((ad) => !isPlaceholder(ad));
   if (!ready.length) {
     console.log("Aucune annonce à tester : collez le texte des annonces dans scripts/fixtures/upwork-ads.ts (à la place du marqueur).");
     return;
@@ -49,6 +67,8 @@ async function main() {
     console.log(`--- PROPOSITION ---\n${proposal.text}`);
     const residual = upworkFailures(proposal.text, proposal.text);
     if (residual.length) console.log(`Règles Upwork sur le texte final : ${residual.join(" | ")}`);
+    const issues = cowork63(proposal.text, ad.budget);
+    console.log(`Contrôles #63 : ${issues.length ? issues.join(" | ") : "tous OK"}`);
     table.push(`| ${ad.title.slice(0, 55)} | ${analysis.score} | ${proposal.score ?? "?"}/10 | ${proposal.attempts} | ${proposal.text.length} | ${price} | ${proposal.delayDays ?? "?"} j | ${proposal.needsReview ? `non — ${(proposal.reason ?? "").slice(0, 80)}` : "OUI"} |`);
   }
   const spent = await spentSince(userId, started);
