@@ -102,7 +102,8 @@ async function main() {
       ],
       messages: [],
     });
-    const badges = await badgeCounts(db as unknown as Db, NOW);
+    // Comportement d'avant le masquage de Codeur (Cowork #117) : les 3 plateformes comptent.
+    const badges = await badgeCounts(db as unknown as Db, NOW, { masquerCodeur: false });
     check("2 réponses non lues (dont un refus) : absence, rebond, lu et corbeille exclus", badges.unread === 2, badges);
     check("3 offres en Alerte non vues (Codeur, Upwork, ComeUp) : vue, > 7 j, ignorée, score faible exclues", badges.alerts === 3, badges);
     check("cas d'Axel : 2 mails + 3 offres → « (5) »", tabCount(badges) === 5 && tabTitle("Aujourd'hui · ORION", tabCount(badges)) === "(5) Aujourd'hui · ORION");

@@ -7,7 +7,7 @@
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ScheduleList, SCHEDULE_PREVIEW, visibleRows, type ScheduleRow } from "@/app/(app)/aujourdhui/_components/schedule-list";
+import { ScheduleList, SCHEDULE_PREVIEW, visibleRows, type ScheduleRow } from "@/app/(app)/archives/prospection-email/_components/schedule-list";
 import { Modal } from "@/components/ui/modal";
 
 let failures = 0;

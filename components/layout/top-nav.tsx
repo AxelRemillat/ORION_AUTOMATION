@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BadgeCheck, LogOut, Trash2 } from "lucide-react";
+import { Archive, BadgeCheck, LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo, ThemeToggle } from "@/components/ui";
 import type { BadgeCounts } from "@/lib/badges/counts";
@@ -11,7 +11,7 @@ import { TabBadge } from "./tab-badge";
 import { tabCount } from "@/lib/badges/tab";
 import { JobsIndicator } from "./jobs-indicator";
 import { OutboxIndicator } from "./outbox-indicator";
-import { HOME_ITEM, NAV_ITEMS } from "./nav-items";
+import { ARCHIVES_ITEM, HOME_ITEM, NAV_ITEMS } from "./nav-items";
 import { NavTab } from "./nav-tab";
 
 /**
@@ -30,7 +30,8 @@ export function TopNav({ email, badges }: { email: string; badges: BadgeCounts }
     <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur-md">
       {/* Compteur de l'onglet (titre + favicon) : même source que les badges ci-dessous. */}
       <TabBadge count={tabCount({ alerts, unread })} />
-      <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-3 px-4 md:px-6">
+      {/* Téléphone (Cowork #117) : les onglets passent sur une 2e ligne pleine largeur, sinon CRM était caché sous les icônes. */}
+      <div className="mx-auto flex min-h-14 w-full max-w-[1600px] flex-wrap items-center gap-x-3 px-4 sm:h-14 sm:flex-nowrap md:px-6">
         {/* Marque */}
         <Link
           href="/aujourdhui"
@@ -46,7 +47,7 @@ export function TopNav({ email, badges }: { email: string; badges: BadgeCounts }
         {/* Navigation : « Aujourd’hui » d’abord, isole du reste par un separateur. */}
         <nav
           aria-label="Navigation principale"
-          className="scrollbar-none -mx-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 sm:justify-center"
+          className="scrollbar-none order-last -mx-1 flex min-w-0 basis-full items-center gap-1 overflow-x-auto px-1 pb-2 sm:order-none sm:flex-1 sm:basis-auto sm:justify-center sm:pb-0"
         >
           <NavTab item={HOME_ITEM} pathname={pathname} home />
 
@@ -60,24 +61,34 @@ export function TopNav({ email, badges }: { email: string; badges: BadgeCounts }
               key={item.href}
               item={item}
               pathname={pathname}
-              badge={item.href === "/opportunites" ? alerts : item.href === "/cockpit" ? unread : 0}
-              badgeLabel={
-                item.href === "/cockpit"
-                  ? (count) => `${count} mail${count > 1 ? "s" : ""} reçu${count > 1 ? "s" : ""} non lu${count > 1 ? "s" : ""}`
-                  : undefined
-              }
-              tone={item.href === "/cockpit" ? "warn" : "good"}
+              badge={item.href === "/opportunites" ? alerts : 0}
+              tone="good"
             />
           ))}
         </nav>
 
         {/* Compte */}
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {/* Visible sur toutes les pages tant qu'une recherche ou un mail tourne. */}
           <JobsIndicator />
           {/* Envois programmés : à venir, partis, échoués. */}
           <OutboxIndicator />
           <span className="mr-1 hidden font-data text-[12px] text-muted lg:inline">{email}</span>
+          {/* Archives › Prospection e-mail (Cowork #117) : les réponses reçues restent signalées, en orange. */}
+          <Link
+            href={ARCHIVES_ITEM.href}
+            aria-label={`${ARCHIVES_ITEM.label}${unread ? ` (${unread} mail${unread > 1 ? "s" : ""} reçu${unread > 1 ? "s" : ""} non lu${unread > 1 ? "s" : ""})` : ""}`}
+            title={ARCHIVES_ITEM.hint}
+            aria-current={pathname.startsWith("/archives") ? "page" : undefined}
+            className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-text"
+          >
+            <Archive className="h-4 w-4" aria-hidden />
+            {unread > 0 && (
+              <span className="font-data absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-warn/15 px-1 text-center text-[10px] leading-4 text-warn-ink ring-1 ring-warn/25">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            )}
+          </Link>
           <Link
             href="/corbeille"
             aria-label={`Corbeille${trash ? ` (${trash})` : ""}`}
@@ -97,11 +108,12 @@ export function TopNav({ email, badges }: { email: string; badges: BadgeCounts }
             aria-label="Mon offre"
             title="Mon offre — signature, preuves, demande d'entrée"
             aria-current={pathname.startsWith("/offre") ? "page" : undefined}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-text"
+            className="hidden h-9 w-9 sm:inline-flex items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-text"
           >
             <BadgeCheck className="h-4 w-4" aria-hidden />
           </Link>
-          <ThemeToggle />
+          {/* Téléphone : « Mon offre » et le thème passent derrière, pour laisser la place aux onglets (Cowork #117). */}
+          <ThemeToggle className="hidden sm:inline-flex" />
           <form action="/auth/signout" method="post">
             <button
               type="submit"

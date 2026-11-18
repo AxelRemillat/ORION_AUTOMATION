@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { Opportunity } from "@/lib/opportunities/types";
 import { emailsToSort, type OpportunityEmail } from "@/lib/opportunities/email/view";
-import { initialTab } from "@/lib/opportunities/tabs";
+import { initialTab, ongletArrivee } from "@/lib/opportunities/tabs";
 import { OpportunitiesClient } from "./_components/opportunities-client";
 
 export const dynamic = "force-dynamic";
@@ -33,12 +33,14 @@ export default async function OpportunitesPage({ searchParams }: { searchParams?
   const opportunities = (data ?? []) as Opportunity[];
   const filter = searchParams?.filtre === "relances" || searchParams?.filtre === "a_trier" ? searchParams.filtre : null;
   // Onglet : ?p=codeur|upwork|comeup, ou celui de la fiche visée par ?id= (notification), Codeur par défaut.
-  const tab = initialTab({ p: searchParams?.p, id: searchParams?.id, filter, items: opportunities, toSort: emailsToSort(emails as OpportunityEmail[]) });
+  // Codeur masqué (Cowork #117) : Upwork par défaut, Codeur seulement pour une fiche Codeur visée par ?id=.
+  const focusCodeur = Boolean(searchParams?.id && opportunities.some((o) => o.id === searchParams.id && o.platform === "codeur"));
+  const tab = ongletArrivee(initialTab({ p: searchParams?.p, id: searchParams?.id, filter, items: opportunities, toSort: emailsToSort(emails as OpportunityEmail[]) }), focusCodeur);
   return (
     <>
       <PageHeader
         title="Opportunités"
-        description="Codeur, Upwork, ComeUp : analyse d'adéquation et proposition prête à copier. Rien n'est envoyé automatiquement."
+        description="Upwork et ComeUp : analyse d'adéquation et proposition prête à copier. Rien n'est envoyé automatiquement."
       />
       <OpportunitiesClient
         initial={opportunities}

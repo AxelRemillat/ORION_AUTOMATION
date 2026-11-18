@@ -11,6 +11,10 @@ import { buildReadiness } from "../lib/usage/readiness";
 import { deriveVariant, recordMessageVariant } from "../lib/variants/record";
 import { lengthBand, outcomeOf, variantStats, type SentVariant } from "../lib/variants/stats";
 
+// Jobs et clients payants testés sur de faux appels (aucun réseau) : la pause de la prospection (Cowork #117,
+// lib/prospection/pause.ts, testée à part) est levée pour cette suite seulement.
+process.env.PROSPECTION_EMAIL_ACTIVE = "true";
+
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
   if (condition) console.log(`  ok   ${name}`);

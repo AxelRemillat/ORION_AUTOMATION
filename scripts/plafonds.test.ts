@@ -23,6 +23,10 @@ import { openAiBudget, pappersAllowance } from "../lib/usage/budgets-server";
 import { FakeDb } from "./fake-supabase";
 import { resetDailyViewMemo } from "../lib/usage/usage-daily";
 
+// Ces tests vérifient les PLAFONDS des clients payants sur de faux fetch (aucun réseau) : la pause de la
+// prospection (Cowork #117, lib/prospection/pause.ts, testée à part) est levée pour eux seulement.
+process.env.PROSPECTION_EMAIL_ACTIVE = "true";
+
 let failures = 0;
 function check(name: string, condition: boolean, detail: unknown = "") {
   if (condition) console.log(`  ok   ${name}`);

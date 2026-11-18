@@ -8,7 +8,7 @@ import { bucketOf, rowsOfBucket, seenAlerts, unseenAlerts, type Bucket } from "@
 import { PLATFORM_IDENTITIES } from "@/lib/opportunities/platform-style";
 import { emailsOf, emailsToSort, type OpportunityEmail } from "@/lib/opportunities/email/view";
 import { followUpDue } from "@/lib/opportunities/follow-up-due";
-import { bucketFilters, emailsOfTab, formPlatform, itemsOfTab, tabBadges, tabHref, visibleTabs, type Filter, type PlatformTab } from "@/lib/opportunities/tabs";
+import { bucketFilters, emailsOfTab, formPlatform, itemsOfTab, ongletsAffiches, tabBadges, tabHref, visibleTabs, type Filter, type PlatformTab } from "@/lib/opportunities/tabs";
 import { useOpportunityActions } from "./use-opportunity-actions";
 import { PlatformTabs } from "./platform-tabs";
 import { FilterBar } from "./filter-bar";
@@ -57,7 +57,8 @@ export function OpportunitiesClient({
   const [pasting, setPasting] = useState(initialTab === "upwork");
   const actions = useOpportunityActions(setItems, tab);
 
-  const tabs = useMemo(() => visibleTabs(items), [items]);
+  // Codeur masqué (Cowork #117) : il ne reste affiché que si la page s'est ouverte dessus (fiche Codeur visée).
+  const tabs = useMemo(() => ongletsAffiches(visibleTabs(items), initialTab), [items, initialTab]);
   const badges = useMemo(() => tabBadges(items), [items]);
   const tabItems = useMemo(() => itemsOfTab(items, tab), [items, tab]);
   const toSort = useMemo(() => emailsOfTab(emailsToSort(emails), tab), [emails, tab]);

@@ -3,6 +3,7 @@ import type { InboundMessage, Prospect } from "@/types";
 import { LAUNCH_FRESH_DAYS, laneOf } from "@/lib/opportunities/lane";
 import { purgeCutoff } from "@/lib/trash/retention";
 import { unreadBadgeCount } from "@/lib/inbound/read-state";
+import { CODEUR_MASQUE } from "@/lib/opportunities/tabs";
 
 /**
  * LES BADGES DE LA BARRE — une seule source, trois règles écrites.
@@ -47,7 +48,7 @@ const freshSince = (now: Date) => new Date(now.getTime() - LAUNCH_FRESH_DAYS * 8
  * sur une base pas encore migrée : l'échec d'une requête vaut 0, jamais une
  * page en erreur.
  */
-async function alertCount(db: Db, now: Date): Promise<number> {
+async function alertCount(db: Db, now: Date, masquerCodeur: boolean): Promise<number> {
   const loose = db as unknown as Loose;
   const since = freshSince(now);
   const { data } = await loose
@@ -63,6 +64,8 @@ async function alertCount(db: Db, now: Date): Promise<number> {
   for (const row of (data ?? []) as Row[]) {
     const published = (row.published_at as string | null) ?? (row.created_at as string | null) ?? null;
     if (published && published < since) continue;
+    // Onglet Codeur masqué (Cowork #117) : ses annonces ne font plus clignoter la barre.
+    if (masquerCodeur && row.platform === "codeur") continue;
     const score = (row.fit_score as number | null) ?? 0;
     // Score élevé, ou mission de lancement Codeur reconnue sur le texte.
     if (score >= 8 || ["lancement", "regie"].includes(laneOf(row as never, now) ?? "")) ids.add(row.id as string);
@@ -119,7 +122,7 @@ async function trashTotal(db: Db, now: Date): Promise<number> {
 }
 
 /** Les trois badges, recalculés à chaque appel — aucune valeur mise en cache. */
-export async function badgeCounts(db: Db, now = new Date()): Promise<BadgeCounts> {
-  const [alerts, unread, trash] = await Promise.all([alertCount(db, now), unreadCount(db), trashTotal(db, now)]);
+export async function badgeCounts(db: Db, now = new Date(), { masquerCodeur = CODEUR_MASQUE }: { masquerCodeur?: boolean } = {}): Promise<BadgeCounts> {
+  const [alerts, unread, trash] = await Promise.all([alertCount(db, now, masquerCodeur), unreadCount(db), trashTotal(db, now)]);
   return { alerts, unread, trash };
 }

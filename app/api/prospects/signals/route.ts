@@ -1,3 +1,4 @@
+import { refusSiPause } from "@/lib/prospection/pause";
 import { NextResponse } from "next/server";
 import { runJobInline } from "@/lib/jobs/inline";
 import { signalsLabel, signalsParamsError, type SignalsParams } from "@/lib/jobs/handlers/signals";
@@ -40,6 +41,9 @@ export async function GET() {
  * paramètres sont contrôlés ICI aussi, pour répondre 422 sans créer de job.
  */
 export async function POST(request: Request) {
+  // PAUSE DE LA PROSPECTION (PROSPECTION_EMAIL_ACTIVE, Cowork #117) : HTTP 423, aucun appel payant ni envoi.
+  const pause = refusSiPause();
+  if (pause) return pause;
   const session = await requireSession();
   if (!session.ok) return session.response;
 

@@ -1,4 +1,4 @@
-import { Briefcase, Gauge, KanbanSquare, Search, Settings, Sun, type LucideIcon } from "lucide-react";
+import { Archive, Briefcase, Contact, Search, Settings, Sun, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -9,42 +9,41 @@ export interface NavItem {
 }
 
 /**
- * « Aujourd'hui » est traite a part.
+ * « Aujourd'hui » est traite a part : l'ecran du matin, isole a gauche d'un separateur.
  *
- * Ce n'est pas une etape du workflow mais l'ecran du matin : la file preparee
- * pendant la nuit, a relire et programmer. La barre de navigation l'affiche
- * isole, a gauche d'un separateur.
+ * Refonte CRM (Cowork #117, 18/11/2026) : ce sont desormais les TACHES CRM du jour (relances, visites, devis a
+ * envoyer). L'ancien ecran des mails n'est pas supprime : il vit sous « Archives › Prospection e-mail », en
+ * lecture seule (ARCHIVES_ITEM).
  */
 export const HOME_ITEM: NavItem = {
   href: "/aujourdhui",
   label: "Aujourd'hui",
   icon: Sun,
-  hint: "La file du jour : réponses, relances, nouveaux prospects",
+  hint: "Les actions CRM du jour : relances, visites, devis",
 };
 
 /**
- * Les autres destinations, dans l'ordre du travail réel : la vue d'ensemble,
- * les annonces entrantes, le pipeline, les réglages. Prospection n'y figure
- * plus (on l'ouvre depuis une fiche) ; Stats et Coûts sont des sections de
- * Réglages (redirections dans next.config.mjs).
+ * Les destinations, dans l'ordre du travail reel (Cowork #117) : le CRM, les annonces Upwork / ComeUp, les
+ * reglages. « Compta » (agent4) s'ajoutera ici quand sa route existera : pas d'onglet vers une page absente.
  *
- * RECHERCHE N'EST PLUS UN ONGLET. La prospection se lance par « Lancer
- * maintenant » depuis Aujourd'hui ; la recherche à la main reste entière, mais
- * secondaire — on l'ouvre par le bouton « Recherche avancée » de l'en-tête.
- * Un onglet pour un écran qu'on utilise une fois sur dix dilue la barre.
+ * RETIRES DE LA BARRE, PAS SUPPRIMES : Cockpit (/cockpit) et Pipeline (/suivi) restent des routes valides,
+ * ouvertes depuis l'archive de la prospection e-mail. La recherche avancee (/recherche) aussi.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/cockpit", label: "Cockpit", icon: Gauge, hint: "Vue d'ensemble, activité et consommation" },
-  { href: "/opportunites", label: "Opportunités", icon: Briefcase, hint: "Annonces Codeur, Upwork… : analyse et proposition à copier" },
-  { href: "/suivi", label: "Pipeline", icon: KanbanSquare, hint: "Pipeline, relances et deals" },
-  { href: "/reglages", label: "Réglages", icon: Settings, hint: "Données, coûts, paramètres, intégrations, délivrabilité" },
+  { href: "/crm", label: "CRM", icon: Contact, hint: "Commerces prospectés et clients du Web des Artisans" },
+  { href: "/opportunites", label: "Opportunités", icon: Briefcase, hint: "Annonces Upwork et ComeUp : analyse et proposition à copier" },
+  { href: "/reglages", label: "Réglages", icon: Settings, hint: "Données, coûts, paramètres, intégrations" },
 ];
 
-/**
- * La recherche manuelle, hors barre : la route existe toujours (liens,
- * indicateur de jobs, favoris) et c'est Aujourd'hui qui s'allume quand on y
- * est — on n'a pas quitté le travail du jour, on l'a approfondi.
- */
+/** L'ancienne prospection par e-mail, en lecture seule : lien secondaire (icone), hors de la rangee d'onglets. */
+export const ARCHIVES_ITEM: NavItem = {
+  href: "/archives/prospection-email",
+  label: "Archives › Prospection e-mail",
+  icon: Archive,
+  hint: "Ancien écran des mails (lecture seule), Cockpit et Pipeline",
+};
+
+/** La recherche manuelle, hors barre : la route existe toujours (liens, favoris). */
 export const SEARCH_ITEM: NavItem = {
   href: "/recherche",
   label: "Recherche avancée",
@@ -52,5 +51,5 @@ export const SEARCH_ITEM: NavItem = {
   hint: "Signaux, critères, scan, ajout manuel, favoris",
 };
 
-/** Toutes les destinations, « Aujourd'hui » et la recherche comprises. */
-export const ALL_NAV_ITEMS: NavItem[] = [HOME_ITEM, ...NAV_ITEMS, SEARCH_ITEM];
+/** Toutes les destinations, « Aujourd'hui », l'archive et la recherche comprises. */
+export const ALL_NAV_ITEMS: NavItem[] = [HOME_ITEM, ...NAV_ITEMS, ARCHIVES_ITEM, SEARCH_ITEM];

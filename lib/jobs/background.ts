@@ -1,3 +1,4 @@
+import { prospectionEmailActive } from "@/lib/prospection/pause";
 import { createAdminClient } from "@/lib/supabase/server";
 import { baseUrl, dispatchTick, waitUntil } from "./dispatch";
 import { HANDLERS } from "./handlers";
@@ -27,6 +28,9 @@ export async function drainJobs(
   db: Db,
   options: { jobId?: string | null; budgetMs?: number; handlers?: Record<JobType, JobHandler> } = {},
 ): Promise<boolean> {
+  // PAUSE DE LA PROSPECTION (Cowork #117) : les jobs déjà en file restent en base, intacts, mais ne sont pas
+  // dépilés (chaque étape peut payer OpenAI, Hunter, Pappers ou Linkup). Ils repartiront à la réactivation.
+  if (!prospectionEmailActive() && !options.handlers) return false;
   const handlers = options.handlers ?? HANDLERS;
   const stopAt = Date.now() + (options.budgetMs ?? DRAIN_BUDGET_MS);
   let preferred = options.jobId ?? null;

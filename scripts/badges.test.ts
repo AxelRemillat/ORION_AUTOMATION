@@ -124,7 +124,7 @@ async function main() {
       ...over,
     });
     const count = async (rows: Record<string, unknown>[]) =>
-      (await badgeCounts(new FakeDb({ opportunities: rows, inbound_messages: [], prospects: [], messages: [] }) as unknown as Db, NOW)).alerts;
+      (await badgeCounts(new FakeDb({ opportunities: rows, inbound_messages: [], prospects: [], messages: [] }) as unknown as Db, NOW, { masquerCodeur: false })).alerts;
 
     check("alerte non vue, à répondre, fraîche → 1", (await count([opportunity({})])) === 1);
     check("marquée « Vu » → 0", (await count([opportunity({ seen_at: daysAgo(0) })])) === 0);
@@ -140,6 +140,10 @@ async function main() {
     );
     check("score faible hors lancement → 0", (await count([opportunity({ platform: "upwork", fit_score: 4 })])) === 0);
     check("deux annonces, deux alertes", (await count([opportunity({}), opportunity({ id: "o3" })])) === 2);
+    // Refonte CRM (Cowork #117) : onglet Codeur masqué par défaut, ses annonces ne comptent plus dans la barre.
+    const parDefaut = async (rows: Record<string, unknown>[]) =>
+      (await badgeCounts(new FakeDb({ opportunities: rows, inbound_messages: [], prospects: [], messages: [] }) as unknown as Db, NOW)).alerts;
+    check("Codeur masqué : son alerte ne compte plus, Upwork si", (await parDefaut([opportunity({}), opportunity({ id: "o4", platform: "upwork" })])) === 1);
   }
 
   console.log("\n5. Badge « corbeille » : le vrai nombre d'éléments");
