@@ -8,6 +8,7 @@
  * demande donc simplement l'actualite de l'entreprise, et c'est `signals.ts`
  * qui decide, preuve en main, s'il y a un evenement.
  */
+import { appelPayantAutorise, erreurPause } from "@/lib/prospection/pause";
 import { repairMojibake } from "./charset";
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
@@ -129,6 +130,8 @@ export async function fetchWebResults(company: {
 }): Promise<Result<WebResult[]>> {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };
+  // PAUSE DE LA PROSPECTION (Cowork #117) : même chemin qu'une clé absente.
+  if (!appelPayantAutorise("linkup")) return { ok: false, error: erreurPause("linkup") };
 
   // Plafond du jour et cache 90 jours, comme la recherche de site (lib/linkup/gate.ts).
   const store = supabaseLinkupStore();
@@ -185,6 +188,8 @@ const PAGE_CHARS = 2_500;
 export async function fetchPage(url: string, prospectId?: string | null): Promise<Result<PageContent>> {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return { ok: false, error: "LINKUP_API_KEY absente" };
+  // PAUSE DE LA PROSPECTION (Cowork #117) : même chemin qu'une clé absente.
+  if (!appelPayantAutorise("linkup")) return { ok: false, error: erreurPause("linkup") };
   const gate = await linkupGate<PageContent>(supabaseLinkupStore(), url, new Date(), "fetch");
   if (gate.status === "cache") return { ok: true, data: gate.value };
   if (gate.status === "blocked") return { ok: false, error: gate.reason };

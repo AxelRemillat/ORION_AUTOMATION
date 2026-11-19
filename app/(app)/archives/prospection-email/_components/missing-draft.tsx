@@ -6,7 +6,7 @@ import { Loader2, PenLine } from "lucide-react";
 import { Button, useToast } from "@/components/ui";
 import { startJob, watchJob } from "@/lib/jobs/client";
 import type { TodayItem } from "@/lib/today/types";
-import { generateFollowUp } from "../../suivi/actions";
+import { generateFollowUp } from "../../../suivi/actions";
 import { draftReplyToday } from "../actions";
 
 /**

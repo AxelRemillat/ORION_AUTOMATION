@@ -14,7 +14,7 @@ Module `/compta` d'ORION : devis, factures et avoirs, encaissements (livre des r
 | Livre des recettes (CSV et PDF) | `lib/compta/recettes.ts` |
 | Données : Supabase (RLS) ou mémoire (démo et tests) | `lib/compta/depot*.ts` |
 | Écrans et actions | `app/compta/**`, `components/compta/**` |
-| Base : tables, numérotation, immuabilité, RLS, bucket privé | `supabase/migrations/20261118153111_compta_init.sql` |
+| Base : tables, numérotation, immuabilité, RLS, bucket privé | `supabase/migrations/20261119090000_compta_init.sql` |
 
 ## Garanties portées par la base
 

@@ -1,48 +1,81 @@
-import { createClient } from "@/lib/supabase/server";
-import { requireUser } from "@/lib/auth";
-import { readPrefs } from "@/lib/funnel/settings";
-import { lastPrepareHealth, livePrepareJob, prepareAlert } from "@/lib/today/auto-run";
-import { loadCapacity } from "@/lib/today/capacity";
-import { flatten } from "@/lib/today/group";
-import { cachedOpenAiBudget } from "@/lib/today/openai-gate";
-import { loadToday } from "@/lib/today/load";
-import { loadYieldPlan } from "@/lib/today/yield";
-import { TodayClient } from "./_components/today-client";
+import Link from "next/link";
+import { Plus } from "lucide-react";
+import { EmptyState, PageHeader } from "@/components/ui";
+import { TacheCarte } from "@/components/crm/tache-carte";
+import { depotCrm } from "@/lib/crm/depot";
+import { aujourdhuiParis, tachesDuJour } from "@/lib/crm/logique";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Aujourd'hui" };
 
+const ACTIVES = new Set(["a_contacter", "contacte", "maquette_envoyee", "rdv", "devis_envoye"]);
+
 /**
- * « Aujourd'hui » — la page d'accueil. La file est recalculée depuis les tables
- * à chaque ouverture (lib/today/load.ts) : les fiches des runs précédents y
- * figurent d'office, rien n'est recopié.
+ * AUJOURD'HUI (refonte CRM, Cowork #117) : les actions CRM datées d'aujourd'hui ou en retard, puis celles des
+ * 7 prochains jours. L'ancien écran des mails est sous « Archives › Prospection e-mail » (lecture seule).
  */
-export default async function AujourdhuiPage({ searchParams }: { searchParams: { item?: string } }) {
-  const user = await requireUser();
-  const db = createClient();
-  const [data, capacity, prefs, liveJobId, health, openai] = await Promise.all([
-    loadToday(db, user.id),
-    loadCapacity(db, user.id),
-    readPrefs(db, user.id),
-    livePrepareJob(db, user.id),
-    lastPrepareHealth(db, user.id).catch(() => null),
-    // Plafond OpenAI : valeur de moins de 5 min (sa lecture complète prenait ≈ 2 s, Cowork #25).
-    cachedOpenAiBudget().catch(() => null),
-  ]);
-  const items = flatten(data.groups);
-  // « Céder la place aux relances » : calculé seulement quand le plafond est engagé (lecture seule).
-  const yieldPlan = await loadYieldPlan(db, user.id, capacity, items).catch(() => null);
+export default async function AujourdhuiPage() {
+  const commerces = await (await depotCrm()).commerces();
+  const jour = aujourdhuiParis();
+  const taches = tachesDuJour(commerces);
+  const dans7 = aujourdhuiParis(new Date(Date.now() + 7 * 86_400_000));
+  const semaine = commerces
+    .filter((c) => !c.archivee_le && c.etape !== "perdu" && c.prochaine_action_le && c.prochaine_action_le > jour && c.prochaine_action_le <= dans7)
+    .sort((a, b) => (a.prochaine_action_le as string).localeCompare(b.prochaine_action_le as string) || a.nom.localeCompare(b.nom, "fr"));
+  const sansAction = commerces.filter((c) => !c.archivee_le && ACTIVES.has(c.etape) && !c.prochaine_action_le).length;
+
   return (
-    <TodayClient
-      today={data.today}
-      items={items}
-      yieldPlan={yieldPlan}
-      capacity={capacity}
-      liveJobId={liveJobId}
-      alert={liveJobId ? null : prepareAlert(health)}
-      blockedReason={openai?.level === "plafond" ? openai.message : null}
-      dailyTarget={prefs.dailyTarget}
-      initialKey={typeof searchParams.item === "string" ? searchParams.item : null}
-    />
+    <>
+      <PageHeader
+        title="Aujourd'hui"
+        description={taches.length ? `${taches.length} action${taches.length > 1 ? "s" : ""} à faire aujourd'hui.` : "Rien d'urgent aujourd'hui."}
+        actions={
+          <Link
+            href="/crm?nouveau=1"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand-grad px-4 text-sm font-medium text-primary-fg shadow-mist"
+          >
+            <Plus className="size-4" aria-hidden />
+            Nouvelle fiche
+          </Link>
+        }
+      />
+      <section aria-labelledby="jour-titre" className="grid gap-3">
+        <h2 id="jour-titre" className="font-display text-lg text-text">
+          À faire aujourd&apos;hui
+        </h2>
+        {taches.length ? (
+          <ul className="grid gap-3 lg:grid-cols-2">
+            {taches.map((t) => (
+              <TacheCarte key={t.commerce.id} c={t.commerce} aujourdhui={jour} />
+            ))}
+          </ul>
+        ) : (
+          <EmptyState title="Aucune relance pour aujourd'hui" description="Les prochaines actions datées des fiches du CRM apparaissent ici le jour venu." />
+        )}
+      </section>
+
+      <section aria-labelledby="semaine-titre" className="mt-8 grid gap-3">
+        <h2 id="semaine-titre" className="font-display text-lg text-text">
+          Les 7 prochains jours
+        </h2>
+        {semaine.length ? (
+          <ul className="grid gap-3 lg:grid-cols-2">
+            {semaine.map((c) => (
+              <TacheCarte key={c.id} c={c} aujourdhui={jour} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted">Rien de prévu cette semaine.</p>
+        )}
+        {sansAction > 0 && (
+          <p className="text-sm text-muted">
+            <Link href="/crm" className="text-primary-ink underline underline-offset-2">
+              {sansAction} fiche{sansAction > 1 ? "s" : ""} en cours sans prochaine action
+            </Link>{" "}
+            : à planifier.
+          </p>
+        )}
+      </section>
+    </>
   );
 }

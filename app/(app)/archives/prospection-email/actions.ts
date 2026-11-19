@@ -1,5 +1,7 @@
 "use server";
 
+import { prospectionEmailActive } from "@/lib/prospection/pause";
+
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { liveDigDeps } from "@/lib/funnel/live";
@@ -21,6 +23,15 @@ import { DISCARD_REASONS, TODAY_KINDS, type DiscardReason, type InboundMessage, 
  * aux lignes de l'utilisateur connecté. La logique vit dans lib/today.
  */
 
+/**
+ * ARCHIVE EN LECTURE SEULE (refonte CRM, Cowork #117) : l'ancien écran « Aujourd'hui » des mails vit sous
+ * « Archives › Prospection e-mail ». Tant que la prospection est en pause (PROSPECTION_EMAIL_ACTIVE ≠ true), aucune
+ * action ne modifie rien (brouillons, programmation, écartement, complétion, réponses) ; la lecture reste possible.
+ */
+function archiveEnLectureSeule(): { ok: false; error: string } | null {
+  return prospectionEmailActive() ? null : { ok: false, error: "Archive en lecture seule : la prospection par e-mail est en pause." };
+}
+
 const SESSION: { ok: false; error: string } = { ok: false, error: "Session expirée. Reconnectez-vous." };
 
 async function session() {
@@ -32,16 +43,20 @@ async function session() {
 }
 
 function done<T extends CoreResult<object>>(result: T): T {
-  if (result.ok) revalidatePath("/aujourdhui");
+  if (result.ok) revalidatePath("/archives/prospection-email");
   return result;
 }
 
 export async function saveTodayDraft(edit: DraftEdit) {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   return ctx ? done(await saveDraft(ctx.db, ctx.userId, edit)) : SESSION;
 }
 
 export async function validateToday(edit: DraftEdit, validate: boolean) {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   return ctx ? done(await saveDraft(ctx.db, ctx.userId, edit, validate)) : SESSION;
 }
@@ -54,17 +69,23 @@ export async function discardToday(input: {
   inboundId: string | null;
   candidateId: string | null;
 }) {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   if (!TODAY_KINDS.includes(input.kind) || !DISCARD_REASONS.includes(input.reason)) return { ok: false as const, error: "Motif inconnu." };
   const ctx = await session();
   return ctx ? done(await discard(ctx.db, ctx.userId, input)) : SESSION;
 }
 
 export async function undoDiscardToday(discardId: string) {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   return ctx ? done(await undoDiscard(ctx.db, ctx.userId, discardId)) : SESSION;
 }
 
 export async function scheduleToday(requests: ScheduleRequest[]) {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   if (!ctx) return SESSION;
   const capacity = await loadCapacity(ctx.db, ctx.userId);
@@ -79,6 +100,8 @@ export async function scheduleToday(requests: ScheduleRequest[]) {
  * recalculé côté serveur ; seules les intros qu'Axel a vues et confirmées bougent.
  */
 export async function yieldTodayToRelances(messageIds: string[]): Promise<CoreResult<{ moved: number; skipped: number }>> {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   if (!ctx) return SESSION;
   const [capacity, data] = await Promise.all([loadCapacity(ctx.db, ctx.userId), loadToday(ctx.db, ctx.userId)]);
@@ -90,6 +113,8 @@ export async function yieldTodayToRelances(messageIds: string[]): Promise<CoreRe
 
 /** « Compléter avec ORION » : la chaîne contact (site → Linkup → Hunter dans le budget). */
 export async function completeToday(input: { prospectId: string; candidateId: string | null }): Promise<CoreResult<{ email: string | null }>> {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   if (!ctx) return SESSION;
   // Fiche opposée, « ne plus contacter » ou hors cible : aucune complétion.
@@ -111,6 +136,8 @@ export async function completeToday(input: { prospectId: string; candidateId: st
 
 /** Saisie manuelle de l'email ou du site. L'ancienne valeur reste dans l'historique du contact. */
 export async function setTodayContact(input: { prospectId: string; candidateId: string | null; email?: string; website?: string }): Promise<CoreResult> {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   if (!ctx) return SESSION;
   const email = input.email?.trim().toLowerCase();
@@ -155,6 +182,8 @@ export async function setTodayContact(input: { prospectId: string; candidateId: 
  * est bien celle de l'entreprise. La confirmation vaut pour CETTE adresse.
  */
 export async function confirmTodayContact(input: { prospectId: string }): Promise<CoreResult> {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   if (!ctx) return SESSION;
   const { data } = await ctx.db.from("prospects").select("email, key_figures").eq("id", input.prospectId).maybeSingle();
@@ -170,6 +199,8 @@ export async function confirmTodayContact(input: { prospectId: string }): Promis
 
 /** Brouillon de réponse manquant : même générateur que la préparation du matin. */
 export async function draftReplyToday(inboundId: string): Promise<CoreResult> {
+  const lectureSeule = archiveEnLectureSeule();
+  if (lectureSeule) return lectureSeule as never;
   const ctx = await session();
   if (!ctx) return SESSION;
   const { data } = await ctx.db.from("inbound_messages").select("*").eq("id", inboundId).is("deleted_at", null).maybeSingle();

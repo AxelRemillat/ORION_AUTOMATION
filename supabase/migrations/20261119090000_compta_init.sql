@@ -37,7 +37,7 @@ create table if not exists public.compta_clients (
   siren text,
   adresse text not null default '',
   email text,
-  crm_ref uuid, -- fiche CRM d'agent2 (liaison optionnelle, sans clé étrangère tant que le CRM n'est pas sur main)
+  crm_ref uuid references public.crm_commerces (id) on delete set null, -- fiche CRM (crm_commerces, #208) : liaison facultative
   created_at timestamptz not null default now()
 );
 

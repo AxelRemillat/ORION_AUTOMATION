@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Input, Label, PageHeader, Table, TBody, TD, TH, THead, TR, Textarea } from "@/components/ui";
 import { Alerte, SousNav } from "@/components/compta/elements";
 import { chargerTout, depot } from "@/lib/compta/contexte";
@@ -29,7 +30,11 @@ export default async function ClientsPage({ searchParams }: { searchParams: { er
               <TR key={c.id}>
                 <TD>
                   {c.nom}
-                  {c.crm_ref && <Badge className="ml-2" tone="info">CRM</Badge>}
+                  {c.crm_ref && (
+                    <Link href={`/crm/${c.crm_ref}`} className="ml-2" title="Ouvrir la fiche CRM">
+                      <Badge tone="info">CRM</Badge>
+                    </Link>
+                  )}
                 </TD>
                 <TD>{c.professionnel ? "Professionnel" : "Particulier"}</TD>
                 <TD className="hidden whitespace-pre-line text-[13px] text-muted sm:table-cell">{c.adresse}</TD>

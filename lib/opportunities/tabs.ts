@@ -21,6 +21,22 @@ export function tabOf(platform: Platform): PlatformTab {
 
 type Row = Pick<Opportunity, "id" | "platform" | "fit_score" | "status" | "seen_at">;
 
+/**
+ * REFONTE CRM (Cowork #117, 18/11/2026) : l'onglet Codeur est MASQUÉ, pas supprimé. Ses fiches restent en base et
+ * l'onglet réapparaît seul quand une notification vise une fiche Codeur (`?id=`). Ne plus compter ses alertes.
+ */
+export const CODEUR_MASQUE = true;
+
+/** Onglets réellement montrés : sans Codeur (sauf s'il est l'onglet demandé par une fiche visée). */
+export function ongletsAffiches(tabs: readonly PlatformTab[], actif?: PlatformTab, masquerCodeur = CODEUR_MASQUE): PlatformTab[] {
+  return masquerCodeur ? tabs.filter((tab) => tab !== "codeur" || actif === "codeur") : [...tabs];
+}
+
+/** Onglet d'arrivée une fois Codeur masqué : Upwork par défaut, Codeur seulement pour une fiche Codeur visée. */
+export function ongletArrivee(tab: PlatformTab, ficheVisee: boolean, masquerCodeur = CODEUR_MASQUE): PlatformTab {
+  return masquerCodeur && tab === "codeur" && !ficheVisee ? "upwork" : tab;
+}
+
 /** Onglets affichés : les trois plateformes, puis « Autres » s'il n'est pas vide. */
 export function visibleTabs(items: readonly Pick<Opportunity, "platform">[]): PlatformTab[] {
   return items.some((item) => tabOf(item.platform) === "autres") ? [...PLATFORM_TABS, "autres"] : [...PLATFORM_TABS];

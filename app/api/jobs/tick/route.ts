@@ -1,3 +1,4 @@
+import { PROSPECTION_EN_PAUSE, prospectionEmailActive } from "@/lib/prospection/pause";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { authorizeCron } from "@/lib/trash/cron-auth";
@@ -40,6 +41,9 @@ export async function POST(request: Request) {
 
   // Réveil par le cron : autant de ticks que de jobs pouvant avancer en parallèle.
   const fanout = clampFanout(body.fanout);
+  // PAUSE DE LA PROSPECTION (Cowork #117) : ni envois programmés (premiers mails, relances), ni préparation de 5 h,
+  // ni jobs. Le tick pg_cron continue de tourner : il ne fait plus rien et ne coûte rien.
+  if (!prospectionEmailActive()) return NextResponse.json({ paused: true, reason: PROSPECTION_EN_PAUSE });
   if (fanout) {
     // Mails programmés échus : une fois par minute, dans CETTE invocation.
     // Le verrou par ligne (lib/outbox/scheduler.ts) rend un doublon de tick

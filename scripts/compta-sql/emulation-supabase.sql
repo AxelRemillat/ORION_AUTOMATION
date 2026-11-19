@@ -23,3 +23,11 @@ grant usage on schema auth, storage to authenticated, anon;
 grant select, insert, update, delete on storage.objects to authenticated;
 grant execute on function auth.uid() to authenticated, anon;
 insert into auth.users (id) values ('11111111-1111-1111-1111-111111111111'), ('22222222-2222-2222-2222-222222222222') on conflict do nothing;
+-- Dépendances de la migration crm_ (#208, déjà sur main) que la compta référence (compta_clients.crm_ref) :
+-- table prospects réduite à sa clé et déclencheur updated_at (définition de 20260907000000_init.sql).
+create table if not exists public.prospects (id uuid primary key default gen_random_uuid());
+create or replace function public.set_updated_at() returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;

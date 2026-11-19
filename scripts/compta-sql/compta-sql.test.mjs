@@ -54,11 +54,14 @@ const brouillon = (total = 10000, uid = A) =>
 try {
   await psql(`create database ${BASE};`, { db: "postgres" });
   await psql(readFileSync(join("scripts", "compta-sql", "emulation-supabase.sql"), "utf8"));
-  for (const f of readdirSync(join("supabase", "migrations")).filter((n) => /_compta_/.test(n)).sort()) {
+  // Ordre réel de main : les migrations crm_ (#208) passent avant les compta_ (crm_ref référence crm_commerces).
+  const migrations = readdirSync(join("supabase", "migrations")).filter((n) => /_(crm|compta)_/.test(n)).sort();
+  verifier("ordre : toutes les crm_ avant les compta_", migrations.findIndex((n) => /_compta_/.test(n)) > migrations.findLastIndex((n) => /_crm_/.test(n)));
+  for (const f of migrations) {
     await psql(readFileSync(join("supabase", "migrations", f), "utf8"));
     await psql(readFileSync(join("supabase", "migrations", f), "utf8")); // idempotente : rejouée sans erreur
   }
-  verifier("migrations compta appliquées deux fois (idempotentes)", true);
+  verifier("migrations crm puis compta appliquées deux fois (idempotentes)", true);
 
   // Émettre sans paramètres : refusé, aucun numéro consommé.
   await une(`insert into public.compta_clients (nom, professionnel) values ('Client Test SARL', true) returning id;`, { uid: A });
@@ -121,6 +124,14 @@ try {
   verifier("RLS : B ne peut pas émettre une facture de A", await refuse(`select public.compta_emettre('${fZero}');`, { uid: B }, /introuvable/));
   verifier("RLS : B ne peut pas modifier un brouillon de A", (await psql(`update public.compta_factures set objet = 'pirate' where id = '${fZero}' returning id;`, { uid: B })).length === 0);
   verifier("anonyme : aucun accès", await refuse(`set role anon; select count(*) from public.compta_factures;`, {}, /permission denied/));
+
+  // Liaison avec la fiche CRM (schéma réel de main) : référence valide acceptée, inconnue refusée, fiche supprimée → lien vidé.
+  const commerce = await une(`insert into public.crm_commerces (nom) values ('Boulangerie CRM') returning id;`, { uid: A });
+  const lie = await une(`insert into public.compta_clients (nom, crm_ref) values ('Client lié', '${commerce}') returning id;`, { uid: A });
+  verifier("crm_ref : client compta lié à une fiche crm_commerces", !!lie);
+  verifier("crm_ref : fiche CRM inexistante refusée", await refuse(`insert into public.compta_clients (nom, crm_ref) values ('Fantôme', gen_random_uuid());`, { uid: A }, /foreign key|clé étrangère/));
+  await psql(`delete from public.crm_commerces where id = '${commerce}';`);
+  verifier("crm_ref : fiche CRM supprimée → lien remis à vide", (await une(`select coalesce(crm_ref::text, 'vide') from public.compta_clients where id = '${lie}';`, { uid: A })) === "vide");
 } catch (e) {
   console.error("✗ erreur inattendue :", e.message);
   echecs++;

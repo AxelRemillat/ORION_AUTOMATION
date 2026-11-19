@@ -20,6 +20,10 @@ import { needsIntroDraft } from "../lib/jobs/handlers/prepare";
 import { cleanPrefs, DEFAULT_PREFS } from "../lib/funnel/settings";
 import type { Db } from "../lib/trash/scope";
 
+// Jobs et clients payants testés sur de faux appels (aucun réseau) : la pause de la prospection (Cowork #117,
+// lib/prospection/pause.ts, testée à part) est levée pour cette suite seulement.
+process.env.PROSPECTION_EMAIL_ACTIVE = "true";
+
 let failures = 0;
 function check(name: string, condition: boolean, detail = "") {
   if (condition) console.log(`  ok   ${name}`);

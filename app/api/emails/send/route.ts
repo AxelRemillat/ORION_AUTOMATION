@@ -1,3 +1,4 @@
+import { refusSiPause } from "@/lib/prospection/pause";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendNow } from "@/lib/outbox/send";
@@ -10,6 +11,9 @@ import { sendNow } from "@/lib/outbox/send";
  * applicatif — vit dans lib/outbox/send.ts, partagée avec l'envoi programmé.
  */
 export async function POST(request: Request) {
+  // PAUSE DE LA PROSPECTION (PROSPECTION_EMAIL_ACTIVE, Cowork #117) : HTTP 423, aucun appel payant ni envoi.
+  const pause = refusSiPause();
+  if (pause) return pause;
   const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const to = payload?.to;
   const messageId = payload?.message_id;

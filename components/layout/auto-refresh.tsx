@@ -51,8 +51,8 @@ export function AutoRefresh() {
     };
   }, [router]);
 
-  // Aujourd'hui garde sa barre d'action en bas : l'indicateur passe au-dessus, sans rien déplacer.
-  const docked = pathname?.startsWith("/aujourdhui");
+  // L'archive de la prospection (ancien Aujourd'hui) garde sa barre d'action en bas : l'indicateur passe au-dessus.
+  const docked = pathname?.startsWith("/archives/prospection-email");
   return (
     <div
       aria-live="off"
