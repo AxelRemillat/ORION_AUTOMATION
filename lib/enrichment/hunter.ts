@@ -18,6 +18,7 @@
  * souscrit. Au-delà du quota, l'API répond 429 : on le traduit en message
  * clair, jamais en exception.
  */
+import { appelPayantAutorise, erreurPause } from "@/lib/prospection/pause";
 import { recordUnitUsage } from "@/lib/usage/record";
 import { gatedHunterCall, hunterCacheKey } from "@/lib/hunter/gate";
 import { supabaseHunterStore } from "@/lib/hunter/store";
@@ -99,6 +100,8 @@ async function hunterGet<T>(path: string, params: URLSearchParams): Promise<Hunt
 async function rawHunterGet<T>(path: string, params: URLSearchParams): Promise<HunterResult<T>> {
   const key = process.env.HUNTER_API_KEY;
   if (!key) return { ok: false, error: "HUNTER_API_KEY absente", quotaExceeded: false };
+  // PAUSE DE LA PROSPECTION (Cowork #117) : même chemin qu'une clé absente, aucun crédit consommé.
+  if (!appelPayantAutorise("hunter")) return { ok: false, error: erreurPause("hunter"), quotaExceeded: false };
   params.set("api_key", key);
 
   const controller = new AbortController();

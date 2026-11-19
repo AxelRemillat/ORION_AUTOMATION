@@ -1,3 +1,4 @@
+import { refusSiPause } from "@/lib/prospection/pause";
 import { NextResponse } from "next/server";
 import { runJobInline } from "@/lib/jobs/inline";
 import { searchLabel, type SearchParams } from "@/lib/jobs/handlers/search";
@@ -19,6 +20,9 @@ export const maxDuration = 300;
  * job continue cote serveur et ses resultats arrivent dans `search_runs`.
  */
 export async function POST(request: Request) {
+  // PAUSE DE LA PROSPECTION (PROSPECTION_EMAIL_ACTIVE, Cowork #117) : HTTP 423, aucun appel payant ni envoi.
+  const pause = refusSiPause();
+  if (pause) return pause;
   const session = await requireSession();
   if (!session.ok) return session.response;
 

@@ -3,6 +3,7 @@
  * Complète le référentiel public, qui ne donne ni chiffre d'affaires ni site web.
  * Sans PAPPERS_API_KEY, l'enrichissement est simplement sauté.
  */
+import { appelPayantAutorise, erreurPause } from "@/lib/prospection/pause";
 import { fetchJson } from "./http";
 import { recordUnitUsage } from "@/lib/usage/record";
 import { cached, readCache, writeCache } from "./cache";
@@ -273,6 +274,8 @@ export async function fetchPappers(
   // PLAFOND DU JOUR (PAPPERS_DAILY_BUDGET, défaut 24, minuit Paris) : au-delà,
   // aucun appel — l'enrichissement passe au repli gratuit (INPI + Recherche
   // d'entreprises), la vérification d'opposition à l'INPI.
+  // PAUSE DE LA PROSPECTION (PROSPECTION_EMAIL_ACTIVE, Cowork #117) : le cache reste lisible, aucun crédit n'est payé.
+  if (!appelPayantAutorise("pappers")) return { ok: false, error: erreurPause("pappers") };
   const gate = await (options.allowance ?? defaultAllowance)().catch(() => ({ allowed: true }) as { allowed: boolean; reason?: string });
   if (!gate.allowed) return { ok: false, error: gate.reason ?? "budget Pappers du jour atteint" };
 

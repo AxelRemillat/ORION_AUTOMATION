@@ -1,3 +1,4 @@
+import { PROSPECTION_EN_PAUSE, prospectionEmailActive } from "@/lib/prospection/pause";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   EMPTY_PROGRESS,
@@ -29,6 +30,9 @@ export async function createJob(
   /** Client service_role (préparation automatique) : `auth.uid()` y est nul. */
   userId?: string,
 ): Promise<{ id: string } | { error: string }> {
+  // PAUSE DE LA PROSPECTION (Cowork #117) : tous les jobs sont de la prospection (recherche, signaux, préparation,
+  // rédaction, réanalyse) — aucun n'est créé pendant la pause.
+  if (!prospectionEmailActive()) return { error: PROSPECTION_EN_PAUSE };
   const { data, error } = await jobs(db)
     .insert({
       ...(userId ? { user_id: userId } : {}),

@@ -3,7 +3,8 @@ import { AutoRefresh } from "@/components/layout/auto-refresh";
 import { ToastProvider } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { badgeCounts } from "@/lib/badges/counts";
+import { badgeCounts, ZERO_BADGES } from "@/lib/badges/counts";
+import { modeDemo, UTILISATEUR_DEMO } from "@/lib/demo";
 import { UndoHost } from "@/components/trash/undo-host";
 
 /**
@@ -16,8 +17,10 @@ import { UndoHost } from "@/components/trash/undo-host";
  * barre les rafraîchit elle-même à chaque navigation (Cowork #21).
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const user = await requireUser();
-  const badges = await badgeCounts(createClient());
+  // Mode démo local (captures, Playwright) : compte fictif et badges à zéro, rien n'est lu dans Supabase.
+  const demo = modeDemo();
+  const user = demo ? UTILISATEUR_DEMO : await requireUser();
+  const badges = demo ? ZERO_BADGES : await badgeCounts(createClient());
 
   return (
     <ToastProvider>

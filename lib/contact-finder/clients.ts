@@ -1,3 +1,4 @@
+import { appelPayantAutorise } from "@/lib/prospection/pause";
 import { decodeBody } from "@/lib/enrichment/charset";
 import { USER_AGENT } from "@/lib/enrichment/site";
 import { findEmailByName } from "@/lib/enrichment/hunter";
@@ -108,6 +109,8 @@ async function fetchHtmlAt(url: string): Promise<{ html: string; url: string } |
 async function webSearch(query: string) {
   const key = process.env.LINKUP_API_KEY;
   if (!key) return null;
+  // PAUSE DE LA PROSPECTION (Cowork #117) : comme une panne, la recherche continue sans Linkup.
+  if (!appelPayantAutorise("linkup")) return null;
   const store = supabaseLinkupStore();
   const gate = await linkupGate<{ url: string; title: string; snippet: string }[]>(store, query);
   if (gate.status === "cache") return gate.value;
@@ -149,6 +152,8 @@ async function callLinkup(key: string, query: string) {
 export async function hunter<T>(path: string, params: Record<string, string>): Promise<{ data: T | null; billed: boolean }> {
   const key = process.env.HUNTER_API_KEY;
   if (!key) return { data: null, billed: false };
+  // PAUSE DE LA PROSPECTION (Cowork #117) : aucun crédit Hunter consommé.
+  if (!appelPayantAutorise("hunter")) return { data: null, billed: false };
   const gated = await gatedHunterCall<T>(supabaseHunterStore(), hunterCacheKey(path, params), async () => {
     const query = new URLSearchParams({ ...params, api_key: key });
     // Pas `get()` : il rend `null` sur toute erreur, et un 429 (crédits

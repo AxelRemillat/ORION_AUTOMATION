@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
+import { modeDemo } from "@/lib/demo";
 
 /**
  * Routes accessibles sans session. Tout le reste exige d'être connecté.
@@ -40,6 +41,9 @@ export async function middleware(request: NextRequest) {
   // cookie à rafraîchir, et l'appel à Supabase coûterait un aller-retour sur
   // chaque webhook.
   if (isMachinePath(pathname)) return NextResponse.next();
+
+  // Mode démo LOCAL (lib/demo.ts, jamais en production) : pas de session, aucun appel à Supabase.
+  if (modeDemo()) return NextResponse.next();
 
   const { response, user } = await updateSession(request);
 

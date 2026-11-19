@@ -1,7 +1,7 @@
 /**
  * MESURE de la page Aujourd'hui (Cowork #25) — LECTURE SEULE.
  *
- * Rejoue les chargeurs de app/(app)/aujourdhui/page.tsx avec un client Supabase connecté
+ * Rejoue les chargeurs de app/(app)/archives/prospection-email/page.tsx avec un client Supabase connecté
  * comme Axel (RLS), en chronométrant CHAQUE requête (table, durée, lignes) et chaque
  * chargeur. Aucune écriture, aucun appel payant.
  *
