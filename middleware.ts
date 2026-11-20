@@ -34,8 +34,16 @@ export const isPublicPath = (pathname: string): boolean => matches(pathname, PUB
 /** `true` pour une route protégée par son propre secret, pas par la session. */
 export const isMachinePath = (pathname: string): boolean => matches(pathname, MACHINE_PATHS);
 
+/**
+ * Mode démo LOCAL de la compta (Cowork #70) : données fictives en mémoire, pour les captures et les essais, sans
+ * session. Jamais en production : `next start` et Vercel tournent avec NODE_ENV=production.
+ */
+export const isComptaDemoPath = (pathname: string, env: { COMPTA_DEMO?: string; NODE_ENV?: string } = process.env): boolean =>
+  env.COMPTA_DEMO === "1" && env.NODE_ENV !== "production" && matches(pathname, ["/compta"]);
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (isComptaDemoPath(pathname)) return NextResponse.next();
 
   // Route machine : on ne rafraîchit même pas la session. Il n'y a pas de
   // cookie à rafraîchir, et l'appel à Supabase coûterait un aller-retour sur

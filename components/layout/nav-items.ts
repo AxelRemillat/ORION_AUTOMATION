@@ -1,4 +1,4 @@
-import { Archive, Briefcase, Contact, Search, Settings, Sun, type LucideIcon } from "lucide-react";
+import { Archive, Briefcase, Calculator, Contact, Search, Settings, Sun, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -24,7 +24,7 @@ export const HOME_ITEM: NavItem = {
 
 /**
  * Les destinations, dans l'ordre du travail reel (Cowork #117) : le CRM, les annonces Upwork / ComeUp, les
- * reglages. « Compta » (agent4) s'ajoutera ici quand sa route existera : pas d'onglet vers une page absente.
+ * comptabilite de la micro-entreprise (agent4, Cowork #70 : routes /compta), les reglages.
  *
  * RETIRES DE LA BARRE, PAS SUPPRIMES : Cockpit (/cockpit) et Pipeline (/suivi) restent des routes valides,
  * ouvertes depuis l'archive de la prospection e-mail. La recherche avancee (/recherche) aussi.
@@ -32,6 +32,7 @@ export const HOME_ITEM: NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/crm", label: "CRM", icon: Contact, hint: "Commerces prospectés et clients du Web des Artisans" },
   { href: "/opportunites", label: "Opportunités", icon: Briefcase, hint: "Annonces Upwork et ComeUp : analyse et proposition à copier" },
+  { href: "/compta", label: "Compta", icon: Calculator, hint: "Devis, factures, recettes, dépenses, URSSAF et seuils" },
   { href: "/reglages", label: "Réglages", icon: Settings, hint: "Données, coûts, paramètres, intégrations" },
 ];
 

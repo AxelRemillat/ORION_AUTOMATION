@@ -1,0 +1,38 @@
+# Tests SQL de la comptabilité (Cowork #70) sur un Postgres 17 jetable : numérotation sans trou (y compris en
+# concurrence), facture émise immuable, avoir, RLS. Aucune clé, aucune base réelle : émulation Supabase minimale.
+name: Compta SQL
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/migrations/*compta*"
+      - "supabase/migrations/*crm*"
+      - "scripts/compta-sql/**"
+      - ".github/workflows/compta-sql.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sql:
+    name: Tests SQL compta
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Tests SQL
+        env:
+          COMPTA_PG_URL: postgres://postgres@localhost:5432/postgres
+        run: node scripts/compta-sql/compta-sql.test.mjs
